@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+gem "appraisal", "~> 2.5"
+gem "bundler", "~> 2.7"
+gem "pry-byebug"
+gem "rake", "~> 13.0"
+gem "rspec", "~> 3.13"
+gem "rubocop", "~> 1.80"
+gem "rubocop-rake"
+gem "rubocop-rspec"
