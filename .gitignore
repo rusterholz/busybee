@@ -9,3 +9,6 @@
 
 # rspec failure tracking
 .rspec_status
+
+# Docker volumes (data is stored in named volumes, not tracked in git)
+.docker/
