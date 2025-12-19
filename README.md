@@ -36,9 +36,22 @@ This gem supports multiple Ruby implementations (MRI, JRuby, TruffleRuby). If yo
 
 Busybee provides a Docker Compose setup for running Zeebe and ElasticSearch locally. This environment includes:
 
-- **Zeebe Gateway & Broker**: Camunda Platform 8.9.0 - handles workflow orchestration and gRPC communication
-- **ElasticSearch**: Version 8.16.1 - stores workflow data and powers the Operate UI
+- **Zeebe Gateway & Broker**: Camunda Platform 8.8.8 - handles workflow orchestration and gRPC communication
+- **ElasticSearch**: Version 8.17.10 - stores workflow data and powers the Operate UI
 - **Operate UI**: Web interface for monitoring workflows at http://localhost:8088 (credentials: demo/demo)
+
+#### Version Management
+
+All version configuration is centralized in the `.env` file at the project root. This file is committed to git and serves as the source of truth for Zeebe and ElasticSearch versions.
+
+**Upgrading Zeebe/Camunda:**
+
+1. Edit `.env` and update `ZEEBE_VERSION` to the desired version
+2. Regenerate GRPC protocol buffers: `rake grpc:generate`
+3. Restart containers: `rake zeebe:restart`
+4. Run tests to verify compatibility: `rake spec`
+
+The `.env` file ensures all developers and CI environments use consistent versions.
 
 #### Starting the Environment
 

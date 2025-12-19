@@ -5,9 +5,14 @@ plugins:
 AllCops:
   TargetRubyVersion: 3.2
   NewCops: enable
+  Exclude:
+    - "spec/grpc_smoke_spec.rb"
 
 Layout/LineLength:
   Max: 120
+  Exclude:
+    - "lib/busybee/grpc/gateway_pb.rb"
+    - "lib/busybee/grpc/gateway_services_pb.rb"
 
 Metrics/BlockLength:
   Exclude:
@@ -16,11 +21,18 @@ Metrics/BlockLength:
 RSpec/MultipleMemoizedHelpers:
   Enabled: false
 
+Style/Documentation:
+  Enabled: false
+
 Style/DoubleNegation:
   Enabled: false
 
 Style/ModuleFunction:
   Enabled: false
+
+Style/RedundantStringEscape:
+  Exclude:
+    - "lib/busybee/grpc/gateway_pb.rb"
 
 Style/StringLiterals:
   Enabled: true

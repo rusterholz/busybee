@@ -29,6 +29,14 @@ end
 
 task default: %i[spec rubocop]
 
+# GRPC code generation
+namespace :grpc do
+  desc "Generate Ruby code from Zeebe protocol buffers"
+  task :generate do
+    sh "./gen-grpc.sh"
+  end
+end
+
 # Docker Compose tasks for Zeebe development environment
 namespace :zeebe do
   desc "Start Zeebe and ElasticSearch containers"
