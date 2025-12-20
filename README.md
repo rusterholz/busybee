@@ -28,9 +28,11 @@ After checking out the repo, run `bin/setup` to install dependencies. Then, run 
 
 To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
 
-### Multi-Platform Support
+### Ruby Implementation Support
 
-This gem supports multiple Ruby implementations (MRI, JRuby, TruffleRuby). If you regenerate `Gemfile.lock` from scratch, run `bundle exec rake gemfile:platforms` to ensure all required platforms are present in the lockfile. This ensures the gem installs correctly across all supported platforms in CI.
+Busybee currently only supports MRI (CRuby). JRuby is not supported because it cannot run C extensions (it would require `grpc-java` with a Ruby wrapper). TruffleRuby's C extension support is experimental and the `grpc` gem does not currently build on it.
+
+If you successfully run busybee on an alternative Ruby implementation, please open an issue—we'd welcome contributions to expand platform support.
 
 ### Local Zeebe Development Environment
 
