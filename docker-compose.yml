@@ -1,0 +1,80 @@
+# Docker Compose configuration for Busybee development environment
+# Provides Zeebe workflow orchestration and ElasticSearch for local development and testing
+
+services:
+  # Camunda Platform 8 (includes Zeebe Gateway, Broker, and Web Apps)
+  zeebe:
+    container_name: busybee-zeebe
+    image: camunda/camunda:8.8.8
+    ports:
+      - "26500:26500"  # Zeebe gRPC Gateway - used by busybee client
+      - "9600:9600"    # Management API and metrics
+      - "8088:8080"    # Operate, Tasklist, and other web UIs
+    environment:
+      # Security configuration - disable authentication for local development
+      # Matches official Camunda 8.8 docker-compose configuration
+      - CAMUNDA_SECURITY_AUTHENTICATION_UNPROTECTEDAPI=true
+      - CAMUNDA_SECURITY_AUTHORIZATIONS_ENABLED=false
+      # ElasticSearch configuration using new unified Camunda 8.8 config format
+      - CAMUNDA_DATA_SECONDARYSTORAGE_TYPE=elasticsearch
+      - CAMUNDA_DATA_SECONDARYSTORAGE_ELASTICSEARCH_URL=http://elasticsearch:9200
+      # JVM memory settings
+      - JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - zeebe-data:/usr/local/zeebe/data
+    networks:
+      - camunda
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/9600' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ElasticSearch for Zeebe data export and Operate/Tasklist
+  elasticsearch:
+    container_name: busybee-elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.10
+    ports:
+      - "9200:9200"  # HTTP API
+      - "9300:9300"  # Node communication
+    environment:
+      # Single-node mode for development
+      - discovery.type=single-node
+      # Disable security features for local development
+      - xpack.security.enabled=false
+      # Memory settings
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      # Disable machine learning
+      - xpack.ml.enabled=false
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - camunda
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+networks:
+  camunda:
+    driver: bridge
+
+volumes:
+  zeebe-data:
+    driver: local
+  elasticsearch-data:
+    driver: local
