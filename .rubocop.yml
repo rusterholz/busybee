@@ -6,6 +6,12 @@ AllCops:
   TargetRubyVersion: 3.2
   NewCops: enable
   Exclude:
+    # Restore defaults (overridden when specifying custom excludes)
+    - ".git/**/*"
+    - "node_modules/**/*"
+    - "tmp/**/*"
+    - "vendor/**/*"
+    # Project-specific
     - "spec/grpc_smoke_spec.rb"
 
 Layout/LineLength:
