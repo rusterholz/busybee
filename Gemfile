@@ -6,7 +6,7 @@ gemspec
 
 gem "appraisal", "~> 2.5"
 gem "bundler", "~> 2.7"
-gem "pry-byebug"
+gem "pry-byebug", platforms: :mri
 gem "rake", "~> 13.0"
 gem "rspec", "~> 3.13"
 gem "rubocop", "~> 1.80"

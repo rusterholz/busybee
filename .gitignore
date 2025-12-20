@@ -1,4 +1,5 @@
 /.bundle/
+!/.bundle/config
 /.yardoc
 /_yardoc/
 /coverage/
