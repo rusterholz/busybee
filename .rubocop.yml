@@ -1,0 +1,27 @@
+plugins:
+  - rubocop-rake
+  - rubocop-rspec
+
+AllCops:
+  TargetRubyVersion: 3.2
+  NewCops: enable
+
+Layout/LineLength:
+  Max: 120
+
+RSpec/MultipleMemoizedHelpers:
+  Enabled: false
+
+Style/DoubleNegation:
+  Enabled: false
+
+Style/ModuleFunction:
+  Enabled: false
+
+Style/StringLiterals:
+  Enabled: true
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  Enabled: true
+  EnforcedStyle: single_quotes

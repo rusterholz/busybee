@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler: Gemfile.lock
+          bundler-cache: true
+      - name: Rubocop
+        run: bundle exec rubocop
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        ruby: ['3.2', '3.3', '3.4', jruby, truffleruby]
+    name: "Tests (${{ matrix.ruby }} / ${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+    - name: "Install Ruby ${{ matrix.ruby }}"
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: "${{ matrix.ruby }}"
+        bundler: Gemfile.lock
+        bundler-cache: true
+    - name: Install Dependencies
+      run: bundle exec appraisal install
+    - name: Appraisal RSpec
+      run: bundle exec appraisal rspec
+  final-results:
+    name: Final Results
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All checks passed"
