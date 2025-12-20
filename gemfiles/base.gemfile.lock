@@ -19,6 +19,9 @@ GEM
     google-protobuf (4.33.2)
       bigdecimal
       rake (>= 13)
+    google-protobuf (4.33.2-arm64-darwin)
+      bigdecimal
+      rake (>= 13)
     google-protobuf (4.33.2-x86_64-darwin)
       bigdecimal
       rake (>= 13)
@@ -28,6 +31,9 @@ GEM
     googleapis-common-protos-types (1.22.0)
       google-protobuf (~> 4.26)
     grpc (1.76.0)
+      google-protobuf (>= 3.25, < 5.0)
+      googleapis-common-protos-types (~> 1.0)
+    grpc (1.76.0-arm64-darwin)
       google-protobuf (>= 3.25, < 5.0)
       googleapis-common-protos-types (~> 1.0)
     grpc (1.76.0-x86_64-darwin)
@@ -96,6 +102,7 @@ GEM
     unicode-emoji (4.1.0)
 
 PLATFORMS
+  arm64-darwin
   ruby
   x86_64-darwin
   x86_64-darwin-24

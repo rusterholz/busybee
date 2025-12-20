@@ -12,7 +12,7 @@ RuboCop::RakeTask.new
 namespace :gemfile do
   desc "Ensure all platforms are present in Gemfile.lock and Appraisal gemfiles"
   task :platforms do
-    platforms = %w[ruby x86_64-darwin x86_64-linux]
+    platforms = %w[ruby x86_64-darwin arm64-darwin x86_64-linux]
 
     # Helper to check and add missing platforms for a gemfile
     check_and_add_platforms = lambda do |gemfile_path|
