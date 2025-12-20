@@ -10,19 +10,33 @@ require "rubocop/rake_task"
 RuboCop::RakeTask.new
 
 namespace :gemfile do
-  desc "Ensure all platforms are present in Gemfile.lock"
+  desc "Ensure all platforms are present in Gemfile.lock and Appraisal gemfiles"
   task :platforms do
-    require "bundler"
     platforms = %w[ruby x86_64-darwin x86_64-linux]
-    current = `bundle platform --ruby`.split("\n")
-                                      .select { |l| l.start_with?("  - ") }
-                                      .map { |l| l.strip.sub(/^- /, "") }
 
-    platforms.each do |platform|
-      next if current.any? { |c| c.start_with?(platform) }
+    # Helper to check and add missing platforms for a gemfile
+    check_and_add_platforms = lambda do |gemfile_path|
+      env = gemfile_path == "Gemfile" ? {} : { "BUNDLE_GEMFILE" => gemfile_path }
+      current = `#{env.map { |k, v| "#{k}=#{v}" }.join(" ")} bundle platform`.split("\n")
+                                                                             .select { |l| l.start_with?("* ") }
+                                                                             .map { |l| l.sub(/^\* /, "") }
 
-      puts "Adding platform: #{platform}"
-      system("bundle lock --add-platform #{platform}")
+      platforms.each do |platform|
+        next if current.any? { |c| c.start_with?(platform) }
+
+        puts "Adding platform #{platform} to #{gemfile_path}"
+        system(env, "bundle lock --add-platform #{platform}")
+      end
+    end
+
+    # Check main Gemfile
+    puts "Checking Gemfile.lock..."
+    check_and_add_platforms.call("Gemfile")
+
+    # Check all Appraisal gemfiles
+    Dir.glob("gemfiles/*.gemfile").each do |gemfile|
+      puts "Checking #{gemfile}.lock..."
+      check_and_add_platforms.call(gemfile)
     end
   end
 end
