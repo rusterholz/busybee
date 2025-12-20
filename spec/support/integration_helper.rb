@@ -100,6 +100,49 @@ module IntegrationHelpers
       .gsub(/(<bpmn:process id=")[^"]+/, "\\1#{process_id}")
       .gsub(/(<bpmndi:BPMNPlane\s+[^>]*bpmnElement=")[^"]+/, "\\1#{process_id}")
   end
+
+  # Deploys a BPMN process with a unique process ID
+  #
+  # @param client [Busybee::GRPC::Gateway::Stub] GRPC client
+  # @param bpmn_path [String] Path to the BPMN file
+  # @param process_id [String] Optional custom process ID (generates random if not provided)
+  # @return [Hash] Deployment info with :process (metadata) and :process_id
+  def deploy_process(client, bpmn_path, process_id = nil)
+    process_id ||= unique_process_id
+    bpmn_content = bpmn_with_unique_id(bpmn_path, process_id)
+
+    resource = Busybee::GRPC::Resource.new(
+      name: File.basename(bpmn_path),
+      content: bpmn_content
+    )
+
+    request = Busybee::GRPC::DeployResourceRequest.new(
+      resources: [resource]
+    )
+
+    response = client.deploy_resource(request)
+
+    {
+      process: response.deployments.first.process,
+      process_id: process_id
+    }
+  end
+
+  # Creates a process instance using bpmnProcessId
+  #
+  # @param client [Busybee::GRPC::Gateway::Stub] GRPC client
+  # @param process_id [String] The BPMN process ID
+  # @param variables [String] Optional JSON-encoded variables
+  # @return [Busybee::GRPC::CreateProcessInstanceResponse] Response with processInstanceKey
+  def create_process_instance(client, process_id, variables = nil)
+    request = Busybee::GRPC::CreateProcessInstanceRequest.new(
+      bpmnProcessId: process_id,
+      version: -1,
+      variables: variables
+    )
+
+    client.create_process_instance(request)
+  end
 end
 
 RSpec.configure do |config|
