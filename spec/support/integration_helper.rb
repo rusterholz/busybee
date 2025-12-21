@@ -6,7 +6,8 @@
 #   1. Start Zeebe: rake zeebe:start && rake zeebe:health
 #   2. Run tests: RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
 #
-# Tests will skip gracefully if Zeebe is not running.
+# Tests will skip gracefully if Zeebe is not running, unless ZEEBE_REQUIRED=1
+# is set, in which case tests will fail (useful for CI).
 
 module IntegrationHelpers
   # Default Zeebe gateway address when running via Docker Compose
@@ -53,20 +54,30 @@ module IntegrationHelpers
     client.topology(request, deadline: Time.now + CONNECTION_TIMEOUT)
     true
   rescue GRPC::Unavailable, GRPC::DeadlineExceeded, GRPC::Core::CallError, GRPC::Unauthenticated => e
+    @zeebe_unavailable_error = e
     warn "\n[Integration Test] Zeebe not available: #{e.class} - #{e.message}"
     false
   end
 
-  # Skips the current test if Zeebe is not available
+  # Skips or fails the current test if Zeebe is not available
   #
-  # Call this in a before block to gracefully skip tests when Zeebe
-  # is not running:
+  # By default, tests skip gracefully when Zeebe is not running (for local dev).
+  # Set ZEEBE_REQUIRED=1 to fail instead of skip (for CI).
+  #
+  # Call this in a before block:
   #
   #   before do
   #     skip_unless_zeebe_available
   #   end
   def skip_unless_zeebe_available
-    skip "Zeebe is not running (start with: rake zeebe:start)" unless zeebe_available?
+    return if zeebe_available?
+
+    if ENV["ZEEBE_REQUIRED"]
+      raise "Zeebe is required but not available at #{ZEEBE_ADDRESS}: " \
+            "#{@zeebe_unavailable_error&.class} - #{@zeebe_unavailable_error&.message}"
+    else
+      skip "Zeebe is not running (start with: rake zeebe:start)"
+    end
   end
 
   # Generates a unique BPMN process ID for test isolation
