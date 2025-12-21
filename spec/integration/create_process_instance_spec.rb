@@ -11,7 +11,7 @@ RSpec.describe "Create Process Instance", :integration do
 
   # Helper method to deploy the simple process with a unique ID before creating instances
   # This ensures test isolation - each test gets its own process definition
-  def deploy_simple_process(client, process_id = nil)
+  def deploy_simple_process(client, process_id = nil) # rubocop:disable Metrics/MethodLength
     process_id ||= unique_process_id
     bpmn_content = bpmn_with_unique_id(bpmn_path, process_id)
 
@@ -60,7 +60,7 @@ RSpec.describe "Create Process Instance", :integration do
 
     # Deploy the process first
     deployment = deploy_simple_process(client)
-    deployed_process = deployment[:process]
+    deployment[:process]
     expected_process_id = deployment[:process_id]
 
     # Create a process instance using the bpmnProcessId
@@ -78,20 +78,20 @@ RSpec.describe "Create Process Instance", :integration do
     expect(response.version).to be > 0
   end
 
-  it "creates a process instance with variables" do
+  it "creates a process instance with variables" do # rubocop:disable RSpec/ExampleLength
     client = grpc_client
 
     # Deploy the process first
     deployment = deploy_simple_process(client)
-    process_definition_key = deployment[:process].processDefinitionKey
+    deployment[:process].processDefinitionKey
     process_id = deployment[:process_id]
 
     # Create process instance with JSON variables
     variables = JSON.generate({
-      testVar: "test_value",
-      number: 42,
-      flag: true
-    })
+                                testVar: "test_value",
+                                number: 42,
+                                flag: true
+                              })
 
     request = Busybee::GRPC::CreateProcessInstanceRequest.new(
       bpmnProcessId: process_id,
@@ -143,12 +143,12 @@ RSpec.describe "Create Process Instance", :integration do
     )
 
     # Expect a GRPC error
-    expect {
+    expect do
       client.create_process_instance(request)
-    }.to raise_error(GRPC::NotFound)
+    end.to raise_error(GRPC::NotFound)
   end
 
-  it "creates a process instance with result (synchronous)" do
+  it "creates a process instance with result (synchronous)" do # rubocop:disable RSpec/ExampleLength
     client = grpc_client
 
     # Deploy the process first

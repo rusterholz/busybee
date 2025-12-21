@@ -8,7 +8,7 @@ RSpec.describe "Set Variables", :integration do
 
   let(:bpmn_path) { File.expand_path("../fixtures/waiting_process.bpmn", __dir__) }
 
-  it "sets variables on a running process instance" do
+  it "sets variables on a running process instance" do # rubocop:disable RSpec/ExampleLength
     client = grpc_client
 
     # Deploy process and create instance
@@ -19,10 +19,10 @@ RSpec.describe "Set Variables", :integration do
 
     # Set variables on the process instance
     variables = JSON.generate({
-      newVar: "new_value",
-      counter: 100,
-      active: true
-    })
+                                newVar: "new_value",
+                                counter: 100,
+                                active: true
+                              })
 
     request = Busybee::GRPC::SetVariablesRequest.new(
       elementInstanceKey: process_instance_key,
@@ -36,7 +36,7 @@ RSpec.describe "Set Variables", :integration do
     expect(response.key).to be > 0
   end
 
-  it "handles errors when setting variables on non-existent process instance" do
+  it "handles errors when setting variables on non-existent process instance" do # rubocop:disable RSpec/ExampleLength
     client = grpc_client
 
     # Create and then cancel a process instance
@@ -60,8 +60,8 @@ RSpec.describe "Set Variables", :integration do
     )
 
     # Expect a GRPC error
-    expect {
+    expect do
       client.set_variables(request)
-    }.to raise_error(GRPC::NotFound)
+    end.to raise_error(GRPC::NotFound)
   end
 end

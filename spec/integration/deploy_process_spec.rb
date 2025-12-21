@@ -8,7 +8,7 @@ RSpec.describe "Deploy Process", :integration do
   let(:bpmn_path) { File.expand_path("../fixtures/simple_process.bpmn", __dir__) }
   let(:bpmn_content) { File.read(bpmn_path) }
 
-  it "deploys a BPMN process to Zeebe" do
+  it "deploys a BPMN process to Zeebe" do # rubocop:disable RSpec/ExampleLength, RSpec/MultipleExpectations
     # Create a GRPC client connection to Zeebe
     client = grpc_client
 
@@ -44,7 +44,7 @@ RSpec.describe "Deploy Process", :integration do
     expect(process.resourceName).to eq("simple_process.bpmn")
   end
 
-  it "deduplicates identical deployments (Camunda 8.8+)" do
+  it "deduplicates identical deployments (Camunda 8.8+)" do # rubocop:disable RSpec/ExampleLength
     # In Camunda 8.8+, deploying identical BPMN content is deduplicated
     # (see https://github.com/camunda/camunda/issues/26239)
     # Deployment keys are still unique, but process version stays the same
@@ -94,8 +94,8 @@ RSpec.describe "Deploy Process", :integration do
     )
 
     # Expect a GRPC error when deploying invalid content
-    expect {
+    expect do
       client.deploy_resource(request)
-    }.to raise_error(GRPC::InvalidArgument)
+    end.to raise_error(GRPC::InvalidArgument)
   end
 end

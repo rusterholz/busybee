@@ -35,8 +35,8 @@ RSpec.describe "Cancel Process Instance", :integration do
     )
 
     # Expect a GRPC error
-    expect {
+    expect do
       client.cancel_process_instance(request)
-    }.to raise_error(GRPC::NotFound)
+    end.to raise_error(GRPC::NotFound)
   end
 end

@@ -5,7 +5,7 @@ RSpec.describe "Zeebe Topology", :integration do
   # and retrieve cluster topology information including brokers, partitions,
   # and cluster configuration.
 
-  it "retrieves cluster topology information" do
+  it "retrieves cluster topology information" do # rubocop:disable RSpec/ExampleLength, RSpec/MultipleExpectations
     # Create a GRPC client connection to Zeebe
     client = grpc_client
 

@@ -9,7 +9,7 @@ RSpec.describe "Publish Message", :integration do
 
   let(:bpmn_path) { File.expand_path("../fixtures/waiting_process.bpmn", __dir__) }
 
-  it "publishes a message to continue a waiting process instance" do
+  it "publishes a message to continue a waiting process instance" do # rubocop:disable RSpec/ExampleLength
     client = grpc_client
 
     # Deploy process and create instance with a correlation ID variable
@@ -46,9 +46,9 @@ RSpec.describe "Publish Message", :integration do
       processInstanceKey: process_instance_key
     )
 
-    expect {
+    expect do
       client.cancel_process_instance(cancel_request)
-    }.to raise_error(GRPC::NotFound)
+    end.to raise_error(GRPC::NotFound)
   end
 
   it "handles errors when publishing message with non-matching correlation key" do
