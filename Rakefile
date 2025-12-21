@@ -13,31 +13,26 @@ namespace :gemfile do
   desc "Ensure all platforms are present in Gemfile.lock and Appraisal gemfiles"
   task :platforms do
     platforms = %w[ruby x86_64-darwin arm64-darwin x86_64-linux]
+    platform_args = platforms.join(" ")
 
-    # Helper to check and add missing platforms for a gemfile
-    check_and_add_platforms = lambda do |gemfile_path|
+    # Always re-lock with all platforms - this is idempotent and ensures:
+    # 1. Lockfile is in sync with gemspec (catches missing dependencies)
+    # 2. All platform-specific gem variants are resolved
+    lock_with_platforms = lambda do |gemfile_path|
       env = gemfile_path == "Gemfile" ? {} : { "BUNDLE_GEMFILE" => gemfile_path }
-      current = `#{env.map { |k, v| "#{k}=#{v}" }.join(" ")} bundle platform`.split("\n")
-                                                                             .select { |l| l.start_with?("* ") }
-                                                                             .map { |l| l.sub(/^\* /, "") }
-
-      platforms.each do |platform|
-        next if current.any? { |c| c.start_with?(platform) }
-
-        puts "Adding platform #{platform} to #{gemfile_path}"
-        system(env, "bundle lock --add-platform #{platform}")
-      end
+      puts "Locking #{gemfile_path} with platforms: #{platforms.join(', ')}"
+      system(env, "bundle lock --add-platform #{platform_args}") || abort("Failed to lock #{gemfile_path}")
     end
 
-    # Check main Gemfile
-    puts "Checking Gemfile.lock..."
-    check_and_add_platforms.call("Gemfile")
+    # Lock main Gemfile
+    lock_with_platforms.call("Gemfile")
 
-    # Check all Appraisal gemfiles
+    # Lock all Appraisal gemfiles
     Dir.glob("gemfiles/*.gemfile").each do |gemfile|
-      puts "Checking #{gemfile}.lock..."
-      check_and_add_platforms.call(gemfile)
+      lock_with_platforms.call(gemfile)
     end
+
+    puts "\nAll lockfiles updated with platforms: #{platforms.join(', ')}"
   end
 end
 
