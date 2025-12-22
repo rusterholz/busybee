@@ -22,17 +22,53 @@ Or install it yourself as:
 
 ...
 
+### Ruby Implementation Support
+
+Busybee currently only supports MRI (CRuby). JRuby is not supported because it cannot run C extensions (it would require `grpc-java` with a Ruby wrapper). TruffleRuby's C extension support is experimental and the `grpc` gem does not currently build on it.
+
+If you successfully run busybee on an alternative Ruby implementation, please open an issue. We'd welcome contributions to expand platform support!
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
 
 To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
 
-### Ruby Implementation Support
+### Running Tests
 
-Busybee currently only supports MRI (CRuby). JRuby is not supported because it cannot run C extensions (it would require `grpc-java` with a Ruby wrapper). TruffleRuby's C extension support is experimental and the `grpc` gem does not currently build on it.
+Busybee has two types of tests:
 
-If you successfully run busybee on an alternative Ruby implementation, please open an issue—we'd welcome contributions to expand platform support.
+**Unit Tests** - Fast tests that don't require external dependencies:
+
+```bash
+# Run all unit tests (default)
+bundle exec rspec
+
+# Run specific test file
+bundle exec rspec spec/busybee_spec.rb
+```
+
+**Integration Tests** - Tests that connect to a real Zeebe instance via gRPC:
+
+```bash
+# Start Zeebe and wait for it to be healthy
+rake zeebe:start
+rake zeebe:health
+
+# Run all integration tests
+RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
+
+# Run all tests (unit + integration)
+RUN_INTEGRATION_TESTS=1 bundle exec rspec
+
+# Run a specific integration test
+RUN_INTEGRATION_TESTS=1 bundle exec rspec spec/integration/topology_spec.rb
+
+# Stop Zeebe when done
+rake zeebe:stop
+```
+
+Integration tests will automatically skip if Zeebe is not running, so you can safely run the full test suite without having Zeebe started. The tests use the generated GRPC classes directly to verify that the protocol buffer bindings work correctly against a real Zeebe cluster.
 
 ### Local Zeebe Development Environment
 

@@ -24,6 +24,16 @@ Metrics/BlockLength:
   Exclude:
     - "Rakefile"
 
+RSpec/DescribeClass:
+  Exclude:
+    - "spec/integration/**/*"
+
+RSpec/ExampleLength:
+  Max: 15
+
+RSpec/MultipleExpectations:
+  Max: 6
+
 RSpec/MultipleMemoizedHelpers:
   Enabled: false
 

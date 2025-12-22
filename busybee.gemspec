@@ -32,6 +32,7 @@ Gem::Specification.new do |spec|
 
   # Dev dependencies are listed in the Gemfile.
 
+  # Runtime dependencies
   spec.add_dependency "base64"
   spec.add_dependency "grpc", "~> 1.76"
 end

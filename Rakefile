@@ -51,7 +51,7 @@ namespace :zeebe do
   desc "Start Zeebe and ElasticSearch containers"
   task :start do
     puts "Starting Zeebe and ElasticSearch containers..."
-    system("docker-compose up -d") || abort("Failed to start containers")
+    system("docker compose up -d") || abort("Failed to start containers")
     puts "\nContainers started! Services will be available at:"
     puts "  - Zeebe gRPC Gateway: localhost:26500"
     puts "  - Operate UI: http://localhost:8088 (demo/demo)"
@@ -64,19 +64,19 @@ namespace :zeebe do
   desc "Stop Zeebe and ElasticSearch containers"
   task :stop do
     puts "Stopping Zeebe and ElasticSearch containers..."
-    system("docker-compose down") || abort("Failed to stop containers")
+    system("docker compose down") || abort("Failed to stop containers")
     puts "Containers stopped."
   end
 
   desc "Show logs from Zeebe and ElasticSearch containers"
   task :logs do
     puts "Showing logs (Ctrl+C to exit)..."
-    system("docker-compose logs -f")
+    system("docker compose logs -f")
   end
 
   desc "Check status of Zeebe and ElasticSearch containers"
   task :status do
-    system("docker-compose ps")
+    system("docker compose ps")
   end
 
   desc "Wait for Zeebe and ElasticSearch to be healthy"
@@ -130,7 +130,7 @@ namespace :zeebe do
     print "Are you sure? (y/N): "
     confirmation = $stdin.gets.chomp
     if confirmation.downcase == "y"
-      system("docker-compose down -v") || abort("Failed to remove containers and volumes")
+      system("docker compose down -v") || abort("Failed to remove containers and volumes")
       puts "Containers and volumes removed."
     else
       puts "Aborted."
