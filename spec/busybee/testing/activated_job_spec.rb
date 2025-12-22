@@ -40,7 +40,7 @@ RSpec.describe Busybee::Testing::ActivatedJob do
     end
 
     it "memoizes the result" do
-      expect(JSON).to receive(:parse).once.and_call_original # rubocop:disable RSpec/MessageSpies
+      expect(JSON).to receive(:parse).once.and_call_original
       job.variables
       job.variables # second call should not parse again
     end
@@ -52,7 +52,7 @@ RSpec.describe Busybee::Testing::ActivatedJob do
     end
 
     it "memoizes the result" do
-      expect(JSON).to receive(:parse).once.and_call_original # rubocop:disable RSpec/MessageSpies
+      expect(JSON).to receive(:parse).once.and_call_original
       job.headers
       job.headers # second call should not parse again
     end
@@ -89,6 +89,91 @@ RSpec.describe Busybee::Testing::ActivatedJob do
 
     it "returns self for chaining" do
       expect(job.expect_headers("task_type" => "process_order")).to be(job)
+    end
+  end
+
+  describe "#mark_completed" do
+    it "sends CompleteJobRequest to client" do
+      expect(client).to receive(:complete_job).with(
+        an_instance_of(Busybee::GRPC::CompleteJobRequest)
+      )
+      job.mark_completed
+    end
+
+    it "includes variables when provided" do
+      expect(client).to receive(:complete_job) do |request|
+        expect(JSON.parse(request.variables)).to eq("result" => "success")
+      end
+      job.mark_completed(result: "success")
+    end
+
+    it "returns self" do
+      allow(client).to receive(:complete_job)
+      expect(job.mark_completed).to be(job)
+    end
+  end
+
+  describe "#and_complete" do
+    it "is an alias for mark_completed" do
+      expect(client).to receive(:complete_job)
+      job.and_complete
+    end
+  end
+
+  describe "#mark_failed" do
+    it "sends FailJobRequest to client" do
+      expect(client).to receive(:fail_job).with(
+        an_instance_of(Busybee::GRPC::FailJobRequest)
+      )
+      job.mark_failed
+    end
+
+    it "includes message and retries when provided" do
+      expect(client).to receive(:fail_job) do |request|
+        expect(request.errorMessage).to eq("Something went wrong")
+        expect(request.retries).to eq(2)
+      end
+      job.mark_failed("Something went wrong", retries: 2)
+    end
+  end
+
+  describe "#and_fail" do
+    it "is an alias for mark_failed" do
+      expect(client).to receive(:fail_job)
+      job.and_fail
+    end
+  end
+
+  describe "#throw_error_event" do
+    it "sends ThrowErrorRequest to client" do
+      expect(client).to receive(:throw_error).with(
+        an_instance_of(Busybee::GRPC::ThrowErrorRequest)
+      )
+      job.throw_error_event("ERROR_CODE")
+    end
+
+    it "includes code and message" do
+      expect(client).to receive(:throw_error) do |request|
+        expect(request.errorCode).to eq("VALIDATION_FAILED")
+        expect(request.errorMessage).to eq("Invalid input")
+      end
+      job.throw_error_event("VALIDATION_FAILED", "Invalid input")
+    end
+  end
+
+  describe "#and_throw_error_event" do
+    it "is an alias for throw_error_event" do
+      expect(client).to receive(:throw_error)
+      job.and_throw_error_event("CODE")
+    end
+  end
+
+  describe "#update_retries" do
+    it "sends UpdateJobRetriesRequest to client" do
+      expect(client).to receive(:update_job_retries).with(
+        an_instance_of(Busybee::GRPC::UpdateJobRetriesRequest)
+      )
+      job.update_retries(5)
     end
   end
 end

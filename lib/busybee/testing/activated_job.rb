@@ -2,6 +2,7 @@
 
 require "json"
 require "rspec/matchers"
+require "busybee/grpc"
 
 module Busybee
   module Testing
@@ -64,6 +65,68 @@ module Busybee
       # @return [self] for chaining
       def expect_headers(expected)
         expect(headers).to include(stringify_keys(expected))
+        self
+      end
+
+      # Complete the job with optional output variables.
+      #
+      # @param variables [Hash] variables to merge into process state
+      # @return [self]
+      def mark_completed(variables = {})
+        request = Busybee::GRPC::CompleteJobRequest.new(
+          jobKey: key,
+          variables: JSON.generate(variables)
+        )
+        client.complete_job(request)
+        self
+      end
+
+      alias and_complete mark_completed
+
+      # Fail the job with optional message and retry count.
+      #
+      # @param message [String, nil] error message
+      # @param retries [Integer] number of retries remaining
+      # @return [self]
+      def mark_failed(message = nil, retries: 0)
+        request = Busybee::GRPC::FailJobRequest.new(
+          jobKey: key,
+          retries: retries,
+          errorMessage: message || ""
+        )
+        client.fail_job(request)
+        self
+      end
+
+      alias and_fail mark_failed
+
+      # Throw a BPMN error event.
+      #
+      # @param code [String] BPMN error code
+      # @param message [String, nil] error message
+      # @return [self]
+      def throw_error_event(code, message = nil)
+        request = Busybee::GRPC::ThrowErrorRequest.new(
+          jobKey: key,
+          errorCode: code,
+          errorMessage: message || ""
+        )
+        client.throw_error(request)
+        self
+      end
+
+      alias and_throw_error_event throw_error_event
+
+      # Update the job's retry count.
+      #
+      # @param count [Integer] new retry count
+      # @return [self]
+      def update_retries(count)
+        request = Busybee::GRPC::UpdateJobRetriesRequest.new(
+          jobKey: key,
+          retries: count
+        )
+        client.update_job_retries(request)
         self
       end
 
