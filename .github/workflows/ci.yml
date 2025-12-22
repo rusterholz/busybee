@@ -59,19 +59,6 @@ jobs:
         run: bundle exec rake zeebe:start
       - name: Wait for Camunda to be healthy
         run: bundle exec rake zeebe:health
-      - name: Debug Camunda connectivity
-        run: |
-          echo "=== Container status ==="
-          docker compose ps
-          echo ""
-          echo "=== Network info ==="
-          docker compose exec -T zeebe sh -c 'ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "No ss/netstat available"' || true
-          echo ""
-          echo "=== Testing gRPC port from host ==="
-          nc -zv localhost 26500 2>&1 || echo "nc failed"
-          echo ""
-          echo "=== Zeebe logs (last 50 lines) ==="
-          docker compose logs --tail=50 zeebe
       - name: Run Integration Tests
         env:
           RUN_INTEGRATION_TESTS: "1"
