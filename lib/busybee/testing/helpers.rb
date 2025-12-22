@@ -61,6 +61,45 @@ module Busybee
         }
       end
 
+      # Create a process instance, yield its key, and cancel on block exit.
+      #
+      # @param process_name [String] BPMN process ID
+      # @param variables [Hash] variables to start the process with
+      # @yield [Integer] the process instance key
+      def with_process_instance(process_name, variables = {}) # rubocop:disable Metrics/MethodLength
+        request = Busybee::GRPC::CreateProcessInstanceRequest.new(
+          bpmnProcessId: process_name,
+          version: -1,
+          variables: JSON.generate(variables)
+        )
+
+        response = grpc_client.create_process_instance(request)
+        @current_process_instance_key = response.processInstanceKey
+
+        yield @current_process_instance_key
+      ensure
+        if @current_process_instance_key
+          cancel_process_instance(@current_process_instance_key)
+          @last_process_instance_key = @current_process_instance_key
+          @current_process_instance_key = nil
+        end
+      end
+
+      # Returns the current process instance key (set by with_process_instance).
+      #
+      # @return [Integer, nil]
+      def process_instance_key
+        @current_process_instance_key
+      end
+
+      # Returns the last process instance key from the most recent with_process_instance call.
+      # Useful for debugging failed tests by tying failures to residual data in ElasticSearch.
+      #
+      # @return [Integer, nil]
+      def last_process_instance_key
+        @last_process_instance_key
+      end
+
       private
 
       def unique_process_id
@@ -77,6 +116,17 @@ module Busybee
         bpmn_content
           .gsub(/(<bpmn:process id=")[^"]+/, "\\1#{process_id}")
           .gsub(/(<bpmndi:BPMNPlane\s+[^>]*bpmnElement=")[^"]+/, "\\1#{process_id}")
+      end
+
+      def cancel_process_instance(key)
+        request = Busybee::GRPC::CancelProcessInstanceRequest.new(
+          processInstanceKey: key
+        )
+        grpc_client.cancel_process_instance(request)
+        true
+      rescue ::GRPC::NotFound
+        # Process already completed, ignore
+        false
       end
 
       def grpc_client

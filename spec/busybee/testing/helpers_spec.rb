@@ -87,4 +87,74 @@ RSpec.describe Busybee::Testing::Helpers do
       end
     end
   end
+
+  describe "#with_process_instance" do
+    let(:create_response) do
+      double("CreateResponse", processInstanceKey: 98_765) # rubocop:disable RSpec/VerifiedDoubles
+    end
+
+    before do
+      allow(mock_client).to receive(:create_process_instance).and_return(create_response)
+      allow(mock_client).to receive(:cancel_process_instance)
+    end
+
+    it "creates a process instance and yields the key" do
+      expect(mock_client).to receive(:create_process_instance)
+
+      yielded_key = nil
+      helper.with_process_instance("my-process") do |key|
+        yielded_key = key
+      end
+
+      expect(yielded_key).to eq(98_765)
+    end
+
+    it "passes variables to the process instance" do
+      expect(mock_client).to receive(:create_process_instance) do |request|
+        expect(JSON.parse(request.variables)).to eq("foo" => "bar")
+        create_response
+      end
+
+      helper.with_process_instance("my-process", foo: "bar") { |_| } # rubocop:disable Lint/EmptyBlock
+    end
+
+    it "cancels the process instance after the block" do
+      expect(mock_client).to receive(:cancel_process_instance).with(
+        an_instance_of(Busybee::GRPC::CancelProcessInstanceRequest)
+      )
+
+      helper.with_process_instance("my-process") { |_| } # rubocop:disable Lint/EmptyBlock
+    end
+
+    it "cancels even if block raises" do
+      expect(mock_client).to receive(:cancel_process_instance)
+
+      expect do
+        helper.with_process_instance("my-process") { raise "oops" }
+      end.to raise_error("oops")
+    end
+
+    it "ignores NotFound when canceling completed process" do
+      allow(mock_client).to receive(:cancel_process_instance).and_raise(GRPC::NotFound)
+
+      expect do
+        helper.with_process_instance("my-process") { |_| } # rubocop:disable Lint/EmptyBlock
+      end.not_to raise_error
+    end
+  end
+
+  describe "#process_instance_key" do
+    let(:create_response) { double("CreateResponse", processInstanceKey: 11_111) } # rubocop:disable RSpec/VerifiedDoubles
+
+    before do
+      allow(mock_client).to receive(:create_process_instance).and_return(create_response)
+      allow(mock_client).to receive(:cancel_process_instance)
+    end
+
+    it "returns the current process instance key inside the block" do
+      helper.with_process_instance("my-process") do |_|
+        expect(helper.process_instance_key).to eq(11_111)
+      end
+    end
+  end
 end
