@@ -128,6 +128,55 @@ module Busybee
         end
       end
 
+      # Publish a message to Zeebe.
+      #
+      # @param name [String] message name
+      # @param correlation_key [String] correlation key
+      # @param variables [Hash] message variables
+      # @param ttl_ms [Integer] time-to-live in milliseconds
+      def publish_message(name, correlation_key:, variables: {}, ttl_ms: 5000)
+        request = Busybee::GRPC::PublishMessageRequest.new(
+          name: name,
+          correlationKey: correlation_key,
+          variables: JSON.generate(variables),
+          timeToLive: ttl_ms
+        )
+        grpc_client.publish_message(request)
+      end
+
+      # Set variables on a process scope.
+      #
+      # @param scope_key [Integer] element instance key
+      # @param variables [Hash] variables to set
+      # @param local [Boolean] whether variables are local to scope
+      def set_variables(scope_key, variables, local: true)
+        request = Busybee::GRPC::SetVariablesRequest.new(
+          elementInstanceKey: scope_key,
+          variables: JSON.generate(variables),
+          local: local
+        )
+        grpc_client.set_variables(request)
+      end
+
+      # Assert that the current process instance has completed.
+      #
+      # @param wait [Float] seconds to wait before checking
+      # @raise [RuntimeError] if process is still running
+      def assert_process_completed!(wait: 0.25)
+        sleep(wait) if wait.positive?
+
+        request = Busybee::GRPC::CancelProcessInstanceRequest.new(
+          processInstanceKey: process_instance_key
+        )
+
+        begin
+          grpc_client.cancel_process_instance(request)
+          raise "Process instance #{process_instance_key} is still running (expected it to be completed)"
+        rescue ::GRPC::NotFound
+          # Expected - process has completed
+        end
+      end
+
       private
 
       def unique_process_id

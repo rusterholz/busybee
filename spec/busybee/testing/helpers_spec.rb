@@ -221,4 +221,69 @@ RSpec.describe Busybee::Testing::Helpers do
       expect(jobs.first).to be_a(Busybee::Testing::ActivatedJob)
     end
   end
+
+  describe "#publish_message" do
+    before do
+      allow(mock_client).to receive(:publish_message)
+    end
+
+    it "publishes a message to Zeebe" do
+      expect(mock_client).to receive(:publish_message) do |request|
+        expect(request.name).to eq("order-received")
+        expect(request.correlationKey).to eq("order-123")
+        expect(JSON.parse(request.variables)).to eq("status" => "received")
+        expect(request.timeToLive).to eq(5000)
+      end
+
+      helper.publish_message("order-received", correlation_key: "order-123", variables: { status: "received" })
+    end
+
+    it "allows custom TTL" do
+      expect(mock_client).to receive(:publish_message) do |request|
+        expect(request.timeToLive).to eq(10_000)
+      end
+
+      helper.publish_message("msg", correlation_key: "key", ttl_ms: 10_000)
+    end
+  end
+
+  describe "#set_variables" do
+    before do
+      allow(mock_client).to receive(:set_variables)
+    end
+
+    it "sets variables on a scope" do
+      expect(mock_client).to receive(:set_variables) do |request|
+        expect(request.elementInstanceKey).to eq(12_345)
+        expect(JSON.parse(request.variables)).to eq("foo" => "bar")
+        expect(request.local).to be(true)
+      end
+
+      helper.set_variables(12_345, { foo: "bar" })
+    end
+
+    it "allows non-local variables" do
+      expect(mock_client).to receive(:set_variables) do |request|
+        expect(request.local).to be(false)
+      end
+
+      helper.set_variables(12_345, { foo: "bar" }, local: false)
+    end
+  end
+
+  describe "#assert_process_completed!" do
+    it "passes when cancel raises NotFound" do
+      allow(mock_client).to receive(:cancel_process_instance).and_raise(GRPC::NotFound)
+
+      helper.instance_variable_set(:@current_process_instance_key, 99_999)
+      expect { helper.assert_process_completed! }.not_to raise_error
+    end
+
+    it "fails when cancel succeeds (process still running)" do
+      allow(mock_client).to receive(:cancel_process_instance)
+
+      helper.instance_variable_set(:@current_process_instance_key, 99_999)
+      expect { helper.assert_process_completed! }.to raise_error(/Process instance 99999 is still running/)
+    end
+  end
 end

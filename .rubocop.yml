@@ -27,6 +27,9 @@ Metrics/BlockLength:
 Metrics/MethodLength:
   Max: 20
 
+Metrics/ModuleLength:
+  Max: 150
+
 RSpec/DescribeClass:
   Exclude:
     - "spec/integration/**/*"
