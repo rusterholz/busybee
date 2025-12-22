@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "rspec/matchers"
 
 module Busybee
   module Testing
@@ -17,6 +18,8 @@ module Busybee
     #   job.mark_completed(result: "success")
     #
     class ActivatedJob
+      include RSpec::Matchers
+
       attr_reader :raw, :client
 
       def initialize(raw_job, client:)
@@ -42,6 +45,32 @@ module Busybee
 
       def retries
         raw.retries
+      end
+
+      # Assert that job variables include the expected values.
+      # Raises RSpec expectation failure if not matched.
+      #
+      # @param expected [Hash] expected variable key-value pairs
+      # @return [self] for chaining
+      def expect_variables(expected)
+        expect(variables).to include(stringify_keys(expected))
+        self
+      end
+
+      # Assert that job headers include the expected values.
+      # Raises RSpec expectation failure if not matched.
+      #
+      # @param expected [Hash] expected header key-value pairs
+      # @return [self] for chaining
+      def expect_headers(expected)
+        expect(headers).to include(stringify_keys(expected))
+        self
+      end
+
+      private
+
+      def stringify_keys(hash)
+        hash.transform_keys(&:to_s)
       end
     end
   end

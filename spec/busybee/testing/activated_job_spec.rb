@@ -63,4 +63,32 @@ RSpec.describe Busybee::Testing::ActivatedJob do
       expect(job.retries).to eq(3)
     end
   end
+
+  describe "#expect_variables" do
+    it "passes when variables include expected values" do
+      expect { job.expect_variables("foo" => "bar") }.not_to raise_error
+    end
+
+    it "fails when variables do not include expected values" do
+      expect { job.expect_variables("foo" => "wrong") }.to raise_error(RSpec::Expectations::ExpectationNotMetError)
+    end
+
+    it "returns self for chaining" do
+      expect(job.expect_variables("foo" => "bar")).to be(job)
+    end
+  end
+
+  describe "#expect_headers" do
+    it "passes when headers include expected values" do
+      expect { job.expect_headers("task_type" => "process_order") }.not_to raise_error
+    end
+
+    it "fails when headers do not include expected values" do
+      expect { job.expect_headers("task_type" => "wrong") }.to raise_error(RSpec::Expectations::ExpectationNotMetError)
+    end
+
+    it "returns self for chaining" do
+      expect(job.expect_headers("task_type" => "process_order")).to be(job)
+    end
+  end
 end
