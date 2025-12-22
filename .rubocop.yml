@@ -24,6 +24,9 @@ Metrics/BlockLength:
   Exclude:
     - "Rakefile"
 
+Metrics/MethodLength:
+  Max: 20
+
 RSpec/DescribeClass:
   Exclude:
     - "spec/integration/**/*"

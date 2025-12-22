@@ -8,6 +8,9 @@ require_relative "activated_job"
 
 module Busybee
   module Testing
+    # Raised when no job is available for activation
+    class NoJobAvailable < StandardError; end
+
     # RSpec helper methods for testing BPMN workflows against Zeebe.
     module Helpers
       # Deploy a BPMN process file to Zeebe.
@@ -35,7 +38,7 @@ module Busybee
       # @example Deploy with custom ID
       #   result = deploy_process("path/to/process.bpmn", uniquify: "my-test-process")
       #   result[:process_id] #=> "my-test-process"
-      def deploy_process(path, uniquify: nil) # rubocop:disable Metrics/MethodLength
+      def deploy_process(path, uniquify: nil)
         if uniquify
           process_id = uniquify == true ? unique_process_id : uniquify
           bpmn_content = bpmn_with_unique_id(path, process_id)
@@ -66,7 +69,7 @@ module Busybee
       # @param process_name [String] BPMN process ID
       # @param variables [Hash] variables to start the process with
       # @yield [Integer] the process instance key
-      def with_process_instance(process_name, variables = {}) # rubocop:disable Metrics/MethodLength
+      def with_process_instance(process_name, variables = {})
         request = Busybee::GRPC::CreateProcessInstanceRequest.new(
           bpmnProcessId: process_name,
           version: -1,
@@ -100,6 +103,31 @@ module Busybee
         @last_process_instance_key
       end
 
+      # Activate a single job of the given type.
+      #
+      # @param type [String] job type
+      # @return [ActivatedJob]
+      # @raise [NoJobAvailable] if no job is available
+      def activate_job(type)
+        jobs = activate_jobs_raw(type, max_jobs: 1)
+        raise NoJobAvailable, "No job of type '#{type}' available" if jobs.empty?
+
+        ActivatedJob.new(jobs.first, client: grpc_client)
+      end
+
+      # Activate multiple jobs of the given type.
+      #
+      # @param type [String] job type
+      # @param max_jobs [Integer] maximum number of jobs to activate
+      # @return [Enumerator<ActivatedJob>]
+      def activate_jobs(type, max_jobs:)
+        Enumerator.new do |yielder|
+          activate_jobs_raw(type, max_jobs: max_jobs).each do |raw_job|
+            yielder << ActivatedJob.new(raw_job, client: grpc_client)
+          end
+        end
+      end
+
       private
 
       def unique_process_id
@@ -127,6 +155,23 @@ module Busybee
       rescue ::GRPC::NotFound
         # Process already completed, ignore
         false
+      end
+
+      def activate_jobs_raw(type, max_jobs:)
+        worker = "#{type}-#{SecureRandom.hex(4)}"
+        request = Busybee::GRPC::ActivateJobsRequest.new(
+          type: type,
+          worker: worker,
+          timeout: 30_000,
+          maxJobsToActivate: max_jobs,
+          requestTimeout: Busybee::Testing.activate_request_timeout
+        )
+
+        jobs = []
+        grpc_client.activate_jobs(request).each do |response|
+          jobs.concat(response.jobs.to_a)
+        end
+        jobs
       end
 
       def grpc_client

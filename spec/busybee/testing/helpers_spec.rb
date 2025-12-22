@@ -157,4 +157,68 @@ RSpec.describe Busybee::Testing::Helpers do
       end
     end
   end
+
+  describe "#activate_job" do
+    # Using plain doubles for protobuf response classes since they're dynamically generated
+    # rubocop:disable RSpec/VerifiedDoubles
+    let(:raw_job) do
+      double(
+        "Busybee::GRPC::ActivatedJob",
+        key: 555,
+        processInstanceKey: 98_765,
+        variables: "{}",
+        customHeaders: "{}",
+        retries: 3
+      )
+    end
+    let(:activate_response) { double("Busybee::GRPC::ActivateJobsResponse", jobs: [raw_job]) }
+    # rubocop:enable RSpec/VerifiedDoubles
+
+    before do
+      allow(mock_client).to receive(:activate_jobs).and_return([activate_response])
+    end
+
+    it "returns an ActivatedJob" do
+      result = helper.activate_job("my-task")
+      expect(result).to be_a(Busybee::Testing::ActivatedJob)
+      expect(result.key).to eq(555)
+    end
+
+    it "raises when no job is found" do
+      empty_response = double("Busybee::GRPC::ActivateJobsResponse", jobs: []) # rubocop:disable RSpec/VerifiedDoubles
+      allow(mock_client).to receive(:activate_jobs).and_return([empty_response])
+
+      expect do
+        helper.activate_job("missing-task")
+      end.to raise_error(Busybee::Testing::NoJobAvailable, /No job of type 'missing-task' available/)
+    end
+  end
+
+  describe "#activate_jobs" do
+    # Using plain doubles for protobuf response classes since they're dynamically generated
+    # rubocop:disable RSpec/VerifiedDoubles
+    let(:raw_jobs) do
+      [
+        double("Busybee::GRPC::ActivatedJob", key: 1, processInstanceKey: 100, variables: "{}", customHeaders: "{}",
+                                              retries: 3),
+        double("Busybee::GRPC::ActivatedJob", key: 2, processInstanceKey: 100, variables: "{}", customHeaders: "{}",
+                                              retries: 3)
+      ]
+    end
+    let(:activate_response) { double("Busybee::GRPC::ActivateJobsResponse", jobs: raw_jobs) }
+    # rubocop:enable RSpec/VerifiedDoubles
+
+    before do
+      allow(mock_client).to receive(:activate_jobs).and_return([activate_response])
+    end
+
+    it "returns an Enumerator of ActivatedJob" do
+      result = helper.activate_jobs("my-task", max_jobs: 2)
+      expect(result).to be_an(Enumerator)
+
+      jobs = result.to_a
+      expect(jobs.length).to eq(2)
+      expect(jobs.first).to be_a(Busybee::Testing::ActivatedJob)
+    end
+  end
 end
