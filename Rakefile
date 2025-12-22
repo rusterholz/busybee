@@ -83,7 +83,8 @@ namespace :zeebe do
   task :health do
     puts "Waiting for services to be healthy..."
 
-    max_attempts = 60
+    # Zeebe has start_period: 60s in its health check, so we need to wait longer
+    max_attempts = 120
     attempt = 0
 
     # Wait for ElasticSearch
@@ -96,12 +97,21 @@ namespace :zeebe do
     end
     puts " OK"
 
-    # Wait for Zeebe Gateway
+    # Wait for Zeebe container to be healthy (not just port open)
+    # The Docker health check verifies the service is actually ready
     attempt = 0
-    print "Checking Zeebe Gateway (port 26500)..."
-    until system("nc -z localhost 26500 > /dev/null 2>&1")
+    print "Checking Zeebe container health..."
+    loop do
+      health_status = `docker compose ps zeebe --format '{{.Health}}' 2>/dev/null`.strip
+      break if health_status == "healthy"
+
       attempt += 1
-      abort("\n\nZeebe Gateway did not become healthy within #{max_attempts} seconds") if attempt >= max_attempts
+      if attempt >= max_attempts
+        # Show container status for debugging
+        system("docker compose ps")
+        system("docker compose logs --tail=20 zeebe")
+        abort("\n\nZeebe did not become healthy within #{max_attempts} seconds (status: #{health_status})")
+      end
       print "."
       sleep 1
     end
