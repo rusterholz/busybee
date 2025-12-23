@@ -5,13 +5,9 @@ RSpec.describe "Cancel Process Instance", :integration do
   # using the CancelProcessInstance GRPC operation.
 
   let(:bpmn_path) { File.expand_path("../fixtures/waiting_process.bpmn", __dir__) }
-  let(:client) { grpc_client }
+  let(:process_id) { deploy_process(bpmn_path, uniquify: true)[:process_id] }
 
   it "cancels a running process instance" do
-    # Deploy process using helper
-    deployment = deploy_process(bpmn_path, uniquify: true)
-    process_id = deployment[:process_id]
-
     # Create instance and test cancel operation
     with_process_instance(process_id) do |process_instance_key|
       # Cancel the process instance (this is what we're testing)
@@ -19,7 +15,7 @@ RSpec.describe "Cancel Process Instance", :integration do
         processInstanceKey: process_instance_key
       )
 
-      response = client.cancel_process_instance(request)
+      response = grpc_client.cancel_process_instance(request)
 
       # Verify the response is valid
       expect(response).to be_a(Busybee::GRPC::CancelProcessInstanceResponse)
@@ -34,7 +30,7 @@ RSpec.describe "Cancel Process Instance", :integration do
 
     # Expect a GRPC error
     expect do
-      client.cancel_process_instance(request)
+      grpc_client.cancel_process_instance(request)
     end.to raise_error(GRPC::NotFound)
   end
 end

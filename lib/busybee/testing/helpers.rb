@@ -103,6 +103,21 @@ module Busybee
         @last_process_instance_key
       end
 
+      # Checks if Zeebe is available and responsive.
+      #
+      # This method attempts to connect to Zeebe and call the topology endpoint
+      # to verify the service is running and healthy.
+      #
+      # @param timeout [Integer] timeout in seconds for the connection check
+      # @return [Boolean] true if Zeebe is available, false otherwise
+      def zeebe_available?(timeout: 5)
+        request = Busybee::GRPC::TopologyRequest.new
+        grpc_client.topology(request, deadline: Time.now + timeout)
+        true
+      rescue GRPC::Unavailable, GRPC::DeadlineExceeded, GRPC::Core::CallError, GRPC::Unauthenticated
+        false
+      end
+
       # Activate a single job of the given type.
       #
       # @param type [String] job type
