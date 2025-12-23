@@ -171,9 +171,10 @@ module Busybee
 
         begin
           grpc_client.cancel_process_instance(request)
-          raise "Process instance #{process_instance_key} is still running (expected it to be completed)"
         rescue ::GRPC::NotFound
-          # Expected - process has completed
+          true # Expected - process has completed
+        else
+          raise "Process instance #{process_instance_key} is still running (expected it to be completed)"
         end
       end
 

@@ -272,14 +272,14 @@ RSpec.describe Busybee::Testing::Helpers do
   end
 
   describe "#assert_process_completed!" do
-    it "passes when cancel raises NotFound" do
+    it "returns true when process has completed" do
       allow(mock_client).to receive(:cancel_process_instance).and_raise(GRPC::NotFound)
 
       helper.instance_variable_set(:@current_process_instance_key, 99_999)
-      expect { helper.assert_process_completed! }.not_to raise_error
+      expect(helper.assert_process_completed!).to be(true)
     end
 
-    it "fails when cancel succeeds (process still running)" do
+    it "raises when process is still running" do
       allow(mock_client).to receive(:cancel_process_instance)
 
       helper.instance_variable_set(:@current_process_instance_key, 99_999)
