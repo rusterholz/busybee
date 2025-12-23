@@ -33,6 +33,7 @@ Metrics/ModuleLength:
 RSpec/DescribeClass:
   Exclude:
     - "spec/integration/**/*"
+    - "spec/**/matchers/**/*"
 
 RSpec/ExampleLength:
   Max: 15

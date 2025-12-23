@@ -11,7 +11,7 @@ RSpec.describe "Create Process Instance", :integration do
 
   # Helper method to deploy the simple process with a unique ID before creating instances
   # This ensures test isolation - each test gets its own process definition
-  def deploy_simple_process(client, process_id = nil) # rubocop:disable Metrics/MethodLength
+  def deploy_simple_process(client, process_id = nil)
     process_id ||= unique_process_id
     bpmn_content = bpmn_with_unique_id(bpmn_path, process_id)
 

@@ -118,7 +118,7 @@ module IntegrationHelpers
   # @param bpmn_path [String] Path to the BPMN file
   # @param process_id [String] Optional custom process ID (generates random if not provided)
   # @return [Hash] Deployment info with :process (metadata) and :process_id
-  def deploy_process(client, bpmn_path, process_id = nil) # rubocop:disable Metrics/MethodLength
+  def deploy_process(client, bpmn_path, process_id = nil)
     process_id ||= unique_process_id
     bpmn_content = bpmn_with_unique_id(bpmn_path, process_id)
 
