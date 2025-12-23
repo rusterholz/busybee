@@ -12,7 +12,7 @@ RSpec.describe "have_received_headers matcher" do
       key: 1,
       processInstanceKey: 2,
       variables: "{}",
-      customHeaders: '{"x-trace-id": "abc123", "x-user-id": "42"}',
+      customHeaders: '{"workflow_version": "v2", "batch_id": "42"}',
       retries: 3
     )
   end
@@ -21,11 +21,11 @@ RSpec.describe "have_received_headers matcher" do
   let(:job) { Busybee::Testing::ActivatedJob.new(raw_job, client: client) }
 
   it "passes when job has expected headers" do
-    expect(job).to have_received_headers("x-trace-id" => "abc123")
+    expect(job).to have_received_headers("workflow_version" => "v2")
   end
 
   it "passes with symbol keys" do
-    expect(job).to have_received_headers("x-trace-id": "abc123")
+    expect(job).to have_received_headers(workflow_version: "v2")
   end
 
   it "fails when job lacks expected headers" do

@@ -23,6 +23,7 @@ Layout/LineLength:
 Metrics/BlockLength:
   Exclude:
     - "Rakefile"
+    - "lib/busybee/testing/matchers/**/*"
 
 Metrics/MethodLength:
   Max: 20
