@@ -22,6 +22,36 @@ Or install it yourself as:
 
 ...
 
+### Testing BPMN Workflows
+
+Busybee includes RSpec helpers and matchers for testing BPMN workflows against Zeebe:
+
+```ruby
+RSpec.describe "Order Fulfillment" do
+  let(:process_id) { deploy_process("spec/fixtures/order.bpmn", uniquify: true)[:process_id] }
+
+  it "processes successful orders" do
+    with_process_instance(process_id, order_id: "123") do
+      expect(activate_job("process-payment"))
+        .to have_activated
+        .with_variables(order_id: "123")
+        .and_complete(payment_id: "pay-456")
+
+      assert_process_completed!
+    end
+  end
+end
+```
+
+**[Read the full testing documentation →](docs/testing.md)**
+
+Features include:
+- Deploy BPMN processes and create instances
+- Activate and complete jobs with fluent API
+- Publish messages and set variables
+- RSpec matchers for job expectations
+- Automatic process instance cleanup
+
 ### Ruby Implementation Support
 
 Busybee currently only supports MRI (CRuby). JRuby is not supported because it cannot run C extensions (it would require `grpc-java` with a Ruby wrapper). TruffleRuby's C extension support is experimental and the `grpc` gem does not currently build on it.
