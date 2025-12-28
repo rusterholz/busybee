@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
 require "busybee"
-require "busybee/grpc/gateway_pb"
-require "busybee/grpc/gateway_services_pb"
+require "busybee/testing"
 require "base64"
 require "securerandom"
 

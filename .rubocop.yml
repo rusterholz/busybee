@@ -23,13 +23,24 @@ Layout/LineLength:
 Metrics/BlockLength:
   Exclude:
     - "Rakefile"
+    - "lib/busybee/testing/matchers/**/*"
+
+Metrics/MethodLength:
+  Max: 20
+
+Metrics/ModuleLength:
+  Max: 150
 
 RSpec/DescribeClass:
   Exclude:
     - "spec/integration/**/*"
+    - "spec/**/matchers/**/*"
 
 RSpec/ExampleLength:
   Max: 15
+
+RSpec/MessageSpies:
+  EnforcedStyle: receive
 
 RSpec/MultipleExpectations:
   Max: 6

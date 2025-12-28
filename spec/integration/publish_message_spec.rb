@@ -8,52 +8,34 @@ RSpec.describe "Publish Message", :integration do
   # a message intermediate catch event that waits for a message before completing.
 
   let(:bpmn_path) { File.expand_path("../fixtures/waiting_process.bpmn", __dir__) }
+  let(:process_id) { deploy_process(bpmn_path, uniquify: true)[:process_id] }
 
-  it "publishes a message to continue a waiting process instance" do # rubocop:disable RSpec/ExampleLength
-    client = grpc_client
-
-    # Deploy process and create instance with a correlation ID variable
-    deployment = deploy_process(client, bpmn_path)
-    process_id = deployment[:process_id]
-
+  it "publishes a message to continue a waiting process instance" do
     # Use a unique correlation ID for this instance
     correlation_id = SecureRandom.hex(8)
-    variables = JSON.generate({ correlationId: correlation_id })
 
-    instance_response = create_process_instance(client, process_id, variables)
-    process_instance_key = instance_response.processInstanceKey
+    # Create instance and test publish message operation
+    with_process_instance(process_id, correlationId: correlation_id) do
+      # The process is now waiting at the message intermediate catch event
+      # Publish a message to continue the process (this is what we're testing)
+      # The waiting_process.bpmn uses correlationKey="=correlationId"
+      request = Busybee::GRPC::PublishMessageRequest.new(
+        name: "continue-message",
+        correlationKey: correlation_id
+      )
 
-    # The process is now waiting at the message intermediate catch event
-    # Publish a message to continue the process
-    # The waiting_process.bpmn uses correlationKey="=correlationId"
-    request = Busybee::GRPC::PublishMessageRequest.new(
-      name: "continue-message",
-      correlationKey: correlation_id
-    )
+      response = grpc_client.publish_message(request)
 
-    response = client.publish_message(request)
+      # Verify the message was published
+      expect(response).to be_a(Busybee::GRPC::PublishMessageResponse)
+      expect(response.key).to be > 0
 
-    # Verify the message was published
-    expect(response).to be_a(Busybee::GRPC::PublishMessageResponse)
-    expect(response.key).to be > 0
-
-    # Wait for the process to complete
-    sleep 2
-
-    # Verify the process has completed by trying to cancel it
-    # This should fail with NotFound because the process already completed
-    cancel_request = Busybee::GRPC::CancelProcessInstanceRequest.new(
-      processInstanceKey: process_instance_key
-    )
-
-    expect do
-      client.cancel_process_instance(cancel_request)
-    end.to raise_error(GRPC::NotFound)
+      # Verify the process completed after receiving the message
+      assert_process_completed!
+    end
   end
 
   it "handles errors when publishing message with non-matching correlation key" do
-    client = grpc_client
-
     # Try to publish a message that won't match any waiting process
     request = Busybee::GRPC::PublishMessageRequest.new(
       name: "continue-message",
@@ -63,7 +45,7 @@ RSpec.describe "Publish Message", :integration do
 
     # This should NOT raise an error - messages are published regardless
     # of whether there's a matching subscription
-    response = client.publish_message(request)
+    response = grpc_client.publish_message(request)
 
     expect(response).to be_a(Busybee::GRPC::PublishMessageResponse)
     expect(response.key).to be > 0
