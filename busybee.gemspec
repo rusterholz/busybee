@@ -8,24 +8,27 @@ Gem::Specification.new do |spec|
   spec.authors       = ["Andy Rusterholz"]
   spec.email         = ["andyrusterholz@gmail.com"]
 
-  spec.summary       = "Write a short summary, because RubyGems requires one."
-  spec.description   = "Write a longer description or delete this line."
+  spec.summary       = "A complete Ruby toolkit for BPMN workflow orchestration."
+  spec.description = <<~DESC.gsub(/\s+/, " ").strip
+    The missing Ruby gem for Camunda 8. Production-ready worker framework
+    that runs out of the box - define your job handlers and go. Idiomatic
+    Zeebe client with sensible defaults and configuration where you want it.
+    RSpec testing helpers and CI/CD deployment tooling for BPMNs.
+  DESC
   spec.homepage      = "https://github.com/rusterholz/busybee"
   spec.license       = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
 
-  spec.metadata["allowed_push_host"] = "TODO: Set to 'https://mygemserver.com'"
-
+  # allowed_push_host removed — this is a public gem, rubygems.org is the default
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/rusterholz/busybee"
   spec.metadata["changelog_uri"] = "https://github.com/rusterholz/busybee/blob/main/CHANGELOG.md"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  # Specify which files should be added to the gem when it is released.
-  # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
-  spec.files = Dir.chdir(File.expand_path(__dir__)) do
-    `git ls-files -z`.split("\x0").reject { |f| f.match(%r{\A(?:test|spec|features)/}) }
-  end
+  # Explicit file list - audit before each release (see docs/development.md)
+  spec.files = Dir.glob(
+    %w[lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]
+  ).reject { |f| f.include?("docs/internal.md") || f.include?("docs/development.md") }
   spec.bindir        = "exe"
   spec.executables   = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]

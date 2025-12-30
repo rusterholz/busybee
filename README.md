@@ -1,41 +1,144 @@
 # Busybee
 
-...buzz buzz...
+**A complete Ruby toolkit for workflow-based orchestration with BPMN, running on Camunda Platform.**
+
+If you're a Ruby shop that needs workflow orchestration, you've probably noticed the gap: Camunda Platform is powerful, but the Ruby ecosystem support is thin. Busybee fills that gap. One gem, one Camunda Cloud account, and you're ready to start building. And when you're ready to scale further, Busybee is ready to grow with you, with battle-proven patterns for large distributed systems.
+
+Busybee provides everything you need to work with Camunda Platform or self-hosted Zeebe from Ruby:
+
+- **Worker Pattern Framework** - Define job handlers as classes with a clean DSL. Busybee handles polling, execution, and lifecycle.
+- **Idiomatic Zeebe Client** - Ruby-native interface with keyword arguments, sensible defaults, and proper exception handling.
+- **RSpec Testing Integration** - Deploy BPMNs, activate jobs, and assert on workflow behavior in your test suite.
+- **Deployment Tools** - CI/CD tooling for deploying BPMN files to your clusters.
+- **Low-Level GRPC Access** - Direct access to Zeebe's protocol buffer API when you need it.
+
+## Roadmap & Availability
+
+| Version | Features | Status |
+|---------|---------|--------|
+| v0.1 | BPMN Testing Tools, GRPC Layer | Available now! |
+| v0.2 | Client, Rails Integration | January 2026 |
+| v0.3 | Worker Pattern & CLI | Early 2026 |
+| v0.4 | Instrumentation Hooks, Deployment Tools | Planned for Early 2026 |
+| v1.0 | Production Polish | Planned for Mid 2026 |
 
 ## Installation
 
-Add this line to your application's Gemfile:
+Add busybee to your Gemfile:
 
 ```ruby
-gem 'busybee'
+gem "busybee"
 ```
 
-And then execute:
+Then run:
 
-    $ bundle install
+```bash
+bundle install
+```
 
-Or install it yourself as:
+Or install directly:
 
-    $ gem install busybee
+```bash
+gem install busybee
+```
 
 ## Usage
 
-...
+### Worker Pattern Framework (coming in early 2026)
 
-### Testing BPMN Workflows
+Define job handlers as Ruby classes. Busybee manages the process lifecycle, the connection to Camunda Cloud, and requesting jobs from Zeebe. If you've used Racecar to build Kafka handlers, or Sidekiq to build background jobs, this should feel very familiar.
 
-Busybee includes RSpec helpers and matchers for testing BPMN workflows against Zeebe:
+> This feature is still being designed. The example shown here is only representative and will change before implementation.
+
+```ruby
+class ProcessOrderWorker < Busybee::Worker
+  type "process-order"
+
+  input :order_id, required: true
+  input :customer_email
+
+  output :confirmation_number
+
+  def perform
+    confirmation = OrderService.process(order_id)
+    complete(confirmation_number: confirmation)
+  end
+end
+```
+
+Planned capabilities:
+
+- Declarative input/output definitions with validation
+- Automatic job activation and completion
+- Configurable timeouts and retry behavior
+- Graceful shutdown on SIGTERM
+- CLI for running workers: `bundle exec busybee work` or similar
+
+### Idiomatic Zeebe Client (coming in January 2026)
+
+A Ruby-native client for Zeebe with keyword arguments, sensible defaults, and proper exception handling.
+
+> This feature is still being designed. The example shown here is only representative and will change before implementation.
+
+```ruby
+client = Busybee::Client.new
+
+# Deploy a workflow
+client.deploy_process("workflows/order-fulfillment.bpmn")
+
+# Start a process instance
+instance_key = client.start_process("order-fulfillment",
+  vars: { order_id: "123", items: ["widget", "gadget"] }
+)
+
+# Publish a message
+client.publish_message("payment-received",
+  correlation_key: "order-123",
+  vars: { amount: 99.99 }
+)
+```
+
+Planned capabilities:
+
+- Connection management with automatic reconnection
+- Multiple credential types (insecure, TLS, OAuth, Camunda Cloud)
+- GRPC error wrapping with preserved cause chains
+- Rails integration via Railtie and `config/busybee.yml`
+- Duration support for timeouts (works with ActiveSupport if present)
+
+### RSpec Testing Integration (available now!)
+
+Deploy processes, create instances, activate jobs, and verify workflow behavior against a real Zeebe instance. A full replacement for the [zeebe_bpmn_rspec](https://github.com/ezcater/zeebe_bpmn_rspec) gem.
+
+#### Setup
+
+```ruby
+# spec/spec_helper.rb
+require "rspec"
+require "busybee/testing"
+
+Busybee::Testing.configure do |config|
+  config.address = "localhost:26500"  # or use ZEEBE_ADDRESS env var
+end
+```
+
+#### Example
 
 ```ruby
 RSpec.describe "Order Fulfillment" do
   let(:process_id) { deploy_process("spec/fixtures/order.bpmn", uniquify: true)[:process_id] }
 
-  it "processes successful orders" do
-    with_process_instance(process_id, order_id: "123") do
+  it "processes payment and ships order" do
+    with_process_instance(process_id, order_id: "123", total: 99.99) do
       expect(activate_job("process-payment"))
         .to have_activated
-        .with_variables(order_id: "123")
+        .with_variables(order_id: "123", total: 99.99)
         .and_complete(payment_id: "pay-456")
+
+      expect(activate_job("prepare-shipment"))
+        .to have_activated
+        .with_variables(payment_id: "pay-456")
+        .and_complete(tracking_number: "TRACK789")
 
       assert_process_completed!
     end
@@ -43,16 +146,42 @@ RSpec.describe "Order Fulfillment" do
 end
 ```
 
-**[Read the full testing documentation →](docs/testing.md)**
+#### Helpers and Matchers
 
-Features include:
-- Deploy BPMN processes and create instances
-- Activate and complete jobs with fluent API
-- Publish messages and set variables
-- RSpec matchers for job expectations
-- Automatic process instance cleanup
+- `deploy_process(path, uniquify:)` - Deploy BPMN files with optional unique IDs for test isolation
+- `with_process_instance(process_id, variables)` - Create instances with automatic cleanup
+- `activate_job(type)` / `activate_jobs(type, max_jobs:)` - Activate jobs for assertions
+- `publish_message(name, correlation_key:, variables:)` - Trigger message catch events
+- `set_variables(scope_key, variables)` - Update process variables
+- `assert_process_completed!` - Verify workflow reached an end event
+- `have_activated`, `have_received_variables`, `have_received_headers` - RSpec matchers
 
-### Ruby Implementation Support
+**[Full testing documentation](docs/testing.md)**
+
+### Deployment Tools (coming in early 2026)
+
+CI/CD tooling for deploying BPMN processes to your Zeebe clusters. Version tracking, environment-specific deployments, and pre-deployment validation.
+
+### Low-Level GRPC Access (available now!)
+
+For edge cases where the higher-level abstractions don't cover what you need, busybee exposes the raw GRPC interface to Zeebe. This is a complete drop-in replacement for the now-discontinued [zeebe-client](https://github.com/zeebe-io/zeebe-client-ruby) gem.
+
+```ruby
+require "busybee/grpc"
+
+stub = Busybee::GRPC::Gateway::Stub.new(
+  "localhost:26500",
+  :this_channel_is_insecure
+)
+
+request = Busybee::GRPC::TopologyRequest.new
+response = stub.topology(request)
+puts response.brokers.map(&:host)
+```
+
+Most users won't need this—the Testing module and future Client cover common workflows. See **[GRPC documentation](docs/grpc.md)** for details.
+
+## Ruby Implementation Support
 
 Busybee currently only supports MRI (CRuby). JRuby is not supported because it cannot run C extensions (it would require `grpc-java` with a Ruby wrapper). TruffleRuby's C extension support is experimental and the `grpc` gem does not currently build on it.
 
@@ -60,131 +189,17 @@ If you successfully run busybee on an alternative Ruby implementation, please op
 
 ## Development
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
-
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
-
-### Running Tests
-
-Busybee has two types of tests:
-
-**Unit Tests** - Fast tests that don't require external dependencies:
+Busybee includes a Docker Compose setup for running Zeebe locally, plus rake tasks for common development workflows.
 
 ```bash
-# Run all unit tests (default)
-bundle exec rspec
-
-# Run specific test file
-bundle exec rspec spec/busybee_spec.rb
+bin/setup              # Install dependencies
+rake zeebe:start       # Start local Zeebe + ElasticSearch
+rake zeebe:health      # Wait for services to be ready
+bundle exec rspec      # Run unit tests
+RUN_INTEGRATION_TESTS=1 bundle exec rspec  # Run all tests including integration
 ```
 
-**Integration Tests** - Tests that connect to a real Zeebe instance via gRPC:
-
-```bash
-# Start Zeebe and wait for it to be healthy
-rake zeebe:start
-rake zeebe:health
-
-# Run all integration tests
-RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
-
-# Run all tests (unit + integration)
-RUN_INTEGRATION_TESTS=1 bundle exec rspec
-
-# Run a specific integration test
-RUN_INTEGRATION_TESTS=1 bundle exec rspec spec/integration/topology_spec.rb
-
-# Stop Zeebe when done
-rake zeebe:stop
-```
-
-Integration tests will automatically skip if Zeebe is not running, so you can safely run the full test suite without having Zeebe started. The tests use the generated GRPC classes directly to verify that the protocol buffer bindings work correctly against a real Zeebe cluster.
-
-### Local Zeebe Development Environment
-
-Busybee provides a Docker Compose setup for running Zeebe and ElasticSearch locally. This environment includes:
-
-- **Zeebe Gateway & Broker**: Camunda Platform 8.8.8 - handles workflow orchestration and gRPC communication
-- **ElasticSearch**: Version 8.17.10 - stores workflow data and powers the Operate UI
-- **Operate UI**: Web interface for monitoring workflows at http://localhost:8088 (credentials: demo/demo)
-
-#### Version Management
-
-All version configuration is centralized in the `.env` file at the project root. This file is committed to git and serves as the source of truth for Zeebe and ElasticSearch versions.
-
-**Upgrading Zeebe/Camunda:**
-
-1. Edit `.env` and update `ZEEBE_VERSION` to the desired version
-2. Regenerate GRPC protocol buffers: `rake grpc:generate`
-3. Restart containers: `rake zeebe:restart`
-4. Run tests to verify compatibility: `rake spec`
-
-The `.env` file ensures all developers and CI environments use consistent versions.
-
-#### Starting the Environment
-
-```bash
-# Start Zeebe and ElasticSearch containers in the background
-rake zeebe:start
-
-# Wait for services to be fully healthy and ready
-rake zeebe:health
-
-# Check container status
-rake zeebe:status
-
-# View live logs from all services
-rake zeebe:logs
-```
-
-After running `rake zeebe:start`, the following services will be available:
-
-- **Zeebe gRPC Gateway**: `localhost:26500` - Use this endpoint for busybee client connections
-- **Operate UI**: http://localhost:8088 - Web interface for monitoring workflows (login: demo/demo)
-- **ElasticSearch**: http://localhost:9200 - Direct access to the search engine
-
-#### Managing the Environment
-
-```bash
-# Stop containers (keeps data volumes intact)
-rake zeebe:stop
-
-# Restart containers
-rake zeebe:restart
-
-# Remove containers AND delete all data (requires confirmation)
-rake zeebe:clean
-```
-
-#### Available Rake Tasks
-
-- `rake zeebe:start` - Start Zeebe and ElasticSearch containers
-- `rake zeebe:stop` - Stop containers (preserves data volumes)
-- `rake zeebe:status` - Display container status
-- `rake zeebe:logs` - Show live logs from all containers
-- `rake zeebe:health` - Wait for services to be healthy (useful in CI)
-- `rake zeebe:restart` - Stop and start containers
-- `rake zeebe:clean` - Remove containers and delete all data volumes
-
-#### What Each Service Does
-
-**Zeebe** is a workflow orchestration engine that executes BPMN workflows. It exposes a gRPC API (port 26500) that the busybee gem uses to deploy workflows, create workflow instances, and interact with jobs. The Zeebe broker stores workflow state and manages job distribution.
-
-**ElasticSearch** stores historical and current workflow data exported from Zeebe. This data powers the Operate web interface and enables searching and analyzing workflow execution.
-
-**Operate UI** is a web application that provides visibility into running and completed workflows. You can inspect workflow instances, view variables, and troubleshoot issues. Access it at http://localhost:8088 with username `demo` and password `demo`.
-
-#### Troubleshooting
-
-If services fail to start or become unresponsive:
-
-1. Check logs: `rake zeebe:logs`
-2. Verify containers are running: `rake zeebe:status`
-3. Ensure ports 26500, 8088, 9200, and 9300 are not in use by other applications
-4. Try restarting: `rake zeebe:restart`
-5. If data is corrupted, clean and restart: `rake zeebe:clean` then `rake zeebe:start`
-
-The health check task (`rake zeebe:health`) will wait up to 60 seconds for each service to become healthy. If services don't become healthy in that time, check the logs for errors.
+**[Full development guide](docs/development.md)** — Local environment setup, running tests, regenerating GRPC classes, and release procedures.
 
 ## Contributing
 
