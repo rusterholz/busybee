@@ -1,8 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-require "busybee/defaults"
-
 RSpec.describe Busybee::Defaults do
   it "defines DEFAULT_JOB_TIMEOUT_MS as 60 seconds" do
     expect(described_class::DEFAULT_JOB_TIMEOUT_MS).to eq(60_000)

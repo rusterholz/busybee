@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-
 RSpec.describe Busybee::Testing do
   after do
     # Reset configuration after each test

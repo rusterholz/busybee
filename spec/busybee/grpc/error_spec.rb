@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
 require "busybee/grpc/error"
 
 RSpec.describe Busybee::GRPC::Error do

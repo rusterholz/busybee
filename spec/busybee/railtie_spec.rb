@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-
 # Only run these tests with Rails loaded
 RSpec.describe "Busybee::Railtie", skip: !defined?(Rails) do
   it "is defined when Rails is present" do

@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-require "busybee"
 require "logger"
 
 RSpec.describe Busybee do
