@@ -1,5 +1,12 @@
 # frozen_string_literal: true
 
+# Load Rails before busybee if testing Rails integration
+# This ensures busybee sees Rails::Railtie as defined and loads the railtie
+if ENV["TEST_RAILS_INTEGRATION"]
+  ENV["RAILS_ENV"] = "test"
+  require File.expand_path("dummy/config/environment", __dir__)
+end
+
 require "busybee"
 require "busybee/testing"
 require "base64"
