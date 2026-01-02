@@ -183,7 +183,38 @@ This adds `ruby`, `x86_64-darwin`, `arm64-darwin`, and `x86_64-linux` platforms 
 
 ## Gem File Contents
 
-The gemspec uses explicit globs to control what ships in the gem. Before each release, audit the file list:
+The gemspec uses explicit globs to control what ships in the gem.
+
+### Verifying New Files Before PR
+
+Before preparing a branch for PR, verify that new files are correctly included or excluded:
+
+```bash
+# Check which files from your branch would be included in the gem
+ruby -e "
+spec = Gem::Specification.load('busybee.gemspec')
+new_files = \`git diff --name-only main...HEAD\`.split(\"\n\")
+included = new_files.select { |f| spec.files.include?(f) }
+excluded = new_files - included
+
+puts 'New files that would be in gem:'
+if included.empty?
+  puts '  (none)'
+else
+  included.each { |f| puts \"  ✓ #{f}\" }
+end
+
+puts ''
+puts 'New files excluded from gem:'
+excluded.each { |f| puts \"  - #{f}\" }
+"
+```
+
+**Review each included file** to ensure it should be user-facing. Test infrastructure, development tooling, and internal docs should be excluded.
+
+### Full Gem Audit (Before Release)
+
+Before each release, audit the complete file list:
 
 ```bash
 ruby -e "puts Dir.glob(%w[lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]).reject { |f| f.include?('docs/internal.md') || f.include?('docs/development.md') }"

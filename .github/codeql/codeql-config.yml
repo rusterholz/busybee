@@ -1,0 +1,9 @@
+# CodeQL configuration for busybee gem
+#
+# Excludes the spec/dummy test application from security scanning since
+# it's never deployed and exists only for testing the gem's Rails integration.
+
+name: "CodeQL Config"
+
+paths-ignore:
+  - 'spec/dummy/**'
