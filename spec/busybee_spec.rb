@@ -125,6 +125,56 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".log_format" do
+    around do |example|
+      original_format = described_class.instance_variable_get(:@log_format)
+      original_logger = described_class.logger
+      example.run
+      described_class.instance_variable_set(:@log_format, original_format)
+      described_class.logger = original_logger
+    end
+
+    it "defaults to :text" do
+      described_class.instance_variable_set(:@log_format, nil)
+      expect(described_class.log_format).to be(:text)
+    end
+
+    it "accepts valid format as string and returns symbol" do
+      described_class.log_format = "json"
+      expect(described_class.log_format).to be(:json)
+    end
+
+    it "accepts valid format as symbol and returns symbol" do
+      described_class.log_format = :json
+      expect(described_class.log_format).to be(:json)
+    end
+
+    it "rejects invalid format and returns default when no previous value set" do
+      described_class.instance_variable_set(:@log_format, nil)
+      described_class.log_format = "invalid"
+      expect(described_class.log_format).to be(:text)
+    end
+
+    it "does not clobber previous valid value when invalid value is set" do
+      described_class.log_format = "json"
+      described_class.log_format = "invalid"
+      expect(described_class.log_format).to be(:json)
+    end
+
+    it "logs warning when invalid format is set" do
+      logger = instance_double(Logger)
+      described_class.logger = logger
+      expect(Busybee::Logging).to receive(:warn).with(/Invalid log_format.*invalid.*Valid formats: text, json/)
+      described_class.log_format = "invalid"
+    end
+
+    it "allows setting to nil explicitly" do
+      described_class.log_format = "json"
+      described_class.log_format = nil
+      expect(described_class.log_format).to be(:text)
+    end
+  end
+
   describe ".credential_type" do
     around do |example|
       original_type = described_class.instance_variable_get(:@credential_type)
@@ -144,9 +194,16 @@ RSpec.describe Busybee do
       expect(described_class.credential_type).to be(:insecure)
     end
 
-    it "rejects invalid type and returns nil" do
+    it "rejects invalid type and returns nil when no previous value set" do
+      described_class.instance_variable_set(:@credential_type, nil)
       described_class.credential_type = "invalid"
       expect(described_class.credential_type).to be_nil
+    end
+
+    it "does not clobber previous valid value when invalid value is set" do
+      described_class.credential_type = "insecure"
+      described_class.credential_type = "invalid"
+      expect(described_class.credential_type).to be(:insecure)
     end
 
     it "logs warning when invalid type is set" do

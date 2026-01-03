@@ -2,6 +2,7 @@
 
 require "busybee"
 require "busybee/grpc/error"
+require "busybee/logging"
 
 module Busybee
   class Client
@@ -20,7 +21,8 @@ module Busybee
           yield
         rescue *Busybee.grpc_retry_errors => e
           if attempts < max_attempts
-            Busybee.logger&.warn("GRPC call failed (#{e.class.name}), retrying in #{Busybee.grpc_retry_delay_ms}ms...")
+            Busybee::Logging.warn("GRPC call failed, retrying in #{Busybee.grpc_retry_delay_ms}ms",
+                                  error_class: e.class.name)
             sleep(Busybee.grpc_retry_delay_ms / 1000.0)
             retry
           end

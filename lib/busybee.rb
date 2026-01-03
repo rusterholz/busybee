@@ -3,11 +3,15 @@
 require_relative "busybee/version"
 require_relative "busybee/defaults"
 require_relative "busybee/credentials"
+require_relative "busybee/logging"
 
 # Top-level gem module, only holds configuration values.
 module Busybee
   # Valid credential type identifiers. Update this as new credential classes are added.
   VALID_CREDENTIAL_TYPES = %w[insecure].freeze
+
+  # Valid log format identifiers.
+  VALID_LOG_FORMATS = %w[text json].freeze
 
   class << self
     attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors
@@ -16,6 +20,24 @@ module Busybee
 
     def configure
       yield self
+    end
+
+    def log_format=(value)
+      if value.nil?
+        @log_format = nil
+        return
+      end
+
+      str_value = value.to_s
+      if VALID_LOG_FORMATS.include?(str_value)
+        @log_format = str_value.to_sym
+      else
+        Logging.warn("Invalid log_format: #{str_value.inspect}. Valid formats: #{VALID_LOG_FORMATS.join(', ')}")
+      end
+    end
+
+    def log_format
+      @log_format || :text
     end
 
     def cluster_address
@@ -46,8 +68,7 @@ module Busybee
       if VALID_CREDENTIAL_TYPES.include?(str_value)
         @credential_type = str_value.to_sym
       else
-        @credential_type = nil
-        logger&.warn("Invalid credential_type: #{str_value.inspect}. Valid types: #{VALID_CREDENTIAL_TYPES.join(', ')}")
+        Logging.warn("Invalid credential_type: #{str_value.inspect}. Valid types: #{VALID_CREDENTIAL_TYPES.join(', ')}")
       end
     end
 
