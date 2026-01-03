@@ -10,9 +10,8 @@ module Busybee
   #
   # @example config/application.rb or config/environments/*.rb
   #   config.x.busybee.cluster_address = "cluster.zeebe.camunda.io:443"
-  #   config.x.busybee.client_id = ENV["CAMUNDA_CLIENT_ID"]
-  #   config.x.busybee.client_secret = ENV["CAMUNDA_CLIENT_SECRET"]
-  #   config.x.busybee.cluster_id = ENV["CAMUNDA_CLUSTER_ID"]
+  #   config.x.busybee.credential_type = "oauth"  # or "insecure"
+  #   config.x.busybee.credentials = MyCustomCredentials.new(...)  # optional explicit override
   #
   class Railtie < Rails::Railtie
     initializer "busybee.configure" do
@@ -22,6 +21,10 @@ module Busybee
         # Use Rails logger by default in Rails apps
         config.logger = Rails.logger
         config.cluster_address = busybee_conf&.cluster_address.presence
+
+        # Credentials configuration
+        config.credential_type = busybee_conf&.credential_type.presence if busybee_conf&.credential_type.presence
+        config.credentials = busybee_conf&.credentials if busybee_conf&.credentials
 
         # GRPC retry configuration
         config.grpc_retry_enabled = !!busybee_conf.grpc_retry_enabled unless busybee_conf&.grpc_retry_enabled.nil?

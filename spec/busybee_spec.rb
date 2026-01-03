@@ -104,4 +104,85 @@ RSpec.describe Busybee do
       )
     end
   end
+
+  describe ".credentials" do
+    it "can be set and retrieved with valid credentials object" do
+      creds = Busybee::Credentials.new
+      described_class.credentials = creds
+      expect(described_class.credentials).to be(creds)
+    end
+
+    it "can be set to nil" do
+      described_class.credentials = nil
+      expect(described_class.credentials).to be_nil
+    end
+
+    it "raises ArgumentError when set to non-Credentials object" do
+      expect { described_class.credentials = "invalid" }.to raise_error(
+        ArgumentError,
+        /credentials must be a Busybee::Credentials object, got String/
+      )
+    end
+  end
+
+  describe ".credential_type" do
+    around do |example|
+      original_type = described_class.instance_variable_get(:@credential_type)
+      original_logger = described_class.logger
+      example.run
+      described_class.instance_variable_set(:@credential_type, original_type)
+      described_class.logger = original_logger
+    end
+
+    it "accepts valid type as string and returns symbol" do
+      described_class.credential_type = "insecure"
+      expect(described_class.credential_type).to be(:insecure)
+    end
+
+    it "accepts valid type as symbol and returns symbol" do
+      described_class.credential_type = :insecure
+      expect(described_class.credential_type).to be(:insecure)
+    end
+
+    it "rejects invalid type and returns nil" do
+      described_class.credential_type = "invalid"
+      expect(described_class.credential_type).to be_nil
+    end
+
+    it "logs warning when invalid type is set" do
+      logger = instance_double(Logger)
+      described_class.logger = logger
+      expect(logger).to receive(:warn).with(/Invalid credential_type.*invalid.*Valid types: insecure/)
+      described_class.credential_type = "invalid"
+    end
+
+    it "does not log warning when logger is nil" do
+      described_class.logger = nil
+      expect { described_class.credential_type = "invalid" }.not_to raise_error
+    end
+
+    it "falls back to BUSYBEE_CREDENTIAL_TYPE env var" do
+      described_class.instance_variable_set(:@credential_type, nil)
+      allow(ENV).to receive(:fetch).with("BUSYBEE_CREDENTIAL_TYPE", nil).and_return("insecure")
+      expect(described_class.credential_type).to be(:insecure)
+    end
+
+    it "validates env var value" do
+      described_class.instance_variable_set(:@credential_type, nil)
+      allow(ENV).to receive(:fetch).with("BUSYBEE_CREDENTIAL_TYPE", nil).and_return("invalid")
+      expect(described_class.credential_type).to be_nil
+    end
+
+    it "returns nil when not configured" do
+      described_class.instance_variable_set(:@credential_type, nil)
+      allow(ENV).to receive(:fetch).with("BUSYBEE_CREDENTIAL_TYPE", nil).and_return(nil)
+      expect(described_class.credential_type).to be_nil
+    end
+
+    it "allows setting to nil explicitly" do
+      described_class.credential_type = "insecure"
+      described_class.credential_type = nil
+      expect(described_class.credential_type).to be_nil
+    end
+  end
 end
