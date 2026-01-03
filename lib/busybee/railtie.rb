@@ -22,6 +22,14 @@ module Busybee
         # Use Rails logger by default in Rails apps
         config.logger = Rails.logger
         config.cluster_address = busybee_conf&.cluster_address.presence
+
+        # GRPC retry configuration
+        config.grpc_retry_enabled = !!busybee_conf.grpc_retry_enabled unless busybee_conf&.grpc_retry_enabled.nil?
+        config.grpc_retry_delay_ms = busybee_conf.grpc_retry_delay_ms.to_i if busybee_conf&.grpc_retry_delay_ms.presence
+
+        if busybee_conf&.grpc_retry_errors.presence
+          config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors.presence)
+        end
       end
     end
   end

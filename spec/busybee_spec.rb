@@ -56,4 +56,52 @@ RSpec.describe Busybee do
       expect(described_class.logger).to be_nil
     end
   end
+
+  describe ".grpc_retry_enabled" do
+    around do |example|
+      original = described_class.instance_variable_get(:@grpc_retry_enabled)
+      example.run
+      described_class.grpc_retry_enabled = original
+    end
+
+    it "defaults to false" do
+      described_class.grpc_retry_enabled = nil
+      expect(described_class.grpc_retry_enabled).to be(false)
+    end
+
+    it "can be set to true" do
+      described_class.grpc_retry_enabled = true
+      expect(described_class.grpc_retry_enabled).to be(true)
+    end
+  end
+
+  describe ".grpc_retry_delay_ms" do
+    around do |example|
+      original = described_class.instance_variable_get(:@grpc_retry_delay_ms)
+      example.run
+      described_class.grpc_retry_delay_ms = original
+    end
+
+    it "defaults to 500" do
+      described_class.grpc_retry_delay_ms = nil
+      expect(described_class.grpc_retry_delay_ms).to eq(500)
+    end
+  end
+
+  describe ".grpc_retry_errors" do
+    around do |example|
+      original = described_class.instance_variable_get(:@grpc_retry_errors)
+      example.run
+      described_class.grpc_retry_errors = original
+    end
+
+    it "defaults to common transient errors" do
+      described_class.grpc_retry_errors = nil
+      expect(described_class.grpc_retry_errors).to contain_exactly(
+        GRPC::Unavailable,
+        GRPC::DeadlineExceeded,
+        GRPC::ResourceExhausted
+      )
+    end
+  end
 end
