@@ -4,6 +4,36 @@ require "spec_helper"
 require "busybee/credentials"
 
 RSpec.describe Busybee::Credentials do
+  describe ".build" do
+    # As new credential types are added (OAuth, CamundaCloud, etc.),
+    # add tests here to verify .build returns the correct type based on provided config.
+
+    it "returns Insecure credentials when insecure: true" do
+      creds = described_class.build(insecure: true)
+      expect(creds).to be_a(Busybee::Credentials::Insecure)
+    end
+
+    it "defaults to Insecure credentials when no config provided" do
+      creds = described_class.build
+      expect(creds).to be_a(Busybee::Credentials::Insecure)
+    end
+
+    it "prefers explicit insecure: true over other credentials" do
+      creds = described_class.build(
+        insecure: true,
+        client_id: "test-client",
+        client_secret: "test-secret",
+        cluster_id: "test-cluster"
+      )
+      expect(creds).to be_a(Busybee::Credentials::Insecure)
+    end
+
+    it "passes cluster_address through to credentials" do
+      creds = described_class.build(insecure: true, cluster_address: "custom:26500")
+      expect(creds.cluster_address).to eq("custom:26500")
+    end
+  end
+
   describe "#cluster_address" do
     it "defaults to Busybee.cluster_address" do
       original = Busybee.cluster_address
