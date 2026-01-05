@@ -36,7 +36,7 @@ RSpec.describe Busybee::Testing::Helpers do
 
     context "when deploying as-is (default)" do
       it "deploys the BPMN file without modification" do
-        expect(mock_client).to receive(:deploy_resource) do |request|
+        expect(mock_client).to receive(:deploy_resource) do |request| # rubocop:disable RSpec/MessageSpies
           expect(request).to be_an_instance_of(Busybee::GRPC::DeployResourceRequest)
           expect(request.resources.first.content).to eq(bpmn_content)
           deploy_response
@@ -59,7 +59,7 @@ RSpec.describe Busybee::Testing::Helpers do
       end
 
       it "modifies BPMN content with unique ID" do
-        expect(mock_client).to receive(:deploy_resource) do |request|
+        expect(mock_client).to receive(:deploy_resource) do |request| # rubocop:disable RSpec/MessageSpies
           content = request.resources.first.content
           expect(content).not_to eq(bpmn_content)
           expect(content).to match(/<bpmn:process id="test-process-[a-f0-9]{12}"/)
@@ -77,7 +77,7 @@ RSpec.describe Busybee::Testing::Helpers do
       end
 
       it "modifies BPMN content with custom ID" do
-        expect(mock_client).to receive(:deploy_resource) do |request|
+        expect(mock_client).to receive(:deploy_resource) do |request| # rubocop:disable RSpec/MessageSpies
           content = request.resources.first.content
           expect(content).not_to eq(bpmn_content)
           expect(content).to include('<bpmn:process id="my-custom-id"')
@@ -99,7 +99,7 @@ RSpec.describe Busybee::Testing::Helpers do
     end
 
     it "creates a process instance and yields the key" do
-      expect(mock_client).to receive(:create_process_instance)
+      expect(mock_client).to receive(:create_process_instance) # rubocop:disable RSpec/MessageSpies
 
       yielded_key = nil
       helper.with_process_instance("my-process") do |key|
@@ -110,7 +110,7 @@ RSpec.describe Busybee::Testing::Helpers do
     end
 
     it "passes variables to the process instance" do
-      expect(mock_client).to receive(:create_process_instance) do |request|
+      expect(mock_client).to receive(:create_process_instance) do |request| # rubocop:disable RSpec/MessageSpies
         expect(JSON.parse(request.variables)).to eq("foo" => "bar")
         create_response
       end
@@ -119,7 +119,7 @@ RSpec.describe Busybee::Testing::Helpers do
     end
 
     it "cancels the process instance after the block" do
-      expect(mock_client).to receive(:cancel_process_instance).with(
+      expect(mock_client).to receive(:cancel_process_instance).with( # rubocop:disable RSpec/MessageSpies
         an_instance_of(Busybee::GRPC::CancelProcessInstanceRequest)
       )
 
@@ -127,7 +127,7 @@ RSpec.describe Busybee::Testing::Helpers do
     end
 
     it "cancels even if block raises" do
-      expect(mock_client).to receive(:cancel_process_instance)
+      expect(mock_client).to receive(:cancel_process_instance) # rubocop:disable RSpec/MessageSpies
 
       expect do
         helper.with_process_instance("my-process") { raise "oops" }
@@ -228,7 +228,7 @@ RSpec.describe Busybee::Testing::Helpers do
     end
 
     it "publishes a message to Zeebe" do
-      expect(mock_client).to receive(:publish_message) do |request|
+      expect(mock_client).to receive(:publish_message) do |request| # rubocop:disable RSpec/MessageSpies
         expect(request.name).to eq("order-received")
         expect(request.correlationKey).to eq("order-123")
         expect(JSON.parse(request.variables)).to eq("status" => "received")
@@ -239,7 +239,7 @@ RSpec.describe Busybee::Testing::Helpers do
     end
 
     it "allows custom TTL" do
-      expect(mock_client).to receive(:publish_message) do |request|
+      expect(mock_client).to receive(:publish_message) do |request| # rubocop:disable RSpec/MessageSpies
         expect(request.timeToLive).to eq(10_000)
       end
 
@@ -253,7 +253,7 @@ RSpec.describe Busybee::Testing::Helpers do
     end
 
     it "sets variables on a scope" do
-      expect(mock_client).to receive(:set_variables) do |request|
+      expect(mock_client).to receive(:set_variables) do |request| # rubocop:disable RSpec/MessageSpies
         expect(request.elementInstanceKey).to eq(12_345)
         expect(JSON.parse(request.variables)).to eq("foo" => "bar")
         expect(request.local).to be(true)
@@ -263,7 +263,7 @@ RSpec.describe Busybee::Testing::Helpers do
     end
 
     it "allows non-local variables" do
-      expect(mock_client).to receive(:set_variables) do |request|
+      expect(mock_client).to receive(:set_variables) do |request| # rubocop:disable RSpec/MessageSpies
         expect(request.local).to be(false)
       end
 

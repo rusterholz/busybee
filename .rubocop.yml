@@ -40,7 +40,7 @@ RSpec/ExampleLength:
   Max: 15
 
 RSpec/MessageSpies:
-  EnforcedStyle: receive
+  EnforcedStyle: have_received
 
 RSpec/MultipleExpectations:
   Max: 6
@@ -55,6 +55,9 @@ Style/DoubleNegation:
   Enabled: false
 
 Style/ModuleFunction:
+  Enabled: false
+
+Style/NumericLiterals:
   Enabled: false
 
 Style/RedundantStringEscape:
