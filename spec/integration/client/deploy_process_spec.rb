@@ -82,7 +82,8 @@ RSpec.describe "Client#deploy_process integration", :integration do
     # Multi-tenancy requires Camunda Identity service for tenant authorization.
     # Local dev environment uses insecure mode without Identity.
     # See: https://docs.camunda.io/docs/self-managed/operational-guides/configure-multi-tenancy/
-    xit "deploys with tenant_id when multi-tenancy is enabled", :multi_tenant_only do
+    it "deploys with tenant_id when multi-tenancy is enabled", :multi_tenant_only do
+      skip "Requires Camunda Identity service"
       result = client.deploy_process(simple_bpmn_path, tenant_id: "acme-production")
 
       expect(result).to be_a(Hash)
