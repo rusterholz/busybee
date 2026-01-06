@@ -3,6 +3,7 @@
 require "busybee"
 require "busybee/credentials"
 require "busybee/client/error_handling"
+require "busybee/client/process_operations"
 
 module Busybee
   # Ruby-idiomatic wrapper around Zeebe GRPC API.
@@ -21,6 +22,7 @@ module Busybee
   #
   class Client
     include ErrorHandling
+    include ProcessOperations
 
     attr_reader :credentials
 

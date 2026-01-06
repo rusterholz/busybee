@@ -37,4 +37,16 @@ RSpec.configure do |config|
   config.before(:each, :integration) do
     skip_unless_zeebe_available
   end
+
+  # Filter specs based on multi-tenancy mode
+  # - :single_tenant_only specs only run when MULTITENANCY_ENABLED is false/unset
+  # - :multi_tenant_only specs only run when MULTITENANCY_ENABLED is true
+  # - Untagged specs run in both modes
+  multitenancy_enabled = ENV["MULTITENANCY_ENABLED"] == "true"
+
+  if multitenancy_enabled
+    config.filter_run_excluding single_tenant_only: true
+  else
+    config.filter_run_excluding multi_tenant_only: true
+  end
 end

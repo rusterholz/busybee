@@ -164,7 +164,7 @@ RSpec.describe Busybee do
     it "logs warning when invalid format is set" do
       logger = instance_double(Logger)
       described_class.logger = logger
-      expect(Busybee::Logging).to receive(:warn).with(/Invalid log_format.*invalid.*Valid formats: text, json/)
+      expect(Busybee::Logging).to receive(:warn).with(/Invalid log_format.*invalid.*Valid formats: text, json/) # rubocop:disable RSpec/MessageSpies
       described_class.log_format = "invalid"
     end
 
@@ -209,7 +209,7 @@ RSpec.describe Busybee do
     it "logs warning when invalid type is set" do
       logger = instance_double(Logger)
       described_class.logger = logger
-      expect(logger).to receive(:warn).with(/Invalid credential_type.*invalid.*Valid types: insecure/)
+      expect(logger).to receive(:warn).with(/Invalid credential_type.*invalid.*Valid types: insecure/) # rubocop:disable RSpec/MessageSpies
       described_class.credential_type = "invalid"
     end
 

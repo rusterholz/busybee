@@ -64,7 +64,7 @@ RSpec.describe Busybee::Credentials do
       allow(creds).to receive(:grpc_channel_credentials).and_return(:this_channel_is_insecure)
 
       stub_double = instance_double(Busybee::GRPC::Gateway::Stub)
-      expect(Busybee::GRPC::Gateway::Stub).to receive(:new) # rubocop:disable RSpec/StubbedMock
+      expect(Busybee::GRPC::Gateway::Stub).to receive(:new) # rubocop:disable RSpec/StubbedMock, RSpec/MessageSpies
         .with("test:26500", :this_channel_is_insecure)
         .and_return(stub_double)
 
@@ -76,7 +76,7 @@ RSpec.describe Busybee::Credentials do
       allow(creds).to receive(:grpc_channel_credentials).and_return(:this_channel_is_insecure)
 
       stub_double = instance_double(Busybee::GRPC::Gateway::Stub)
-      expect(Busybee::GRPC::Gateway::Stub).to receive(:new).once.and_return(stub_double)
+      expect(Busybee::GRPC::Gateway::Stub).to receive(:new).once.and_return(stub_double) # rubocop:disable RSpec/MessageSpies
 
       # Call twice - Stub.new should only be called once due to memoization
       creds.grpc_stub
