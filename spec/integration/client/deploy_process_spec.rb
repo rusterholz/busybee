@@ -66,9 +66,9 @@ RSpec.describe "Client#deploy_process integration", :integration do
       end
     end
 
-    it "wraps GRPC errors when tenant_id is provided but multi-tenancy is disabled" do
+    it "wraps GRPC errors when tenant_id is provided but multi-tenancy is disabled", :single_tenant_only do
       expect do
-        client.deploy_process(simple_bpmn_path, tenant_id: "test-tenant")
+        client.deploy_process(simple_bpmn_path, tenant_id: "acme-production")
       end.to raise_error(Busybee::GRPC::Error) do |error| # rubocop:disable Style/MultilineBlockChain
         # Should wrap the GRPC InvalidArgument error
         expect(error.cause).to be_a(GRPC::InvalidArgument)
@@ -77,6 +77,16 @@ RSpec.describe "Client#deploy_process integration", :integration do
         # Should include multi-tenancy error in details
         expect(error.message).to include("multi-tenancy is disabled")
       end
+    end
+
+    # Multi-tenancy requires Camunda Identity service for tenant authorization.
+    # Local dev environment uses insecure mode without Identity.
+    # See: https://docs.camunda.io/docs/self-managed/operational-guides/configure-multi-tenancy/
+    xit "deploys with tenant_id when multi-tenancy is enabled", :multi_tenant_only do
+      result = client.deploy_process(simple_bpmn_path, tenant_id: "acme-production")
+
+      expect(result).to be_a(Hash)
+      expect(result["simple-process"]).to be > 0
     end
   end
 end

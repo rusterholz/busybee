@@ -43,7 +43,11 @@ jobs:
     - name: Appraisal RSpec
       run: bundle exec appraisal rspec
   integration:
-    name: Integration Tests
+    strategy:
+      fail-fast: false
+      matrix:
+        tenancy: [single, multi]
+    name: "Integration Tests (${{ matrix.tenancy }}-tenant)"
     runs-on: ubuntu-latest
     needs: [lint, test]
     steps:
@@ -56,11 +60,14 @@ jobs:
           bundler: Gemfile.lock
           bundler-cache: true
       - name: Start Camunda
+        env:
+          MULTITENANCY_ENABLED: ${{ matrix.tenancy == 'multi' }}
         run: bundle exec rake zeebe:start
       - name: Wait for Camunda to be healthy
         run: bundle exec rake zeebe:health
       - name: Run Integration Tests
         env:
+          MULTITENANCY_ENABLED: ${{ matrix.tenancy == 'multi' }}
           RUN_INTEGRATION_TESTS: "1"
           ZEEBE_REQUIRED: "1"
         run: bundle exec rspec --tag integration

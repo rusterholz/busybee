@@ -15,6 +15,9 @@ services:
       # Matches official Camunda 8.8 docker-compose configuration
       - CAMUNDA_SECURITY_AUTHENTICATION_UNPROTECTEDAPI=true
       - CAMUNDA_SECURITY_AUTHORIZATIONS_ENABLED=false
+      # Multi-tenancy configuration - defaults to false for local development
+      # Set MULTITENANCY_ENABLED=true to enable multi-tenancy testing
+      - CAMUNDA_MULTITENANCY_ENABLED=${MULTITENANCY_ENABLED:-false}
       # ElasticSearch configuration using new unified Camunda 8.8 config format
       - CAMUNDA_DATA_SECONDARYSTORAGE_TYPE=elasticsearch
       - CAMUNDA_DATA_SECONDARYSTORAGE_ELASTICSEARCH_URL=http://elasticsearch:9200

@@ -44,6 +44,43 @@ rake zeebe:stop
 
 Integration tests will automatically skip if Zeebe is not running, so you can safely run the full test suite without having Zeebe started. The tests use the generated GRPC classes directly to verify that the protocol buffer bindings work correctly against a real Zeebe cluster.
 
+### Multi-Tenancy Testing
+
+Busybee supports testing in both single-tenant and multi-tenant modes. Integration tests are automatically filtered based on the `MULTITENANCY_ENABLED` environment variable:
+
+**Single-Tenant Mode (default):**
+
+```bash
+# Start Zeebe in single-tenant mode
+rake zeebe:start
+rake zeebe:health
+
+# Run integration tests (multi-tenant-only tests will be skipped)
+RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
+```
+
+**Multi-Tenant Mode:**
+
+```bash
+# Start Zeebe with multi-tenancy enabled
+MULTITENANCY_ENABLED=true rake zeebe:start
+MULTITENANCY_ENABLED=true rake zeebe:health
+
+# Run integration tests (single-tenant-only tests will be skipped)
+MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
+```
+
+**Note:** Full multi-tenancy testing requires Camunda Identity service for tenant authorization. The local Docker Compose environment uses insecure mode without Identity, so `:multi_tenant_only` tests are currently marked as pending. The test infrastructure (filtering, CI matrix) is ready for when Identity is configured.
+
+**Test Tagging:**
+- `:single_tenant_only` - Only runs when multi-tenancy is disabled
+- `:multi_tenant_only` - Only runs when multi-tenancy is enabled
+- No tag - Runs in both modes
+
+**CI Behavior:**
+
+CI automatically runs integration tests in parallel for both modes using a matrix strategy, ensuring full coverage across single-tenant and multi-tenant configurations.
+
 ## Local Zeebe Development Environment
 
 Busybee provides a Docker Compose setup for running Zeebe and ElasticSearch locally. This environment includes:
