@@ -42,6 +42,8 @@ module Busybee
         case Busybee.credential_type
         when :insecure
           build_insecure(cluster_address: cluster_address)
+        when :tls
+          build_tls(cluster_address: cluster_address, certificate_file: params[:certificate_file])
         # As new credential types are added, add cases here (e.g., :oauth, :camunda_cloud)
         else
           autodetect_credentials(cluster_address: cluster_address, **params)
@@ -54,6 +56,7 @@ module Busybee
       # As new credential types are added, extend this method with detection logic.
       def autodetect_credentials(cluster_address: nil, **params)
         return build_insecure(cluster_address: cluster_address) if params[:insecure]
+        return build_tls(cluster_address: cluster_address, certificate_file: params[:certificate_file]) if params[:tls]
 
         # As new credential types are added, add autodetection logic here.
         # Example: if params[:client_id] && params[:client_secret] && params[:cluster_id]
@@ -66,6 +69,11 @@ module Busybee
       def build_insecure(cluster_address: nil)
         require_relative "credentials/insecure"
         Insecure.new(cluster_address: cluster_address)
+      end
+
+      def build_tls(cluster_address: nil, certificate_file: nil)
+        require_relative "credentials/tls"
+        TLS.new(cluster_address: cluster_address, certificate_file: certificate_file)
       end
     end
 

@@ -32,6 +32,33 @@ RSpec.describe Busybee::Credentials do
       creds = described_class.build(insecure: true, cluster_address: "custom:26500")
       expect(creds.cluster_address).to eq("custom:26500")
     end
+
+    context "with TLS credentials" do
+      it "returns TLS credentials when tls: true" do
+        creds = described_class.build(tls: true)
+        expect(creds).to be_a(Busybee::Credentials::TLS)
+      end
+
+      it "returns TLS credentials when credential_type is :tls" do
+        original = Busybee.credential_type
+        Busybee.credential_type = :tls
+
+        creds = described_class.build
+        expect(creds).to be_a(Busybee::Credentials::TLS)
+      ensure
+        Busybee.credential_type = original
+      end
+
+      it "passes certificate_file parameter to TLS credentials" do
+        creds = described_class.build(tls: true, certificate_file: "/path/to/cert.pem")
+        expect(creds.certificate_file).to eq("/path/to/cert.pem")
+      end
+
+      it "passes cluster_address to TLS credentials" do
+        creds = described_class.build(tls: true, cluster_address: "secure.zeebe.io:443")
+        expect(creds.cluster_address).to eq("secure.zeebe.io:443")
+      end
+    end
   end
 
   describe "#cluster_address" do

@@ -8,7 +8,7 @@ require_relative "busybee/logging"
 # Top-level gem module, only holds configuration values.
 module Busybee
   # Valid credential type identifiers. Update this as new credential classes are added.
-  VALID_CREDENTIAL_TYPES = %w[insecure].freeze
+  VALID_CREDENTIAL_TYPES = %w[insecure tls].freeze
 
   # Valid log format identifiers.
   VALID_LOG_FORMATS = %w[text json].freeze
