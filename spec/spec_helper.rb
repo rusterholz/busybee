@@ -11,6 +11,8 @@ require "busybee"
 require "busybee/testing"
 require "base64"
 require "securerandom"
+require "tempfile"
+require "webmock/rspec"
 
 # Load support files
 Dir[File.join(__dir__, "support", "**", "*.rb")].each { |f| require f }

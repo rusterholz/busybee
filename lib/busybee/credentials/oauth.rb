@@ -1,0 +1,143 @@
+# frozen_string_literal: true
+
+require "grpc"
+require "net/http"
+require "json"
+require "active_support"
+require "active_support/cache"
+require_relative "../credentials"
+require_relative "../error"
+
+module Busybee
+  class Credentials
+    # OAuth2 credentials with automatic token refresh.
+    # Combines TLS channel credentials with OAuth2 call credentials.
+    #
+    # Token caching uses ActiveSupport::Cache with race_condition_ttl to prevent
+    # thundering herd during refresh - multiple threads won't block waiting for
+    # a refresh when the token is still valid.
+    #
+    # @example Basic usage
+    #   credentials = Busybee::Credentials::OAuth.new(
+    #     token_url: "https://auth.example.com/oauth/token",
+    #     client_id: "my-client-id",
+    #     client_secret: "my-client-secret",
+    #     audience: "zeebe-api",
+    #     cluster_address: "zeebe.example.com:443"
+    #   )
+    #   stub = credentials.grpc_stub
+    #
+    # @example With custom CA certificate
+    #   credentials = Busybee::Credentials::OAuth.new(
+    #     token_url: "https://auth.example.com/oauth/token",
+    #     client_id: "my-client-id",
+    #     client_secret: "my-client-secret",
+    #     audience: "zeebe-api",
+    #     cluster_address: "zeebe.example.com:443",
+    #     certificate_file: "/path/to/ca-cert.pem"
+    #   )
+    #
+    class OAuth < Credentials
+      # These constants may become configuration options in a future version.
+      RACE_CONDITION_TTL_SECONDS = 30
+      TOKEN_CACHE_SIZE_BYTES = 4 * 1024 * 1024 # 4MB
+
+      # @param token_url [String] OAuth2 token endpoint URL
+      # @param client_id [String] OAuth2 client ID
+      # @param client_secret [String] OAuth2 client secret
+      # @param audience [String] OAuth2 audience (API identifier)
+      # @param cluster_address [String, nil] Zeebe cluster address (host:port)
+      # @param certificate_file [String, nil] Optional CA certificate file path
+      def initialize(token_url:, client_id:, client_secret:, audience:, cluster_address: nil, certificate_file: nil) # rubocop:disable Metrics/ParameterLists
+        super(cluster_address: cluster_address)
+        @token_url = token_url
+        @client_id = client_id
+        @client_secret = client_secret
+        @audience = audience
+        @certificate_file = certificate_file
+      end
+
+      def grpc_channel_credentials
+        build_tls_credentials.compose(grpc_call_credentials)
+      end
+
+      private
+
+      def grpc_call_credentials
+        ::GRPC::Core::CallCredentials.new(method(:token_updater).to_proc)
+      end
+
+      def build_tls_credentials
+        if @certificate_file
+          ::GRPC::Core::ChannelCredentials.new(File.read(@certificate_file))
+        else
+          ::GRPC::Core::ChannelCredentials.new
+        end
+      end
+
+      def current_token
+        # Use race_condition_ttl to prevent thundering herd:
+        # - When token is fresh, multiple threads read from cache
+        # - 30s before expiry, first thread refreshes while others use stale token
+        # - Dynamic expires_in set from token response
+        token_cache.fetch(cache_key, race_condition_ttl: RACE_CONDITION_TTL_SECONDS) do |_key, options|
+          token_data = fetch_token_response
+          expires_in = token_data.fetch("expires_in", 3600)
+          cache_expiry = expires_in - RACE_CONDITION_TTL_SECONDS
+
+          # Rails 7.1+: options.expires_in= setter
+          # Rails 7.0: options[:expires_in]= hash assignment
+          if options.respond_to?(:expires_in=)
+            options.expires_in = cache_expiry
+          else
+            options[:expires_in] = cache_expiry
+          end
+
+          token_data["access_token"]
+        end
+      end
+
+      def fetch_token_response
+        response = http_client.request(build_token_request)
+        unless response.is_a?(Net::HTTPSuccess)
+          raise Busybee::OAuthTokenRefreshFailed, "HTTP #{response.code}: #{response.body}"
+        end
+
+        JSON.parse(response.body)
+      rescue JSON::ParserError => e
+        raise Busybee::OAuthInvalidResponse, "Invalid JSON response from token endpoint: #{e.message}"
+      end
+
+      def http_client
+        uri = URI(@token_url)
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = uri.scheme == "https"
+        http
+      end
+
+      def build_token_request
+        uri = URI(@token_url)
+        request = Net::HTTP::Post.new(uri.path)
+        request.set_form_data(
+          "grant_type" => "client_credentials",
+          "client_id" => @client_id,
+          "client_secret" => @client_secret,
+          "audience" => @audience
+        )
+        request
+      end
+
+      def token_updater(_context)
+        { authorization: "Bearer #{current_token}" }
+      end
+
+      def cache_key
+        "busybee:oauth_token:#{@audience}:#{@client_id}"
+      end
+
+      def token_cache
+        @token_cache ||= ActiveSupport::Cache::MemoryStore.new(size: TOKEN_CACHE_SIZE_BYTES)
+      end
+    end
+  end
+end
