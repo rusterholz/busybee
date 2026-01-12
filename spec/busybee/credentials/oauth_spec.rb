@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-require "busybee/credentials/oauth"
 require "active_support/testing/time_helpers"
+
+require "busybee/credentials/oauth"
 
 RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePathFormat
   include ActiveSupport::Testing::TimeHelpers

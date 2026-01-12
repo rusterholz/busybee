@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../credentials"
+require "busybee/credentials"
 
 module Busybee
   class Credentials

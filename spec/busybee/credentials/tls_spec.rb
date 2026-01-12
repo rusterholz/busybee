@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
-require "spec_helper"
 require "busybee/credentials/tls"
-require "tempfile"
 
 RSpec.describe Busybee::Credentials::TLS do
   describe "#grpc_channel_credentials" do

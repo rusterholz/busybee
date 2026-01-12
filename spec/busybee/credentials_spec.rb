@@ -1,8 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-require "busybee/credentials"
-
 RSpec.describe Busybee::Credentials do
   describe ".build" do
     # As new credential types are added (OAuth, CamundaCloud, etc.),

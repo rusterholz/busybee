@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
-require "grpc"
-require "net/http"
-require "json"
 require "active_support"
 require "active_support/cache"
-require_relative "../credentials"
-require_relative "../error"
+require "grpc"
+require "json"
+require "net/http"
+
+require "busybee/credentials"
+require "busybee/error"
 
 module Busybee
   class Credentials

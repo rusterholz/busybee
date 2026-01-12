@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
 require "busybee/client/error_handling"
 
 RSpec.describe Busybee::Client::ErrorHandling do

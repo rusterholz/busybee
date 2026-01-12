@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
-require "spec_helper"
 require "busybee/client"
-require "tempfile"
 
 RSpec.describe "Client#deploy_process integration", :integration do
   let(:client) { Busybee::Client.new(insecure: true) }

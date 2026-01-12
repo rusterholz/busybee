@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
 require "busybee/credentials/insecure"
 
 RSpec.describe Busybee::Credentials::Insecure do

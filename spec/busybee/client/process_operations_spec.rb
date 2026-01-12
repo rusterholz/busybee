@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
 require "busybee/client"
 
 RSpec.describe Busybee::Client, "#deploy_process" do # rubocop:disable RSpec/SpecFilePathFormat

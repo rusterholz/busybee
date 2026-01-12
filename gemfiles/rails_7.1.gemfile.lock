@@ -353,7 +353,7 @@ DEPENDENCIES
   busybee!
   grpc-tools (~> 1.76)
   pry-byebug
-  rails (~> 7.1.0)
+  rails (~> 7.1.6)
   rake (~> 13.0)
   rspec (~> 3.13)
   rubocop (~> 1.80)
