@@ -47,14 +47,24 @@ module Busybee
       # @param client_id [String] OAuth2 client ID
       # @param client_secret [String] OAuth2 client secret
       # @param audience [String] OAuth2 audience (API identifier)
+      # @param scope [String, nil] Optional OAuth2 scope for API access control
       # @param cluster_address [String, nil] Zeebe cluster address (host:port)
       # @param certificate_file [String, nil] Optional CA certificate file path
-      def initialize(token_url:, client_id:, client_secret:, audience:, cluster_address: nil, certificate_file: nil) # rubocop:disable Metrics/ParameterLists
+      def initialize( # rubocop:disable Metrics/ParameterLists
+        token_url:,
+        client_id:,
+        client_secret:,
+        audience:,
+        scope: nil,
+        cluster_address: nil,
+        certificate_file: nil
+      )
         super(cluster_address: cluster_address)
         @token_uri = URI(token_url)
         @client_id = client_id
         @client_secret = client_secret
         @audience = audience
+        @scope = scope
         @certificate_file = certificate_file
       end
 
@@ -117,12 +127,14 @@ module Busybee
 
       def build_token_request
         Net::HTTP::Post.new(@token_uri.path).tap do |request|
-          request.set_form_data(
+          form_data = {
             "grant_type" => "client_credentials",
             "client_id" => @client_id,
             "client_secret" => @client_secret,
             "audience" => @audience
-          )
+          }
+          form_data["scope"] = @scope if @scope
+          request.set_form_data(form_data)
         end
       end
 

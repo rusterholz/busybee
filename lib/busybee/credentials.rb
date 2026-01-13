@@ -87,6 +87,7 @@ module Busybee
         client_id: nil,
         client_secret: nil,
         audience: nil,
+        scope: nil,
         certificate_file: nil,
         **_
       )
@@ -97,6 +98,7 @@ module Busybee
           client_id: client_id,
           client_secret: client_secret,
           audience: audience,
+          scope: scope,
           certificate_file: certificate_file
         )
       end

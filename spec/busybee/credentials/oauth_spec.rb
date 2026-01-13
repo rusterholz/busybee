@@ -232,6 +232,37 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
     end
   end
 
+  describe "scope parameter" do
+    it "includes scope in token request when provided" do
+      creds = described_class.new(
+        token_url: token_url,
+        client_id: "test-client",
+        client_secret: "test-secret",
+        audience: "zeebe-api",
+        scope: "Zeebe Tasklist"
+      )
+
+      request = creds.send(:build_token_request)
+      body = URI.decode_www_form(request.body).to_h
+
+      expect(body["scope"]).to eq("Zeebe Tasklist")
+    end
+
+    it "omits scope from token request when not provided" do
+      creds = described_class.new(
+        token_url: token_url,
+        client_id: "test-client",
+        client_secret: "test-secret",
+        audience: "zeebe-api"
+      )
+
+      request = creds.send(:build_token_request)
+      body = URI.decode_www_form(request.body).to_h
+
+      expect(body).not_to have_key("scope")
+    end
+  end
+
   it "is a subclass of Credentials" do
     expect(described_class.superclass).to eq(Busybee::Credentials)
   end

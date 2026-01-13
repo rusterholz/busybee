@@ -100,6 +100,22 @@ RSpec.describe Busybee::Credentials do
         expect(body["audience"]).to eq("test-audience")
       end
 
+      it "passes scope through to OAuth credentials when provided" do
+        creds = described_class.build(
+          credential_type: :oauth,
+          token_url: "https://auth.example.com/token",
+          client_id: "test-client",
+          client_secret: "test-secret",
+          audience: "test-audience",
+          scope: "Zeebe Tasklist"
+        )
+
+        request = creds.send(:build_token_request)
+        body = URI.decode_www_form(request.body).to_h
+
+        expect(body["scope"]).to eq("Zeebe Tasklist")
+      end
+
       it "passes cluster_address to OAuth credentials" do
         creds = described_class.build(
           credential_type: :oauth,
