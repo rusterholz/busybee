@@ -56,6 +56,58 @@ RSpec.describe Busybee::Credentials do
         expect(creds.cluster_address).to eq("secure.zeebe.io:443")
       end
     end
+
+    context "with OAuth credentials" do
+      it "returns OAuth credentials when credential_type is :oauth" do
+        original = Busybee.credential_type
+        Busybee.credential_type = :oauth
+
+        creds = described_class.build(
+          token_url: "https://auth.example.com/token",
+          client_id: "test-client",
+          client_secret: "test-secret",
+          audience: "test-audience"
+        )
+        expect(creds).to be_a(Busybee::Credentials::OAuth)
+      ensure
+        Busybee.credential_type = original
+      end
+
+      it "auto-detects OAuth when OAuth-specific params are present" do
+        creds = described_class.build(
+          token_url: "https://auth.example.com/token",
+          client_id: "test-client",
+          client_secret: "test-secret",
+          audience: "test-audience"
+        )
+        expect(creds).to be_a(Busybee::Credentials::OAuth)
+      end
+
+      it "passes OAuth parameters through to OAuth credentials" do
+        creds = described_class.build(
+          credential_type: :oauth,
+          token_url: "https://auth.example.com/token",
+          client_id: "test-client",
+          client_secret: "test-secret",
+          audience: "test-audience"
+        )
+
+        request = creds.send(:build_token_request)
+        body = URI.decode_www_form(request.body).to_h
+
+        expect(body["client_id"]).to eq("test-client")
+        expect(body["client_secret"]).to eq("test-secret")
+        expect(body["audience"]).to eq("test-audience")
+      end
+
+      it "passes cluster_address to OAuth credentials" do
+        creds = described_class.build(
+          credential_type: :oauth,
+          cluster_address: "oauth.zeebe.io:443"
+        )
+        expect(creds.cluster_address).to eq("oauth.zeebe.io:443")
+      end
+    end
   end
 
   describe "#cluster_address" do

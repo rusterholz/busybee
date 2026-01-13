@@ -51,7 +51,7 @@ module Busybee
       # @param certificate_file [String, nil] Optional CA certificate file path
       def initialize(token_url:, client_id:, client_secret:, audience:, cluster_address: nil, certificate_file: nil) # rubocop:disable Metrics/ParameterLists
         super(cluster_address: cluster_address)
-        @token_url = token_url
+        @token_uri = URI(token_url)
         @client_id = client_id
         @client_secret = client_secret
         @audience = audience
@@ -110,22 +110,20 @@ module Busybee
       end
 
       def http_client
-        uri = URI(@token_url)
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = uri.scheme == "https"
-        http
+        Net::HTTP.new(@token_uri.host, @token_uri.port).tap do |client|
+          client.use_ssl = (@token_uri.scheme == "https")
+        end
       end
 
       def build_token_request
-        uri = URI(@token_url)
-        request = Net::HTTP::Post.new(uri.path)
-        request.set_form_data(
-          "grant_type" => "client_credentials",
-          "client_id" => @client_id,
-          "client_secret" => @client_secret,
-          "audience" => @audience
-        )
-        request
+        Net::HTTP::Post.new(@token_uri.path).tap do |request|
+          request.set_form_data(
+            "grant_type" => "client_credentials",
+            "client_id" => @client_id,
+            "client_secret" => @client_secret,
+            "audience" => @audience
+          )
+        end
       end
 
       def token_updater(_context)
@@ -133,7 +131,7 @@ module Busybee
       end
 
       def cache_key
-        "busybee:oauth_token:#{@audience}:#{@client_id}"
+        @cache_key ||= "busybee:oauth_token:#{@audience}:#{@client_id}"
       end
 
       def token_cache
