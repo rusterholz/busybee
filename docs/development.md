@@ -81,6 +81,52 @@ MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integr
 
 CI automatically runs integration tests in parallel for both modes using a matrix strategy, ensuring full coverage across single-tenant and multi-tenant configurations.
 
+### Camunda Cloud Integration Tests
+
+Busybee includes integration tests for **live Camunda Cloud** clusters (tagged `:camunda_cloud`). These tests verify OAuth authentication, cluster connectivity, and API operations against a real Camunda Cloud environment.
+
+**Setup Requirements:**
+
+1. **Create Camunda Cloud Account**: Sign up at https://signup.camunda.com/ (free trial available)
+2. **Create a Cluster**: Create a Development tier cluster in your desired region (e.g., `bru-2`, `dsm-1`)
+3. **Create API Client**: In Console → Clusters → [Your Cluster] → API, create a client with "Zeebe" permissions
+4. **Add credentials to ~/.bashrc** (or ~/.zshrc):
+
+   ```bash
+   # Camunda Cloud credentials for integration tests
+   export CAMUNDA_CLIENT_ID="your-client-id"
+   export CAMUNDA_CLIENT_SECRET="your-client-secret"
+   export CAMUNDA_CLUSTER_ID="your-cluster-id"
+   export CAMUNDA_CLUSTER_REGION="bru-2"  # or your cluster's region
+   ```
+
+5. **macOS users only** - Add this to avoid c-ares DNS resolution issues:
+
+   ```bash
+   # gRPC DNS resolver - use native resolver on macOS (c-ares has known issues)
+   # See: https://github.com/grpc/grpc/issues/19954
+   export GRPC_DNS_RESOLVER=native
+   ```
+
+   The gRPC gem's default DNS resolver (c-ares) has [well-documented issues](https://github.com/grpc/grpc/issues/19954) on macOS, including [c-ares 1.20+ compatibility problems](https://github.com/grpc/grpc/issues/34669) and [DNS timeout failures](https://github.com/grpc/grpc/issues/20216). Setting `GRPC_DNS_RESOLVER=native` uses the system's native getaddrinfo()-based resolver, which works reliably on macOS.
+
+**Running the Tests:**
+
+```bash
+# Run Camunda Cloud integration tests
+RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec --tag camunda_cloud
+```
+
+**What These Tests Verify:**
+
+- OAuth token acquisition with correct audience (`zeebe.camunda.io`)
+- Cluster address derivation from cluster_id and region
+- Authentication with and without OAuth scope parameter
+- Topology API calls to live cluster
+- Process deployment to live cluster
+
+**Note:** These tests are **disabled by default** - they require explicit opt-in via `RUN_CAMUNDA_CLOUD_TESTS=1` and valid credentials. They are not run in CI. Maintainers should run these tests when making changes to OAuth or CamundaCloud credentials handling.
+
 ## Local Zeebe Development Environment
 
 Busybee provides a Docker Compose setup for running Zeebe and ElasticSearch locally. This environment includes:
