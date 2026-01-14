@@ -23,15 +23,91 @@ module IntegrationHelpers
   def skip_unless_zeebe_available
     return if zeebe_available?
 
-    raise "Zeebe is required but not available at #{Busybee::Testing.address}" if ENV["ZEEBE_REQUIRED"]
+    raise "Zeebe is required but not available at #{Busybee.cluster_address}" if ENV["ZEEBE_REQUIRED"]
 
     skip "Zeebe is not running (start with: rake zeebe:start)"
+  end
+
+  # Returns a GRPC stub for Camunda Cloud
+  #
+  # Raises KeyError with clear message if required environment variables are not set.
+  def camunda_cloud_grpc_stub
+    @camunda_cloud_grpc_stub ||= camunda_cloud_credentials.grpc_stub
+  end
+
+  # Returns a GRPC stub for local Zeebe (alias for consistency with camunda_cloud_grpc_stub)
+  def local_grpc_stub
+    grpc_client
+  end
+
+  # Returns a Busybee::Client configured for Camunda Cloud
+  #
+  # Raises KeyError with clear message if required environment variables are not set.
+  def camunda_cloud_busybee_client
+    @camunda_cloud_busybee_client ||= begin
+      require "busybee/client"
+      Busybee::Client.new(camunda_cloud_credentials)
+    end
+  end
+
+  # Returns a Busybee::Client configured for local Zeebe
+  def local_busybee_client
+    @local_busybee_client ||= begin
+      require "busybee/client"
+      Busybee::Client.new(insecure: true)
+    end
+  end
+
+  private
+
+  # Returns Camunda Cloud credentials
+  #
+  # Raises with clear message if required environment variables are not set.
+  # Required:
+  #   - CAMUNDA_CLIENT_ID
+  #   - CAMUNDA_CLIENT_SECRET
+  #   - CAMUNDA_CLUSTER_ID
+  #   - CAMUNDA_CLUSTER_REGION
+  def camunda_cloud_credentials
+    @camunda_cloud_credentials ||= begin
+      require "busybee/credentials/camunda_cloud"
+
+      fail_if_cloud_credentials_absent!
+
+      Busybee::Credentials::CamundaCloud.new(
+        client_id: ENV.fetch("CAMUNDA_CLIENT_ID"),
+        client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET"),
+        cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID"),
+        region: ENV.fetch("CAMUNDA_CLUSTER_REGION")
+      )
+    end
+  end
+
+  def fail_if_cloud_credentials_absent!
+    # Fail fast if credentials aren't configured
+    missing = %w[CAMUNDA_CLIENT_ID CAMUNDA_CLIENT_SECRET CAMUNDA_CLUSTER_ID CAMUNDA_CLUSTER_REGION].reject do |var|
+      ENV.fetch(var, nil)
+    end
+    return if missing.empty?
+
+    raise <<~ERROR
+      Camunda Cloud credentials not configured. Missing: #{missing.join(', ')}
+
+      Set these environment variables:
+        export CAMUNDA_CLIENT_ID="your-client-id"
+        export CAMUNDA_CLIENT_SECRET="your-client-secret"
+        export CAMUNDA_CLUSTER_ID="your-cluster-id"
+        export CAMUNDA_CLUSTER_REGION="your-region"  # e.g., "bru-2"
+
+      See: https://console.camunda.io/ → Select cluster → API tab
+    ERROR
   end
 end
 
 RSpec.configure do |config|
   # Include integration helpers in all integration tests
   config.include IntegrationHelpers, integration: true
+  config.include IntegrationHelpers, camunda_cloud: true
 
   # Check Zeebe availability before running integration tests
   config.before(:each, :integration) do

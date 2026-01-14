@@ -7,20 +7,15 @@ module Busybee
   #
   # @example Configuration
   #   Busybee::Testing.configure do |config|
-  #     config.address = "localhost:26500"
   #     config.activate_request_timeout = 2000
   #   end
   #
   module Testing
     class << self
-      attr_writer :address, :activate_request_timeout
+      attr_writer :activate_request_timeout
 
       def configure
         yield self
-      end
-
-      def address
-        @address || ENV["ZEEBE_ADDRESS"] || "localhost:26500"
       end
 
       def activate_request_timeout

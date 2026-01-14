@@ -241,10 +241,21 @@ module Busybee
       end
 
       def grpc_client
-        @grpc_client ||= Busybee::GRPC::Gateway::Stub.new(
-          Busybee::Testing.address,
-          :this_channel_is_insecure
+        require "busybee/credentials"
+        credentials = Busybee::Credentials.build(
+          # Camunda Cloud params
+          client_id: ENV.fetch("CAMUNDA_CLIENT_ID", nil),
+          client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET", nil),
+          cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID", nil),
+          region: ENV.fetch("CAMUNDA_CLUSTER_REGION", nil),
+          # OAuth params
+          token_url: ENV.fetch("ZEEBE_TOKEN_URL", nil),
+          audience: ENV.fetch("ZEEBE_AUDIENCE", nil),
+          scope: ENV.fetch("ZEEBE_SCOPE", nil),
+          # TLS params
+          certificate_file: ENV.fetch("ZEEBE_CERTIFICATE_FILE", nil)
         )
+        credentials.grpc_stub
       end
     end
   end
