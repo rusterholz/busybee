@@ -20,6 +20,9 @@ Layout/LineLength:
     - "lib/busybee/grpc/gateway_pb.rb"
     - "lib/busybee/grpc/gateway_services_pb.rb"
 
+Lint/UselessDefaultValueArgument:
+  Enabled: false
+
 Metrics/BlockLength:
   Exclude:
     - "Rakefile"
