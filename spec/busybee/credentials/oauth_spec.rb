@@ -67,6 +67,14 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
   end
 
   describe "token refresh behavior" do
+    # Helper to prime the cache with learned expiry (for Rails < 7.1 compatibility)
+    # In Rails < 7.1, the first fetch uses default expiry but learns the actual value.
+    # Clearing and re-fetching ensures subsequent fetches use the learned expiry.
+    def prime_cache_expiry
+      subject.send(:token_updater, nil)
+      subject.send(:token_cache).clear
+    end
+
     it "refreshes token when expired" do
       # First call fetches token
       subject.send(:token_updater, nil)
@@ -113,17 +121,20 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
           headers: { "Content-Type" => "application/json" }
         )
 
-      subject.send(:token_updater, nil)
+      # Prime cache to learn expiry (Rails < 7.1 compatibility)
+      prime_cache_expiry # Makes 1 request
+
+      subject.send(:token_updater, nil) # Request 2
 
       # Token expires in 60s, refresh at 30s, so should be valid for 29s
       travel 29
-      subject.send(:token_updater, nil)
-      expect(WebMock).to have_requested(:post, token_url).once
+      subject.send(:token_updater, nil) # Still cached, request 2
+      expect(WebMock).to have_requested(:post, token_url).times(2)
 
       # But should refresh at 30s
       travel 1 # Total: 30s
-      subject.send(:token_updater, nil)
-      expect(WebMock).to have_requested(:post, token_url).twice
+      subject.send(:token_updater, nil) # Refresh, request 3
+      expect(WebMock).to have_requested(:post, token_url).times(3)
     end
 
     it "defaults to 50 minute expiry if expires_in not in response" do
@@ -134,16 +145,19 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
           headers: { "Content-Type" => "application/json" }
         )
 
-      subject.send(:token_updater, nil)
+      # Prime cache to learn default expiry (Rails < 7.1 compatibility)
+      prime_cache_expiry # Makes 1 request
+
+      subject.send(:token_updater, nil) # Request 2
 
       # Should use default 50 minute (3000s) expiry
       travel 3000 - 31
-      subject.send(:token_updater, nil)
-      expect(WebMock).to have_requested(:post, token_url).once
+      subject.send(:token_updater, nil) # Still cached, request 2
+      expect(WebMock).to have_requested(:post, token_url).times(2)
 
       travel 1 # Total: 3000 - 30
-      subject.send(:token_updater, nil)
-      expect(WebMock).to have_requested(:post, token_url).twice
+      subject.send(:token_updater, nil) # Refresh, request 3
+      expect(WebMock).to have_requested(:post, token_url).times(3)
     end
   end
 
