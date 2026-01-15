@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-require "busybee/logging"
 require "logger"
 require "stringio"
+
+require "busybee/logging"
 
 RSpec.describe Busybee::Logging do
   let(:log_output) { StringIO.new }

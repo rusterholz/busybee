@@ -11,6 +11,8 @@ require "busybee"
 require "busybee/testing"
 require "base64"
 require "securerandom"
+require "tempfile"
+require "webmock/rspec"
 
 # Load support files
 Dir[File.join(__dir__, "support", "**", "*.rb")].each { |f| require f }
@@ -30,4 +32,16 @@ RSpec.configure do |config|
   # To run integration tests: RUN_INTEGRATION_TESTS=1 bundle exec rspec
   # To run only integration tests: RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
   config.filter_run_excluding integration: true unless ENV["RUN_INTEGRATION_TESTS"]
+
+  # Skip Camunda Cloud integration tests unless explicitly requested
+  # These require live credentials and are disabled by default
+  # To run: RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec --tag camunda_cloud
+  config.filter_run_excluding camunda_cloud: true unless ENV["RUN_CAMUNDA_CLOUD_TESTS"]
+
+  # Allow real HTTP connections for Camunda Cloud integration tests
+  config.around(:each, :camunda_cloud) do |example|
+    WebMock.allow_net_connect!
+    example.run
+    WebMock.disable_net_connect!
+  end
 end

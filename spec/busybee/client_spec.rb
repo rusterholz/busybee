@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "spec_helper"
 require "busybee/client"
 require "busybee/credentials/insecure"
 

@@ -20,6 +20,9 @@ Layout/LineLength:
     - "lib/busybee/grpc/gateway_pb.rb"
     - "lib/busybee/grpc/gateway_services_pb.rb"
 
+Lint/UselessDefaultValueArgument:
+  Enabled: false
+
 Metrics/BlockLength:
   Exclude:
     - "Rakefile"
@@ -40,12 +43,15 @@ RSpec/ExampleLength:
   Max: 15
 
 RSpec/MessageSpies:
-  EnforcedStyle: receive
+  EnforcedStyle: have_received
 
 RSpec/MultipleExpectations:
   Max: 6
 
 RSpec/MultipleMemoizedHelpers:
+  Enabled: false
+
+RSpec/NamedSubject:
   Enabled: false
 
 Style/Documentation:
@@ -55,6 +61,9 @@ Style/DoubleNegation:
   Enabled: false
 
 Style/ModuleFunction:
+  Enabled: false
+
+Style/NumericLiterals:
   Enabled: false
 
 Style/RedundantStringEscape:

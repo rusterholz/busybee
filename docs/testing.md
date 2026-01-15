@@ -36,14 +36,10 @@ Configure the Zeebe connection. Busybee reads from environment variables by defa
 ```ruby
 # Use environment variables (recommended)
 # ZEEBE_ADDRESS=localhost:26500
-# ZEEBE_USERNAME=demo
-# ZEEBE_PASSWORD=demo
 
 # Or configure explicitly
 Busybee::Testing.configure do |config|
   config.address = "localhost:26500"
-  config.username = "demo"
-  config.password = "demo"
   config.activate_request_timeout = 2000 # milliseconds, default: 1000
 end
 ```
@@ -53,8 +49,6 @@ end
 | Option | Environment Variable | Default | Description |
 |--------|---------------------|---------|-------------|
 | `address` | `ZEEBE_ADDRESS` | `"localhost:26500"` | Zeebe gateway gRPC address |
-| `username` | `ZEEBE_USERNAME` | `"demo"` | Zeebe authentication username |
-| `password` | `ZEEBE_PASSWORD` | `"demo"` | Zeebe authentication password |
 | `activate_request_timeout` | - | `1000` | Timeout in milliseconds for job activation requests |
 
 ## Helper Methods

@@ -41,8 +41,13 @@ module Busybee
       def build(cluster_address: nil, **params)
         case Busybee.credential_type
         when :insecure
-          build_insecure(cluster_address: cluster_address)
-        # As new credential types are added, add cases here (e.g., :oauth, :camunda_cloud)
+          build_insecure(cluster_address: cluster_address, **params)
+        when :tls
+          build_tls(cluster_address: cluster_address, **params)
+        when :oauth
+          build_oauth(cluster_address: cluster_address, **params)
+        when :camunda_cloud
+          build_camunda_cloud(cluster_address: cluster_address, **params)
         else
           autodetect_credentials(cluster_address: cluster_address, **params)
         end
@@ -53,19 +58,76 @@ module Busybee
       # Autodetects credential type based on provided parameters.
       # As new credential types are added, extend this method with detection logic.
       def autodetect_credentials(cluster_address: nil, **params)
-        return build_insecure(cluster_address: cluster_address) if params[:insecure]
-
-        # As new credential types are added, add autodetection logic here.
-        # Example: if params[:client_id] && params[:client_secret] && params[:cluster_id]
-        #   return build_camunda_cloud(...)
-
-        # Default to insecure for local development
-        build_insecure(cluster_address: cluster_address)
+        if tls_keys?(params)
+          build_tls(cluster_address: cluster_address, **params)
+        elsif oauth_keys?(params)
+          build_oauth(cluster_address: cluster_address, **params)
+        elsif camunda_cloud_keys?(params)
+          build_camunda_cloud(cluster_address: cluster_address, **params)
+        else
+          # Default to insecure for local development (includes explicit insecure: true)
+          build_insecure(cluster_address: cluster_address, **params)
+        end
       end
 
-      def build_insecure(cluster_address: nil)
-        require_relative "credentials/insecure"
+      def id_and_secret?(params)
+        params[:client_id] && params[:client_secret]
+      end
+
+      def tls_keys?(params)
+        !id_and_secret?(params) && (params[:certificate_file] || params[:tls])
+      end
+
+      def oauth_keys?(params)
+        id_and_secret?(params) && params[:token_url] && params[:audience]
+      end
+
+      def camunda_cloud_keys?(params)
+        id_and_secret?(params) && params[:cluster_id] && params[:region]
+      end
+
+      def build_insecure(cluster_address: nil, **_)
+        require "busybee/credentials/insecure"
         Insecure.new(cluster_address: cluster_address)
+      end
+
+      def build_tls(cluster_address: nil, certificate_file: nil, **_)
+        require "busybee/credentials/tls"
+        TLS.new(cluster_address: cluster_address, certificate_file: certificate_file)
+      end
+
+      def build_oauth( # rubocop:disable Metrics/ParameterLists
+        cluster_address: nil,
+        token_url: nil,
+        client_id: nil,
+        client_secret: nil,
+        audience: nil,
+        scope: nil,
+        certificate_file: nil,
+        **_
+      )
+        require "busybee/credentials/oauth"
+        OAuth.new(
+          cluster_address: cluster_address,
+          token_url: token_url,
+          client_id: client_id,
+          client_secret: client_secret,
+          audience: audience,
+          scope: scope,
+          certificate_file: certificate_file
+        )
+      end
+
+      # NOTE: cluster_address is intentionally omitted - CamundaCloud constructs it from cluster_id and region
+      def build_camunda_cloud(client_id: nil, client_secret: nil, cluster_id: nil, region: nil, scope: nil, **_) # rubocop:disable Metrics/ParameterLists
+        require "busybee/credentials/camunda_cloud"
+        CamundaCloud.new(
+          client_id: client_id,
+          client_secret: client_secret,
+          cluster_id: cluster_id,
+          region: region,
+          scope: scope
+        )
       end
     end
 
