@@ -90,18 +90,12 @@ module Busybee
         # Use race_condition_ttl to prevent thundering herd:
         # - When token is fresh, multiple threads read from cache
         # - 30s before expiry, first thread refreshes while others use stale token
-        # - Dynamic expires_in set from token response
-        token_cache.fetch(cache_key, race_condition_ttl: RACE_CONDITION_TTL_SECONDS) do |_key, options|
+        token_cache.fetch(cache_key, race_condition_ttl: RACE_CONDITION_TTL_SECONDS) do |_key, options = nil|
           token_data = fetch_token_response
-          expires_in = token_data.fetch("expires_in", 3600)
-          cache_expiry = expires_in - RACE_CONDITION_TTL_SECONDS
 
-          # Rails 7.1+: options.expires_in= setter
-          # Rails 7.0: options[:expires_in]= hash assignment
-          if options.respond_to?(:expires_in=)
-            options.expires_in = cache_expiry
-          else
-            options[:expires_in] = cache_expiry
+          # Set cache expiry dynamically if possible (Rails 7.1+ only):
+          if options&.respond_to?(:expires_in=) # rubocop:disable Lint/RedundantSafeNavigation
+            options.expires_in = token_data.fetch("expires_in", 3600).to_i - RACE_CONDITION_TTL_SECONDS
           end
 
           token_data["access_token"]
