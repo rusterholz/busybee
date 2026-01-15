@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "busybee/version"
-require_relative "busybee/defaults"
-require_relative "busybee/credentials"
-require_relative "busybee/logging"
+require "busybee/version"
+require "busybee/defaults"
+require "busybee/credentials"
+require "busybee/logging"
+require "busybee/client"
 
 # Top-level gem module, only holds configuration values.
 module Busybee
@@ -105,4 +106,4 @@ module Busybee
   end
 end
 
-require_relative "busybee/railtie" if defined?(Rails::Railtie)
+require "busybee/railtie" if defined?(Rails::Railtie)

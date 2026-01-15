@@ -20,7 +20,7 @@ require "busybee/credentials/camunda_cloud"
 #
 # To run: RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec --tag camunda_cloud
 #
-RSpec.describe "Camunda Cloud Credentials", :camunda_cloud do
+RSpec.describe Busybee::Credentials::CamundaCloud, :camunda_cloud do
   before(:all) do # rubocop:disable RSpec/BeforeAfterAll
     fail_if_cloud_credentials_absent!
 
@@ -36,7 +36,7 @@ RSpec.describe "Camunda Cloud Credentials", :camunda_cloud do
 
   describe "cluster address derivation" do
     it "derives correct cluster address from cluster_id and region" do
-      credentials = Busybee::Credentials::CamundaCloud.new(
+      credentials = described_class.new(
         client_id: ENV.fetch("CAMUNDA_CLIENT_ID"),
         client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET"),
         cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID"),
@@ -55,7 +55,7 @@ RSpec.describe "Camunda Cloud Credentials", :camunda_cloud do
   [nil, "Zeebe"].each do |scope_value|
     context "with#{'out' unless scope_value} scope parameter" do
       let(:credentials) do
-        Busybee::Credentials::CamundaCloud.new(
+        described_class.new(
           client_id: ENV.fetch("CAMUNDA_CLIENT_ID"),
           client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET"),
           cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID"),

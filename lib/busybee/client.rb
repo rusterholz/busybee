@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "busybee"
 require "busybee/credentials"
 require "busybee/client/error_handling"
 require "busybee/client/process_operations"

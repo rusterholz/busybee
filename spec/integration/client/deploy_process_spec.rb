@@ -2,7 +2,7 @@
 
 require "busybee/client"
 
-RSpec.describe "Client#deploy_process integration" do
+RSpec.describe Busybee::Client, "#deploy_process" do
   let(:simple_bpmn_path) { File.expand_path("../../fixtures/simple_process.bpmn", __dir__) }
   let(:waiting_bpmn_path) { File.expand_path("../../fixtures/waiting_process.bpmn", __dir__) }
 
