@@ -54,6 +54,10 @@ RSpec/MultipleMemoizedHelpers:
 RSpec/NamedSubject:
   Enabled: false
 
+RSpec/SpecFilePathFormat:
+  Exclude:
+    - "spec/integration/**/*"
+
 Style/Documentation:
   Enabled: false
 
