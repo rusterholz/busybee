@@ -40,6 +40,7 @@ module Busybee
     #
     class OAuth < Credentials
       # These constants may become configuration options in a future version.
+      DEFAULT_EXPIRY_SECONDS = 60 * 50 # 50 minutes
       RACE_CONDITION_TTL_SECONDS = 30
       TOKEN_CACHE_SIZE_BYTES = 4 * 1024 * 1024 # 4MB
 
@@ -66,6 +67,7 @@ module Busybee
         @audience = audience
         @scope = scope
         @certificate_file = certificate_file
+        @current_expiry = DEFAULT_EXPIRY_SECONDS - RACE_CONDITION_TTL_SECONDS
       end
 
       def grpc_channel_credentials
@@ -90,13 +92,15 @@ module Busybee
         # Use race_condition_ttl to prevent thundering herd:
         # - When token is fresh, multiple threads read from cache
         # - 30s before expiry, first thread refreshes while others use stale token
-        token_cache.fetch(cache_key, race_condition_ttl: RACE_CONDITION_TTL_SECONDS) do |_key, options = nil|
+        fetch_options = { expires_in: @current_expiry, race_condition_ttl: RACE_CONDITION_TTL_SECONDS }
+        token_cache.fetch(cache_key, fetch_options) do |_key, options = nil|
           token_data = fetch_token_response
 
+          @current_expiry =
+            token_data.fetch("expires_in", DEFAULT_EXPIRY_SECONDS).to_i - RACE_CONDITION_TTL_SECONDS
+
           # Set cache expiry dynamically if possible (Rails 7.1+ only):
-          if options&.respond_to?(:expires_in=) # rubocop:disable Lint/RedundantSafeNavigation
-            options.expires_in = token_data.fetch("expires_in", 3600).to_i - RACE_CONDITION_TTL_SECONDS
-          end
+          options.expires_in = @current_expiry if options&.respond_to?(:expires_in=) # rubocop:disable Lint/RedundantSafeNavigation
 
           token_data["access_token"]
         end

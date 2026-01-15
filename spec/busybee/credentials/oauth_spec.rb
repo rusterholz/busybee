@@ -126,7 +126,7 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
       expect(WebMock).to have_requested(:post, token_url).twice
     end
 
-    it "defaults to 3600s expiry if expires_in not in response" do
+    it "defaults to 50 minute expiry if expires_in not in response" do
       stub_request(:post, token_url)
         .to_return(
           status: 200,
@@ -136,12 +136,12 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
 
       subject.send(:token_updater, nil)
 
-      # Should use default 3600s expiry
-      travel 3600 - 31
+      # Should use default 50 minute (3000s) expiry
+      travel 3000 - 31
       subject.send(:token_updater, nil)
       expect(WebMock).to have_requested(:post, token_url).once
 
-      travel 1 # Total: 3600 - 30
+      travel 1 # Total: 3000 - 30
       subject.send(:token_updater, nil)
       expect(WebMock).to have_requested(:post, token_url).twice
     end
