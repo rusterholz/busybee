@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "busybee/client"
-
 RSpec.describe Busybee::Client, "#cancel_instance" do
   let(:slow_bpmn_path) { File.expand_path("../../fixtures/slow_process.bpmn", __dir__) }
 

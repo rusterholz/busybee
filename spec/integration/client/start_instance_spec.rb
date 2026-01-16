@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "busybee/client"
-
 RSpec.describe Busybee::Client, "#start_instance" do
   let(:simple_bpmn_path) { File.expand_path("../../fixtures/simple_process.bpmn", __dir__) }
 

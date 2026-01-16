@@ -24,16 +24,16 @@ RSpec.describe Busybee::Credentials::CamundaCloud do
   end
 
   before do
-    stub_request(:post, expected_token_url)
-      .with(
+    stub_request(:post, expected_token_url).
+      with(
         body: {
           "grant_type" => "client_credentials",
           "client_id" => "test-client",
           "client_secret" => "test-secret",
           "audience" => expected_audience
         }
-      )
-      .to_return(
+      ).
+      to_return(
         status: 200,
         body: token_response.to_json,
         headers: { "Content-Type" => "application/json" }
@@ -57,20 +57,20 @@ RSpec.describe Busybee::Credentials::CamundaCloud do
       # Verify the audience in the token request
       subject.send(:token_updater, nil)
 
-      expect(WebMock).to have_requested(:post, expected_token_url)
-        .with(body: hash_including("audience" => "zeebe.camunda.io"))
-        .once
+      expect(WebMock).to have_requested(:post, expected_token_url).
+        with(body: hash_including("audience" => "zeebe.camunda.io")).
+        once
     end
 
     it "passes through client_id and client_secret" do
       subject.send(:token_updater, nil)
 
-      expect(WebMock).to have_requested(:post, expected_token_url)
-        .with(body: hash_including(
+      expect(WebMock).to have_requested(:post, expected_token_url).
+        with(body: hash_including(
           "client_id" => "test-client",
           "client_secret" => "test-secret"
-        ))
-        .once
+        )).
+        once
     end
   end
 
@@ -84,11 +84,11 @@ RSpec.describe Busybee::Credentials::CamundaCloud do
         scope: "Zeebe Tasklist"
       )
 
-      stub_request(:post, expected_token_url)
-        .with(
+      stub_request(:post, expected_token_url).
+        with(
           body: hash_including("scope" => "Zeebe Tasklist")
-        )
-        .to_return(
+        ).
+        to_return(
           status: 200,
           body: token_response.to_json,
           headers: { "Content-Type" => "application/json" }
@@ -96,9 +96,9 @@ RSpec.describe Busybee::Credentials::CamundaCloud do
 
       creds.send(:token_updater, nil)
 
-      expect(WebMock).to have_requested(:post, expected_token_url)
-        .with(body: hash_including("scope" => "Zeebe Tasklist"))
-        .once
+      expect(WebMock).to have_requested(:post, expected_token_url).
+        with(body: hash_including("scope" => "Zeebe Tasklist")).
+        once
     end
 
     it "omits scope from token request when not provided" do

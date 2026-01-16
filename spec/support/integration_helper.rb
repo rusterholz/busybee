@@ -44,18 +44,12 @@ module IntegrationHelpers
   #
   # Raises KeyError with clear message if required environment variables are not set.
   def camunda_cloud_busybee_client
-    @camunda_cloud_busybee_client ||= begin
-      require "busybee/client"
-      Busybee::Client.new(camunda_cloud_credentials)
-    end
+    @camunda_cloud_busybee_client ||= Busybee::Client.new(camunda_cloud_credentials)
   end
 
   # Returns a Busybee::Client configured for local Zeebe
   def local_busybee_client
-    @local_busybee_client ||= begin
-      require "busybee/client"
-      Busybee::Client.new(insecure: true)
-    end
+    @local_busybee_client ||= Busybee::Client.new(insecure: true)
   end
 
   private

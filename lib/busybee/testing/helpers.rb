@@ -206,10 +206,10 @@ module Busybee
 
       def bpmn_with_unique_id(bpmn_path, process_id)
         bpmn_content = File.read(bpmn_path)
-        bpmn_content
-          .gsub(/(<bpmn:process id=")[^"]+/, "\\1#{process_id}")
+        bpmn_content.
+          gsub(/(<bpmn:process id=")[^"]+/, "\\1#{process_id}").
           # Possessive quantifiers (++, *+) prevent polynomial backtracking
-          .gsub(/(<bpmndi:BPMNPlane\s++[^>]*+bpmnElement=")[^"]++/, "\\1#{process_id}")
+          gsub(/(<bpmndi:BPMNPlane\s++[^>]*+bpmnElement=")[^"]++/, "\\1#{process_id}")
       end
 
       def cancel_process_instance(key)

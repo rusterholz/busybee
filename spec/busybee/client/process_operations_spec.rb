@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "busybee/client"
-
 RSpec.describe Busybee::Client::ProcessOperations do
   let(:client) { Busybee::Client.new(insecure: true, cluster_address: "localhost:26500") }
   let(:stub) { instance_double(Busybee::GRPC::Gateway::Stub) }

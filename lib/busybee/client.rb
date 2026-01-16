@@ -2,6 +2,7 @@
 
 require "busybee/credentials"
 require "busybee/client/error_handling"
+require "busybee/client/message_operations"
 require "busybee/client/process_operations"
 
 module Busybee
@@ -21,6 +22,7 @@ module Busybee
   #
   class Client
     include ErrorHandling
+    include MessageOperations
     include ProcessOperations
 
     attr_reader :credentials

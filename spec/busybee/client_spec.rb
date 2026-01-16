@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "busybee/client"
 require "busybee/credentials/insecure"
 
 RSpec.describe Busybee::Client do

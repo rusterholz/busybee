@@ -145,8 +145,8 @@ RSpec.describe Busybee::Credentials do
 
   describe "#grpc_channel_credentials" do
     it "raises NotImplementedError" do
-      expect { described_class.new.grpc_channel_credentials }
-        .to raise_error(NotImplementedError, /must implement/)
+      expect { described_class.new.grpc_channel_credentials }.
+        to raise_error(NotImplementedError, /must implement/)
     end
   end
 
@@ -156,9 +156,9 @@ RSpec.describe Busybee::Credentials do
       allow(creds).to receive(:grpc_channel_credentials).and_return(:this_channel_is_insecure)
 
       stub_double = instance_double(Busybee::GRPC::Gateway::Stub)
-      expect(Busybee::GRPC::Gateway::Stub).to receive(:new) # rubocop:disable RSpec/StubbedMock, RSpec/MessageSpies
-        .with("test:26500", :this_channel_is_insecure)
-        .and_return(stub_double)
+      expect(Busybee::GRPC::Gateway::Stub).to receive(:new). # rubocop:disable RSpec/StubbedMock, RSpec/MessageSpies
+        with("test:26500", :this_channel_is_insecure).
+        and_return(stub_double)
 
       expect(creds.grpc_stub).to eq(stub_double)
     end
@@ -176,8 +176,8 @@ RSpec.describe Busybee::Credentials do
     end
 
     it "raises NotImplementedError when grpc_channel_credentials not implemented" do
-      expect { described_class.new.grpc_stub }
-        .to raise_error(NotImplementedError, /must implement/)
+      expect { described_class.new.grpc_stub }.
+        to raise_error(NotImplementedError, /must implement/)
     end
   end
 end
