@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "active_support/duration"
+require "active_support"
 require "active_support/core_ext/numeric/time"
 
 RSpec.describe Busybee::Client::MessageOperations do
@@ -72,10 +72,66 @@ RSpec.describe Busybee::Client::MessageOperations do
       )
     end
 
-    it "raises ArgumentError when ttl is nil" do
-      expect do
-        client.publish_message("order-ready", correlation_key: "order-123", ttl: nil)
-      end.to raise_error(ArgumentError, "ttl is required (message buffer time in milliseconds or Duration)")
+    it "uses configured default_message_ttl when ttl not provided" do
+      Busybee.default_message_ttl = 60_000
+      response = double(key: 12345)
+      allow(stub).to receive(:publish_message).with(
+        having_attributes(timeToLive: 60_000)
+      ).and_return(response)
+
+      client.publish_message("order-ready", correlation_key: "order-123")
+
+      expect(stub).to have_received(:publish_message).with(
+        having_attributes(timeToLive: 60_000)
+      )
+    ensure
+      Busybee.default_message_ttl = nil
+    end
+
+    it "falls back to Defaults::DEFAULT_MESSAGE_TTL_MS when not configured" do
+      Busybee.default_message_ttl = nil
+      response = double(key: 12345)
+      allow(stub).to receive(:publish_message).with(
+        having_attributes(timeToLive: Busybee::Defaults::DEFAULT_MESSAGE_TTL_MS)
+      ).and_return(response)
+
+      client.publish_message("order-ready", correlation_key: "order-123")
+
+      expect(stub).to have_received(:publish_message).with(
+        having_attributes(timeToLive: Busybee::Defaults::DEFAULT_MESSAGE_TTL_MS)
+      )
+    end
+
+    it "supports Duration objects as default_message_ttl" do
+      Busybee.default_message_ttl = 45.seconds
+      response = double(key: 12345)
+      allow(stub).to receive(:publish_message).with(
+        having_attributes(timeToLive: 45_000)
+      ).and_return(response)
+
+      client.publish_message("order-ready", correlation_key: "order-123")
+
+      expect(stub).to have_received(:publish_message).with(
+        having_attributes(timeToLive: 45_000)
+      )
+    ensure
+      Busybee.default_message_ttl = nil
+    end
+
+    it "allows explicit ttl to override default_message_ttl with Duration" do
+      Busybee.default_message_ttl = 60_000
+      response = double(key: 12345)
+      allow(stub).to receive(:publish_message).with(
+        having_attributes(timeToLive: 20_000)
+      ).and_return(response)
+
+      client.publish_message("order-ready", correlation_key: "order-123", ttl: 20.seconds)
+
+      expect(stub).to have_received(:publish_message).with(
+        having_attributes(timeToLive: 20_000)
+      )
+    ensure
+      Busybee.default_message_ttl = nil
     end
 
     it "wraps GRPC errors in Busybee::GRPC::Error" do

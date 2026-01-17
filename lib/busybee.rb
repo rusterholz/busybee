@@ -15,7 +15,7 @@ module Busybee
   VALID_LOG_FORMATS = %w[text json].freeze
 
   class << self
-    attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors
+    attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl
     attr_accessor :logger
     attr_reader :credentials
 
@@ -57,6 +57,10 @@ module Busybee
 
     def grpc_retry_errors
       @grpc_retry_errors || default_retry_errors
+    end
+
+    def default_message_ttl
+      @default_message_ttl || Defaults::DEFAULT_MESSAGE_TTL_MS
     end
 
     def credential_type=(value)
