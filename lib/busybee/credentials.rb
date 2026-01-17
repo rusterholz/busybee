@@ -53,6 +53,26 @@ module Busybee
         end
       end
 
+      # Build credentials from environment variables.
+      # Used primarily for testing helpers to auto-configure from environment.
+      #
+      # @return [Credentials] appropriate credential instance based on environment
+      def build_from_env
+        build(
+          # Camunda Cloud params
+          client_id: ENV.fetch("CAMUNDA_CLIENT_ID", nil),
+          client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET", nil),
+          cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID", nil),
+          region: ENV.fetch("CAMUNDA_CLUSTER_REGION", nil),
+          # OAuth params
+          token_url: ENV.fetch("ZEEBE_TOKEN_URL", nil),
+          audience: ENV.fetch("ZEEBE_AUDIENCE", nil),
+          scope: ENV.fetch("ZEEBE_SCOPE", nil),
+          # TLS params
+          certificate_file: ENV.fetch("ZEEBE_CERTIFICATE_FILE", nil)
+        )
+      end
+
       private
 
       # Autodetects credential type based on provided parameters.

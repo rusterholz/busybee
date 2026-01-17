@@ -3,6 +3,8 @@
 require "securerandom"
 require "base64"
 require "json"
+require "active_support"
+require "active_support/duration"
 require "busybee/grpc"
 require_relative "activated_job"
 
@@ -121,10 +123,11 @@ module Busybee
       # Activate a single job of the given type.
       #
       # @param type [String] job type
+      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee::Testing.activate_request_timeout)
       # @return [ActivatedJob]
       # @raise [NoJobAvailable] if no job is available
-      def activate_job(type)
-        jobs = activate_jobs_raw(type, max_jobs: 1)
+      def activate_job(type, timeout: nil)
+        jobs = activate_jobs_raw(type, max_jobs: 1, timeout: timeout)
         raise NoJobAvailable, "No job of type '#{type}' available" if jobs.empty?
 
         ActivatedJob.new(jobs.first, client: grpc_client)
@@ -134,10 +137,11 @@ module Busybee
       #
       # @param type [String] job type
       # @param max_jobs [Integer] maximum number of jobs to activate
+      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee::Testing.activate_request_timeout)
       # @return [Enumerator<ActivatedJob>]
-      def activate_jobs(type, max_jobs:)
+      def activate_jobs(type, max_jobs:, timeout: nil)
         Enumerator.new do |yielder|
-          activate_jobs_raw(type, max_jobs: max_jobs).each do |raw_job|
+          activate_jobs_raw(type, max_jobs: max_jobs, timeout: timeout).each do |raw_job|
             yielder << ActivatedJob.new(raw_job, client: grpc_client)
           end
         end
@@ -223,14 +227,22 @@ module Busybee
         false
       end
 
-      def activate_jobs_raw(type, max_jobs:)
+      def activate_jobs_raw(type, max_jobs:, timeout: nil)
         worker = "#{type}-#{SecureRandom.hex(4)}"
+
+        request_timeout = timeout || Busybee::Testing.activate_request_timeout
+        request_timeout_ms = if request_timeout.is_a?(ActiveSupport::Duration)
+                               request_timeout.in_milliseconds.to_i
+                             else
+                               request_timeout.to_i
+                             end
+
         request = Busybee::GRPC::ActivateJobsRequest.new(
           type: type,
           worker: worker,
           timeout: 30_000,
           maxJobsToActivate: max_jobs,
-          requestTimeout: Busybee::Testing.activate_request_timeout
+          requestTimeout: request_timeout_ms
         )
 
         jobs = []
@@ -242,20 +254,8 @@ module Busybee
 
       def grpc_client
         require "busybee/credentials"
-        credentials = Busybee::Credentials.build(
-          # Camunda Cloud params
-          client_id: ENV.fetch("CAMUNDA_CLIENT_ID", nil),
-          client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET", nil),
-          cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID", nil),
-          region: ENV.fetch("CAMUNDA_CLUSTER_REGION", nil),
-          # OAuth params
-          token_url: ENV.fetch("ZEEBE_TOKEN_URL", nil),
-          audience: ENV.fetch("ZEEBE_AUDIENCE", nil),
-          scope: ENV.fetch("ZEEBE_SCOPE", nil),
-          # TLS params
-          certificate_file: ENV.fetch("ZEEBE_CERTIFICATE_FILE", nil)
-        )
-        credentials.grpc_stub
+        # Uses Busybee.credential_type if set, autodetects otherwise
+        Busybee::Credentials.build_from_env.grpc_stub
       end
     end
   end
