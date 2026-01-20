@@ -108,7 +108,7 @@ Planned capabilities:
 
 ### RSpec Testing Integration (available now!)
 
-Deploy processes, create instances, activate jobs, and verify workflow behavior against a real Zeebe instance. A full replacement for the [zeebe_bpmn_rspec](https://github.com/ezcater/zeebe_bpmn_rspec) gem.
+Allows you to unit test your BPMN files. Deploy processes, create instances, activate jobs, and verify workflow behavior against a real Zeebe instance.
 
 #### Setup
 
@@ -156,7 +156,7 @@ end
 - `assert_process_completed!` - Verify workflow reached an end event
 - `have_activated`, `have_received_variables`, `have_received_headers` - RSpec matchers
 
-**[Full testing documentation](docs/testing.md)**
+**For more info, see our [full testing documentation here](docs/testing.md).**
 
 ### Deployment Tools (coming in early 2026)
 
@@ -165,6 +165,8 @@ CI/CD tooling for deploying BPMN processes to your Zeebe clusters. Version track
 ### Low-Level GRPC Access (available now!)
 
 For edge cases where the higher-level abstractions don't cover what you need, busybee exposes the raw GRPC interface to Zeebe. This is a complete drop-in replacement for the now-discontinued [zeebe-client](https://github.com/zeebe-io/zeebe-client-ruby) gem.
+
+> Most users won't need this, as the Testing module, Client class, and Worker pattern cover most common use cases.
 
 ```ruby
 require "busybee/grpc"
@@ -179,17 +181,17 @@ response = stub.topology(request)
 puts response.brokers.map(&:host)
 ```
 
-Most users won't need this—the Testing module and future Client cover common workflows. See **[GRPC documentation](docs/grpc.md)** for details.
+**For more info, see the [full GRPC documentation here](docs/grpc.md).**
 
 ## Ruby Implementation Support
 
-Busybee currently only supports MRI (CRuby). JRuby is not supported because it cannot run C extensions (it would require `grpc-java` with a Ruby wrapper). TruffleRuby's C extension support is experimental and the `grpc` gem does not currently build on it.
+Busybee currently only supports MRI (CRuby). This is due to the state of `grpc` support on other implementations. JRuby is not supported because it cannot run C extensions (it would require `grpc-java` with a Ruby wrapper). TruffleRuby's C extension support is experimental and the `grpc` gem does not currently build on it.
 
-If you successfully run busybee on an alternative Ruby implementation, please open an issue. We'd welcome contributions to expand platform support!
+If you successfully run busybee on an alternative Ruby implementation, please open a GitHub issue to let us know! We'd welcome contributions to expand platform support.
 
 ## Development
 
-Busybee includes a Docker Compose setup for running Zeebe locally, plus rake tasks for common development workflows.
+Busybee includes a Docker Compose setup for running Zeebe locally, plus rake tasks for common development workflows:
 
 ```bash
 bin/setup              # Install dependencies
@@ -199,7 +201,7 @@ bundle exec rspec      # Run unit tests
 RUN_INTEGRATION_TESTS=1 bundle exec rspec  # Run all tests including integration
 ```
 
-**[Full development guide](docs/development.md)** — Local environment setup, running tests, regenerating GRPC classes, and release procedures.
+**The full development guide for contributors [is available here](docs/development.md),** including local environment setup, running tests, regenerating GRPC classes, and release procedures.
 
 ## Contributing
 
