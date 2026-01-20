@@ -25,6 +25,7 @@ module Busybee
       #
       # First checks Busybee.credential_type for explicit type selection.
       # If not set, autodetects credential type based on which keys are present in params.
+      # If no keys are given in params, attempts to load them from environment vars.
       #
       # @param cluster_address [String, nil] Override cluster address
       # @param params [Hash] Configuration parameters (keys inform credential type selection)
@@ -39,6 +40,12 @@ module Busybee
       #   Credentials.build  # Uses configured type
       #
       def build(cluster_address: nil, **params)
+        if params.empty?
+          params = extract_possible_credential_params_from_env
+          extracted_address = params.delete(:cluster_address) # always delete to avoid duplicate keyword arg
+          cluster_address ||= extracted_address # allow explicit kwarg to override env
+        end
+
         case Busybee.credential_type
         when :insecure
           build_insecure(cluster_address: cluster_address, **params)
@@ -51,26 +58,6 @@ module Busybee
         else
           autodetect_credentials(cluster_address: cluster_address, **params)
         end
-      end
-
-      # Build credentials from environment variables.
-      # Used primarily for testing helpers to auto-configure from environment.
-      #
-      # @return [Credentials] appropriate credential instance based on environment
-      def build_from_env
-        build(
-          # Camunda Cloud params
-          client_id: ENV.fetch("CAMUNDA_CLIENT_ID", nil),
-          client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET", nil),
-          cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID", nil),
-          region: ENV.fetch("CAMUNDA_CLUSTER_REGION", nil),
-          # OAuth params
-          token_url: ENV.fetch("ZEEBE_TOKEN_URL", nil),
-          audience: ENV.fetch("ZEEBE_AUDIENCE", nil),
-          scope: ENV.fetch("ZEEBE_SCOPE", nil),
-          # TLS params
-          certificate_file: ENV.fetch("ZEEBE_CERTIFICATE_FILE", nil)
-        )
       end
 
       private
@@ -148,6 +135,24 @@ module Busybee
           region: region,
           scope: scope
         )
+      end
+
+      # Attempt to extract credentials from environment variables, if present.
+      def extract_possible_credential_params_from_env
+        {
+          cluster_address: ENV.fetch("CLUSTER_ADDRESS", nil),
+          # Camunda Cloud params
+          client_id: ENV.fetch("CAMUNDA_CLIENT_ID", nil),
+          client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET", nil),
+          cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID", nil),
+          region: ENV.fetch("CAMUNDA_CLUSTER_REGION", nil),
+          # OAuth params
+          token_url: ENV.fetch("ZEEBE_TOKEN_URL", nil),
+          audience: ENV.fetch("ZEEBE_AUDIENCE", nil),
+          scope: ENV.fetch("ZEEBE_SCOPE", nil),
+          # TLS params
+          certificate_file: ENV.fetch("ZEEBE_CERTIFICATE_FILE", nil)
+        }.compact
       end
     end
 

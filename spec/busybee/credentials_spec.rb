@@ -10,9 +10,27 @@ RSpec.describe Busybee::Credentials do
       expect(creds).to be_a(Busybee::Credentials::Insecure)
     end
 
-    it "defaults to Insecure credentials when no config provided" do
+    it "defaults to Insecure credentials when no config provided and no env vars set" do
+      stub_credential_env_vars
+
       creds = described_class.build
       expect(creds).to be_a(Busybee::Credentials::Insecure)
+    end
+
+    it "extracts credentials from environment variables when no params given" do
+      stub_credential_env_vars
+      allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return("env:26500")
+
+      creds = described_class.build
+      expect(creds.cluster_address).to eq("env:26500")
+    end
+
+    it "allows explicit cluster_address kwarg to override env var" do
+      stub_credential_env_vars
+      allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return("env:26500")
+
+      creds = described_class.build(cluster_address: "override:26500")
+      expect(creds.cluster_address).to eq("override:26500")
     end
 
     it "prefers explicit insecure: true over other credentials" do

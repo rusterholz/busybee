@@ -116,7 +116,7 @@ module Busybee
         request = Busybee::GRPC::TopologyRequest.new
         grpc_client.topology(request, deadline: Time.now + timeout)
         true
-      rescue GRPC::Unavailable, GRPC::DeadlineExceeded, GRPC::Core::CallError, GRPC::Unauthenticated
+      rescue ::GRPC::Unavailable, ::GRPC::DeadlineExceeded, ::GRPC::Core::CallError, ::GRPC::Unauthenticated
         false
       end
 
@@ -254,8 +254,8 @@ module Busybee
 
       def grpc_client
         require "busybee/credentials"
-        # Uses Busybee.credential_type if set, autodetects otherwise
-        Busybee::Credentials.build_from_env.grpc_stub
+        # Uses Busybee.credential_type if set, autodetects from env vars otherwise
+        Busybee::Credentials.build.grpc_stub
       end
     end
   end

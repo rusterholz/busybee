@@ -7,20 +7,36 @@ RSpec.describe Busybee::Client do
     around do |example|
       original_cluster_address = Busybee.cluster_address
       original_credential_type = Busybee.credential_type
+      original_credentials = Busybee.credentials
       Busybee.credential_type = nil
+      Busybee.credentials = nil
       example.run
       Busybee.cluster_address = original_cluster_address
       Busybee.credential_type = original_credential_type
+      Busybee.credentials = original_credentials
     end
 
     context "with no arguments" do
-      it "builds credentials using Credentials.build" do
+      it "uses Busybee.credentials if set" do
+        configured_creds = Busybee::Credentials::Insecure.new(cluster_address: "configured:26500")
+        Busybee.credentials = configured_creds
+
+        client = described_class.new
+        expect(client.credentials).to be(configured_creds)
+      end
+
+      it "builds credentials using Credentials.build if Busybee.credentials not set" do
+        stub_credential_env_vars
+        Busybee.credentials = nil
+
         client = described_class.new
         expect(client.credentials).to be_a(Busybee::Credentials::Insecure)
       end
 
       it "uses Busybee.cluster_address via credentials" do
+        stub_credential_env_vars
         Busybee.cluster_address = "configured:26500"
+
         client = described_class.new
         expect(client.cluster_address).to eq("configured:26500")
       end
