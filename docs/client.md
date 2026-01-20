@@ -61,7 +61,7 @@ insecure_client = Busybee::Client.new(
 )
 
 tls_client = Busybee::Client.new(
-  # if cluster_address is not given to any of these, they will use the configured cluster_address implicitly:
+  # if cluster_address is not given to any of these, it will use the configured cluster_address (see below):
   certificate_file: "/path/to/ca.crt"
 )
 
@@ -81,6 +81,34 @@ camunda_cloud_client = Busybee::Client.new(
   region: "my-cluster-region" # e.g., "bru-2"
 )
 ```
+
+### Cluster Address Resolution
+
+When `cluster_address` is not explicitly provided, Busybee uses this precedence:
+
+1. Explicit `cluster_address:` parameter (highest priority)
+2. `Busybee.cluster_address` configuration value
+3. `CLUSTER_ADDRESS` environment variable
+4. Default: `"localhost:26500"` (lowest priority)
+
+This allows you to set a default cluster address once and override it selectively when needed.
+
+### Environment Variables
+
+For convenience, many of the credential parameters may be read implicitly from the following env vars:
+
+| Environment Variable | Purpose | Used By |
+|---------------------|---------|---------|
+| `CLUSTER_ADDRESS` | Zeebe cluster address (host:port) | All credential types |
+| `BUSYBEE_CREDENTIAL_TYPE` | Credential type (insecure, tls, oauth, camunda_cloud) | Auto-detection |
+| `ZEEBE_TOKEN_URL` | OAuth token endpoint | OAuth |
+| `ZEEBE_AUDIENCE` | OAuth audience | OAuth |
+| `ZEEBE_SCOPE` | OAuth scope (optional) | OAuth |
+| `ZEEBE_CERTIFICATE_FILE` | Path to CA certificate | TLS, OAuth |
+| `CAMUNDA_CLIENT_ID` | OAuth client ID | OAuth, Camunda Cloud |
+| `CAMUNDA_CLIENT_SECRET` | OAuth client secret | OAuth, Camunda Cloud |
+| `CAMUNDA_CLUSTER_ID` | Cluster UUID | Camunda Cloud |
+| `CAMUNDA_CLUSTER_REGION` | Cluster region (e.g., "bru-2") | Camunda Cloud |
 
 ## Error Handling
 
