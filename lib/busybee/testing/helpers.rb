@@ -3,6 +3,8 @@
 require "securerandom"
 require "base64"
 require "json"
+require "active_support"
+require "active_support/duration"
 require "busybee/grpc"
 require_relative "activated_job"
 
@@ -114,17 +116,18 @@ module Busybee
         request = Busybee::GRPC::TopologyRequest.new
         grpc_client.topology(request, deadline: Time.now + timeout)
         true
-      rescue GRPC::Unavailable, GRPC::DeadlineExceeded, GRPC::Core::CallError, GRPC::Unauthenticated
+      rescue ::GRPC::Unavailable, ::GRPC::DeadlineExceeded, ::GRPC::Core::CallError, ::GRPC::Unauthenticated
         false
       end
 
       # Activate a single job of the given type.
       #
       # @param type [String] job type
+      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee::Testing.activate_request_timeout)
       # @return [ActivatedJob]
       # @raise [NoJobAvailable] if no job is available
-      def activate_job(type)
-        jobs = activate_jobs_raw(type, max_jobs: 1)
+      def activate_job(type, timeout: nil)
+        jobs = activate_jobs_raw(type, max_jobs: 1, timeout: timeout)
         raise NoJobAvailable, "No job of type '#{type}' available" if jobs.empty?
 
         ActivatedJob.new(jobs.first, client: grpc_client)
@@ -134,10 +137,11 @@ module Busybee
       #
       # @param type [String] job type
       # @param max_jobs [Integer] maximum number of jobs to activate
+      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee::Testing.activate_request_timeout)
       # @return [Enumerator<ActivatedJob>]
-      def activate_jobs(type, max_jobs:)
+      def activate_jobs(type, max_jobs:, timeout: nil)
         Enumerator.new do |yielder|
-          activate_jobs_raw(type, max_jobs: max_jobs).each do |raw_job|
+          activate_jobs_raw(type, max_jobs: max_jobs, timeout: timeout).each do |raw_job|
             yielder << ActivatedJob.new(raw_job, client: grpc_client)
           end
         end
@@ -206,10 +210,10 @@ module Busybee
 
       def bpmn_with_unique_id(bpmn_path, process_id)
         bpmn_content = File.read(bpmn_path)
-        bpmn_content
-          .gsub(/(<bpmn:process id=")[^"]+/, "\\1#{process_id}")
+        bpmn_content.
+          gsub(/(<bpmn:process id=")[^"]+/, "\\1#{process_id}").
           # Possessive quantifiers (++, *+) prevent polynomial backtracking
-          .gsub(/(<bpmndi:BPMNPlane\s++[^>]*+bpmnElement=")[^"]++/, "\\1#{process_id}")
+          gsub(/(<bpmndi:BPMNPlane\s++[^>]*+bpmnElement=")[^"]++/, "\\1#{process_id}")
       end
 
       def cancel_process_instance(key)
@@ -223,14 +227,22 @@ module Busybee
         false
       end
 
-      def activate_jobs_raw(type, max_jobs:)
+      def activate_jobs_raw(type, max_jobs:, timeout: nil)
         worker = "#{type}-#{SecureRandom.hex(4)}"
+
+        request_timeout = timeout || Busybee::Testing.activate_request_timeout
+        request_timeout_ms = if request_timeout.is_a?(ActiveSupport::Duration)
+                               request_timeout.in_milliseconds.to_i
+                             else
+                               request_timeout.to_i
+                             end
+
         request = Busybee::GRPC::ActivateJobsRequest.new(
           type: type,
           worker: worker,
           timeout: 30_000,
           maxJobsToActivate: max_jobs,
-          requestTimeout: Busybee::Testing.activate_request_timeout
+          requestTimeout: request_timeout_ms
         )
 
         jobs = []
@@ -242,20 +254,8 @@ module Busybee
 
       def grpc_client
         require "busybee/credentials"
-        credentials = Busybee::Credentials.build(
-          # Camunda Cloud params
-          client_id: ENV.fetch("CAMUNDA_CLIENT_ID", nil),
-          client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET", nil),
-          cluster_id: ENV.fetch("CAMUNDA_CLUSTER_ID", nil),
-          region: ENV.fetch("CAMUNDA_CLUSTER_REGION", nil),
-          # OAuth params
-          token_url: ENV.fetch("ZEEBE_TOKEN_URL", nil),
-          audience: ENV.fetch("ZEEBE_AUDIENCE", nil),
-          scope: ENV.fetch("ZEEBE_SCOPE", nil),
-          # TLS params
-          certificate_file: ENV.fetch("ZEEBE_CERTIFICATE_FILE", nil)
-        )
-        credentials.grpc_stub
+        # Uses Busybee.credential_type if set, autodetects from env vars otherwise
+        Busybee::Credentials.build.grpc_stub
       end
     end
   end

@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "busybee/version"
-require_relative "busybee/defaults"
-require_relative "busybee/credentials"
-require_relative "busybee/logging"
+require "busybee/version"
+require "busybee/defaults"
+require "busybee/credentials"
+require "busybee/logging"
+require "busybee/client"
 
 # Top-level gem module, only holds configuration values.
 module Busybee
@@ -14,7 +15,7 @@ module Busybee
   VALID_LOG_FORMATS = %w[text json].freeze
 
   class << self
-    attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors
+    attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl
     attr_accessor :logger
     attr_reader :credentials
 
@@ -56,6 +57,10 @@ module Busybee
 
     def grpc_retry_errors
       @grpc_retry_errors || default_retry_errors
+    end
+
+    def default_message_ttl
+      @default_message_ttl || Defaults::DEFAULT_MESSAGE_TTL_MS
     end
 
     def credential_type=(value)
@@ -105,4 +110,4 @@ module Busybee
   end
 end
 
-require_relative "busybee/railtie" if defined?(Rails::Railtie)
+require "busybee/railtie" if defined?(Rails::Railtie)

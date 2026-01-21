@@ -28,16 +28,16 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
   end
 
   before do
-    stub_request(:post, token_url)
-      .with(
+    stub_request(:post, token_url).
+      with(
         body: {
           "grant_type" => "client_credentials",
           "client_id" => "test-client",
           "client_secret" => "test-secret",
           "audience" => "zeebe-api"
         }
-      )
-      .to_return(
+      ).
+      to_return(
         status: 200,
         body: token_response.to_json,
         headers: { "Content-Type" => "application/json" }
@@ -114,8 +114,8 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
     end
 
     it "uses expires_in from token response" do
-      stub_request(:post, token_url)
-        .to_return(
+      stub_request(:post, token_url).
+        to_return(
           status: 200,
           body: { access_token: "short-token", expires_in: 60 }.to_json,
           headers: { "Content-Type" => "application/json" }
@@ -138,8 +138,8 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
     end
 
     it "defaults to 50 minute expiry if expires_in not in response" do
-      stub_request(:post, token_url)
-        .to_return(
+      stub_request(:post, token_url).
+        to_return(
           status: 200,
           body: { access_token: "no-expiry-token" }.to_json,
           headers: { "Content-Type" => "application/json" }
@@ -216,27 +216,27 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
 
   describe "error handling" do
     it "raises Busybee::OAuthTokenRefreshFailed when token fetch fails with 401" do
-      stub_request(:post, token_url)
-        .to_return(status: 401, body: "Unauthorized")
+      stub_request(:post, token_url).
+        to_return(status: 401, body: "Unauthorized")
 
-      expect { subject.send(:token_updater, nil) }
-        .to raise_error(Busybee::OAuthTokenRefreshFailed, /HTTP 401/)
+      expect { subject.send(:token_updater, nil) }.
+        to raise_error(Busybee::OAuthTokenRefreshFailed, /HTTP 401/)
     end
 
     it "raises Busybee::OAuthTokenRefreshFailed when token fetch fails with 500" do
-      stub_request(:post, token_url)
-        .to_return(status: 500, body: "Internal Server Error")
+      stub_request(:post, token_url).
+        to_return(status: 500, body: "Internal Server Error")
 
-      expect { subject.send(:token_updater, nil) }
-        .to raise_error(Busybee::OAuthTokenRefreshFailed, /HTTP 500/)
+      expect { subject.send(:token_updater, nil) }.
+        to raise_error(Busybee::OAuthTokenRefreshFailed, /HTTP 500/)
     end
 
     it "raises Busybee::OAuthInvalidResponse when token response is invalid JSON" do
-      stub_request(:post, token_url)
-        .to_return(status: 200, body: "not json")
+      stub_request(:post, token_url).
+        to_return(status: 200, body: "not json")
 
-      expect { subject.send(:token_updater, nil) }
-        .to raise_error(Busybee::OAuthInvalidResponse, /Invalid JSON/)
+      expect { subject.send(:token_updater, nil) }.
+        to raise_error(Busybee::OAuthInvalidResponse, /Invalid JSON/)
     end
   end
 

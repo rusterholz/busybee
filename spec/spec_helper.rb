@@ -17,6 +17,22 @@ require "webmock/rspec"
 # Load support files
 Dir[File.join(__dir__, "support", "**", "*.rb")].each { |f| require f }
 
+# Helper to stub all credential-related env vars to nil for test isolation.
+# Call this at the start of any test that needs to control credential env vars,
+# then override specific vars as needed for that test.
+def stub_credential_env_vars # rubocop:disable Metrics/AbcSize
+  allow(ENV).to receive(:fetch).and_call_original
+  allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return(nil)
+  allow(ENV).to receive(:fetch).with("CAMUNDA_CLIENT_ID", nil).and_return(nil)
+  allow(ENV).to receive(:fetch).with("CAMUNDA_CLIENT_SECRET", nil).and_return(nil)
+  allow(ENV).to receive(:fetch).with("CAMUNDA_CLUSTER_ID", nil).and_return(nil)
+  allow(ENV).to receive(:fetch).with("CAMUNDA_CLUSTER_REGION", nil).and_return(nil)
+  allow(ENV).to receive(:fetch).with("ZEEBE_TOKEN_URL", nil).and_return(nil)
+  allow(ENV).to receive(:fetch).with("ZEEBE_AUDIENCE", nil).and_return(nil)
+  allow(ENV).to receive(:fetch).with("ZEEBE_SCOPE", nil).and_return(nil)
+  allow(ENV).to receive(:fetch).with("ZEEBE_CERTIFICATE_FILE", nil).and_return(nil)
+end
+
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure
   config.example_status_persistence_file_path = ".rspec_status"

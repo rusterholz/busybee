@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-require "busybee"
 require "busybee/credentials"
 require "busybee/client/error_handling"
+require "busybee/client/message_operations"
 require "busybee/client/process_operations"
+require "busybee/client/variable_operations"
 
 module Busybee
   # Ruby-idiomatic wrapper around Zeebe GRPC API.
@@ -22,29 +23,40 @@ module Busybee
   #
   class Client
     include ErrorHandling
+    include MessageOperations
     include ProcessOperations
+    include VariableOperations
 
     attr_reader :credentials
 
     # Create a new client.
     #
     # @param credentials [Credentials, nil] Explicit credentials object (first positional arg)
-    # @param params [Hash] Credential parameters (passed to Credentials.build if no explicit credentials)
+    # @param params [Hash, nil] Credential kwargs (passed to Credentials.build if no explicit credentials)
     # @raise [ArgumentError] if both credentials object and credential params are provided
     #
-    # @example With credential parameters
+    # @example With credential parameters:
     #   Client.new(insecure: true, cluster_address: "localhost:26500")
     #
-    # @example With explicit credentials
+    # @example With explicit credentials:
     #   creds = Credentials::Insecure.new(cluster_address: "localhost:26500")
     #   Client.new(creds)
+    #
+    # @example Inferred entirely from gem configuration or env vars:
+    #   Client.new
     #
     def initialize(credentials = nil, **params)
       if credentials && params.any?
         raise ArgumentError, "cannot pass both explicit credentials and credential parameters"
       end
 
-      @credentials = credentials || Credentials.build(**params)
+      @credentials = if credentials
+                       credentials
+                     elsif params.empty? && Busybee.credentials.is_a?(Busybee::Credentials)
+                       Busybee.credentials
+                     else
+                       Credentials.build(**params) # will attempt to autodetect from env if no params are given
+                     end
     end
 
     # Returns the cluster address from credentials.

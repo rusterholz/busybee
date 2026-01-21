@@ -14,6 +14,9 @@ AllCops:
     # Project-specific
     - "spec/grpc_smoke_spec.rb"
 
+Layout/DotPosition:
+  EnforcedStyle: trailing
+
 Layout/LineLength:
   Max: 120
   Exclude:
@@ -28,11 +31,18 @@ Metrics/BlockLength:
     - "Rakefile"
     - "lib/busybee/testing/matchers/**/*"
 
+Metrics/ClassLength:
+  Max: 150
+
 Metrics/MethodLength:
   Max: 20
 
 Metrics/ModuleLength:
   Max: 150
+
+Naming/VariableNumber:
+  Exclude:
+    - "spec/**/*"
 
 RSpec/DescribeClass:
   Exclude:
@@ -53,6 +63,10 @@ RSpec/MultipleMemoizedHelpers:
 
 RSpec/NamedSubject:
   Enabled: false
+
+RSpec/SpecFilePathFormat:
+  Exclude:
+    - "spec/integration/**/*"
 
 Style/Documentation:
   Enabled: false

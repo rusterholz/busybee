@@ -68,6 +68,13 @@ namespace :zeebe do
     puts "Containers stopped."
   end
 
+  desc "Stop containers and remove all data volumes (fresh start)"
+  task cleanup: :stop do
+    puts "Removing data volumes..."
+    system("docker volume rm busybee_zeebe-data busybee_elasticsearch-data 2>/dev/null") || true
+    puts "Cleanup complete. Run 'rake zeebe:start' for a fresh cluster."
+  end
+
   desc "Show logs from Zeebe and ElasticSearch containers"
   task :logs do
     puts "Showing logs (Ctrl+C to exit)..."

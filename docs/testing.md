@@ -141,12 +141,13 @@ end
 
 ### Job Activation
 
-#### `activate_job(type)`
+#### `activate_job(type, timeout: nil)`
 
 Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAvailable` if no job is available.
 
 **Parameters:**
 - `type` (String) - Job type to activate
+- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee::Testing.activate_request_timeout` (1000ms)
 
 **Returns:** `ActivatedJob` instance
 
@@ -158,15 +159,19 @@ Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAva
 job = activate_job("process-payment")
 expect(job.variables["amount"]).to eq(99.99)
 job.mark_completed(payment_status: "success")
+
+# With custom timeout for faster cleanup loops
+job = activate_job("process-order", timeout: 100)
 ```
 
-#### `activate_jobs(type, max_jobs:)`
+#### `activate_jobs(type, max_jobs:, timeout: nil)`
 
 Activates multiple jobs of the specified type.
 
 **Parameters:**
 - `type` (String) - Job type to activate
 - `max_jobs` (Integer) - Maximum number of jobs to activate
+- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee::Testing.activate_request_timeout` (1000ms)
 
 **Returns:** Enumerator of `ActivatedJob` instances
 
@@ -452,6 +457,26 @@ expect(activate_job("process-order"))
   .with_variables(order_id: "123", total: 99.99)
   .with_headers(priority: "high")
   .and_complete(processed: true, processed_at: Time.now.iso8601)
+```
+
+### `have_available_jobs`
+
+Matcher to check if jobs are available for activation. Primarily used in negated form to verify that no jobs exist.
+
+**Aliases:** `have_an_available_job`
+
+**Example:**
+
+```ruby
+# Verify jobs are available
+expect { activate_job("process-order") }.to have_available_jobs
+
+# More commonly: verify NO jobs are available (most common usage)
+expect { activate_job("process-order") }.not_to have_available_jobs
+
+# Use case: verify signal didn't create instances
+client.broadcast_signal("non-existent-signal")
+expect { activate_job("process-order") }.not_to have_an_available_job
 ```
 
 ## Complete Workflow Example

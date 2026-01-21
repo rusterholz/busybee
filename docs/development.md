@@ -114,6 +114,8 @@ Busybee includes integration tests for **live Camunda Cloud** clusters (tagged `
 
 ```bash
 # Run Camunda Cloud integration tests
+# Note: Source your shell rc file first to load credentials
+source ~/.bashrc  # or ~/.zshrc
 RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec --tag camunda_cloud
 ```
 

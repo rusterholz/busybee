@@ -32,6 +32,7 @@ if defined?(RSpec)
   require "busybee/testing/matchers/have_received_variables"
   require "busybee/testing/matchers/have_received_headers"
   require "busybee/testing/matchers/have_activated"
+  require "busybee/testing/matchers/have_available_jobs"
 
   RSpec.configure do |config|
     config.include Busybee::Testing::Helpers

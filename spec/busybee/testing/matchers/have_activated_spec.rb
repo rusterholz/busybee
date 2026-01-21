@@ -79,24 +79,24 @@ RSpec.describe "have_activated matcher" do
 
   describe "chaining both variables and headers" do
     it "passes when job has both expected variables and headers" do
-      expect(helper).to have_activated("my-task")
-        .with_variables(foo: "bar")
-        .with_headers(workflow_version: "v2")
+      expect(helper).to have_activated("my-task").
+        with_variables(foo: "bar").
+        with_headers(workflow_version: "v2")
     end
 
     it "fails when variables match but headers don't" do
       expect do
-        expect(helper).to have_activated("my-task")
-          .with_variables(foo: "bar")
-          .with_headers(missing: "value")
+        expect(helper).to have_activated("my-task").
+          with_variables(foo: "bar").
+          with_headers(missing: "value")
       end.to raise_error(RSpec::Expectations::ExpectationNotMetError, /expected job headers to include/)
     end
 
     it "fails when headers match but variables don't" do
       expect do
-        expect(helper).to have_activated("my-task")
-          .with_variables(missing: "value")
-          .with_headers(workflow_version: "v2")
+        expect(helper).to have_activated("my-task").
+          with_variables(missing: "value").
+          with_headers(workflow_version: "v2")
       end.to raise_error(RSpec::Expectations::ExpectationNotMetError, /expected job variables to include/)
     end
   end

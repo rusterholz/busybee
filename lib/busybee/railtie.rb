@@ -24,7 +24,7 @@ module Busybee
 
         # Credentials configuration
         config.credential_type = busybee_conf&.credential_type.presence if busybee_conf&.credential_type.presence
-        config.credentials = busybee_conf&.credentials if busybee_conf&.credentials
+        config.credentials = busybee_conf&.credentials if busybee_conf&.credentials.is_a?(Busybee::Credentials)
 
         # GRPC retry configuration
         config.grpc_retry_enabled = !!busybee_conf.grpc_retry_enabled unless busybee_conf&.grpc_retry_enabled.nil?
@@ -33,6 +33,9 @@ module Busybee
         if busybee_conf&.grpc_retry_errors.presence
           config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors.presence)
         end
+
+        # Message configuration
+        config.default_message_ttl = busybee_conf.default_message_ttl if busybee_conf&.default_message_ttl.presence
       end
     end
   end
