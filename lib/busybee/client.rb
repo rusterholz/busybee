@@ -2,6 +2,7 @@
 
 require "busybee/credentials"
 require "busybee/client/error_handling"
+require "busybee/client/job_operations"
 require "busybee/client/message_operations"
 require "busybee/client/process_operations"
 require "busybee/client/variable_operations"
@@ -23,6 +24,7 @@ module Busybee
   #
   class Client
     include ErrorHandling
+    include JobOperations
     include MessageOperations
     include ProcessOperations
     include VariableOperations

@@ -64,6 +64,9 @@ RSpec/MultipleMemoizedHelpers:
 RSpec/NamedSubject:
   Enabled: false
 
+RSpec/NestedGroups:
+  Max: 5
+
 RSpec/SpecFilePathFormat:
   Exclude:
     - "spec/integration/**/*"

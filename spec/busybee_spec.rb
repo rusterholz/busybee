@@ -105,6 +105,56 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".default_message_ttl" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_message_ttl)
+      example.run
+      described_class.default_message_ttl = original
+    end
+
+    it "defaults to Defaults::DEFAULT_MESSAGE_TTL_MS" do
+      described_class.default_message_ttl = nil
+      expect(described_class.default_message_ttl).to eq(Busybee::Defaults::DEFAULT_MESSAGE_TTL_MS)
+    end
+
+    it "can be set to a custom integer value" do
+      described_class.default_message_ttl = 30_000
+      expect(described_class.default_message_ttl).to eq(30_000)
+    end
+
+    it "can be set to an ActiveSupport::Duration and returns the Duration" do
+      duration = 30.seconds
+      described_class.default_message_ttl = duration
+      expect(described_class.default_message_ttl).to be(duration)
+      expect(described_class.default_message_ttl).to be_a(ActiveSupport::Duration)
+    end
+  end
+
+  describe ".default_fail_job_backoff" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_fail_job_backoff)
+      example.run
+      described_class.default_fail_job_backoff = original
+    end
+
+    it "defaults to Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS" do
+      described_class.default_fail_job_backoff = nil
+      expect(described_class.default_fail_job_backoff).to eq(Busybee::Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS)
+    end
+
+    it "can be set to a custom integer value" do
+      described_class.default_fail_job_backoff = 10_000
+      expect(described_class.default_fail_job_backoff).to eq(10_000)
+    end
+
+    it "can be set to an ActiveSupport::Duration and returns the Duration" do
+      duration = 10.seconds
+      described_class.default_fail_job_backoff = duration
+      expect(described_class.default_fail_job_backoff).to be(duration)
+      expect(described_class.default_fail_job_backoff).to be_a(ActiveSupport::Duration)
+    end
+  end
+
   describe ".credentials" do
     it "can be set and retrieved with valid credentials object" do
       creds = Busybee::Credentials.new
