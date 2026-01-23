@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-RSpec.describe Busybee::Client, "#complete_job" do
+RSpec.describe Busybee::Client, "#throw_bpmn_error" do
   let(:job_bpmn_path) { File.expand_path("../../fixtures/job_process.bpmn", __dir__) }
 
-  shared_examples "complete_job" do
+  shared_examples "throw_bpmn_error" do
     around do |example|
       if example.metadata[:skip_process_instance]
         example.run
@@ -17,25 +17,25 @@ RSpec.describe Busybee::Client, "#complete_job" do
       end
     end
 
-    it "completes a job successfully" do
+    it "throws a BPMN error successfully" do
       # Activate the job
       job = activate_job("process-order")
 
       expect(job.bpmn_process_id).to eq("job-process")
       expect(job.process_instance_key).to eq(process_instance_key)
 
-      # Complete the job
-      result = client.complete_job(job.key)
+      # Throw a BPMN error
+      result = client.throw_bpmn_error(job.key, "ORDER_NOT_FOUND")
 
       expect(result).to be_truthy
     end
 
-    it "completes a job with output variables" do
+    it "throws a BPMN error with message" do
       # Activate the job
       job = activate_job("process-order")
 
-      # Complete with variables
-      result = client.complete_job(job.key, vars: { result: "success", orderId: 123 })
+      # Throw error with message
+      result = client.throw_bpmn_error(job.key, "PAYMENT_FAILED", message: "Insufficient funds")
 
       expect(result).to be_truthy
     end
@@ -43,23 +43,25 @@ RSpec.describe Busybee::Client, "#complete_job" do
     it "raises error when job key does not exist", :skip_process_instance do
       non_existent_key = 999_999_999_999
 
-      expect { client.complete_job(non_existent_key) }.to raise_error(Busybee::GRPC::Error) do |error|
-        expect(error.cause).to be_a(GRPC::NotFound)
-        expect(error.grpc_status).to eq(:not_found)
-      end
+      expect { client.throw_bpmn_error(non_existent_key, "ERROR_CODE") }.
+        to raise_error(Busybee::GRPC::Error) do |error|
+          expect(error.cause).to be_a(GRPC::NotFound)
+          expect(error.grpc_status).to eq(:not_found)
+        end
     end
 
-    it "raises error when trying to complete an already completed job" do
+    it "raises error when trying to throw error on already completed job" do
       # Activate a job
       job = activate_job("process-order")
 
-      # Complete the job once
+      # Complete the job first
       client.complete_job(job.key)
 
-      # Attempting to complete again should raise an error
-      expect { client.complete_job(job.key) }.to raise_error(Busybee::GRPC::Error) do |error|
-        expect(error.cause).to be_a(GRPC::NotFound)
-      end
+      # Attempting to throw error should fail
+      expect { client.throw_bpmn_error(job.key, "ERROR_CODE") }.
+        to raise_error(Busybee::GRPC::Error) do |error|
+          expect(error.cause).to be_a(GRPC::NotFound)
+        end
     end
   end
 
@@ -73,7 +75,7 @@ RSpec.describe Busybee::Client, "#complete_job" do
 
     let(:client) { local_busybee_client }
 
-    it_behaves_like "complete_job"
+    it_behaves_like "throw_bpmn_error"
   end
 
   context "with Camunda Cloud", :camunda_cloud do
@@ -86,6 +88,6 @@ RSpec.describe Busybee::Client, "#complete_job" do
 
     let(:client) { camunda_cloud_busybee_client }
 
-    it_behaves_like "complete_job"
+    it_behaves_like "throw_bpmn_error"
   end
 end
