@@ -7,6 +7,7 @@ require "active_support"
 require "active_support/duration"
 require "busybee/grpc"
 require_relative "activated_job"
+require_relative "helpers/support"
 
 module Busybee
   module Testing
@@ -15,6 +16,8 @@ module Busybee
 
     # RSpec helper methods for testing BPMN workflows against Zeebe.
     module Helpers
+      extend Support
+
       # Deploy a BPMN process file to Zeebe.
       #
       # By default, deploys the BPMN file as-is using its original process ID.
@@ -42,11 +45,11 @@ module Busybee
       #   result[:process_id] #=> "my-test-process"
       def deploy_process(path, uniquify: nil)
         if uniquify
-          process_id = uniquify == true ? unique_process_id : uniquify
-          bpmn_content = bpmn_with_unique_id(path, process_id)
+          process_id = uniquify == true ? Busybee::Testing::Helpers.unique_process_id : uniquify
+          bpmn_content = Busybee::Testing::Helpers.bpmn_with_unique_id(path, process_id)
         else
           bpmn_content = File.read(path)
-          process_id = extract_process_id(bpmn_content)
+          process_id = Busybee::Testing::Helpers.extract_process_id(bpmn_content)
         end
 
         resource = Busybee::GRPC::Resource.new(
@@ -84,7 +87,7 @@ module Busybee
         yield @current_process_instance_key
       ensure
         if @current_process_instance_key
-          cancel_process_instance(@current_process_instance_key)
+          Busybee::Testing::Helpers.cancel_process_instance(@current_process_instance_key)
           @last_process_instance_key = @current_process_instance_key
           @current_process_instance_key = nil
         end
@@ -103,6 +106,31 @@ module Busybee
       # @return [Integer, nil]
       def last_process_instance_key
         @last_process_instance_key
+      end
+
+      # Activate a job, yield it, and complete it on block exit.
+      # Must be called within a with_process_instance block.
+      #
+      # @param job_type [String] job type to activate
+      # @yield [ActivatedJob] the activated job
+      def with_activated_job_instance(job_type)
+        job = activate_job(job_type)
+        @current_job_key = job.key
+        yield job
+      ensure
+        if @current_job_key
+          begin
+            request = Busybee::GRPC::CompleteJobRequest.new(
+              jobKey: @current_job_key,
+              variables: "{}"
+            )
+            grpc_client.complete_job(request)
+          rescue ::GRPC::BadStatus
+            # Job may have already been completed/failed in the test block - ignore
+          ensure
+            @current_job_key = nil
+          end
+        end
       end
 
       # Checks if Zeebe is available and responsive.
@@ -127,7 +155,7 @@ module Busybee
       # @return [ActivatedJob]
       # @raise [NoJobAvailable] if no job is available
       def activate_job(type, timeout: nil)
-        jobs = activate_jobs_raw(type, max_jobs: 1, timeout: timeout)
+        jobs = Busybee::Testing::Helpers.activate_jobs_raw(type, max_jobs: 1, timeout: timeout)
         raise NoJobAvailable, "No job of type '#{type}' available" if jobs.empty?
 
         ActivatedJob.new(jobs.first, client: grpc_client)
@@ -141,7 +169,7 @@ module Busybee
       # @return [Enumerator<ActivatedJob>]
       def activate_jobs(type, max_jobs:, timeout: nil)
         Enumerator.new do |yielder|
-          activate_jobs_raw(type, max_jobs: max_jobs, timeout: timeout).each do |raw_job|
+          Busybee::Testing::Helpers.activate_jobs_raw(type, max_jobs: max_jobs, timeout: timeout).each do |raw_job|
             yielder << ActivatedJob.new(raw_job, client: grpc_client)
           end
         end
@@ -197,65 +225,14 @@ module Busybee
         end
       end
 
-      private
-
-      def unique_process_id
-        "test-process-#{SecureRandom.hex(6)}"
-      end
-
-      def extract_process_id(bpmn_content)
-        match = bpmn_content.match(/<bpmn:process id="([^"]+)"/)
-        match ? match[1] : nil
-      end
-
-      def bpmn_with_unique_id(bpmn_path, process_id)
-        bpmn_content = File.read(bpmn_path)
-        bpmn_content.
-          gsub(/(<bpmn:process id=")[^"]+/, "\\1#{process_id}").
-          # Possessive quantifiers (++, *+) prevent polynomial backtracking
-          gsub(/(<bpmndi:BPMNPlane\s++[^>]*+bpmnElement=")[^"]++/, "\\1#{process_id}")
-      end
-
-      def cancel_process_instance(key)
-        request = Busybee::GRPC::CancelProcessInstanceRequest.new(
-          processInstanceKey: key
-        )
-        grpc_client.cancel_process_instance(request)
-        true
-      rescue ::GRPC::NotFound
-        # Process already completed, ignore
-        false
-      end
-
-      def activate_jobs_raw(type, max_jobs:, timeout: nil)
-        worker = "#{type}-#{SecureRandom.hex(4)}"
-
-        request_timeout = timeout || Busybee::Testing.activate_request_timeout
-        request_timeout_ms = if request_timeout.is_a?(ActiveSupport::Duration)
-                               request_timeout.in_milliseconds.to_i
-                             else
-                               request_timeout.to_i
-                             end
-
-        request = Busybee::GRPC::ActivateJobsRequest.new(
-          type: type,
-          worker: worker,
-          timeout: 30_000,
-          maxJobsToActivate: max_jobs,
-          requestTimeout: request_timeout_ms
-        )
-
-        jobs = []
-        grpc_client.activate_jobs(request).each do |response|
-          jobs.concat(response.jobs.to_a)
-        end
-        jobs
-      end
-
+      # Returns a GRPC client stub for direct Zeebe access.
+      # Uses Busybee.credential_type if set, autodetects from env vars otherwise.
+      #
+      # This is a public instance method that delegates to the module-level implementation.
+      #
+      # @return [Busybee::GRPC::Gateway::Stub]
       def grpc_client
-        require "busybee/credentials"
-        # Uses Busybee.credential_type if set, autodetects from env vars otherwise
-        Busybee::Credentials.build.grpc_stub
+        Busybee::Testing::Helpers.grpc_client
       end
     end
   end

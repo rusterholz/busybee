@@ -231,12 +231,12 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
         to raise_error(Busybee::OAuthTokenRefreshFailed, /HTTP 500/)
     end
 
-    it "raises Busybee::OAuthInvalidResponse when token response is invalid JSON" do
+    it "raises Busybee::InvalidOAuthResponse when token response is invalid JSON" do
       stub_request(:post, token_url).
         to_return(status: 200, body: "not json")
 
       expect { subject.send(:token_updater, nil) }.
-        to raise_error(Busybee::OAuthInvalidResponse, /Invalid JSON/)
+        to raise_error(Busybee::InvalidOAuthResponse, /Invalid JSON/)
     end
   end
 

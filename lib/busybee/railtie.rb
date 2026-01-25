@@ -21,6 +21,7 @@ module Busybee
         # Use Rails logger by default in Rails apps
         config.logger = Rails.logger
         config.cluster_address = busybee_conf&.cluster_address.presence
+        config.worker_name = busybee_conf&.worker_name.presence
 
         # Credentials configuration
         config.credential_type = busybee_conf&.credential_type.presence if busybee_conf&.credential_type.presence

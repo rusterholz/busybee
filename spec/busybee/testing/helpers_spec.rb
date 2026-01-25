@@ -14,7 +14,7 @@ RSpec.describe Busybee::Testing::Helpers do
   let(:bpmn_content) { File.read(bpmn_path) }
 
   before do
-    allow(helper).to receive(:grpc_client).and_return(mock_client)
+    allow(described_class).to receive(:grpc_client).and_return(mock_client)
   end
 
   describe "#deploy_process" do

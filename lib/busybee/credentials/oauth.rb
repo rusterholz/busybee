@@ -114,7 +114,7 @@ module Busybee
 
         JSON.parse(response.body)
       rescue JSON::ParserError => e
-        raise Busybee::OAuthInvalidResponse, "Invalid JSON response from token endpoint: #{e.message}"
+        raise Busybee::InvalidOAuthResponse, "Invalid JSON response from token endpoint: #{e.message}"
       end
 
       def http_client

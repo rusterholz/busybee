@@ -10,5 +10,11 @@ module Busybee
   OAuthTokenRefreshFailed = Class.new(Error)
 
   # Raised when OAuth2 token endpoint returns invalid JSON
-  OAuthInvalidResponse = Class.new(Error)
+  InvalidOAuthResponse = Class.new(Error)
+
+  # Raised when job variables or headers JSON cannot be parsed
+  InvalidJobJson = Class.new(Error)
+
+  # Raised when attempting to complete, fail, or throw error on a job that has already been handled
+  JobAlreadyHandled = Class.new(Error)
 end

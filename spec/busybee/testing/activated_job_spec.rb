@@ -13,10 +13,13 @@ RSpec.describe Busybee::Testing::ActivatedJob do
     double(
       "Busybee::GRPC::ActivatedJob",
       key: 12_345,
+      type: "process-order",
       processInstanceKey: 67_890,
+      bpmnProcessId: "order-workflow",
       variables: '{"foo": "bar", "count": 42}',
       customHeaders: '{"task_type": "process_order"}',
-      retries: 3
+      retries: 3,
+      deadline: 1640000000000
     )
     # rubocop:enable RSpec/VerifiedDoubles
   end
@@ -28,9 +31,33 @@ RSpec.describe Busybee::Testing::ActivatedJob do
     end
   end
 
+  describe "#type" do
+    it "returns the job type" do
+      expect(job.type).to eq("process-order")
+    end
+  end
+
   describe "#process_instance_key" do
     it "returns the process instance key" do
       expect(job.process_instance_key).to eq(67_890)
+    end
+  end
+
+  describe "#bpmn_process_id" do
+    it "returns the BPMN process ID" do
+      expect(job.bpmn_process_id).to eq("order-workflow")
+    end
+  end
+
+  describe "#retries" do
+    it "returns the retry count" do
+      expect(job.retries).to eq(3)
+    end
+  end
+
+  describe "#deadline" do
+    it "returns the deadline timestamp" do
+      expect(job.deadline).to eq(1640000000000)
     end
   end
 
@@ -55,12 +82,6 @@ RSpec.describe Busybee::Testing::ActivatedJob do
       expect(JSON).to receive(:parse).once.and_call_original # rubocop:disable RSpec/MessageSpies
       job.headers
       job.headers # second call should not parse again
-    end
-  end
-
-  describe "#retries" do
-    it "returns the retry count" do
-      expect(job.retries).to eq(3)
     end
   end
 

@@ -32,8 +32,24 @@ module Busybee
         raw.key
       end
 
+      def type
+        raw.type
+      end
+
       def process_instance_key
         raw.processInstanceKey
+      end
+
+      def bpmn_process_id
+        raw.bpmnProcessId
+      end
+
+      def retries
+        raw.retries
+      end
+
+      def deadline
+        raw.deadline
       end
 
       def variables
@@ -42,10 +58,6 @@ module Busybee
 
       def headers
         @headers ||= JSON.parse(raw.customHeaders)
-      end
-
-      def retries
-        raw.retries
       end
 
       # Assert that job variables include the expected values.
