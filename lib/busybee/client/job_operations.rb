@@ -93,6 +93,98 @@ module Busybee
           stub.throw_error(request)
         end
       end
+
+      # Update the retry count for a job.
+      #
+      # @param job_key [Integer] The unique job identifier
+      # @param retries [Integer] The new number of retries
+      # @return [Object] Response from the gateway (truthy)
+      # @raise [Busybee::GRPC::Error] if update operation fails
+      #
+      # @example Update job retries
+      #   client.update_job_retries(123456, 5)
+      #
+      def update_job_retries(job_key, retries)
+        request = Busybee::GRPC::UpdateJobRetriesRequest.new(
+          jobKey: job_key.to_i,
+          retries: retries.to_i
+        )
+
+        with_retry do
+          stub.update_job_retries(request)
+        end
+      end
+
+      # Update the timeout for a job.
+      #
+      # @param job_key [Integer] The unique job identifier
+      # @param timeout [Integer, ActiveSupport::Duration] New timeout in milliseconds
+      # @return [Object] Response from the gateway (truthy)
+      # @raise [Busybee::GRPC::Error] if update operation fails
+      #
+      # @example Update job timeout with milliseconds
+      #   client.update_job_timeout(123456, 30_000)
+      #
+      # @example Update job timeout with Duration
+      #   client.update_job_timeout(123456, 30.seconds)
+      #
+      def update_job_timeout(job_key, timeout)
+        timeout_ms = timeout.is_a?(ActiveSupport::Duration) ? timeout.in_milliseconds.to_i : timeout.to_i
+
+        request = Busybee::GRPC::UpdateJobTimeoutRequest.new(
+          jobKey: job_key.to_i,
+          timeout: timeout_ms
+        )
+
+        with_retry do
+          stub.update_job_timeout(request)
+        end
+      end
+
+      # Activate and process jobs with a block (bounded, non-streaming).
+      #
+      # @param job_type [String] The job type to activate
+      # @param max_jobs [Integer] Maximum number of jobs to activate
+      # @param job_timeout [Integer, ActiveSupport::Duration] Job timeout in milliseconds
+      # @param request_timeout [Integer, ActiveSupport::Duration] Request timeout in milliseconds
+      # @yield [job] Yields each activated job to the block
+      # @yieldparam job [Busybee::Job] The activated job
+      # @return [Integer] Count of jobs processed
+      # @raise [ArgumentError] if no block given
+      # @raise [Busybee::GRPC::Error] if activation fails
+      #
+      # @example Process jobs
+      #   client.with_each_job("send-email") do |job|
+      #     send_email(job.variables.email, job.variables.subject)
+      #     job.complete!
+      #   end
+      #
+      def with_each_job(job_type, max_jobs: Busybee::Defaults::DEFAULT_MAX_JOBS, # rubocop:disable Metrics/AbcSize
+                        job_timeout: Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS,
+                        request_timeout: Busybee::Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS)
+        raise ArgumentError, "block required" unless block_given?
+
+        request = Busybee::GRPC::ActivateJobsRequest.new(
+          type: job_type.to_s,
+          worker: Busybee.worker_name,
+          maxJobsToActivate: max_jobs.to_i,
+          timeout: milliseconds_from(job_timeout),
+          requestTimeout: milliseconds_from(request_timeout)
+        )
+
+        count = 0
+        responses = with_retry { stub.activate_jobs(request) }
+
+        responses.each do |response|
+          response.jobs.each do |raw_job|
+            job = Busybee::Job.new(raw_job, client: self)
+            yield job
+            count += 1
+          end
+        end
+
+        count
+      end
     end
   end
 end

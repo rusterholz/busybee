@@ -212,4 +212,283 @@ RSpec.describe Busybee::Client::JobOperations do
       end.to raise_error(Busybee::GRPC::Error)
     end
   end
+
+  describe "#update_job_retries" do
+    let(:response) { double("UpdateJobRetriesResponse") } # rubocop:disable RSpec/VerifiedDoubles
+
+    it "updates job retries and returns truthy value" do
+      allow(stub).to receive(:update_job_retries).and_return(response)
+
+      result = client.update_job_retries(123456, 5)
+
+      expect(result).to be_truthy
+    end
+
+    it "sends job key and retries in request" do
+      allow(stub).to receive(:update_job_retries).and_return(response)
+
+      client.update_job_retries(123456, 5)
+
+      expect(stub).to have_received(:update_job_retries).with(
+        having_attributes(
+          jobKey: 123456,
+          retries: 5
+        )
+      )
+    end
+
+    it "converts job key from string to integer" do
+      allow(stub).to receive(:update_job_retries).and_return(response)
+
+      client.update_job_retries("123456", 5)
+
+      expect(stub).to have_received(:update_job_retries).with(
+        having_attributes(jobKey: 123456)
+      )
+    end
+
+    it "requires retries parameter" do
+      expect { client.update_job_retries(123456) }.to raise_error(ArgumentError)
+    end
+
+    it "wraps GRPC errors" do
+      grpc_error = GRPC::NotFound.new("job not found")
+      allow(stub).to receive(:update_job_retries).and_raise(grpc_error)
+
+      expect { client.update_job_retries(123456, 5) }.to raise_error(Busybee::GRPC::Error)
+    end
+  end
+
+  describe "#update_job_timeout" do
+    let(:response) { double("UpdateJobTimeoutResponse") } # rubocop:disable RSpec/VerifiedDoubles
+
+    it "updates job timeout and returns truthy value" do
+      allow(stub).to receive(:update_job_timeout).and_return(response)
+
+      result = client.update_job_timeout(123456, 30_000)
+
+      expect(result).to be_truthy
+    end
+
+    it "sends job key and timeout in request" do
+      allow(stub).to receive(:update_job_timeout).and_return(response)
+
+      client.update_job_timeout(123456, 30_000)
+
+      expect(stub).to have_received(:update_job_timeout).with(
+        having_attributes(
+          jobKey: 123456,
+          timeout: 30_000
+        )
+      )
+    end
+
+    it "converts job key from string to integer" do
+      allow(stub).to receive(:update_job_timeout).and_return(response)
+
+      client.update_job_timeout("123456", 30_000)
+
+      expect(stub).to have_received(:update_job_timeout).with(
+        having_attributes(jobKey: 123456)
+      )
+    end
+
+    it "requires timeout parameter" do
+      expect { client.update_job_timeout(123456) }.to raise_error(ArgumentError)
+    end
+
+    it "supports timeout as Duration object" do
+      allow(stub).to receive(:update_job_timeout).and_return(response)
+
+      client.update_job_timeout(123456, 30.seconds)
+
+      expect(stub).to have_received(:update_job_timeout).with(
+        having_attributes(timeout: 30_000)
+      )
+    end
+
+    it "wraps GRPC errors" do
+      grpc_error = GRPC::NotFound.new("job not found")
+      allow(stub).to receive(:update_job_timeout).and_raise(grpc_error)
+
+      expect { client.update_job_timeout(123456, 30_000) }.to raise_error(Busybee::GRPC::Error)
+    end
+  end
+
+  describe "#with_each_job" do
+    # rubocop:disable RSpec/IndexedLet, Lint/EmptyBlock
+    let(:raw_job1) do
+      Busybee::GRPC::ActivatedJob.new(
+        key: 111,
+        type: "test-job",
+        processInstanceKey: 789,
+        bpmnProcessId: "test-process",
+        variables: '{"foo":"bar"}',
+        customHeaders: "{}",
+        retries: 3,
+        deadline: (Time.now.to_f * 1000).to_i
+      )
+    end
+    let(:raw_job2) do
+      Busybee::GRPC::ActivatedJob.new(
+        key: 222,
+        type: "test-job",
+        processInstanceKey: 790,
+        bpmnProcessId: "test-process",
+        variables: '{"baz":"qux"}',
+        customHeaders: "{}",
+        retries: 3,
+        deadline: (Time.now.to_f * 1000).to_i
+      )
+    end
+    let(:raw_job3) do
+      Busybee::GRPC::ActivatedJob.new(
+        key: 333,
+        type: "test-job",
+        processInstanceKey: 791,
+        bpmnProcessId: "test-process",
+        variables: '{"hello":"world"}',
+        customHeaders: "{}",
+        retries: 3,
+        deadline: (Time.now.to_f * 1000).to_i
+      )
+    end
+    # Multiple responses, each containing multiple jobs
+    let(:responses) do
+      [
+        Busybee::GRPC::ActivateJobsResponse.new(jobs: [raw_job1, raw_job2]),
+        Busybee::GRPC::ActivateJobsResponse.new(jobs: [raw_job3])
+      ]
+    end
+
+    it "activates jobs and yields each job to the block" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      yielded_jobs = []
+      client.with_each_job("test-job") do |job|
+        yielded_jobs << job
+      end
+
+      expect(yielded_jobs.length).to eq(3)
+      expect(yielded_jobs).to all(be_a(Busybee::Job))
+      expect(yielded_jobs.map(&:key)).to eq([111, 222, 333])
+    end
+
+    it "returns count of jobs processed" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      count = client.with_each_job("test-job") { |_job| }
+
+      expect(count).to eq(3)
+    end
+
+    it "sends job type and worker name in request" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job") { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(
+          type: "test-job",
+          worker: Busybee.worker_name
+        )
+      )
+    end
+
+    it "uses default max_jobs from Defaults" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job") { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(maxJobsToActivate: Busybee::Defaults::DEFAULT_MAX_JOBS)
+      )
+    end
+
+    it "accepts custom max_jobs parameter" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job", max_jobs: 10) { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(maxJobsToActivate: 10)
+      )
+    end
+
+    it "uses default job_timeout from Defaults" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job") { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(timeout: Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS)
+      )
+    end
+
+    it "accepts custom job_timeout parameter" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job", job_timeout: 30_000) { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(timeout: 30_000)
+      )
+    end
+
+    it "supports job_timeout as Duration object" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job", job_timeout: 30.seconds) { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(timeout: 30_000)
+      )
+    end
+
+    it "uses default request_timeout from Defaults" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job") { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(requestTimeout: Busybee::Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS)
+      )
+    end
+
+    it "accepts custom request_timeout parameter" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job", request_timeout: 120_000) { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(requestTimeout: 120_000)
+      )
+    end
+
+    it "supports request_timeout as Duration object" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job", request_timeout: 2.minutes) { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(
+        having_attributes(requestTimeout: 120_000)
+      )
+    end
+
+    it "requires a block" do
+      expect do
+        client.with_each_job("test-job")
+      end.to raise_error(ArgumentError, /block required/)
+    end
+
+    it "wraps GRPC errors" do
+      grpc_error = GRPC::Unavailable.new("service unavailable")
+      allow(stub).to receive(:activate_jobs).and_raise(grpc_error)
+
+      expect do
+        client.with_each_job("test-job") { |_job| }
+      end.to raise_error(Busybee::GRPC::Error)
+    end
+    # rubocop:enable RSpec/IndexedLet, Lint/EmptyBlock
+  end
 end

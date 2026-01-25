@@ -38,6 +38,46 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".worker_name" do
+    around do |example|
+      original = described_class.instance_variable_get(:@worker_name)
+      example.run
+      described_class.worker_name = original
+    end
+
+    it "returns configured worker name" do
+      described_class.worker_name = "my-custom-worker"
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return("env-worker")
+      allow(Socket).to receive(:gethostname).and_return("hostname")
+
+      expect(described_class.worker_name).to eq("my-custom-worker")
+    end
+
+    it "falls back to BUSYBEE_WORKER_NAME env var" do
+      described_class.worker_name = nil
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return("env-worker")
+      allow(Socket).to receive(:gethostname).and_return("hostname")
+
+      expect(described_class.worker_name).to eq("env-worker")
+    end
+
+    it "falls back to hostname when BUSYBEE_WORKER_NAME not set" do
+      described_class.worker_name = nil
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return(nil)
+      allow(Socket).to receive(:gethostname).and_return("my-hostname")
+
+      expect(described_class.worker_name).to eq("my-hostname")
+    end
+
+    it "falls back to busybee-worker when hostname fails" do
+      described_class.worker_name = nil
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return(nil)
+      allow(Socket).to receive(:gethostname).and_raise(StandardError, "hostname failed")
+
+      expect(described_class.worker_name).to eq("busybee-worker")
+    end
+  end
+
   describe ".logger" do
     around do |example|
       original = described_class.instance_variable_get(:@logger)
