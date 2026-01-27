@@ -58,7 +58,7 @@ RSpec.describe Busybee::Client, "#with_each_job" do
       expect(count).to eq(0)
     end
 
-    it "processes jobs from multiple process instances", :skip_process_instance do # rubocop:disable RSpec/ExampleLength
+    it "processes jobs from multiple process instances", :skip_process_instance do
       # Create multiple process instances
       instance_keys = []
       3.times do

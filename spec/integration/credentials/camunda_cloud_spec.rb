@@ -76,7 +76,7 @@ RSpec.describe Busybee::Credentials::CamundaCloud, :camunda_cloud do
         expect(response["clusterSize"]).to be > 0
       end
 
-      it "can deploy a process definition" do # rubocop:disable RSpec/ExampleLength
+      it "can deploy a process definition" do
         stub = credentials.grpc_stub
 
         resources = [

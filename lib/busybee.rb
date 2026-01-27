@@ -6,6 +6,7 @@ require "busybee/defaults"
 require "busybee/credentials"
 require "busybee/logging"
 require "busybee/job"
+require "busybee/job_stream"
 require "busybee/client"
 
 # Top-level gem module, only holds configuration values.

@@ -51,6 +51,8 @@ RSpec/DescribeClass:
 
 RSpec/ExampleLength:
   Max: 15
+  Exclude:
+    - "spec/integration/**/*"
 
 RSpec/MessageSpies:
   EnforcedStyle: have_received

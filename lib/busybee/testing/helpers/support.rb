@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require "securerandom"
-require "json"
 require "active_support"
 require "active_support/duration"
+require "json"
+require "securerandom"
 require "busybee/grpc"
 
 module Busybee

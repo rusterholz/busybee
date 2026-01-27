@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "rspec/expectations"
-require_relative "../activated_job"
+require "busybee/testing/activated_job"
 
 RSpec::Matchers.define :have_activated do |job_type|
   match do |helper|

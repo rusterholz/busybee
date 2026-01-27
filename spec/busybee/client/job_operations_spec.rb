@@ -491,4 +491,93 @@ RSpec.describe Busybee::Client::JobOperations do
     end
     # rubocop:enable RSpec/IndexedLet, Lint/EmptyBlock
   end
+
+  describe "#open_job_stream" do
+    let(:operation) { instance_double(GRPC::ActiveCall::Operation) }
+    let(:enumerator) { instance_double(Enumerator) }
+
+    before do
+      allow(operation).to receive(:execute).and_return(enumerator)
+    end
+
+    it "returns a Busybee::JobStream instance" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      stream = client.open_job_stream("test-job")
+
+      expect(stream).to be_a(Busybee::JobStream)
+    end
+
+    it "passes return_op: true to stream_activated_jobs" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream("test-job")
+
+      expect(stub).to have_received(:stream_activated_jobs).with(anything, return_op: true)
+    end
+
+    it "sends job type in request" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream("send-email")
+
+      expect(stub).to have_received(:stream_activated_jobs).with(
+        having_attributes(type: "send-email"),
+        return_op: true
+      )
+    end
+
+    it "sends worker name in request" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream("test-job")
+
+      expect(stub).to have_received(:stream_activated_jobs).with(
+        having_attributes(worker: Busybee.worker_name),
+        return_op: true
+      )
+    end
+
+    it "uses default job_timeout from Defaults" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream("test-job")
+
+      expect(stub).to have_received(:stream_activated_jobs).with(
+        having_attributes(timeout: Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS),
+        return_op: true
+      )
+    end
+
+    it "accepts custom job_timeout parameter" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream("test-job", job_timeout: 30_000)
+
+      expect(stub).to have_received(:stream_activated_jobs).with(
+        having_attributes(timeout: 30_000),
+        return_op: true
+      )
+    end
+
+    it "supports job_timeout as Duration object" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream("test-job", job_timeout: 30.seconds)
+
+      expect(stub).to have_received(:stream_activated_jobs).with(
+        having_attributes(timeout: 30_000),
+        return_op: true
+      )
+    end
+
+    it "wraps GRPC errors" do
+      grpc_error = GRPC::InvalidArgument.new("type is blank")
+      allow(stub).to receive(:stream_activated_jobs).and_raise(grpc_error)
+
+      expect do
+        client.open_job_stream("test-job")
+      end.to raise_error(Busybee::GRPC::Error)
+    end
+  end
 end

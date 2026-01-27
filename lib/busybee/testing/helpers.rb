@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
-require "securerandom"
-require "base64"
-require "json"
 require "active_support"
 require "active_support/duration"
+require "base64"
+require "json"
+require "securerandom"
 require "busybee/grpc"
-require_relative "activated_job"
-require_relative "helpers/support"
+require "busybee/testing/activated_job"
+require "busybee/testing/helpers/support"
 
 module Busybee
   module Testing

@@ -185,6 +185,44 @@ module Busybee
 
         count
       end
+
+      # Open a long-lived stream for job activation.
+      #
+      # Unlike {#with_each_job}, this method returns a {Busybee::JobStream} that
+      # continuously receives jobs as they become available. The stream remains
+      # open until explicitly closed via {Busybee::JobStream#close}.
+      #
+      # @note The stream blocks while iterating. Call {Busybee::JobStream#close}
+      #   from another thread or use a signal handler to terminate the stream.
+      #
+      # @param job_type [String] The job type to activate
+      # @param job_timeout [Integer, ActiveSupport::Duration] Job timeout in milliseconds
+      # @return [Busybee::JobStream] Stream of activated jobs
+      # @raise [Busybee::GRPC::Error] if stream creation fails
+      #
+      # @example Process jobs with graceful shutdown
+      #   stream = client.open_job_stream("send-email", job_timeout: 60.seconds)
+      #   trap("INT") { stream.close }
+      #
+      #   stream.each do |job|
+      #     send_email(job.variables)
+      #     job.complete!
+      #   end
+      #
+      def open_job_stream(job_type, job_timeout: Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS)
+        request = Busybee::GRPC::StreamActivatedJobsRequest.new(
+          type: job_type.to_s,
+          worker: Busybee.worker_name,
+          timeout: milliseconds_from(job_timeout)
+        )
+
+        with_retry do
+          Busybee::JobStream.new(
+            stub.stream_activated_jobs(request, return_op: true),
+            client: self
+          )
+        end
+      end
     end
   end
 end
