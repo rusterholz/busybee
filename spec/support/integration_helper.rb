@@ -37,7 +37,7 @@ module IntegrationHelpers
 
   # Returns a GRPC stub for local Zeebe (alias for consistency with camunda_cloud_grpc_stub)
   def local_grpc_stub
-    grpc_client
+    Busybee::Testing::Helpers.grpc_client
   end
 
   # Returns a Busybee::Client configured for Camunda Cloud

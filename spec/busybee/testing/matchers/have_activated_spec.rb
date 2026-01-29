@@ -29,7 +29,7 @@ RSpec.describe "have_activated matcher" do
   let(:activate_response) { double("Busybee::GRPC::ActivateJobsResponse", jobs: jobs) } # rubocop:disable RSpec/VerifiedDoubles
 
   before do
-    allow(helper).to receive(:grpc_client).and_return(mock_client)
+    allow(Busybee::Testing::Helpers).to receive(:grpc_client).and_return(mock_client)
     allow(mock_client).to receive(:activate_jobs).and_return([activate_response])
   end
 

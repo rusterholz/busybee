@@ -334,3 +334,42 @@ If you add new docs, ensure user-facing docs go in `docs/` (included) and mainta
 9. Tag: `git tag vX.Y.Z && git push --tags`
 
 **For v0.2+:** GitHub Actions with manual trigger (workflow_dispatch).
+
+## Implementation Patterns
+
+### Enumerable Wrapper Classes
+
+When wrapping a raw enumerable source (like a gRPC stream) with a class that transforms elements, implement `#each` yourself rather than delegating directly. This ensures all Enumerable methods work correctly with your transformed elements.
+
+**Pattern:**
+
+```ruby
+class JobStream
+  include Enumerable
+
+  def initialize(raw_stream, client:)
+    @raw_stream = raw_stream
+    @client = client
+  end
+
+  def each
+    return enum_for(:each) unless block_given?
+
+    @raw_stream.each do |raw_job|
+      yield Busybee::Job.new(raw_job, client: @client)
+    end
+  end
+end
+```
+
+**Key points:**
+
+1. `include Enumerable` adds `map`, `select`, `first`, etc. - all built on top of `#each`
+2. Your `#each` must yield the *transformed* elements (wrapped jobs, not raw protos)
+3. Return `enum_for(:each)` when no block given - this provides Enumerator support
+4. Enumerable methods will "just work" as long as `#each` yields correctly
+
+**References:**
+
+- [Ruby Enumerable documentation](https://ruby-doc.org/3.4.1/Enumerable.html) - "The class must provide a method `#each`, which yields successive members of the collection."
+- [Ruby Object#enum_for](https://ruby-doc.org/3.4.1/Object.html#method-i-enum_for) - Creates an Enumerator that calls the named method when enumerated; the standard pattern for supporting block-less iteration.

@@ -6,7 +6,7 @@ RSpec.describe "GRPC Topology" do
   # and cluster configuration.
 
   shared_examples "topology retrieval" do
-    it "retrieves cluster topology information" do # rubocop:disable RSpec/ExampleLength, RSpec/MultipleExpectations
+    it "retrieves cluster topology information" do # rubocop:disable RSpec/MultipleExpectations
       # Create a topology request (empty message)
       request = Busybee::GRPC::TopologyRequest.new
 

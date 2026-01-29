@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
+require "socket"
 require "busybee/version"
 require "busybee/defaults"
 require "busybee/credentials"
 require "busybee/logging"
+require "busybee/job"
+require "busybee/job_stream"
 require "busybee/client"
 
 # Top-level gem module, only holds configuration values.
@@ -15,7 +18,8 @@ module Busybee
   VALID_LOG_FORMATS = %w[text json].freeze
 
   class << self
-    attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl
+    attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl,
+                :default_fail_job_backoff, :worker_name
     attr_accessor :logger
     attr_reader :credentials
 
@@ -45,6 +49,15 @@ module Busybee
       @cluster_address || ENV.fetch("CLUSTER_ADDRESS", "localhost:26500")
     end
 
+    def worker_name
+      return @worker_name if @worker_name
+      return ENV["BUSYBEE_WORKER_NAME"] if ENV["BUSYBEE_WORKER_NAME"]
+
+      Socket.gethostname
+    rescue StandardError
+      "busybee-worker"
+    end
+
     def grpc_retry_enabled
       return @grpc_retry_enabled unless @grpc_retry_enabled.nil?
 
@@ -61,6 +74,10 @@ module Busybee
 
     def default_message_ttl
       @default_message_ttl || Defaults::DEFAULT_MESSAGE_TTL_MS
+    end
+
+    def default_fail_job_backoff
+      @default_fail_job_backoff || Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS
     end
 
     def credential_type=(value)

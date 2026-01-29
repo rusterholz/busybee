@@ -38,6 +38,46 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".worker_name" do
+    around do |example|
+      original = described_class.instance_variable_get(:@worker_name)
+      example.run
+      described_class.worker_name = original
+    end
+
+    it "returns configured worker name" do
+      described_class.worker_name = "my-custom-worker"
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return("env-worker")
+      allow(Socket).to receive(:gethostname).and_return("hostname")
+
+      expect(described_class.worker_name).to eq("my-custom-worker")
+    end
+
+    it "falls back to BUSYBEE_WORKER_NAME env var" do
+      described_class.worker_name = nil
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return("env-worker")
+      allow(Socket).to receive(:gethostname).and_return("hostname")
+
+      expect(described_class.worker_name).to eq("env-worker")
+    end
+
+    it "falls back to hostname when BUSYBEE_WORKER_NAME not set" do
+      described_class.worker_name = nil
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return(nil)
+      allow(Socket).to receive(:gethostname).and_return("my-hostname")
+
+      expect(described_class.worker_name).to eq("my-hostname")
+    end
+
+    it "falls back to busybee-worker when hostname fails" do
+      described_class.worker_name = nil
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return(nil)
+      allow(Socket).to receive(:gethostname).and_raise(StandardError, "hostname failed")
+
+      expect(described_class.worker_name).to eq("busybee-worker")
+    end
+  end
+
   describe ".logger" do
     around do |example|
       original = described_class.instance_variable_get(:@logger)
@@ -102,6 +142,56 @@ RSpec.describe Busybee do
         GRPC::DeadlineExceeded,
         GRPC::ResourceExhausted
       )
+    end
+  end
+
+  describe ".default_message_ttl" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_message_ttl)
+      example.run
+      described_class.default_message_ttl = original
+    end
+
+    it "defaults to Defaults::DEFAULT_MESSAGE_TTL_MS" do
+      described_class.default_message_ttl = nil
+      expect(described_class.default_message_ttl).to eq(Busybee::Defaults::DEFAULT_MESSAGE_TTL_MS)
+    end
+
+    it "can be set to a custom integer value" do
+      described_class.default_message_ttl = 30_000
+      expect(described_class.default_message_ttl).to eq(30_000)
+    end
+
+    it "can be set to an ActiveSupport::Duration and returns the Duration" do
+      duration = 30.seconds
+      described_class.default_message_ttl = duration
+      expect(described_class.default_message_ttl).to be(duration)
+      expect(described_class.default_message_ttl).to be_a(ActiveSupport::Duration)
+    end
+  end
+
+  describe ".default_fail_job_backoff" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_fail_job_backoff)
+      example.run
+      described_class.default_fail_job_backoff = original
+    end
+
+    it "defaults to Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS" do
+      described_class.default_fail_job_backoff = nil
+      expect(described_class.default_fail_job_backoff).to eq(Busybee::Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS)
+    end
+
+    it "can be set to a custom integer value" do
+      described_class.default_fail_job_backoff = 10_000
+      expect(described_class.default_fail_job_backoff).to eq(10_000)
+    end
+
+    it "can be set to an ActiveSupport::Duration and returns the Duration" do
+      duration = 10.seconds
+      described_class.default_fail_job_backoff = duration
+      expect(described_class.default_fail_job_backoff).to be(duration)
+      expect(described_class.default_fail_job_backoff).to be_a(ActiveSupport::Duration)
     end
   end
 

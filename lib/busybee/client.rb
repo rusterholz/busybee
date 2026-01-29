@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
+require "active_support"
+require "active_support/duration"
 require "busybee/credentials"
 require "busybee/client/error_handling"
+require "busybee/client/job_operations"
 require "busybee/client/message_operations"
 require "busybee/client/process_operations"
 require "busybee/client/variable_operations"
@@ -23,6 +26,7 @@ module Busybee
   #
   class Client
     include ErrorHandling
+    include JobOperations
     include MessageOperations
     include ProcessOperations
     include VariableOperations
@@ -71,6 +75,13 @@ module Busybee
     # @return [Busybee::GRPC::Gateway::Stub]
     def stub
       credentials.grpc_stub
+    end
+
+    # Ensures a value is in milliseconds.
+    # @param value [Integer, ActiveSupport::Duration] Value to convert
+    # @return [Integer] Value in milliseconds
+    def milliseconds_from(value)
+      value.is_a?(ActiveSupport::Duration) ? value.in_milliseconds.to_i : value.to_i
     end
   end
 end

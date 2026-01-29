@@ -9,7 +9,7 @@ RSpec.describe "GRPC Deploy Process" do
   let(:bpmn_content) { File.read(bpmn_path) }
 
   shared_examples "deploy process" do
-    it "deploys a BPMN process to Zeebe" do # rubocop:disable RSpec/ExampleLength, RSpec/MultipleExpectations
+    it "deploys a BPMN process to Zeebe" do # rubocop:disable RSpec/MultipleExpectations
       # Create a resource object for the BPMN file
       resource = Busybee::GRPC::Resource.new(
         name: "simple_process.bpmn",
@@ -42,7 +42,7 @@ RSpec.describe "GRPC Deploy Process" do
       expect(process.resourceName).to eq("simple_process.bpmn")
     end
 
-    it "deduplicates identical deployments (Camunda 8.8+)" do # rubocop:disable RSpec/ExampleLength
+    it "deduplicates identical deployments (Camunda 8.8+)" do
       # In Camunda 8.8+, deploying identical BPMN content is deduplicated
       # (see https://github.com/camunda/camunda/issues/26239)
       # Deployment keys are still unique, but process version stays the same

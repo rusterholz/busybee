@@ -139,6 +139,38 @@ after do
 end
 ```
 
+#### `with_activated_job_instance(job_type)`
+
+Activates a job, yields it, and automatically completes it when the block exits. Must be called within a `with_process_instance` block. This ensures cleanup even if tests fail.
+
+**Parameters:**
+- `job_type` (String) - Job type to activate
+
+**Yields:** `ActivatedJob` instance
+
+**Note:** If the job is already completed or failed within the block, the cleanup completion is silently ignored.
+
+**Examples:**
+
+```ruby
+with_process_instance("order-fulfillment") do
+  with_activated_job_instance("process-order") do |job|
+    # Test job without worrying about cleanup
+    expect(job.variables["order_id"]).to eq("123")
+    client.update_job_retries(job.key, 5)
+    # Job is automatically completed after block
+  end
+end
+
+# Test that completes the job explicitly
+with_process_instance("order-fulfillment") do
+  with_activated_job_instance("process-order") do |job|
+    job.mark_completed(result: "success")
+    # Cleanup completion is safely ignored since job already completed
+  end
+end
+```
+
 ### Job Activation
 
 #### `activate_job(type, timeout: nil)`
