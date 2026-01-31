@@ -18,8 +18,14 @@ module Busybee
       Busybee.configure do |config|
         busybee_conf = Rails.configuration.x.busybee.presence
 
-        # Use Rails logger by default in Rails apps
-        config.logger = Rails.logger
+        # Logger: Rails.logger by default, custom logger if set, nil if explicitly false
+        config.logger = case busybee_conf&.logger
+                        when false then nil
+                        when nil, true then Rails.logger
+                        else busybee_conf.logger
+                        end
+
+        config.log_format = busybee_conf&.log_format.presence if busybee_conf&.log_format.presence
         config.cluster_address = busybee_conf&.cluster_address.presence
         config.worker_name = busybee_conf&.worker_name.presence
 
@@ -35,8 +41,12 @@ module Busybee
           config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors.presence)
         end
 
-        # Message configuration
+        # Client API method defaults
         config.default_message_ttl = busybee_conf.default_message_ttl if busybee_conf&.default_message_ttl.presence
+
+        if busybee_conf&.default_fail_job_backoff.presence
+          config.default_fail_job_backoff = busybee_conf.default_fail_job_backoff
+        end
       end
     end
   end
