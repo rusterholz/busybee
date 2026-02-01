@@ -20,17 +20,12 @@ Dir[File.join(__dir__, "support", "**", "*.rb")].each { |f| require f }
 # Helper to stub all credential-related env vars to nil for test isolation.
 # Call this at the start of any test that needs to control credential env vars,
 # then override specific vars as needed for that test.
-def stub_credential_env_vars # rubocop:disable Metrics/AbcSize
+def stub_credential_env_vars
   allow(ENV).to receive(:fetch).and_call_original
-  allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return(nil)
-  allow(ENV).to receive(:fetch).with("CAMUNDA_CLIENT_ID", nil).and_return(nil)
-  allow(ENV).to receive(:fetch).with("CAMUNDA_CLIENT_SECRET", nil).and_return(nil)
-  allow(ENV).to receive(:fetch).with("CAMUNDA_CLUSTER_ID", nil).and_return(nil)
-  allow(ENV).to receive(:fetch).with("CAMUNDA_CLUSTER_REGION", nil).and_return(nil)
-  allow(ENV).to receive(:fetch).with("ZEEBE_TOKEN_URL", nil).and_return(nil)
-  allow(ENV).to receive(:fetch).with("ZEEBE_AUDIENCE", nil).and_return(nil)
-  allow(ENV).to receive(:fetch).with("ZEEBE_SCOPE", nil).and_return(nil)
-  allow(ENV).to receive(:fetch).with("ZEEBE_CERTIFICATE_FILE", nil).and_return(nil)
+  %w[CAMUNDA_CLIENT_ID CAMUNDA_CLIENT_SECRET CAMUNDA_CLUSTER_ID CAMUNDA_CLUSTER_REGION CLUSTER_ADDRESS
+     ZEEBE_AUDIENCE ZEEBE_CERTIFICATE_FILE ZEEBE_SCOPE ZEEBE_TOKEN_URL].each do |var|
+    allow(ENV).to receive(:fetch).with(var, nil).and_return(nil)
+  end
 end
 
 RSpec.configure do |config|
@@ -42,6 +37,14 @@ RSpec.configure do |config|
 
   config.expect_with :rspec do |c|
     c.syntax = :expect
+  end
+
+  # Skip specs that require Rails unless Rails::Railtie is available
+  # Try to load it here (without full Rails boot) for unit tests in Rails appraisals
+  begin
+    require "rails/railtie"
+  rescue LoadError
+    config.filter_run_excluding rails: true
   end
 
   # Skip integration tests unless explicitly requested via ENV variable
