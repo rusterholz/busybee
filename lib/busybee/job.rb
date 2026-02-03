@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
-require "active_support/core_ext/hash/indifferent_access"
-require "active_support/core_ext/string/inflections"
-require "json"
+require "busybee/serialization"
 
 module Busybee
   # Represents a job activated from Zeebe for processing by a worker.
@@ -163,29 +161,11 @@ module Busybee
     private
 
     def parse_and_freeze_hash(json_string, attribute_name)
-      if json_string.nil? || json_string.empty?
-        return ActiveSupport::HashWithIndifferentAccess.new.extend(HashAccess).freeze
-      end
-
-      hash = JSON.parse(json_string).with_indifferent_access
-      deep_freeze_and_extend(hash)
-    rescue JSON::ParserError => e
-      raise Busybee::InvalidJobJson, "Failed to parse job #{attribute_name}: #{e.message}", e.backtrace, cause: e
-    end
-
-    def deep_freeze_and_extend(obj)
-      case obj
-      when Hash
-        obj.extend(HashAccess)
-        obj.each_value { |value| deep_freeze_and_extend(value) }
-        obj.freeze
-      when Array
-        obj.each { |element| deep_freeze_and_extend(element) }
-        obj.freeze
-      else
-        obj.freeze if obj.respond_to?(:freeze)
-        obj
-      end
+      Busybee::Serialization.from_json(json_string)
+    rescue Busybee::InvalidJobJson => e
+      # Re-raise with attribute context for better error messages
+      message = "Failed to parse job #{attribute_name}: #{e.cause.message}"
+      raise Busybee::InvalidJobJson, message, e.backtrace, cause: e.cause
     end
 
     def format_error_message(error_message_or_exception)
@@ -207,32 +187,6 @@ module Busybee
         code_or_exception.class.name.gsub("::", "_").underscore.upcase
       else
         code_or_exception.to_s
-      end
-    end
-
-    # Module that adds method-style access to hashes with camelCase to snake_case conversion.
-    # Also chains itself recursively onto nested hashes and freezes them.
-    module HashAccess
-      def method_missing(method_name, *args, **kwargs, &block)
-        return super if args.any? || kwargs.any? || block
-
-        # Convert snake_case method name to potential camelCase keys
-        snake_key = method_name.to_s
-        camel_key = snake_key.camelize(:lower)
-
-        if key?(snake_key)
-          self[snake_key]
-        elsif key?(camel_key)
-          self[camel_key]
-        else
-          super
-        end
-      end
-
-      def respond_to_missing?(method_name, include_private = false)
-        snake_key = method_name.to_s
-        camel_key = snake_key.camelize(:lower)
-        key?(snake_key) || key?(camel_key) || super
       end
     end
   end

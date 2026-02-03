@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "busybee/grpc"
+require "busybee/serialization"
 
 module Busybee
   class Client
@@ -61,7 +62,7 @@ module Busybee
 
         request = Busybee::GRPC::CreateProcessInstanceRequest.new(
           bpmnProcessId: bpmn_process_id,
-          variables: JSON.generate(vars),
+          variables: Busybee::Serialization.to_json(vars),
           version: version == :latest || version.nil? ? -1 : version,
           tenantId: tenant_id
         )

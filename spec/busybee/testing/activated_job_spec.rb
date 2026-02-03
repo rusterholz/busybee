@@ -62,26 +62,54 @@ RSpec.describe Busybee::Testing::ActivatedJob do
   end
 
   describe "#variables" do
-    it "parses and returns variables as a hash with string keys" do
+    it "parses and returns variables" do
       expect(job.variables).to eq("foo" => "bar", "count" => 42)
     end
 
+    it "returns HashWithIndifferentAccess" do
+      expect(job.variables).to be_a(ActiveSupport::HashWithIndifferentAccess)
+      expect(job.variables[:foo]).to eq("bar")
+      expect(job.variables["foo"]).to eq("bar")
+    end
+
+    it "supports method-style access" do
+      expect(job.variables.foo).to eq("bar")
+    end
+
+    it "returns a frozen hash" do
+      expect(job.variables).to be_frozen
+    end
+
     it "memoizes the result" do
-      expect(JSON).to receive(:parse).once.and_call_original # rubocop:disable RSpec/MessageSpies
-      job.variables
-      job.variables # second call should not parse again
+      vars1 = job.variables
+      vars2 = job.variables
+      expect(vars1.object_id).to eq(vars2.object_id)
     end
   end
 
   describe "#headers" do
-    it "parses and returns custom headers as a hash with string keys" do
+    it "parses and returns custom headers" do
       expect(job.headers).to eq("task_type" => "process_order")
     end
 
+    it "returns HashWithIndifferentAccess" do
+      expect(job.headers).to be_a(ActiveSupport::HashWithIndifferentAccess)
+      expect(job.headers[:task_type]).to eq("process_order")
+      expect(job.headers["task_type"]).to eq("process_order")
+    end
+
+    it "supports method-style access" do
+      expect(job.headers.task_type).to eq("process_order")
+    end
+
+    it "returns a frozen hash" do
+      expect(job.headers).to be_frozen
+    end
+
     it "memoizes the result" do
-      expect(JSON).to receive(:parse).once.and_call_original # rubocop:disable RSpec/MessageSpies
-      job.headers
-      job.headers # second call should not parse again
+      headers1 = job.headers
+      headers2 = job.headers
+      expect(headers1.object_id).to eq(headers2.object_id)
     end
   end
 

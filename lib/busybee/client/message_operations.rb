@@ -3,6 +3,7 @@
 require "active_support"
 require "active_support/duration"
 require "busybee/grpc"
+require "busybee/serialization"
 
 module Busybee
   class Client
@@ -39,7 +40,7 @@ module Busybee
         request = Busybee::GRPC::PublishMessageRequest.new(
           name: name.to_s,
           correlationKey: correlation_key.to_s,
-          variables: JSON.generate(vars),
+          variables: Busybee::Serialization.to_json(vars),
           timeToLive: ttl_ms,
           tenantId: tenant_id
         )
@@ -70,7 +71,7 @@ module Busybee
 
         request = Busybee::GRPC::BroadcastSignalRequest.new(
           signalName: signal_name.to_s,
-          variables: JSON.generate(vars),
+          variables: Busybee::Serialization.to_json(vars),
           tenantId: tenant_id
         )
 

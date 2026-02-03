@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "busybee/grpc"
+require "busybee/serialization"
 
 module Busybee
   class Client
@@ -29,7 +30,7 @@ module Busybee
 
         request = Busybee::GRPC::SetVariablesRequest.new(
           elementInstanceKey: element_instance_key.to_i,
-          variables: JSON.generate(vars),
+          variables: Busybee::Serialization.to_json(vars),
           local: local
         )
 

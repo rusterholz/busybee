@@ -3,9 +3,9 @@
 require "active_support"
 require "active_support/duration"
 require "base64"
-require "json"
 require "securerandom"
 require "busybee/grpc"
+require "busybee/serialization"
 require "busybee/testing/activated_job"
 require "busybee/testing/helpers/support"
 
@@ -78,7 +78,7 @@ module Busybee
         request = Busybee::GRPC::CreateProcessInstanceRequest.new(
           bpmnProcessId: process_name,
           version: -1,
-          variables: JSON.generate(variables)
+          variables: Busybee::Serialization.to_json(variables)
         )
 
         response = grpc_client.create_process_instance(request)
@@ -185,7 +185,7 @@ module Busybee
         request = Busybee::GRPC::PublishMessageRequest.new(
           name: name,
           correlationKey: correlation_key,
-          variables: JSON.generate(variables),
+          variables: Busybee::Serialization.to_json(variables),
           timeToLive: ttl_ms
         )
         grpc_client.publish_message(request)
@@ -199,7 +199,7 @@ module Busybee
       def set_variables(scope_key, variables, local: true)
         request = Busybee::GRPC::SetVariablesRequest.new(
           elementInstanceKey: scope_key,
-          variables: JSON.generate(variables),
+          variables: Busybee::Serialization.to_json(variables),
           local: local
         )
         grpc_client.set_variables(request)
