@@ -42,7 +42,7 @@ module Busybee
           correlationKey: correlation_key.to_s,
           variables: Busybee::Serialization.to_json(vars),
           timeToLive: ttl_ms,
-          tenantId: tenant_id
+          tenantId: tenant_id&.to_s
         )
 
         with_retry do
@@ -72,7 +72,7 @@ module Busybee
         request = Busybee::GRPC::BroadcastSignalRequest.new(
           signalName: signal_name.to_s,
           variables: Busybee::Serialization.to_json(vars),
-          tenantId: tenant_id
+          tenantId: tenant_id&.to_s
         )
 
         with_retry do

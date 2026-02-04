@@ -22,7 +22,7 @@ module Busybee
       #   client.deploy_process("order.bpmn", "payment.bpmn")
       #   # => { "order-fulfillment" => 123, "payment-process" => 456 }
       #
-      def deploy_process(*paths, tenant_id: nil)
+      def deploy_process(*paths, tenant_id: nil) # rubocop:disable Metrics/AbcSize
         resources = paths.map do |path|
           Busybee::GRPC::Resource.new(
             name: File.basename(path),
@@ -32,7 +32,7 @@ module Busybee
 
         request = Busybee::GRPC::DeployResourceRequest.new(
           resources: resources,
-          tenantId: tenant_id
+          tenantId: tenant_id&.to_s
         )
 
         with_retry do
@@ -61,10 +61,10 @@ module Busybee
         raise ArgumentError, "vars must be a Hash" unless vars.is_a?(Hash)
 
         request = Busybee::GRPC::CreateProcessInstanceRequest.new(
-          bpmnProcessId: bpmn_process_id,
+          bpmnProcessId: bpmn_process_id.to_s,
           variables: Busybee::Serialization.to_json(vars),
-          version: version == :latest || version.nil? ? -1 : version,
-          tenantId: tenant_id
+          version: version == :latest || version.nil? ? -1 : version.to_i,
+          tenantId: tenant_id&.to_s
         )
 
         with_retry do

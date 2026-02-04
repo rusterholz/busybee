@@ -580,4 +580,51 @@ RSpec.describe Busybee::Client::JobOperations do
       end.to raise_error(Busybee::GRPC::Error)
     end
   end
+
+  describe "type coercion" do
+    it "converts string job_key to integer in complete_job" do
+      allow(stub).to receive(:complete_job).and_return(double)
+
+      client.complete_job("123456")
+
+      expect(stub).to have_received(:complete_job).with(having_attributes(jobKey: 123456))
+    end
+
+    it "converts string job_key to integer in fail_job" do
+      allow(stub).to receive(:fail_job).and_return(double)
+
+      client.fail_job("123456", "error")
+
+      expect(stub).to have_received(:fail_job).with(having_attributes(jobKey: 123456))
+    end
+
+    it "converts string job_key to integer in throw_bpmn_error" do
+      allow(stub).to receive(:throw_error).and_return(double)
+
+      client.throw_bpmn_error("123456", "ERROR_CODE")
+
+      expect(stub).to have_received(:throw_error).with(having_attributes(jobKey: 123456))
+    end
+
+    it "converts symbol job_type to string in with_each_job" do
+      allow(stub).to receive(:activate_jobs).and_return([])
+
+      client.with_each_job(:send_email) { |_| } # rubocop:disable Lint/EmptyBlock
+
+      expect(stub).to have_received(:activate_jobs).with(having_attributes(type: "send_email"))
+    end
+
+    it "converts symbol job_type to string in open_job_stream" do
+      operation = instance_double(GRPC::ActiveCall::Operation)
+      allow(operation).to receive(:execute).and_return([].each)
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream(:send_email)
+
+      expect(stub).to have_received(:stream_activated_jobs).with(
+        having_attributes(type: "send_email"),
+        return_op: true
+      )
+    end
+  end
 end

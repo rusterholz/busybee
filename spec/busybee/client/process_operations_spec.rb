@@ -221,4 +221,57 @@ RSpec.describe Busybee::Client::ProcessOperations do
       expect(client.method(:cancel_process_instance)).to eq(client.method(:cancel_instance))
     end
   end
+
+  describe "type coercion" do
+    it "converts symbol bpmn_process_id to string" do
+      response = double(processInstanceKey: 67890)
+      allow(stub).to receive(:create_process_instance).with(
+        having_attributes(bpmnProcessId: "order_process")
+      ).and_return(response)
+
+      client.start_instance(:order_process)
+
+      expect(stub).to have_received(:create_process_instance).with(
+        having_attributes(bpmnProcessId: "order_process")
+      )
+    end
+
+    it "converts string version to integer" do
+      response = double(processInstanceKey: 67890)
+      allow(stub).to receive(:create_process_instance).with(
+        having_attributes(version: 3)
+      ).and_return(response)
+
+      client.start_instance("order-process", version: "3")
+
+      expect(stub).to have_received(:create_process_instance).with(
+        having_attributes(version: 3)
+      )
+    end
+
+    it "converts symbol tenant_id to string in deploy_process" do
+      response = double(deployments: [])
+      allow(stub).to receive(:deploy_resource).with(
+        having_attributes(tenantId: "tenant_a")
+      ).and_return(response)
+
+      simple_process_path = File.expand_path("../../fixtures/simple_process.bpmn", __dir__)
+      client.deploy_process(simple_process_path, tenant_id: :tenant_a)
+
+      expect(stub).to have_received(:deploy_resource).with(having_attributes(tenantId: "tenant_a"))
+    end
+
+    it "converts symbol tenant_id to string in start_instance" do
+      response = double(processInstanceKey: 67890)
+      allow(stub).to receive(:create_process_instance).with(
+        having_attributes(tenantId: "tenant_a")
+      ).and_return(response)
+
+      client.start_instance("order-process", tenant_id: :tenant_a)
+
+      expect(stub).to have_received(:create_process_instance).with(
+        having_attributes(tenantId: "tenant_a")
+      )
+    end
+  end
 end
