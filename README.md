@@ -17,10 +17,10 @@ Busybee provides everything you need to work with Camunda Platform or self-hoste
 | Version | Features | Status |
 |---------|---------|--------|
 | v0.1 | BPMN Testing Tools, GRPC Layer | Available now! |
-| v0.2 | Client, Rails Integration | January 2026 |
+| v0.2 | Client, Rails Integration | Available now! |
 | v0.3 | Worker Pattern & CLI | Early 2026 |
-| v0.4 | Instrumentation Hooks, Deployment Tools | Planned for Early 2026 |
-| v1.0 | Production Polish | Planned for Mid 2026 |
+| v0.4 | Instrumentation Hooks, Deployment Tools | Mid 2026 |
+| v1.0 | Production Polish | Late 2026 |
 
 ## Installation
 
@@ -74,20 +74,20 @@ Planned capabilities:
 - Graceful shutdown on SIGTERM
 - CLI for running workers: `bundle exec busybee work` or similar
 
-### Idiomatic Zeebe Client (coming in January 2026)
+### Idiomatic Zeebe Client (available now!)
 
 A Ruby-native client for Zeebe with keyword arguments, sensible defaults, and proper exception handling.
 
-> This feature is still being designed. The example shown here is only representative and will change before implementation.
-
 ```ruby
+# Connect to Camunda Cloud with environment variables
+# (CAMUNDA_CLIENT_ID, CAMUNDA_CLIENT_SECRET, CAMUNDA_CLUSTER_ID, CAMUNDA_CLUSTER_REGION)
 client = Busybee::Client.new
 
 # Deploy a workflow
 client.deploy_process("workflows/order-fulfillment.bpmn")
 
 # Start a process instance
-instance_key = client.start_process("order-fulfillment",
+instance_key = client.start_instance("order-fulfillment",
   vars: { order_id: "123", items: ["widget", "gadget"] }
 )
 
@@ -96,15 +96,23 @@ client.publish_message("payment-received",
   correlation_key: "order-123",
   vars: { amount: 99.99 }
 )
+
+# Process jobs
+client.with_each_job("send-confirmation") do |job|
+  EmailService.send(job.variables.customer_email)
+  job.complete!(sent_at: Time.now.iso8601)
+end
 ```
 
-Planned capabilities:
+Capabilities:
 
-- Connection management with automatic reconnection
-- Multiple credential types (insecure, TLS, OAuth, Camunda Cloud)
-- GRPC error wrapping with preserved cause chains
-- Rails integration via Railtie and `config/busybee.yml`
-- Duration support for timeouts (works with ActiveSupport if present)
+- Multiple credential types (Insecure, TLS, OAuth, Camunda Cloud) with automatic detection
+- Complete process lifecycle: deploy, start, cancel, set variables, resolve incidents
+- Job operations: activate, complete, fail, throw BPMN errors, streaming
+- Rails integration via Railtie with `config.x.busybee.*` configuration
+- GRPC error wrapping with configurable retry
+
+**[Full client documentation →](docs/client.md)**
 
 ### RSpec Testing Integration (available now!)
 
@@ -117,8 +125,9 @@ Allows you to unit test your BPMN files. Deploy processes, create instances, act
 require "rspec"
 require "busybee/testing"
 
-Busybee::Testing.configure do |config|
-  config.address = "localhost:26500"  # or use ZEEBE_ADDRESS env var
+# Optional: defaults to localhost:26500, or set CLUSTER_ADDRESS env var
+Busybee.configure do |config|
+  config.cluster_address = "localhost:26500"
 end
 ```
 
