@@ -131,4 +131,35 @@ RSpec.describe Busybee::Credentials::CamundaCloud do
       expect(creds.cluster_address).to eq("my-cluster.us-east-1.zeebe.camunda.io:443")
     end
   end
+
+  describe "required parameter validation" do
+    let(:valid_params) do
+      {
+        client_id: "test-client",
+        client_secret: "test-secret",
+        cluster_id: "abc-123",
+        region: "bru-2"
+      }
+    end
+
+    it "raises ArgumentError when client_id is nil" do
+      expect { described_class.new(**valid_params, client_id: nil) }.
+        to raise_error(ArgumentError, "client_id is required")
+    end
+
+    it "raises ArgumentError when client_secret is nil" do
+      expect { described_class.new(**valid_params, client_secret: nil) }.
+        to raise_error(ArgumentError, "client_secret is required")
+    end
+
+    it "raises ArgumentError when cluster_id is nil" do
+      expect { described_class.new(**valid_params, cluster_id: nil) }.
+        to raise_error(ArgumentError, "cluster_id is required")
+    end
+
+    it "raises ArgumentError when region is nil" do
+      expect { described_class.new(**valid_params, region: nil) }.
+        to raise_error(ArgumentError, "region is required")
+    end
+  end
 end

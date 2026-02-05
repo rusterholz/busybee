@@ -14,8 +14,9 @@ module Dummy
     config.api_only = true
 
     # Busybee configuration for integration testing
-    config.x.busybee.cluster_address = "dummy.zeebe.test:26500"
-    config.x.busybee.credential_type = :insecure
+    # Use TLS (not insecure) to prove credentials are built from config, not defaulted
+    config.x.busybee.cluster_address = "dummy.zeebe.test:443"
+    config.x.busybee.credential_type = :tls
     config.x.busybee.worker_name = "dummy-test-worker"
     config.x.busybee.grpc_retry_enabled = true
     config.x.busybee.grpc_retry_delay_ms = 250

@@ -33,11 +33,11 @@ RSpec.describe "Railtie integration with dummy Rails app", :rails do
     # See spec/dummy/config/application.rb for the configured values.
 
     it "sets cluster_address from config" do
-      expect(Busybee.cluster_address).to eq("dummy.zeebe.test:26500")
+      expect(Busybee.cluster_address).to eq("dummy.zeebe.test:443")
     end
 
     it "sets credential_type from config" do
-      expect(Busybee.credential_type).to eq(:insecure)
+      expect(Busybee.credential_type).to eq(:tls)
     end
 
     it "sets worker_name from config" do
@@ -62,6 +62,14 @@ RSpec.describe "Railtie integration with dummy Rails app", :rails do
 
     it "sets log_format from config" do
       expect(Busybee.log_format).to eq(:json)
+    end
+
+    it "builds TLS credentials object from config" do
+      expect(Busybee.credentials).to be_a(Busybee::Credentials::TLS)
+    end
+
+    it "uses cluster_address from config for built credentials" do
+      expect(Busybee.credentials.cluster_address).to eq("dummy.zeebe.test:443")
     end
   end
 end

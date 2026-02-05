@@ -60,6 +60,11 @@ module Busybee
         cluster_address: nil,
         certificate_file: nil
       )
+        raise ArgumentError, "token_url is required" if token_url.nil?
+        raise ArgumentError, "client_id is required" if client_id.nil?
+        raise ArgumentError, "client_secret is required" if client_secret.nil?
+        raise ArgumentError, "audience is required" if audience.nil?
+
         super(cluster_address: cluster_address)
         @token_uri = URI(token_url)
         @client_id = client_id

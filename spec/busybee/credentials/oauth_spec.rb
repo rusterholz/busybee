@@ -280,4 +280,35 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
   it "is a subclass of Credentials" do
     expect(described_class.superclass).to eq(Busybee::Credentials)
   end
+
+  describe "required parameter validation" do
+    let(:valid_params) do
+      {
+        token_url: "https://auth.example.com/token",
+        client_id: "test-client",
+        client_secret: "test-secret",
+        audience: "zeebe-api"
+      }
+    end
+
+    it "raises ArgumentError when token_url is nil" do
+      expect { described_class.new(**valid_params, token_url: nil) }.
+        to raise_error(ArgumentError, "token_url is required")
+    end
+
+    it "raises ArgumentError when client_id is nil" do
+      expect { described_class.new(**valid_params, client_id: nil) }.
+        to raise_error(ArgumentError, "client_id is required")
+    end
+
+    it "raises ArgumentError when client_secret is nil" do
+      expect { described_class.new(**valid_params, client_secret: nil) }.
+        to raise_error(ArgumentError, "client_secret is required")
+    end
+
+    it "raises ArgumentError when audience is nil" do
+      expect { described_class.new(**valid_params, audience: nil) }.
+        to raise_error(ArgumentError, "audience is required")
+    end
+  end
 end
