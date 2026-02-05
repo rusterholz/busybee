@@ -2,9 +2,9 @@
 
 **A complete Ruby toolkit for workflow-based orchestration with BPMN, running on Camunda Platform.**
 
-If you're a Ruby shop that needs workflow orchestration, you've probably noticed the gap: Camunda Platform is powerful, but the Ruby ecosystem support is thin. Busybee fills that gap. One gem, one Camunda Cloud account, and you're ready to start building. And when you're ready to scale further, Busybee is ready to grow with you, with battle-proven patterns for large distributed systems.
+If you're a Ruby shop considering workflow orchestration, you might have noticed: Camunda Platform is powerful, but the Ruby ecosystem support is thin. Busybee fills that gap. One gem, one Camunda Cloud account, and you're ready to start building. And when you're ready to scale further, Busybee is ready to grow with you, with battle-proven patterns for large distributed systems.
 
-Busybee provides everything you need to work with Camunda Platform or self-hosted Zeebe from Ruby:
+Busybee provides everything you need to work with Camunda Platform or self-hosted Zeebe in a Ruby world:
 
 - **Worker Pattern Framework** - Define job handlers as classes with a clean DSL. Busybee handles polling, execution, and lifecycle.
 - **Idiomatic Zeebe Client** - Ruby-native interface with keyword arguments, sensible defaults, and proper exception handling.
