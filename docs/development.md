@@ -328,9 +328,10 @@ If you add new docs, ensure user-facing docs go in `docs/` (included) and mainta
 3. Update CHANGELOG.md with release date
 4. Run full test suite: `RUN_INTEGRATION_TESTS=1 bundle exec rspec`
 5. Commit, PR, and merge to `main` — gem must be built from a clean `main` commit
-6. From clean `main`: `gem build busybee.gemspec`
-7. Verify contents: `gem unpack busybee-X.Y.Z.gem` and inspect
-8. Push to RubyGems: `gem push busybee-X.Y.Z.gem`
+6. From clean `main`: `bundle exec rake build` (outputs to `pkg/`, which is gitignored)
+   - **Note:** Use `rake build`, not raw `gem build`. The rake task outputs to `pkg/` which is in `.gitignore`. Raw `gem build` outputs to cwd and would show as an unstaged change.
+7. Verify contents: `gem unpack pkg/busybee-X.Y.Z.gem` and inspect
+8. Push to RubyGems: `gem push pkg/busybee-X.Y.Z.gem`
 9. Tag: `git tag vX.Y.Z && git push --tags`
 
 **For v0.2+:** GitHub Actions with manual trigger (workflow_dispatch).
