@@ -2,8 +2,8 @@
 
 require "active_support"
 require "active_support/duration"
-require "json"
 require "busybee/grpc"
+require "busybee/serialization"
 
 module Busybee
   class Client
@@ -25,7 +25,7 @@ module Busybee
       def complete_job(job_key, vars: {})
         request = Busybee::GRPC::CompleteJobRequest.new(
           jobKey: job_key.to_i,
-          variables: vars.to_json
+          variables: Busybee::Serialization.to_json(vars)
         )
 
         with_retry do

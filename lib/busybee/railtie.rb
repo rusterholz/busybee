@@ -8,35 +8,81 @@ module Busybee
   # Rails integration for Busybee.
   # Automatically configures Busybee from Rails configuration.
   #
-  # @example config/application.rb or config/environments/*.rb
-  #   config.x.busybee.cluster_address = "cluster.zeebe.camunda.io:443"
-  #   config.x.busybee.credential_type = "oauth"  # or "insecure"
-  #   config.x.busybee.credentials = MyCustomCredentials.new(...)  # optional explicit override
+  # @example Basic configuration
+  #   config.x.busybee.cluster_address = "localhost:26500"
+  #   config.x.busybee.credential_type = :insecure
+  #
+  # @example Camunda Cloud with Rails credentials
+  #   config.x.busybee.credential_type = :camunda_cloud
+  #   config.x.busybee.client_id = Rails.application.credentials.zeebe[:client_id]
+  #   config.x.busybee.client_secret = Rails.application.credentials.zeebe[:client_secret]
+  #   config.x.busybee.cluster_id = Rails.application.credentials.zeebe[:cluster_id]
+  #   config.x.busybee.region = "bru-2"
+  #
+  # @example Explicit credentials object
+  #   config.x.busybee.credentials = MyCustomCredentials.new(...)
   #
   class Railtie < Rails::Railtie
+    # Credential parameters that can be configured via config.x.busybee.*
+    CREDENTIAL_PARAMS = %i[
+      cluster_address client_id client_secret cluster_id region
+      token_url audience scope certificate_file
+    ].freeze
+
     initializer "busybee.configure" do
       Busybee.configure do |config|
-        busybee_conf = Rails.configuration.x.busybee.presence
+        busybee_conf = Rails.configuration.x.busybee
 
-        # Use Rails logger by default in Rails apps
-        config.logger = Rails.logger
-        config.cluster_address = busybee_conf&.cluster_address.presence
-        config.worker_name = busybee_conf&.worker_name.presence
+        # Logger: Rails.logger by default, custom logger if set, nil if explicitly false
+        config.logger = case busybee_conf&.logger
+                        when false then nil
+                        when nil, true then Rails.logger
+                        else busybee_conf.logger
+                        end
 
-        # Credentials configuration
-        config.credential_type = busybee_conf&.credential_type.presence if busybee_conf&.credential_type.presence
-        config.credentials = busybee_conf&.credentials if busybee_conf&.credentials.is_a?(Busybee::Credentials)
+        next unless busybee_conf.presence
+
+        config.log_format = busybee_conf.log_format.presence if busybee_conf.log_format.presence
+        config.cluster_address = busybee_conf.cluster_address.presence
+        config.worker_name = busybee_conf.worker_name.presence
+
+        # Credentials: explicit object, or build from type + params
+        Busybee::Railtie.configure_credentials(config, busybee_conf)
 
         # GRPC retry configuration
-        config.grpc_retry_enabled = !!busybee_conf.grpc_retry_enabled unless busybee_conf&.grpc_retry_enabled.nil?
-        config.grpc_retry_delay_ms = busybee_conf.grpc_retry_delay_ms.to_i if busybee_conf&.grpc_retry_delay_ms.presence
+        config.grpc_retry_enabled = !!busybee_conf.grpc_retry_enabled unless busybee_conf.grpc_retry_enabled.nil?
+        config.grpc_retry_delay_ms = busybee_conf.grpc_retry_delay_ms.to_i if busybee_conf.grpc_retry_delay_ms.presence
+        config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors) if busybee_conf.grpc_retry_errors.presence
 
-        if busybee_conf&.grpc_retry_errors.presence
-          config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors.presence)
+        # Client API method defaults
+        config.default_message_ttl = busybee_conf.default_message_ttl if busybee_conf.default_message_ttl.presence
+        if busybee_conf.default_fail_job_backoff.presence
+          config.default_fail_job_backoff = busybee_conf.default_fail_job_backoff
         end
+      end
+    end
 
-        # Message configuration
-        config.default_message_ttl = busybee_conf.default_message_ttl if busybee_conf&.default_message_ttl.presence
+    # @api private
+    def self.configure_credentials(config, busybee_conf)
+      # Option 1: Explicit credentials object
+      if busybee_conf.credentials.is_a?(Busybee::Credentials)
+        config.credentials = busybee_conf.credentials
+        return
+      end
+
+      # Option 2: Build credentials from type + params (or autodetect from params alone)
+      credential_type = busybee_conf.credential_type.presence
+      credential_params = extract_credential_params(busybee_conf)
+
+      config.credential_type = credential_type if credential_type
+      config.credentials = Busybee::Credentials.build(**credential_params) if credential_params.any?
+    end
+
+    # @api private
+    def self.extract_credential_params(busybee_conf)
+      CREDENTIAL_PARAMS.each_with_object({}) do |param, hash|
+        value = busybee_conf.public_send(param)
+        hash[param] = value unless value.nil?
       end
     end
   end

@@ -201,4 +201,28 @@ RSpec.describe Busybee::Client::MessageOperations do
       end.to raise_error(ArgumentError, "vars must be a Hash")
     end
   end
+
+  describe "type coercion" do
+    it "converts symbol tenant_id to string in publish_message" do
+      response = double(key: 12345)
+      allow(stub).to receive(:publish_message).with(
+        having_attributes(tenantId: "tenant_a")
+      ).and_return(response)
+
+      client.publish_message("order-ready", correlation_key: "123", ttl: 1000, tenant_id: :tenant_a)
+
+      expect(stub).to have_received(:publish_message).with(having_attributes(tenantId: "tenant_a"))
+    end
+
+    it "converts symbol tenant_id to string in broadcast_signal" do
+      response = double(key: 54321)
+      allow(stub).to receive(:broadcast_signal).with(
+        having_attributes(tenantId: "tenant_a")
+      ).and_return(response)
+
+      client.broadcast_signal("cancel-all", tenant_id: :tenant_a)
+
+      expect(stub).to have_received(:broadcast_signal).with(having_attributes(tenantId: "tenant_a"))
+    end
+  end
 end

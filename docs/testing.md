@@ -35,11 +35,15 @@ Configure the Zeebe connection. Busybee reads from environment variables by defa
 
 ```ruby
 # Use environment variables (recommended)
-# ZEEBE_ADDRESS=localhost:26500
+# CLUSTER_ADDRESS=localhost:26500
 
 # Or configure explicitly
+Busybee.configure do |config|
+  config.cluster_address = "localhost:26500"
+end
+
+# Testing-specific options
 Busybee::Testing.configure do |config|
-  config.address = "localhost:26500"
   config.activate_request_timeout = 2000 # milliseconds, default: 1000
 end
 ```
@@ -48,8 +52,10 @@ end
 
 | Option | Environment Variable | Default | Description |
 |--------|---------------------|---------|-------------|
-| `address` | `ZEEBE_ADDRESS` | `"localhost:26500"` | Zeebe gateway gRPC address |
-| `activate_request_timeout` | - | `1000` | Timeout in milliseconds for job activation requests |
+| `cluster_address` | `CLUSTER_ADDRESS` | `"localhost:26500"` | Zeebe gateway gRPC address (via `Busybee.configure`) |
+| `activate_request_timeout` | - | `1000` | Timeout in milliseconds for job activation requests (via `Busybee::Testing.configure`) |
+
+For authenticated cluster connections (TLS, OAuth, Camunda Cloud), configure credentials via `Busybee.configure` in your Rails `config/environments/test.rb` or equivalent. See [Providing Credentials](client.md#providing-credentials) for details.
 
 ## Helper Methods
 
@@ -322,6 +328,34 @@ job.variables              #=> {"order_id" => "123", "total" => 99.99}
 job.headers                #=> {"priority" => "high"}
 job.retries                #=> 3
 ```
+
+#### Variables and Headers
+
+The `variables` and `headers` accessors return frozen `HashWithIndifferentAccess` objects with method-style access:
+
+```ruby
+job = activate_job("my-task")
+
+# Indifferent access - use symbol or string keys interchangeably
+job.variables[:order_id]     #=> "123"
+job.variables["order_id"]    #=> "123"
+
+# Method-style access - access keys as methods
+job.variables.order_id       #=> "123"
+job.variables.total          #=> 99.99
+
+# Works with camelCase keys from Zeebe (snake_case methods)
+# If Zeebe sends {"customerId": "abc"}, access via:
+job.variables.customer_id    #=> "abc"
+
+# Nested hashes also support method access
+job.variables.order.line_items.first.product_name
+
+# Variables are frozen (immutable) to prevent accidental modification
+job.variables[:foo] = "bar"  #=> raises FrozenError
+```
+
+This matches the behavior of `Busybee::Job` used in production code, making it easy to write tests that mirror real job handling.
 
 ### Expectation Methods
 

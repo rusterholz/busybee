@@ -274,32 +274,6 @@ client = Busybee::Client.new(
 )
 ```
 
-# Error Handling
+# Next Steps
 
-*This section will be completed in a future update.*
-
-# API Reference
-
-*This section will be completed in a future update.*
-
-## Process Operations
-
-| Method | Description |
-|--------|-------------|
-| `deploy_process(*paths, tenant_id: nil)` | Deploy BPMN files |
-| `start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil)` | Start a process instance |
-| `cancel_instance(process_instance_key, ignore_missing: false)` | Cancel a running instance |
-
-## Message Operations
-
-| Method | Description |
-|--------|-------------|
-| `publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil)` | Publish a message |
-| `broadcast_signal(signal_name, vars: {}, tenant_id: nil)` | Broadcast a signal |
-
-## Variable Operations
-
-| Method | Description |
-|--------|-------------|
-| `set_variables(element_instance_key, vars: {}, local: false)` | Set variables on an instance |
-| `resolve_incident(incident_key)` | Resolve an incident |
+For complete API documentation, error handling details, and advanced usage, see the [Client documentation](../client.md).

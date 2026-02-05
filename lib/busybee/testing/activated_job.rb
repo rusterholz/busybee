@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require "json"
 require "rspec/matchers"
 require "busybee/grpc"
+require "busybee/serialization"
 
 module Busybee
   module Testing
@@ -53,11 +53,11 @@ module Busybee
       end
 
       def variables
-        @variables ||= JSON.parse(raw.variables)
+        @variables ||= Busybee::Serialization.from_json(raw.variables)
       end
 
       def headers
-        @headers ||= JSON.parse(raw.customHeaders)
+        @headers ||= Busybee::Serialization.from_json(raw.customHeaders)
       end
 
       # Assert that job variables include the expected values.
@@ -87,7 +87,7 @@ module Busybee
       def mark_completed(variables = {})
         request = Busybee::GRPC::CompleteJobRequest.new(
           jobKey: key,
-          variables: JSON.generate(variables)
+          variables: Busybee::Serialization.to_json(variables)
         )
         client.complete_job(request)
         self

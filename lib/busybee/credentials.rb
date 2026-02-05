@@ -64,6 +64,9 @@ module Busybee
 
       # Autodetects credential type based on provided parameters.
       # As new credential types are added, extend this method with detection logic.
+      #
+      # @raise [Busybee::CannotDetectCredentials] if params are present but don't match
+      #   any known credential type pattern
       def autodetect_credentials(cluster_address: nil, **params)
         if tls_keys?(params)
           build_tls(cluster_address: cluster_address, **params)
@@ -71,10 +74,19 @@ module Busybee
           build_oauth(cluster_address: cluster_address, **params)
         elsif camunda_cloud_keys?(params)
           build_camunda_cloud(cluster_address: cluster_address, **params)
-        else
-          # Default to insecure for local development (includes explicit insecure: true)
+        elsif insecure_fallback_allowed?(params)
           build_insecure(cluster_address: cluster_address, **params)
+        else
+          raise Busybee::CannotDetectCredentials,
+                "Cannot detect credential type from provided params: #{params.keys.join(', ')}. " \
+                "Set Busybee.credential_type explicitly or provide complete params for a credential type."
         end
+      end
+
+      # Insecure fallback is only allowed when no credential params were provided,
+      # or when `insecure: true` is the only param.
+      def insecure_fallback_allowed?(params)
+        params.empty? || params == { insecure: true }
       end
 
       def id_and_secret?(params)

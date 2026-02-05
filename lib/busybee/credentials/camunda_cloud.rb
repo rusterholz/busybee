@@ -36,6 +36,11 @@ module Busybee
       # @param region [String] Camunda Cloud region (e.g., "bru-2", "us-east-1")
       # @param scope [String, nil] Optional OAuth2 scope for API access control
       def initialize(client_id:, client_secret:, cluster_id:, region:, scope: nil)
+        raise ArgumentError, "client_id is required" if client_id.nil?
+        raise ArgumentError, "client_secret is required" if client_secret.nil?
+        raise ArgumentError, "cluster_id is required" if cluster_id.nil?
+        raise ArgumentError, "region is required" if region.nil?
+
         @cluster_id = cluster_id
         @region = region
 

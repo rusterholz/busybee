@@ -33,7 +33,10 @@ RSpec.describe Busybee::Credentials do
       expect(creds.cluster_address).to eq("override:26500")
     end
 
-    it "prefers explicit insecure: true over other credentials" do
+    it "prefers explicit insecure: true over other credentials when credential_type is :insecure" do
+      original = Busybee.credential_type
+      Busybee.credential_type = :insecure
+
       creds = described_class.build(
         insecure: true,
         client_id: "test-client",
@@ -41,6 +44,8 @@ RSpec.describe Busybee::Credentials do
         cluster_id: "test-cluster"
       )
       expect(creds).to be_a(Busybee::Credentials::Insecure)
+    ensure
+      Busybee.credential_type = original
     end
 
     it "passes cluster_address through to credentials" do
@@ -72,6 +77,49 @@ RSpec.describe Busybee::Credentials do
       it "passes cluster_address to TLS credentials" do
         creds = described_class.build(tls: true, cluster_address: "secure.zeebe.io:443")
         expect(creds.cluster_address).to eq("secure.zeebe.io:443")
+      end
+    end
+
+    context "with incomplete or unrecognized params (no credential_type set)" do
+      before do
+        stub_credential_env_vars
+        # Ensure no credential_type is set so autodetection runs
+        allow(Busybee).to receive(:credential_type).and_return(nil)
+      end
+
+      it "raises CannotDetectCredentials when client_id is provided without other required params" do
+        expect { described_class.build(client_id: "orphan-client") }.
+          to raise_error(Busybee::CannotDetectCredentials, /Cannot detect credential type/)
+      end
+
+      it "raises CannotDetectCredentials when partial OAuth params are provided" do
+        expect { described_class.build(client_id: "test", client_secret: "secret") }.
+          to raise_error(Busybee::CannotDetectCredentials, /Cannot detect credential type/)
+      end
+
+      it "raises CannotDetectCredentials when partial CamundaCloud params are provided" do
+        expect { described_class.build(client_id: "test", client_secret: "secret", cluster_id: "abc") }.
+          to raise_error(Busybee::CannotDetectCredentials, /Cannot detect credential type/)
+      end
+
+      it "includes the unrecognized param keys in the error message" do
+        expect { described_class.build(client_id: "test", some_unknown: "value") }.
+          to raise_error(Busybee::CannotDetectCredentials, /client_id, some_unknown/)
+      end
+
+      it "suggests setting credential_type explicitly" do
+        expect { described_class.build(client_id: "test") }.
+          to raise_error(Busybee::CannotDetectCredentials, /Set Busybee\.credential_type explicitly/)
+      end
+
+      it "does NOT raise when params are empty (falls back to insecure)" do
+        creds = described_class.build
+        expect(creds).to be_a(Busybee::Credentials::Insecure)
+      end
+
+      it "does NOT raise when only insecure: true is provided" do
+        creds = described_class.build(insecure: true)
+        expect(creds).to be_a(Busybee::Credentials::Insecure)
       end
     end
 
@@ -135,11 +183,19 @@ RSpec.describe Busybee::Credentials do
       end
 
       it "passes cluster_address to OAuth credentials" do
+        original = Busybee.credential_type
+        Busybee.credential_type = :oauth
+
         creds = described_class.build(
-          credential_type: :oauth,
+          token_url: "https://auth.example.com/token",
+          client_id: "test",
+          client_secret: "secret",
+          audience: "api",
           cluster_address: "oauth.zeebe.io:443"
         )
         expect(creds.cluster_address).to eq("oauth.zeebe.io:443")
+      ensure
+        Busybee.credential_type = original
       end
     end
   end

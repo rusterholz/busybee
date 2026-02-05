@@ -53,10 +53,10 @@ For local development with an insecure connection, you can create a stub instanc
 require "busybee/credentials"
 
 credentials = Busybee::Credentials::CamundaCloud.new(
-  client_id: "my-client-id",          # these can also be configured
-  client_secret: "my-client-secret",  # by the Railtie or by env vars;
-  cluster_id: "my-cluster-id",        # see the client documentation
-  region: "my-cluster-region"         # for details
+  client_id: "my-client-id",          # these can also be configured by the Railtie
+  client_secret: "my-client-secret",  # or by env vars; see Providing Credentials
+  cluster_id: "my-cluster-id",        # in client.md for details
+  region: "my-cluster-region"
 )
 
 credentials.grpc_stub # will always return a stub instance correctly configured for CamundaCloud
@@ -68,7 +68,7 @@ If you have manually or automatically configured a top-level set of credentials 
 # in config/application.rb or config/initializers/busybee.rb:
 Busybee.configure do |config|
   config.credentials = Busybee::Credentials::CamundaCloud.new(...)
-  # this can also be configured by the Railtie or by env vars; see client documentation for details
+  # see client.md "Providing Credentials" for Railtie and env var configuration
 end
 
 # then, anywhere in application code:
