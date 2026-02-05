@@ -219,9 +219,9 @@ When you receive jobs through `with_each_job` or `open_job_stream`, each job is 
 | `headers` | `Hash` | Custom headers from the BPMN task definition |
 | `status` | `Symbol` | Current status: `:ready`, `:complete`, `:failed`, or `:error` |
 
-**Accessing Variables and Headers:**
+**Variables: Reading and Writing**
 
-Variables and headers use `ActiveSupport::HashWithIndifferentAccess`, so you can access them with strings or symbols. They also support method-style access with automatic camelCase conversion:
+When you **read** variables and headers from a job, they're returned as `ActiveSupport::HashWithIndifferentAccess`. You can access keys with strings or symbols, and they support method-style access with automatic camelCase conversion:
 
 ```ruby
 client.with_each_job("process-order") do |job|
@@ -237,6 +237,22 @@ end
 ```
 
 Variables and headers are frozen to prevent accidental mutation.
+
+When you **write** variables (via `complete!`, `start_instance`, `publish_message`, etc.), Busybee calls `as_json` on your data before JSON-encoding it. This means objects with custom serialization—like ActiveRecord models—work sensibly:
+
+```ruby
+user = User.find(user_id)
+order = Order.find(order_id)
+
+# ActiveRecord models serialize via as_json, not inspect
+job.complete!(user: user, order: order)
+# => {"user": {"id": 1, "name": "Alice", ...}, "order": {"id": 42, ...}}
+
+# Plain hashes, arrays, and primitives work as expected
+job.complete!(items: ["a", "b"], count: 3, metadata: { source: "api" })
+```
+
+If you need custom serialization for your own classes, implement `as_json`.
 
 **Actions:**
 

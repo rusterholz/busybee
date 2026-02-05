@@ -320,6 +320,50 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_message_ttl` | `Busybee.default_message_ttl` |
 | `config.x.busybee.default_fail_job_backoff` | `Busybee.default_fail_job_backoff` |
 
+**Credential configuration:**
+
+In addition to `credential_type` and `credentials`, you can configure credential parameters directly. The Railtie builds a credentials object automatically when parameters are provided:
+
+| Rails Config | Used By | Description |
+|--------------|---------|-------------|
+| `config.x.busybee.client_id` | OAuth, Camunda Cloud | OAuth client ID |
+| `config.x.busybee.client_secret` | OAuth, Camunda Cloud | OAuth client secret |
+| `config.x.busybee.cluster_id` | Camunda Cloud | Camunda Cloud cluster UUID |
+| `config.x.busybee.region` | Camunda Cloud | Camunda Cloud region (e.g., `"bru-2"`) |
+| `config.x.busybee.token_url` | OAuth | OAuth token endpoint URL |
+| `config.x.busybee.audience` | OAuth | OAuth audience |
+| `config.x.busybee.scope` | OAuth, Camunda Cloud | OAuth scope (optional) |
+| `config.x.busybee.certificate_file` | TLS, OAuth | Path to CA certificate file |
+
+Three approaches to credential configuration:
+
+```ruby
+# config/environments/production.rb
+Rails.application.configure do
+  # Option 1: Minimal - set credential_type, use ENV vars for secrets
+  # (CAMUNDA_CLIENT_ID, CAMUNDA_CLIENT_SECRET, etc.)
+  config.x.busybee.credential_type = :camunda_cloud
+
+  # Option 2: Full config - use Rails encrypted credentials
+  config.x.busybee.credential_type = :camunda_cloud
+  config.x.busybee.client_id = Rails.application.credentials.zeebe[:client_id]
+  config.x.busybee.client_secret = Rails.application.credentials.zeebe[:client_secret]
+  config.x.busybee.cluster_id = Rails.application.credentials.zeebe[:cluster_id]
+  config.x.busybee.region = "bru-2"
+
+  # Option 3: Explicit credentials object
+  config.x.busybee.credentials = Busybee::Credentials::OAuth.new(
+    cluster_address: "zeebe.example.com:443",
+    token_url: "https://auth.example.com/oauth/token",
+    client_id: Rails.application.credentials.zeebe[:client_id],
+    client_secret: Rails.application.credentials.zeebe[:client_secret],
+    audience: "zeebe-api"
+  )
+end
+```
+
+When both `credential_type` and credential parameters are provided, Busybee builds the appropriate credentials object at Rails boot time. If only `credential_type` is set, credential parameters fall back to environment variables (see [Client: Environment Variables](client.md#environment-variables)).
+
 **Logger behavior:**
 
 - If not set, defaults to `Rails.logger`
