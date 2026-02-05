@@ -323,6 +323,8 @@ If you add new docs, ensure user-facing docs go in `docs/` (included) and mainta
 
 **For v0.1:** Manual release from local machine.
 
+> **IMPORTANT:** Release tags must ALWAYS be created on `main`, never on feature branches. Complete all work, merge to `main`, then checkout `main` before tagging.
+
 1. Audit gemspec files (see "Gem File Contents" above)
 2. Update version in `lib/busybee/version.rb`
 3. Update CHANGELOG.md with release date
