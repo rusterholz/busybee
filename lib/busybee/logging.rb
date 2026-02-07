@@ -5,7 +5,8 @@ require "json"
 
 module Busybee
   # Centralized logging with prefixing and optional JSON formatting.
-  # Thread-safe mutex support will be added in v0.3 when Worker abstraction introduces multi-threading.
+  # Thread-safe: a mutex serializes format + write so concurrent threads
+  # cannot interleave within a single log line.
   module Logging
     PREFIX = "[busybee]"
 
@@ -28,15 +29,19 @@ module Busybee
 
       private
 
+      def mutex = @mutex ||= Mutex.new
+
       def log(level, message, **context)
         return unless Busybee.logger
 
-        formatted = case Busybee.log_format
-                    when :text then format_text(message, **context)
-                    when :json then format_json(level, message, **context)
-                    end
+        mutex.synchronize do
+          formatted = case Busybee.log_format
+                      when :text then format_text(message, **context)
+                      when :json then format_json(level, message, **context)
+                      end
 
-        Busybee.logger.public_send(level, formatted)
+          Busybee.logger.public_send(level, formatted)
+        end
       end
 
       def format_text(message, **context)

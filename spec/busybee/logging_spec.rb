@@ -124,4 +124,51 @@ RSpec.describe Busybee::Logging do
       expect { described_class.info("test") }.not_to raise_error
     end
   end
+
+  context "with concurrent logging" do
+    let(:lines) { Queue.new }
+    let(:logger) do
+      Logger.new($stdout).tap do |l|
+        l.formatter = proc do |_severity, _datetime, _progname, msg|
+          lines << msg
+          ""
+        end
+      end
+    end
+
+    let(:thread_count) { 10 }
+    let(:messages_per_thread) { 50 }
+
+    def log_from_threads
+      threads = thread_count.times.map do |t|
+        Thread.new do
+          messages_per_thread.times do |m|
+            described_class.info("thread-#{t}-message-#{m}", thread: t, seq: m)
+          end
+        end
+      end
+      threads.each(&:join)
+
+      [].tap { |collected| collected << lines.pop until lines.empty? }
+    end
+
+    it "does not interleave text log lines across threads" do
+      Busybee.log_format = :text
+      collected = log_from_threads
+
+      expect(collected.size).to eq(thread_count * messages_per_thread)
+      expect(collected).to all match(/\A\[busybee\] thread-\d+-message-\d+ \(thread: \d+, seq: \d+\)\z/)
+    end
+
+    it "does not interleave JSON log lines across threads" do
+      Busybee.log_format = :json
+      collected = log_from_threads
+
+      expect(collected.size).to eq(thread_count * messages_per_thread)
+      expect(collected).to all satisfy("be valid JSON with expected keys") { |line|
+        json = JSON.parse(line)
+        json.key?("message") && json.key?("level") && json.key?("thread") && json.key?("seq")
+      }
+    end
+  end
 end
