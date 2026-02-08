@@ -225,4 +225,13 @@ RSpec.describe Busybee::Testing::ActivatedJob do
       job.update_retries(5)
     end
   end
+
+  describe "#update_timeout" do
+    it "sends UpdateJobTimeoutRequest to client" do
+      expect(client).to receive(:update_job_timeout).with( # rubocop:disable RSpec/MessageSpies
+        an_instance_of(Busybee::GRPC::UpdateJobTimeoutRequest)
+      )
+      job.update_timeout(30_000)
+    end
+  end
 end

@@ -142,6 +142,19 @@ module Busybee
         self
       end
 
+      # Update the job's timeout.
+      #
+      # @param timeout [Integer] new timeout in milliseconds
+      # @return [self]
+      def update_timeout(timeout)
+        request = Busybee::GRPC::UpdateJobTimeoutRequest.new(
+          jobKey: key,
+          timeout: timeout.to_i
+        )
+        client.update_job_timeout(request)
+        self
+      end
+
       private
 
       def stringify_keys(hash)
