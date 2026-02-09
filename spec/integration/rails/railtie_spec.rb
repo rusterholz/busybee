@@ -60,6 +60,14 @@ RSpec.describe "Railtie integration with dummy Rails app", :rails do
       expect(Busybee.default_fail_job_backoff).to eq(10_000)
     end
 
+    it "sets default_job_request_timeout from config" do
+      expect(Busybee.default_job_request_timeout).to eq(30_000)
+    end
+
+    it "sets default_job_lock_timeout from config" do
+      expect(Busybee.default_job_lock_timeout).to eq(120_000)
+    end
+
     it "sets log_format from config" do
       expect(Busybee.log_format).to eq(:json)
     end

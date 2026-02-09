@@ -195,6 +195,56 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".default_job_request_timeout" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_job_request_timeout)
+      example.run
+      described_class.default_job_request_timeout = original
+    end
+
+    it "defaults to Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS" do
+      described_class.default_job_request_timeout = nil
+      expect(described_class.default_job_request_timeout).to eq(Busybee::Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS)
+    end
+
+    it "can be set to a custom integer value" do
+      described_class.default_job_request_timeout = 30_000
+      expect(described_class.default_job_request_timeout).to eq(30_000)
+    end
+
+    it "can be set to an ActiveSupport::Duration and returns the Duration" do
+      duration = 30.seconds
+      described_class.default_job_request_timeout = duration
+      expect(described_class.default_job_request_timeout).to be(duration)
+      expect(described_class.default_job_request_timeout).to be_a(ActiveSupport::Duration)
+    end
+  end
+
+  describe ".default_job_lock_timeout" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_job_lock_timeout)
+      example.run
+      described_class.default_job_lock_timeout = original
+    end
+
+    it "defaults to Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS" do
+      described_class.default_job_lock_timeout = nil
+      expect(described_class.default_job_lock_timeout).to eq(Busybee::Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS)
+    end
+
+    it "can be set to a custom integer value" do
+      described_class.default_job_lock_timeout = 120_000
+      expect(described_class.default_job_lock_timeout).to eq(120_000)
+    end
+
+    it "can be set to an ActiveSupport::Duration and returns the Duration" do
+      duration = 2.minutes
+      described_class.default_job_lock_timeout = duration
+      expect(described_class.default_job_lock_timeout).to be(duration)
+      expect(described_class.default_job_lock_timeout).to be_a(ActiveSupport::Duration)
+    end
+  end
+
   describe ".credentials" do
     it "can be set and retrieved with valid credentials object" do
       creds = Busybee::Credentials.new

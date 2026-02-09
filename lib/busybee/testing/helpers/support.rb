@@ -43,7 +43,7 @@ module Busybee
         def activate_jobs_raw(type, max_jobs:, timeout: nil)
           worker = "#{type}-#{SecureRandom.hex(4)}"
 
-          request_timeout = timeout || Busybee::Testing.activate_request_timeout
+          request_timeout = timeout || Busybee.default_job_request_timeout
           request_timeout_ms = if request_timeout.is_a?(ActiveSupport::Duration)
                                  request_timeout.in_milliseconds.to_i
                                else

@@ -39,12 +39,17 @@ RSpec.configure do |config|
     c.syntax = :expect
   end
 
-  # Skip specs that require Rails unless Rails::Railtie is available
-  # Try to load it here (without full Rails boot) for unit tests in Rails appraisals
+  # Skip specs that require Rails unless Rails::Railtie is available.
+  # Try to load it here (without full Rails boot) for unit tests in Rails appraisals.
+  # The before hook handles the case where someone runs `--tag rails` directly,
+  # which would override filter_run_excluding.
   begin
     require "rails/railtie"
   rescue LoadError
     config.filter_run_excluding rails: true
+    config.before(:each, :rails) do
+      skip "Requires a Rails appraisal (e.g., `bundle exec appraisal rails-7.1 rspec --tag rails`)"
+    end
   end
 
   # Skip integration tests unless explicitly requested via ENV variable

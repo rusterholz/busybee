@@ -7,7 +7,8 @@ require "busybee/credentials/insecure"
 # All Busybee config instance variables that the Railtie may set
 def busybee_config_ivars
   %i[
-    @cluster_address @credential_type @credentials @default_fail_job_backoff @default_message_ttl
+    @cluster_address @credential_type @credentials @default_fail_job_backoff
+    @default_job_lock_timeout @default_job_request_timeout @default_message_ttl
     @grpc_retry_delay_ms @grpc_retry_enabled @grpc_retry_errors
     @log_format @logger @worker_name
   ]
@@ -205,6 +206,32 @@ RSpec.describe "Busybee::Railtie", :rails do
         configure_and_initialize
         expect(Busybee.instance_variable_get(:@default_fail_job_backoff)).to be_nil
         expect(Busybee.default_fail_job_backoff).to eq(Busybee::Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS)
+      end
+    end
+
+    describe "default_job_request_timeout" do
+      it "sets default_job_request_timeout when configured" do
+        configure_and_initialize(default_job_request_timeout: 30_000)
+        expect(Busybee.instance_variable_get(:@default_job_request_timeout)).to eq(30_000)
+      end
+
+      it "leaves nil when not configured (uses default from Defaults)" do
+        configure_and_initialize
+        expect(Busybee.instance_variable_get(:@default_job_request_timeout)).to be_nil
+        expect(Busybee.default_job_request_timeout).to eq(Busybee::Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS)
+      end
+    end
+
+    describe "default_job_lock_timeout" do
+      it "sets default_job_lock_timeout when configured" do
+        configure_and_initialize(default_job_lock_timeout: 120_000)
+        expect(Busybee.instance_variable_get(:@default_job_lock_timeout)).to eq(120_000)
+      end
+
+      it "leaves nil when not configured (uses default from Defaults)" do
+        configure_and_initialize
+        expect(Busybee.instance_variable_get(:@default_job_lock_timeout)).to be_nil
+        expect(Busybee.default_job_lock_timeout).to eq(Busybee::Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS)
       end
     end
 

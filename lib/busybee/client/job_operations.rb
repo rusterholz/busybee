@@ -145,8 +145,10 @@ module Busybee
       #
       # @param job_type [String] The job type to activate
       # @param max_jobs [Integer] Maximum number of jobs to activate
-      # @param job_timeout [Integer, ActiveSupport::Duration] Job timeout in milliseconds
-      # @param request_timeout [Integer, ActiveSupport::Duration] Request timeout in milliseconds
+      # @param job_timeout [Integer, ActiveSupport::Duration, nil] Job lock timeout in milliseconds
+      #   (defaults to Busybee.default_job_lock_timeout)
+      # @param request_timeout [Integer, ActiveSupport::Duration, nil] Request timeout in milliseconds
+      #   (defaults to Busybee.default_job_request_timeout)
       # @yield [job] Yields each activated job to the block
       # @yieldparam job [Busybee::Job] The activated job
       # @return [Integer] Count of jobs processed
@@ -160,9 +162,12 @@ module Busybee
       #   end
       #
       def with_each_job(job_type, max_jobs: Busybee::Defaults::DEFAULT_MAX_JOBS, # rubocop:disable Metrics/AbcSize
-                        job_timeout: Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS,
-                        request_timeout: Busybee::Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS)
+                        job_timeout: nil,
+                        request_timeout: nil)
         raise ArgumentError, "block required" unless block_given?
+
+        job_timeout ||= Busybee.default_job_lock_timeout
+        request_timeout ||= Busybee.default_job_request_timeout
 
         request = Busybee::GRPC::ActivateJobsRequest.new(
           type: job_type.to_s,
@@ -196,7 +201,8 @@ module Busybee
       #   from another thread or use a signal handler to terminate the stream.
       #
       # @param job_type [String] The job type to activate
-      # @param job_timeout [Integer, ActiveSupport::Duration] Job timeout in milliseconds
+      # @param job_timeout [Integer, ActiveSupport::Duration, nil] Job lock timeout in milliseconds
+      #   (defaults to Busybee.default_job_lock_timeout)
       # @return [Busybee::JobStream] Stream of activated jobs
       # @raise [Busybee::GRPC::Error] if stream creation fails
       #
@@ -209,7 +215,9 @@ module Busybee
       #     job.complete!
       #   end
       #
-      def open_job_stream(job_type, job_timeout: Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS)
+      def open_job_stream(job_type, job_timeout: nil)
+        job_timeout ||= Busybee.default_job_lock_timeout
+
         request = Busybee::GRPC::StreamActivatedJobsRequest.new(
           type: job_type.to_s,
           worker: Busybee.worker_name,

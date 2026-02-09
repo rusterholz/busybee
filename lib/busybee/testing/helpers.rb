@@ -151,7 +151,7 @@ module Busybee
       # Activate a single job of the given type.
       #
       # @param type [String] job type
-      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee::Testing.activate_request_timeout)
+      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee.default_job_request_timeout)
       # @return [ActivatedJob]
       # @raise [NoJobAvailable] if no job is available
       def activate_job(type, timeout: nil)
@@ -165,7 +165,7 @@ module Busybee
       #
       # @param type [String] job type
       # @param max_jobs [Integer] maximum number of jobs to activate
-      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee::Testing.activate_request_timeout)
+      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee.default_job_request_timeout)
       # @return [Enumerator<ActivatedJob>]
       def activate_jobs(type, max_jobs:, timeout: nil)
         Enumerator.new do |yielder|
