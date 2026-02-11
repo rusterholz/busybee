@@ -9,6 +9,7 @@ require "busybee/serialization"
 require "busybee/job"
 require "busybee/job_stream"
 require "busybee/client"
+require "busybee/worker"
 
 # Top-level gem module, only holds configuration values.
 module Busybee
