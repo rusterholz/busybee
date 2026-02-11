@@ -20,7 +20,7 @@ module Busybee
 
   class << self
     attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl,
-                :default_fail_job_backoff, :worker_name
+                :default_fail_job_backoff, :default_job_request_timeout, :default_job_lock_timeout, :worker_name
     attr_accessor :logger
     attr_reader :credentials
 
@@ -79,6 +79,14 @@ module Busybee
 
     def default_fail_job_backoff
       @default_fail_job_backoff || Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS
+    end
+
+    def default_job_request_timeout
+      @default_job_request_timeout || Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS
+    end
+
+    def default_job_lock_timeout
+      @default_job_lock_timeout || Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS
     end
 
     def credential_type=(value)

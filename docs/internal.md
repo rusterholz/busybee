@@ -30,7 +30,7 @@ lib/busybee/
 │   └── gateway_services_pb.rb # Service stubs (generated)
 ├── job.rb                   # Job wrapper for activated jobs
 ├── job_stream.rb            # JobStream for streaming job activation
-├── logging.rb               # Logging module (text/JSON formats)
+├── logging.rb               # Logging module (text/JSON, thread-safe)
 ├── railtie.rb               # Rails integration
 ├── serialization.rb         # JSON serialization/deserialization
 ├── testing.rb               # Testing module entry point
@@ -84,6 +84,10 @@ lib/busybee/
 - **Client** wraps GRPC with Ruby-idiomatic interface
 - **Worker** uses Client for job operations, plus GRPC directly for streaming
 - **Railtie** is optional; it reads Rails config and sets up gem-level configuration
+
+## Logging Module
+
+`Busybee::Logging` provides prefixed log output in text or JSON format. A mutex serializes the format + write path so concurrent threads (e.g., multiple Worker runners) cannot interleave within a single log line. The nil-logger guard runs outside the mutex to avoid unnecessary lock acquisition.
 
 ## Serialization Module
 

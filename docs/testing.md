@@ -41,19 +41,20 @@ Configure the Zeebe connection. Busybee reads from environment variables by defa
 Busybee.configure do |config|
   config.cluster_address = "localhost:26500"
 end
-
-# Testing-specific options
-Busybee::Testing.configure do |config|
-  config.activate_request_timeout = 2000 # milliseconds, default: 1000
-end
 ```
 
-### Configuration Options
+Job activation timeouts used by the testing helpers default to `Busybee.default_job_request_timeout` (see [Configuration](configuration.md)). You can override per-call or globally:
 
-| Option | Environment Variable | Default | Description |
-|--------|---------------------|---------|-------------|
-| `cluster_address` | `CLUSTER_ADDRESS` | `"localhost:26500"` | Zeebe gateway gRPC address (via `Busybee.configure`) |
-| `activate_request_timeout` | - | `1000` | Timeout in milliseconds for job activation requests (via `Busybee::Testing.configure`) |
+```ruby
+# Per-call: pass timeout directly to the helper
+job = activate_job("my-task", timeout: 2000)
+jobs = activate_jobs("my-task", max_jobs: 5, timeout: 2000)
+
+# Globally: configure a shorter default for your test environment
+Busybee.configure do |config|
+  config.default_job_request_timeout = 2000 # milliseconds, default: 60_000
+end
+```
 
 For authenticated cluster connections (TLS, OAuth, Camunda Cloud), configure credentials via `Busybee.configure` in your Rails `config/environments/test.rb` or equivalent. See [Providing Credentials](client.md#providing-credentials) for details.
 
@@ -185,7 +186,7 @@ Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAva
 
 **Parameters:**
 - `type` (String) - Job type to activate
-- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee::Testing.activate_request_timeout` (1000ms)
+- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee.default_job_request_timeout` (60,000ms)
 
 **Returns:** `ActivatedJob` instance
 
@@ -209,7 +210,7 @@ Activates multiple jobs of the specified type.
 **Parameters:**
 - `type` (String) - Job type to activate
 - `max_jobs` (Integer) - Maximum number of jobs to activate
-- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee::Testing.activate_request_timeout` (1000ms)
+- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee.default_job_request_timeout` (60,000ms)
 
 **Returns:** Enumerator of `ActivatedJob` instances
 

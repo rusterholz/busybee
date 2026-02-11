@@ -238,6 +238,34 @@ Default backoff time when failing a job, in milliseconds. Individual `fail_job` 
 Busybee.default_fail_job_backoff = 10_000  # 10 seconds
 ```
 
+#### `default_job_request_timeout`
+
+Default timeout for job activation requests, in milliseconds. This controls how long the Zeebe gateway waits for jobs to become available before returning an empty response. Individual `with_each_job` and `activate_job` calls can override this.
+
+| | |
+|--|--|
+| **Type** | Integer (milliseconds) or ActiveSupport::Duration |
+| **Default** | `60_000` (60 seconds) |
+
+```ruby
+Busybee.default_job_request_timeout = 30_000   # 30 seconds
+Busybee.default_job_request_timeout = 30.seconds
+```
+
+#### `default_job_lock_timeout`
+
+Default lock timeout for activated jobs, in milliseconds. This controls how long a worker has to process a job before the lock expires and the job becomes available to other workers. Individual `with_each_job` and `open_job_stream` calls can override this.
+
+| | |
+|--|--|
+| **Type** | Integer (milliseconds) or ActiveSupport::Duration |
+| **Default** | `60_000` (60 seconds) |
+
+```ruby
+Busybee.default_job_lock_timeout = 120_000   # 2 minutes
+Busybee.default_job_lock_timeout = 2.minutes
+```
+
 #### `worker_name`
 
 Identifier for this worker instance, used in job activation. Useful for debugging which worker processed a job.
@@ -319,6 +347,8 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.grpc_retry_errors` | `Busybee.grpc_retry_errors` |
 | `config.x.busybee.default_message_ttl` | `Busybee.default_message_ttl` |
 | `config.x.busybee.default_fail_job_backoff` | `Busybee.default_fail_job_backoff` |
+| `config.x.busybee.default_job_request_timeout` | `Busybee.default_job_request_timeout` |
+| `config.x.busybee.default_job_lock_timeout` | `Busybee.default_job_lock_timeout` |
 
 **Credential configuration:**
 

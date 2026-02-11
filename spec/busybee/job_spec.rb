@@ -65,9 +65,10 @@ RSpec.describe Busybee::Job do
       expect(job.retries).to eq(3)
     end
 
-    it "returns deadline as a Time object" do
+    it "returns deadline as a UTC Time object" do
       expect(job.deadline).to be_a(Time)
       expect(job.deadline).to eq(Time.at(1640000000))
+      expect(job.deadline).to be_utc
     end
 
     it "freezes the deadline" do
@@ -733,6 +734,75 @@ RSpec.describe Busybee::Job do
           /cannot throw bpmn error.*already error/i
         )
       end
+    end
+  end
+
+  describe "#update_retries" do
+    it "calls client.update_job_retries with job key and count" do
+      allow(client).to receive(:update_job_retries)
+
+      job.update_retries(5)
+
+      expect(client).to have_received(:update_job_retries).with(123456, 5)
+    end
+
+    it "updates the local retries value" do
+      allow(client).to receive(:update_job_retries)
+
+      expect { job.update_retries(5) }.to change(job, :retries).from(3).to(5)
+    end
+
+    it "does not change job status" do
+      allow(client).to receive(:update_job_retries)
+
+      expect { job.update_retries(5) }.not_to change(job, :status)
+    end
+  end
+
+  describe "#update_timeout" do
+    it "calls client.update_job_timeout with job key and duration" do
+      allow(client).to receive(:update_job_timeout)
+
+      job.update_timeout(30_000)
+
+      expect(client).to have_received(:update_job_timeout).with(123456, 30_000)
+    end
+
+    it "passes through Duration objects" do
+      duration = 30.seconds
+      allow(client).to receive(:update_job_timeout)
+
+      job.update_timeout(duration)
+
+      expect(client).to have_received(:update_job_timeout).with(123456, duration)
+    end
+
+    it "updates the local deadline from integer milliseconds" do
+      allow(client).to receive(:update_job_timeout)
+      freeze_time = Time.now.utc
+
+      allow(Time).to receive(:now).and_return(freeze_time)
+      job.update_timeout(30_000)
+
+      expect(job.deadline).to eq(freeze_time + 30)
+      expect(job.deadline).to be_utc
+      expect(job.deadline).to be_frozen
+    end
+
+    it "updates the local deadline from Duration" do
+      allow(client).to receive(:update_job_timeout)
+      freeze_time = Time.now.utc
+
+      allow(Time).to receive(:now).and_return(freeze_time)
+      job.update_timeout(30.seconds)
+
+      expect(job.deadline).to eq(freeze_time + 30)
+    end
+
+    it "does not change job status" do
+      allow(client).to receive(:update_job_timeout)
+
+      expect { job.update_timeout(30_000) }.not_to change(job, :status)
     end
   end
 end

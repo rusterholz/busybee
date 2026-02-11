@@ -58,13 +58,13 @@ module Busybee
     # Number of retries remaining
     # @return [Integer]
     def retries
-      @raw_job.retries
+      @retries_override || @raw_job.retries
     end
 
     # Job deadline as a frozen Time object
     # @return [Time]
     def deadline
-      @deadline ||= Time.at(@raw_job.deadline / 1000.0).freeze
+      @deadline ||= Time.at(@raw_job.deadline / 1000.0).utc.freeze
     end
 
     # Job variables with indifferent access and method-style access.
@@ -131,6 +131,29 @@ module Busybee
 
       @client.throw_bpmn_error(key, code, message: message).tap do
         @status = :error
+      end
+    end
+
+    # Update the retry count for this job.
+    #
+    # @param count [Integer] The new number of retries
+    # @return [Object] Response from update_job_retries operation
+    # @raise [Busybee::GRPC::Error] if the update fails
+    def update_retries(count)
+      @client.update_job_retries(key, count).tap do
+        @retries_override = count
+      end
+    end
+
+    # Update the timeout for this job.
+    #
+    # @param duration [Integer, ActiveSupport::Duration] New timeout in milliseconds
+    # @return [Object] Response from update_job_timeout operation
+    # @raise [Busybee::GRPC::Error] if the update fails
+    def update_timeout(duration)
+      duration_seconds = duration.is_a?(ActiveSupport::Duration) ? duration.in_seconds : duration / 1000.0
+      @client.update_job_timeout(key, duration).tap do
+        @deadline = (Time.now.utc + duration_seconds).freeze
       end
     end
 

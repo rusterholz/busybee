@@ -55,9 +55,10 @@ module Busybee
         config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors) if busybee_conf.grpc_retry_errors.presence
 
         # Client API method defaults
-        config.default_message_ttl = busybee_conf.default_message_ttl if busybee_conf.default_message_ttl.presence
-        if busybee_conf.default_fail_job_backoff.presence
-          config.default_fail_job_backoff = busybee_conf.default_fail_job_backoff
+        %i[default_message_ttl default_fail_job_backoff
+           default_job_request_timeout default_job_lock_timeout].each do |attr|
+          value = busybee_conf.public_send(attr)
+          config.public_send(:"#{attr}=", value) if value.presence
         end
       end
     end
