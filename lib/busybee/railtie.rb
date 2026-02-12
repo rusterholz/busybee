@@ -60,7 +60,22 @@ module Busybee
           value = busybee_conf.public_send(attr)
           config.public_send(:"#{attr}=", value) if value.presence
         end
+
+        # Worker defaults
+        Busybee::Railtie.configure_worker_defaults(config, busybee_conf)
       end
+    end
+
+    # @api private
+    def self.configure_worker_defaults(config, busybee_conf) # rubocop:disable Metrics/AbcSize
+      unless busybee_conf.default_input_required.nil?
+        config.default_input_required = !!busybee_conf.default_input_required
+      end
+      unless busybee_conf.default_output_required.nil?
+        config.default_output_required = !!busybee_conf.default_output_required
+      end
+      config.default_runner_mode = busybee_conf.default_runner_mode if busybee_conf.default_runner_mode.presence
+      config.unhealthy_errors = busybee_conf.unhealthy_errors if busybee_conf.unhealthy_errors.presence
     end
 
     # @api private

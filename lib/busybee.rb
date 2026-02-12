@@ -21,7 +21,8 @@ module Busybee
 
   class << self
     attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl,
-                :default_fail_job_backoff, :default_job_request_timeout, :default_job_lock_timeout, :worker_name
+                :default_fail_job_backoff, :default_job_request_timeout, :default_job_lock_timeout, :worker_name,
+                :default_input_required, :default_output_required, :default_runner_mode
     attr_accessor :logger
     attr_reader :credentials
 
@@ -88,6 +89,26 @@ module Busybee
 
     def default_job_lock_timeout
       @default_job_lock_timeout || Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS
+    end
+
+    def default_input_required
+      @default_input_required.nil? ? Defaults::DEFAULT_INPUT_REQUIRED : @default_input_required
+    end
+
+    def default_output_required
+      @default_output_required.nil? ? Defaults::DEFAULT_OUTPUT_REQUIRED : @default_output_required
+    end
+
+    def default_runner_mode
+      @default_runner_mode || Defaults::DEFAULT_RUNNER_MODE
+    end
+
+    def unhealthy_errors
+      @unhealthy_errors ||= []
+    end
+
+    def unhealthy_errors=(value)
+      @unhealthy_errors = Array(value)
     end
 
     def credential_type=(value)
