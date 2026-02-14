@@ -6,7 +6,7 @@ module Busybee
   class Worker
     # Stores all DSL-declared metadata for a Worker subclass.
     # Lazily instantiated per worker class via Worker.configuration.
-    class Configuration
+    class Configuration # rubocop:disable Metrics/ClassLength
       VALID_TYPES = %w[string integer decimal boolean datetime duration uuid null].freeze
       VALID_SOURCES = %i[variable header].freeze
       VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
@@ -21,7 +21,7 @@ module Busybee
 
       attr_accessor :description
       attr_reader :inputs, :outputs, :runner_mode, :polling_config, :streaming_config,
-                  :job_timeout, :backoff
+                  :job_timeout, :backoff, :complete_job_on_success, :fail_job_on_error, :shutdown_on
 
       def initialize(worker_class)
         @worker_class = worker_class
@@ -34,7 +34,9 @@ module Busybee
         @streaming_config = {}
         @job_timeout = nil
         @backoff = nil
-        # Mission 9: autocomplete, autofail, unhealthy_on
+        @complete_job_on_success = true
+        @fail_job_on_error = true
+        @shutdown_on = []
       end
 
       def job_type
@@ -81,6 +83,33 @@ module Busybee
         @backoff = value
       end
 
+      def complete_job_on_success=(value)
+        unless [true, false].include?(value)
+          raise InvalidWorkerDefinition, "`complete_job_on_success` requires a boolean, got #{value.inspect}"
+        end
+
+        @complete_job_on_success = value
+      end
+
+      def fail_job_on_error=(value)
+        unless [true, false].include?(value)
+          raise InvalidWorkerDefinition, "`fail_job_on_error` requires a boolean, got #{value.inspect}"
+        end
+
+        @fail_job_on_error = value
+      end
+
+      def add_shutdown_on(*exception_classes)
+        exception_classes.each do |klass|
+          unless klass.is_a?(Class) && klass <= Exception
+            raise InvalidWorkerDefinition,
+                  "`shutdown_on` expects exception classes, got #{klass.inspect}"
+          end
+        end
+
+        @shutdown_on |= exception_classes
+      end
+
       def add_input(input)
         validate_name!(input.name, "input")
         validate_source!(input)
@@ -109,8 +138,10 @@ module Busybee
           polling_config: polling_config,
           streaming_config: streaming_config,
           job_timeout: job_timeout,
-          backoff: backoff
-          # Mission 9: autocomplete, autofail, unhealthy_on
+          backoff: backoff,
+          complete_job_on_success: complete_job_on_success,
+          fail_job_on_error: fail_job_on_error,
+          shutdown_on: shutdown_on
         }
       end
 

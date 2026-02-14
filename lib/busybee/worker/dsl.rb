@@ -98,7 +98,29 @@ module Busybee
         configuration.backoff = value
       end
 
-      # Mission 9: autocomplete, autofail, unhealthy_on
+      def complete_job_on_success(value = nil)
+        if value.nil?
+          configuration.complete_job_on_success
+        else
+          configuration.complete_job_on_success = value
+        end
+      end
+
+      def fail_job_on_error(value = nil)
+        if value.nil?
+          configuration.fail_job_on_error
+        else
+          configuration.fail_job_on_error = value
+        end
+      end
+
+      def shutdown_on(*exception_classes)
+        if exception_classes.empty?
+          configuration.shutdown_on
+        else
+          configuration.add_shutdown_on(*exception_classes)
+        end
+      end
 
       private
 

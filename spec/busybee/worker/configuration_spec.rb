@@ -338,7 +338,113 @@ RSpec.describe Busybee::Worker::Configuration do
       expect(result[:job_timeout]).to eq(300_000)
       expect(result[:backoff]).to eq(30_000)
     end
+
+    it "includes lifecycle defaults" do
+      result = config.to_h
+      expect(result[:complete_job_on_success]).to be(true)
+      expect(result[:fail_job_on_error]).to be(true)
+      expect(result[:shutdown_on]).to eq([])
+    end
+
+    it "includes lifecycle configuration when overridden" do
+      config.complete_job_on_success = false
+      config.fail_job_on_error = false
+      config.add_shutdown_on(RuntimeError)
+
+      result = config.to_h
+      expect(result[:complete_job_on_success]).to be(false)
+      expect(result[:fail_job_on_error]).to be(false)
+      expect(result[:shutdown_on]).to eq([RuntimeError])
+    end
   end
 
-  # Mission 9: lifecycle configuration (autocomplete, autofail, unhealthy_on)
+  describe "#complete_job_on_success" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "defaults to true" do
+      expect(config.complete_job_on_success).to be(true)
+    end
+
+    it "accepts true" do
+      config.complete_job_on_success = true
+      expect(config.complete_job_on_success).to be(true)
+    end
+
+    it "accepts false" do
+      config.complete_job_on_success = false
+      expect(config.complete_job_on_success).to be(false)
+    end
+
+    it "raises on non-boolean" do
+      expect { config.complete_job_on_success = :yes }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /complete_job_on_success.*boolean/
+      )
+    end
+  end
+
+  describe "#fail_job_on_error" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "defaults to true" do
+      expect(config.fail_job_on_error).to be(true)
+    end
+
+    it "accepts true" do
+      config.fail_job_on_error = true
+      expect(config.fail_job_on_error).to be(true)
+    end
+
+    it "accepts false" do
+      config.fail_job_on_error = false
+      expect(config.fail_job_on_error).to be(false)
+    end
+
+    it "raises on non-boolean" do
+      expect { config.fail_job_on_error = "true" }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /fail_job_on_error.*boolean/
+      )
+    end
+  end
+
+  describe "#add_shutdown_on" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "starts with an empty array" do
+      expect(config.shutdown_on).to eq([])
+    end
+
+    it "adds an exception class" do
+      config.add_shutdown_on(RuntimeError)
+      expect(config.shutdown_on).to eq([RuntimeError])
+    end
+
+    it "accepts multiple classes via splat" do
+      config.add_shutdown_on(RuntimeError, ArgumentError)
+      expect(config.shutdown_on).to contain_exactly(RuntimeError, ArgumentError)
+    end
+
+    it "is additive across calls" do
+      config.add_shutdown_on(RuntimeError)
+      config.add_shutdown_on(ArgumentError)
+      expect(config.shutdown_on).to contain_exactly(RuntimeError, ArgumentError)
+    end
+
+    it "deduplicates" do
+      config.add_shutdown_on(RuntimeError)
+      config.add_shutdown_on(RuntimeError, ArgumentError)
+      expect(config.shutdown_on).to contain_exactly(RuntimeError, ArgumentError)
+    end
+
+    it "raises on non-class argument" do
+      expect { config.add_shutdown_on("RuntimeError") }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /shutdown_on.*exception classes/
+      )
+    end
+
+    it "raises on class that is not an Exception subclass" do
+      expect { config.add_shutdown_on(String) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /shutdown_on.*exception classes/
+      )
+    end
+  end
 end

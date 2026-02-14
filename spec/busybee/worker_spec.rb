@@ -34,8 +34,7 @@ RSpec.describe Busybee::Worker do
   end
 
   describe ".perform_job" do
-    # Mission 7: bare-bones — instantiate, call perform, return result.
-    # Mission 9: will add input validation, autocomplete, autofail, unhealthy_on wrapping.
+    before { allow(client).to receive(:complete_job) }
 
     it "calls perform on a new instance and returns the result" do
       result = performing_worker.perform_job(job)
@@ -44,6 +43,387 @@ RSpec.describe Busybee::Worker do
 
     it "raises NotImplementedError when perform is not overridden" do
       expect { minimal_worker.perform_job(job) }.to raise_error(NotImplementedError, /perform/)
+    end
+
+    context "with complete_job_on_success (default: true)" do
+      it "auto-completes the job with the result hash" do
+        performing_worker.perform_job(job)
+        expect(client).to have_received(:complete_job).with(123456, vars: { processed: true })
+      end
+
+      it "normalizes non-hash results to empty hash" do
+        worker = stub_const("NilReturnWorker", Class.new(described_class) do
+          define_method(:perform) { nil }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job).with(123456, vars: {})
+      end
+
+      it "skips completion when disabled" do
+        worker = stub_const("NoAutoCompleteWorker", Class.new(described_class) do
+          complete_job_on_success false
+          define_method(:perform) { { done: true } }
+        end)
+
+        worker.perform_job(job)
+        expect(client).not_to have_received(:complete_job)
+      end
+
+      it "skips completion when job is already handled" do
+        worker = stub_const("ManualCompleteWorker", Class.new(described_class) do
+          define_method(:perform) do
+            complete!(manual: true)
+            { extra: "data" }
+          end
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job).once.with(123456, vars: { manual: true })
+      end
+
+      it "logs and swallows GRPC errors from complete!" do
+        allow(client).to receive(:complete_job).and_raise(GRPC::Unavailable, "connection lost")
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        expect { performing_worker.perform_job(job) }.not_to raise_error
+        expect(logger).to have_received(:warn).with(/Failed to complete job.*connection lost/)
+      end
+    end
+
+    context "with fail_job_on_error (default: true)" do
+      before { allow(client).to receive(:fail_job) }
+
+      it "auto-fails the job when perform raises" do
+        worker = stub_const("FailingWorker", Class.new(described_class) do
+          define_method(:perform) { raise "boom" }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:fail_job).with(123456, /RuntimeError.*boom/, retries: nil, backoff: nil)
+      end
+
+      it "uses configured backoff" do
+        worker = stub_const("BackoffWorker", Class.new(described_class) do
+          backoff 30_000
+          define_method(:perform) { raise "boom" }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:fail_job).with(123456, anything, retries: nil, backoff: 30_000)
+      end
+
+      it "does not auto-fail when disabled" do
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        worker = stub_const("NoAutoFailWorker", Class.new(described_class) do
+          fail_job_on_error false
+          define_method(:perform) { raise "boom" }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:fail_job)
+      end
+
+      it "skips auto-fail when job is already handled" do
+        worker = stub_const("ManualFailWorker", Class.new(described_class) do
+          define_method(:perform) do
+            fail!("handled manually", retries: 0)
+            raise "after fail"
+          end
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:fail_job).once.with(123456, "handled manually", retries: 0, backoff: nil)
+      end
+
+      it "skips auto-fail when job had a BPMN error thrown" do
+        allow(client).to receive(:throw_bpmn_error)
+
+        worker = stub_const("BpmnErrorWorker", Class.new(described_class) do
+          define_method(:perform) do
+            throw_bpmn_error!(:order_not_found, "missing")
+            raise "after bpmn error"
+          end
+        end)
+
+        worker.perform_job(job)
+        expect(client).not_to have_received(:fail_job)
+      end
+
+      it "logs and swallows GRPC errors from fail!" do
+        allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        worker = stub_const("FailGrpcWorker", Class.new(described_class) do
+          define_method(:perform) { raise "boom" }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(logger).to have_received(:warn).with(/Failed to fail job.*connection lost/)
+      end
+
+      it "swallows perform errors after auto-fail (runner continues)" do
+        worker = stub_const("SwallowWorker", Class.new(described_class) do
+          define_method(:perform) { raise "transient" }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+      end
+
+      it "swallows errors when fail_job_on_error is false and logs a warning" do
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        worker = stub_const("SwallowNoFailWorker", Class.new(described_class) do
+          fail_job_on_error false
+          define_method(:perform) { raise "unhandled" }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(job).to be_ready
+        expect(logger).to have_received(:warn).with(/Unhandled error.*fail_job_on_error is off.*will timeout/)
+      end
+    end
+
+    context "with shutdown_on" do
+      before do
+        stub_const("PGConnectionBad", Class.new(StandardError))
+        allow(client).to receive(:fail_job)
+      end
+
+      it "wraps matching exceptions as Shutdown and re-raises" do
+        worker = stub_const("ShutdownWorker", Class.new(described_class) do
+          shutdown_on PGConnectionBad
+          define_method(:perform) { raise PGConnectionBad, "connection lost" }
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown) do |e|
+          expect(e.cause).to be_a(PGConnectionBad)
+          expect(e.worker_class).to eq(worker)
+          expect(e.message).to include("PGConnectionBad")
+          expect(e.message).to include("connection lost")
+        end
+      end
+
+      it "auto-fails the job before raising Shutdown" do
+        worker = stub_const("FailThenShutdownWorker", Class.new(described_class) do
+          shutdown_on PGConnectionBad
+          define_method(:perform) { raise PGConnectionBad, "gone" }
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+        expect(client).to have_received(:fail_job).with(123456, /PGConnectionBad.*gone/, retries: nil, backoff: nil)
+      end
+
+      it "does not wrap non-matching exceptions" do
+        worker = stub_const("NonMatchWorker", Class.new(described_class) do
+          shutdown_on PGConnectionBad
+          define_method(:perform) { raise "normal error" }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+      end
+
+      it "matches subclasses" do
+        stub_const("PGQueryCancelled", Class.new(PGConnectionBad))
+
+        worker = stub_const("SubclassShutdownWorker", Class.new(described_class) do
+          shutdown_on PGConnectionBad
+          define_method(:perform) { raise PGQueryCancelled, "cancelled" }
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+      end
+
+      it "re-raises Shutdown raised directly in perform" do
+        worker = stub_const("DirectShutdownWorker", Class.new(described_class) do
+          define_method(:perform) { raise Busybee::Worker::Shutdown.new(worker: self.class) }
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+      end
+
+      it "auto-fails using the cause when Shutdown is raised directly" do
+        worker = stub_const("DirectShutdownFailWorker", Class.new(described_class) do
+          define_method(:perform) do
+            raise "root cause"
+          rescue StandardError
+            raise Busybee::Worker::Shutdown.new(worker: self.class)
+          end
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+        expect(client).to have_received(:fail_job).with(123456, /RuntimeError.*root cause/, retries: nil, backoff: nil)
+      end
+
+      it "merges gem-level shutdown_on_errors" do
+        original = Busybee.shutdown_on_errors.dup
+        begin
+          Busybee.shutdown_on_errors = [PGConnectionBad]
+
+          worker = stub_const("GemLevelWorker", Class.new(described_class) do
+            define_method(:perform) { raise PGConnectionBad, "gone" }
+          end)
+
+          expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+        ensure
+          Busybee.shutdown_on_errors = original
+        end
+      end
+    end
+
+    context "with input validation" do
+      before { allow(client).to receive(:fail_job) }
+
+      it "raises MissingInput for missing required inputs" do
+        worker = stub_const("RequiredInputWorker", Class.new(described_class) do
+          variable :nonexistent, required: true
+          define_method(:perform) { {} }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).to have_received(:fail_job).
+          with(123456, /MissingInput.*:nonexistent/, retries: nil, backoff: nil)
+      end
+
+      it "lists all missing inputs" do
+        worker = stub_const("MultiMissingWorker", Class.new(described_class) do
+          variable :missing_one, required: true
+          variable :missing_two, required: true
+          define_method(:perform) { {} }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).to have_received(:fail_job).with(123456, /missing_one.*missing_two/, retries: nil, backoff: nil)
+      end
+
+      it "passes when required inputs are present" do
+        worker = stub_const("PresentInputWorker", Class.new(described_class) do
+          variable :order_id, required: true
+          define_method(:perform) { { ok: true } }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+      end
+
+      it "skips validation for inputs with defaults" do
+        worker = stub_const("DefaultInputWorker", Class.new(described_class) do
+          variable :nonexistent, default: "fallback"
+          define_method(:perform) { { ok: true } }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:fail_job)
+      end
+
+      it "includes job_type in error message" do
+        worker = stub_const("TypedWorker", Class.new(described_class) do
+          job_type "process-order"
+          variable :nonexistent, required: true
+          define_method(:perform) { {} }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).to have_received(:fail_job).with(123456, /process-order worker/, retries: nil, backoff: nil)
+      end
+    end
+
+    context "with output validation" do
+      before { allow(client).to receive(:complete_job) }
+
+      it "raises MissingOutput when required outputs are absent" do
+        allow(client).to receive(:fail_job)
+
+        worker = stub_const("MissingOutputWorker", Class.new(described_class) do
+          output :notification_id, required: true
+          define_method(:perform) { {} }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:complete_job)
+        expect(client).to have_received(:fail_job).
+          with(123456, /MissingOutput.*:notification_id/, retries: nil, backoff: nil)
+      end
+
+      it "passes when required outputs are present as symbols" do
+        worker = stub_const("SymbolOutputWorker", Class.new(described_class) do
+          output :notification_id, required: true
+          define_method(:perform) { { notification_id: "abc" } }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job).with(123456, vars: { notification_id: "abc" })
+      end
+
+      it "passes when required outputs are present as strings" do
+        worker = stub_const("StringOutputWorker", Class.new(described_class) do
+          output :notification_id, required: true
+          define_method(:perform) { { "notification_id" => "abc" } }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job)
+      end
+
+      it "skips output validation when complete_job_on_success is false" do
+        worker = stub_const("NoCompleteOutputWorker", Class.new(described_class) do
+          complete_job_on_success false
+          output :notification_id, required: true
+          define_method(:perform) { {} }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:complete_job)
+      end
+
+      it "skips output validation for optional outputs" do
+        worker = stub_const("OptionalOutputWorker", Class.new(described_class) do
+          output :debug_info, required: false
+          define_method(:perform) { {} }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job).with(123456, vars: {})
+      end
+    end
+  end
+
+  describe Busybee::Worker::Shutdown do
+    def raise_with_cause(cause_class, cause_message, **shutdown_kwargs)
+      raise cause_class, cause_message
+    rescue cause_class
+      raise described_class.new(**shutdown_kwargs)
+    end
+
+    it "builds a message from worker class and cause" do
+      error = raise_with_cause(RuntimeError, "connection lost", worker: String) rescue $! # rubocop:disable Style/RescueModifier
+
+      expect(error.message).to include("Shutting down worker")
+      expect(error.message).to include("RuntimeError")
+      expect(error.message).to include("String")
+      expect(error.message).to include("connection lost")
+      expect(error.worker_class).to eq(String)
+      expect(error.cause).to be_a(RuntimeError)
+    end
+
+    it "handles missing cause gracefully" do
+      error = described_class.new(worker: String)
+      expect(error.message).to include("due to error")
+      expect(error.message).to include("String")
+    end
+
+    it "handles anonymous worker class" do
+      error = described_class.new(worker: Class.new)
+      expect(error.message).not_to include(" in ")
+    end
+
+    it "accepts a custom base message" do
+      error = described_class.new("Custom shutdown reason", worker: String)
+      expect(error.message).to start_with("Custom shutdown reason")
     end
   end
 

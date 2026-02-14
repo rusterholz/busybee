@@ -94,6 +94,7 @@ module Busybee
 
       @client.complete_job(key, vars: vars).tap do
         @status = :complete
+        # [hook: job.completed]
       end
     end
 
@@ -111,6 +112,7 @@ module Busybee
 
       @client.fail_job(key, message, retries: retries, backoff: backoff).tap do
         @status = :failed
+        # [hook: job.failed]
       end
     end
 
@@ -131,6 +133,7 @@ module Busybee
 
       @client.throw_bpmn_error(key, code, message: message).tap do
         @status = :error
+        # [hook: job.error]
       end
     end
 
