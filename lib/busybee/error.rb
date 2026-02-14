@@ -16,6 +16,9 @@ module Busybee
   # Raised when OAuth2 token endpoint returns invalid JSON
   InvalidOAuthResponse = Class.new(Error)
 
+  # Raised when a Worker DSL declaration is invalid (conflicting options, bad values, etc.)
+  InvalidWorkerDefinition = Class.new(Error)
+
   # Raised when attempting to complete, fail, or throw error on a job that has already been handled
   JobAlreadyHandled = Class.new(Error)
 

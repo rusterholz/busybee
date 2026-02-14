@@ -7,17 +7,21 @@ module Busybee
     # Stores all DSL-declared metadata for a Worker subclass.
     # Lazily instantiated per worker class via Worker.configuration.
     class Configuration
+      VALID_TYPES = %w[string integer decimal boolean datetime duration uuid null].freeze
+      VALID_SOURCES = %i[variable header].freeze
+      VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
+      VALID_POLLING_KWARGS = %i[max_jobs request_timeout].freeze
+
       # Represents a declared input (from variable, header, or both).
-      # Mission 8: DSL methods (input, variable, header) will create these.
       Input = Struct.new(:name, :source, :required, :type, :description, :default,
                          :accessor_name, :define_accessor, keyword_init: true)
 
       # Represents a declared output returned from perform.
-      # Mission 8: output DSL method will create these.
       Output = Struct.new(:name, :required, :type, :description, keyword_init: true)
 
       attr_accessor :description
-      attr_reader :inputs, :outputs
+      attr_reader :inputs, :outputs, :runner_mode, :polling_config, :streaming_config,
+                  :job_timeout, :backoff
 
       def initialize(worker_class)
         @worker_class = worker_class
@@ -25,7 +29,11 @@ module Busybee
         @description = nil
         @inputs = []
         @outputs = []
-        # Mission 8: runner_mode, polling config, streaming config, job_timeout, backoff
+        @runner_mode = nil
+        @polling_config = {}
+        @streaming_config = {}
+        @job_timeout = nil
+        @backoff = nil
         # Mission 9: autocomplete, autofail, unhealthy_on
       end
 
@@ -37,13 +45,71 @@ module Busybee
         @job_type = value.to_s
       end
 
+      def runner_mode=(value)
+        sym = value.to_sym
+        unless VALID_RUNNER_MODES.include?(sym)
+          raise InvalidWorkerDefinition,
+                "Invalid runner mode #{value.inspect}. Valid: #{VALID_RUNNER_MODES.map(&:inspect).join(', ')}"
+        end
+
+        @runner_mode = sym
+      end
+
+      def polling_config=(kwargs)
+        unknown = kwargs.keys - VALID_POLLING_KWARGS
+        if unknown.any?
+          raise InvalidWorkerDefinition,
+                "Unknown polling config: #{unknown.map(&:inspect).join(', ')}. " \
+                "Valid: #{VALID_POLLING_KWARGS.map(&:inspect).join(', ')}"
+        end
+
+        @polling_config = kwargs
+      end
+
+      # TODO: add kwargs validation when streaming options are defined
+      def streaming_config=(kwargs) # rubocop:disable Style/TrivialAccessors
+        @streaming_config = kwargs
+      end
+
+      def job_timeout=(value)
+        validate_duration!(:job_timeout, value)
+        @job_timeout = value
+      end
+
+      def backoff=(value)
+        validate_duration!(:backoff, value)
+        @backoff = value
+      end
+
+      def add_input(input)
+        validate_name!(input.name, "input")
+        validate_source!(input)
+        validate_type!(input.name, input.type, "input") if input.type
+        validate_accessor_options!(input)
+        validate_unique_input!(input.name)
+
+        @inputs << input
+      end
+
+      def add_output(output)
+        validate_name!(output.name, "output")
+        validate_type!(output.name, output.type, "output") if output.type
+        validate_unique_output!(output.name)
+
+        @outputs << output
+      end
+
       def to_h
         {
           job_type: job_type,
           description: description,
           inputs: inputs.map(&:to_h),
-          outputs: outputs.map(&:to_h)
-          # Mission 8: runner_mode, polling, streaming, job_timeout, backoff
+          outputs: outputs.map(&:to_h),
+          runner_mode: runner_mode,
+          polling_config: polling_config,
+          streaming_config: streaming_config,
+          job_timeout: job_timeout,
+          backoff: backoff
           # Mission 9: autocomplete, autofail, unhealthy_on
         }
       end
@@ -57,6 +123,61 @@ module Busybee
         last_segment = class_name.split("::").last
         last_segment = last_segment.delete_suffix("Worker") if last_segment != "Worker"
         last_segment.underscore
+      end
+
+      def validate_name!(name, kind)
+        raise InvalidWorkerDefinition, "Name is required for all #{kind}s" if name.nil? || name.to_s.strip.empty?
+      end
+
+      def validate_source!(input)
+        sources = Array(input.source)
+        raise InvalidWorkerDefinition, "`source:` is required for input :#{input.name}" if sources.empty?
+
+        invalid = sources - VALID_SOURCES
+        unless invalid.empty?
+          raise InvalidWorkerDefinition,
+                "Invalid source #{invalid.map(&:inspect).join(', ')} for input :#{input.name}. " \
+                "Valid: #{VALID_SOURCES.map(&:inspect).join(', ')}"
+        end
+
+        # Deduplicate sources (e.g., [:variable, :variable] → [:variable])
+        input.source = sources.uniq
+      end
+
+      def validate_type!(name, type, kind)
+        return if VALID_TYPES.include?(type.to_s)
+
+        raise InvalidWorkerDefinition,
+              "Invalid type #{type.inspect} for #{kind} :#{name}. " \
+              "Valid: #{VALID_TYPES.join(', ')}"
+      end
+
+      def validate_accessor_options!(input)
+        return unless !input.define_accessor && input.accessor_name
+
+        raise InvalidWorkerDefinition,
+              "`define_accessor: false` and `accessor_name:` are mutually exclusive on input :#{input.name} " \
+              "— no accessor will be defined, so naming it is meaningless"
+      end
+
+      def validate_unique_input!(name)
+        return unless @inputs.any? { |i| i.name == name }
+
+        raise InvalidWorkerDefinition, "Input :#{name} is already declared"
+      end
+
+      def validate_unique_output!(name)
+        return unless @outputs.any? { |o| o.name == name }
+
+        raise InvalidWorkerDefinition, "Output :#{name} is already declared"
+      end
+
+      def validate_duration!(attr, value)
+        return if value.is_a?(Integer)
+        return if defined?(ActiveSupport::Duration) && value.is_a?(ActiveSupport::Duration)
+
+        raise InvalidWorkerDefinition,
+              "`#{attr}` accepts Integer (milliseconds) or ActiveSupport::Duration, got #{value.class}"
       end
     end
   end

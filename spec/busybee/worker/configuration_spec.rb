@@ -68,17 +68,11 @@ RSpec.describe Busybee::Worker::Configuration do
     end
   end
 
-  # Mission 8 will add DSL methods (input, output, runner_mode, polling, streaming,
-  # job_timeout, backoff) that populate these collections and configuration values.
-  # Mission 9 will add lifecycle configuration (autocomplete, autofail, unhealthy_on).
-
   describe "#inputs" do
     it "starts as an empty collection" do
       config = configuration_for("ProcessOrderWorker")
       expect(config.inputs).to eq([])
     end
-
-    # Mission 8: input/variable/header DSL methods will add Input structs here
   end
 
   describe "#outputs" do
@@ -86,8 +80,174 @@ RSpec.describe Busybee::Worker::Configuration do
       config = configuration_for("ProcessOrderWorker")
       expect(config.outputs).to eq([])
     end
+  end
 
-    # Mission 8: output DSL method will add Output structs here
+  describe "#add_input" do
+    let(:config) { configuration_for("TestWorker") }
+
+    def build_input(**overrides)
+      described_class::Input.new(
+        name: :order_id, source: [:variable], required: true, type: nil,
+        description: nil, default: nil, accessor_name: nil, define_accessor: true,
+        **overrides
+      )
+    end
+
+    it "adds input to the collection" do
+      config.add_input(build_input)
+      expect(config.inputs.length).to eq(1)
+      expect(config.inputs.first.name).to eq(:order_id)
+    end
+
+    it "raises on nil name" do
+      expect { config.add_input(build_input(name: nil)) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Name is required/
+      )
+    end
+
+    it "raises on blank name" do
+      expect { config.add_input(build_input(name: :"")) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Name is required/
+      )
+    end
+
+    it "raises on empty source" do
+      expect { config.add_input(build_input(source: [])) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /source:.*required/
+      )
+    end
+
+    it "raises on invalid source" do
+      expect { config.add_input(build_input(source: [:database])) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Invalid source.*:database/
+      )
+    end
+
+    it "raises on invalid type" do
+      expect { config.add_input(build_input(type: :array)) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Invalid type.*:array/
+      )
+    end
+
+    it "accepts all valid types" do
+      described_class::VALID_TYPES.each_with_index do |type, i|
+        expect { config.add_input(build_input(name: :"field_#{i}", type: type.to_sym)) }.not_to raise_error
+      end
+    end
+
+    it "raises on duplicate input names" do
+      config.add_input(build_input)
+      expect { config.add_input(build_input) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Input :order_id is already declared/
+      )
+    end
+
+    it "deduplicates sources" do
+      input = build_input(source: %i[variable variable])
+      config.add_input(input)
+      expect(config.inputs.first.source).to eq([:variable])
+    end
+
+    it "raises when define_accessor: false is combined with accessor_name" do
+      expect { config.add_input(build_input(define_accessor: false, accessor_name: :oid)) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /define_accessor: false.*accessor_name:.*mutually exclusive/
+      )
+    end
+  end
+
+  describe "#add_output" do
+    let(:config) { configuration_for("TestWorker") }
+
+    def build_output(**overrides)
+      described_class::Output.new(name: :result, required: true, type: nil, description: nil, **overrides)
+    end
+
+    it "adds output to the collection" do
+      config.add_output(build_output)
+      expect(config.outputs.length).to eq(1)
+      expect(config.outputs.first.name).to eq(:result)
+    end
+
+    it "raises on nil name" do
+      expect { config.add_output(build_output(name: nil)) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Name is required/
+      )
+    end
+
+    it "raises on invalid type" do
+      expect { config.add_output(build_output(type: :hash)) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Invalid type.*:hash/
+      )
+    end
+
+    it "raises on duplicate output names" do
+      config.add_output(build_output)
+      expect { config.add_output(build_output) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Output :result is already declared/
+      )
+    end
+  end
+
+  describe "#runner_mode=" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "accepts valid modes" do
+      %i[polling streaming hybrid].each do |mode|
+        config.runner_mode = mode
+        expect(config.runner_mode).to eq(mode)
+      end
+    end
+
+    it "raises on invalid mode" do
+      expect { config.runner_mode = :batch }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Invalid runner mode/
+      )
+    end
+  end
+
+  describe "#polling_config=" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "accepts valid kwargs" do
+      config.polling_config = { max_jobs: 10, request_timeout: 30_000 }
+      expect(config.polling_config).to eq(max_jobs: 10, request_timeout: 30_000)
+    end
+
+    it "raises on unknown kwargs" do
+      expect { config.polling_config = { batch_size: 10 } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Unknown polling config.*:batch_size/
+      )
+    end
+  end
+
+  describe "#job_timeout=" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "accepts an Integer" do
+      config.job_timeout = 300_000
+      expect(config.job_timeout).to eq(300_000)
+    end
+
+    it "raises on non-Integer, non-Duration" do
+      expect { config.job_timeout = "5 minutes" }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /job_timeout.*Integer.*ActiveSupport::Duration/
+      )
+    end
+  end
+
+  describe "#backoff=" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "accepts an Integer" do
+      config.backoff = 30_000
+      expect(config.backoff).to eq(30_000)
+    end
+
+    it "raises on non-Integer, non-Duration" do
+      expect { config.backoff = 30.5 }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /backoff.*Integer.*ActiveSupport::Duration/
+      )
+    end
   end
 
   describe Busybee::Worker::Configuration::Input do
@@ -104,35 +264,17 @@ RSpec.describe Busybee::Worker::Configuration do
       )
     end
 
-    it "stores name" do
+    it "stores core attributes" do
       expect(input.name).to eq(:order_id)
-    end
-
-    it "stores source" do
       expect(input.source).to eq(:variable)
-    end
-
-    it "stores required" do
       expect(input.required).to be(true)
-    end
-
-    it "stores type" do
       expect(input.type).to eq(:uuid)
-    end
-
-    it "stores description" do
       expect(input.description).to eq("The order identifier")
     end
 
-    it "stores default" do
+    it "stores accessor options" do
       expect(input.default).to be_nil
-    end
-
-    it "stores accessor_name" do
       expect(input.accessor_name).to be_nil
-    end
-
-    it "stores define_accessor" do
       expect(input.define_accessor).to be(true)
     end
 
@@ -170,19 +312,33 @@ RSpec.describe Busybee::Worker::Configuration do
   end
 
   describe "#to_h" do
-    it "serializes configuration to a hash" do
-      config = configuration_for("ProcessOrderWorker")
-      config.description = "Processes orders"
+    let(:config) do
+      configuration_for("ProcessOrderWorker").tap do |c|
+        c.description = "Processes orders"
+        c.runner_mode = :polling
+        c.polling_config = { max_jobs: 10 }
+        c.job_timeout = 300_000
+        c.backoff = 30_000
+      end
+    end
 
+    it "includes metadata" do
       result = config.to_h
-
       expect(result[:job_type]).to eq("process_order")
       expect(result[:description]).to eq("Processes orders")
       expect(result[:inputs]).to eq([])
       expect(result[:outputs]).to eq([])
     end
 
-    # Mission 8: to_h will include DSL-configured values (runner_mode, polling, etc.)
-    # Mission 9: to_h will include lifecycle values (autocomplete, autofail, unhealthy_on)
+    it "includes runner configuration" do
+      result = config.to_h
+      expect(result[:runner_mode]).to eq(:polling)
+      expect(result[:polling_config]).to eq(max_jobs: 10)
+      expect(result[:streaming_config]).to eq({})
+      expect(result[:job_timeout]).to eq(300_000)
+      expect(result[:backoff]).to eq(30_000)
+    end
   end
+
+  # Mission 9: lifecycle configuration (autocomplete, autofail, unhealthy_on)
 end
