@@ -89,6 +89,9 @@ Style/RedundantStringEscape:
   Exclude:
     - "lib/busybee/grpc/gateway_pb.rb"
 
+Style/SpecialGlobalVars:
+  EnforcedStyle: use_perl_names
+
 Style/StringLiterals:
   Enabled: true
   EnforcedStyle: double_quotes

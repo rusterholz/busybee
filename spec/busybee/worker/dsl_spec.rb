@@ -473,5 +473,109 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
-  # Mission 9: autocomplete, autofail, unhealthy_on DSL methods will be tested here.
+  describe ".complete_job_on_success" do
+    it "defaults to true" do
+      worker = stub_const("DefaultCompleteWorker", Class.new(Busybee::Worker))
+      expect(worker.complete_job_on_success).to be(true)
+    end
+
+    it "can be set to false" do
+      worker = stub_const("NoCompleteWorker", Class.new(Busybee::Worker) do
+        complete_job_on_success false
+      end)
+
+      expect(worker.configuration.complete_job_on_success).to be(false)
+    end
+
+    it "raises on non-boolean" do
+      expect do
+        stub_const("BadCompleteWorker", Class.new(Busybee::Worker) do
+          complete_job_on_success :yes
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /complete_job_on_success.*boolean/)
+    end
+  end
+
+  describe ".fail_job_on_error" do
+    it "defaults to true" do
+      worker = stub_const("DefaultFailWorker", Class.new(Busybee::Worker))
+      expect(worker.fail_job_on_error).to be(true)
+    end
+
+    it "can be set to false" do
+      worker = stub_const("NoFailWorker", Class.new(Busybee::Worker) do
+        fail_job_on_error false
+      end)
+
+      expect(worker.configuration.fail_job_on_error).to be(false)
+    end
+
+    it "raises on non-boolean" do
+      expect do
+        stub_const("BadFailWorker", Class.new(Busybee::Worker) do
+          fail_job_on_error "true"
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /fail_job_on_error.*boolean/)
+    end
+  end
+
+  describe ".shutdown_on" do
+    it "registers an exception class" do
+      worker = stub_const("ShutdownWorker", Class.new(Busybee::Worker) do
+        shutdown_on RuntimeError
+      end)
+
+      expect(worker.configuration.shutdown_on).to eq([RuntimeError])
+    end
+
+    it "accepts multiple classes via splat" do
+      worker = stub_const("MultiShutdownWorker", Class.new(Busybee::Worker) do
+        shutdown_on RuntimeError, ArgumentError
+      end)
+
+      expect(worker.configuration.shutdown_on).to contain_exactly(RuntimeError, ArgumentError)
+    end
+
+    it "is additive across calls" do
+      worker = stub_const("AdditiveShutdownWorker", Class.new(Busybee::Worker) do
+        shutdown_on RuntimeError
+        shutdown_on ArgumentError
+      end)
+
+      expect(worker.configuration.shutdown_on).to contain_exactly(RuntimeError, ArgumentError)
+    end
+
+    it "deduplicates across calls" do
+      worker = stub_const("DedupShutdownWorker", Class.new(Busybee::Worker) do
+        shutdown_on RuntimeError
+        shutdown_on RuntimeError, ArgumentError
+      end)
+
+      expect(worker.configuration.shutdown_on).to contain_exactly(RuntimeError, ArgumentError)
+    end
+
+    it "returns current value when called without arguments" do
+      worker = stub_const("GetterShutdownWorker", Class.new(Busybee::Worker) do
+        shutdown_on RuntimeError
+      end)
+
+      expect(worker.shutdown_on).to eq([RuntimeError])
+    end
+
+    it "raises on non-exception class" do
+      expect do
+        stub_const("BadShutdownWorker", Class.new(Busybee::Worker) do
+          shutdown_on String
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /shutdown_on.*exception classes/)
+    end
+
+    it "raises on non-class argument" do
+      expect do
+        stub_const("InstanceShutdownWorker", Class.new(Busybee::Worker) do
+          shutdown_on "RuntimeError"
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /shutdown_on.*exception classes/)
+    end
+  end
 end

@@ -19,6 +19,12 @@ module Busybee
   # Raised when a Worker DSL declaration is invalid (conflicting options, bad values, etc.)
   InvalidWorkerDefinition = Class.new(Error)
 
+  # Raised when required inputs are missing from job variables/headers
+  MissingInput = Class.new(Error)
+
+  # Raised when required outputs are missing from perform's return value
+  MissingOutput = Class.new(Error)
+
   # Raised when attempting to complete, fail, or throw error on a job that has already been handled
   JobAlreadyHandled = Class.new(Error)
 

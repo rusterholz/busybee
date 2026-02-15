@@ -75,7 +75,7 @@ module Busybee
         config.default_output_required = !!busybee_conf.default_output_required
       end
       config.default_runner_mode = busybee_conf.default_runner_mode if busybee_conf.default_runner_mode.presence
-      config.unhealthy_errors = busybee_conf.unhealthy_errors if busybee_conf.unhealthy_errors.presence
+      config.shutdown_on_errors = busybee_conf.shutdown_on_errors if busybee_conf.shutdown_on_errors.presence
     end
 
     # @api private

@@ -103,12 +103,12 @@ module Busybee
       @default_runner_mode || Defaults::DEFAULT_RUNNER_MODE
     end
 
-    def unhealthy_errors
-      @unhealthy_errors ||= []
+    def shutdown_on_errors
+      @shutdown_on_errors ||= []
     end
 
-    def unhealthy_errors=(value)
-      @unhealthy_errors = Array(value)
+    def shutdown_on_errors=(value)
+      @shutdown_on_errors = Array(value)
     end
 
     def credential_type=(value)
