@@ -220,6 +220,37 @@ RSpec.describe Busybee::Worker::Configuration do
     end
   end
 
+  describe "#polling_options" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "returns gem defaults when no DSL config is set" do
+      opts = config.polling_options
+      expect(opts[:max_jobs]).to eq(Busybee::Defaults::DEFAULT_MAX_JOBS)
+      expect(opts[:request_timeout]).to eq(Busybee.default_job_request_timeout)
+      expect(opts[:job_timeout]).to eq(Busybee.default_job_lock_timeout)
+    end
+
+    it "uses DSL polling_config values when set" do
+      config.polling_config = { max_jobs: 10, request_timeout: 30_000 }
+      opts = config.polling_options
+      expect(opts[:max_jobs]).to eq(10)
+      expect(opts[:request_timeout]).to eq(30_000)
+    end
+
+    it "uses DSL job_timeout when set" do
+      config.job_timeout = 120_000
+      expect(config.polling_options[:job_timeout]).to eq(120_000)
+    end
+
+    it "merges DSL overrides with gem defaults" do
+      config.polling_config = { max_jobs: 5 }
+      opts = config.polling_options
+      expect(opts[:max_jobs]).to eq(5)
+      expect(opts[:request_timeout]).to eq(Busybee.default_job_request_timeout)
+      expect(opts[:job_timeout]).to eq(Busybee.default_job_lock_timeout)
+    end
+  end
+
   describe "#job_timeout=" do
     let(:config) { configuration_for("TestWorker") }
 

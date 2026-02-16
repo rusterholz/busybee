@@ -245,6 +245,56 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".runner_backpressure_delay" do
+    around do |example|
+      original = described_class.instance_variable_get(:@runner_backpressure_delay)
+      example.run
+      described_class.runner_backpressure_delay = original
+    end
+
+    it "defaults to Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS" do
+      described_class.runner_backpressure_delay = nil
+      expect(described_class.runner_backpressure_delay).to eq(Busybee::Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS)
+    end
+
+    it "can be set to a custom integer value" do
+      described_class.runner_backpressure_delay = 10_000
+      expect(described_class.runner_backpressure_delay).to eq(10_000)
+    end
+
+    it "can be set to an ActiveSupport::Duration and returns the Duration" do
+      duration = 10.seconds
+      described_class.runner_backpressure_delay = duration
+      expect(described_class.runner_backpressure_delay).to be(duration)
+      expect(described_class.runner_backpressure_delay).to be_a(ActiveSupport::Duration)
+    end
+  end
+
+  describe ".runner_shutdown_backoff" do
+    around do |example|
+      original = described_class.instance_variable_get(:@runner_shutdown_backoff)
+      example.run
+      described_class.runner_shutdown_backoff = original
+    end
+
+    it "defaults to Defaults::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS" do
+      described_class.runner_shutdown_backoff = nil
+      expect(described_class.runner_shutdown_backoff).to eq(Busybee::Defaults::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS)
+    end
+
+    it "can be set to a custom integer value" do
+      described_class.runner_shutdown_backoff = 30_000
+      expect(described_class.runner_shutdown_backoff).to eq(30_000)
+    end
+
+    it "can be set to an ActiveSupport::Duration and returns the Duration" do
+      duration = 30.seconds
+      described_class.runner_shutdown_backoff = duration
+      expect(described_class.runner_shutdown_backoff).to be(duration)
+      expect(described_class.runner_shutdown_backoff).to be_a(ActiveSupport::Duration)
+    end
+  end
+
   describe ".credentials" do
     it "can be set and retrieved with valid credentials object" do
       creds = Busybee::Credentials.new

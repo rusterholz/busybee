@@ -128,6 +128,16 @@ module Busybee
         @outputs << output
       end
 
+      # Returns resolved polling options for client.with_each_job, merging
+      # DSL overrides with gem-level defaults.
+      def polling_options
+        {
+          max_jobs: polling_config[:max_jobs] || Busybee::Defaults::DEFAULT_MAX_JOBS,
+          request_timeout: polling_config[:request_timeout] || Busybee.default_job_request_timeout,
+          job_timeout: job_timeout || Busybee.default_job_lock_timeout
+        }
+      end
+
       def to_h
         {
           job_type: job_type,

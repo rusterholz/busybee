@@ -75,6 +75,12 @@ module Busybee
         config.default_output_required = !!busybee_conf.default_output_required
       end
       config.default_runner_mode = busybee_conf.default_runner_mode if busybee_conf.default_runner_mode.presence
+      if busybee_conf.runner_backpressure_delay.presence
+        config.runner_backpressure_delay = busybee_conf.runner_backpressure_delay
+      end
+      if busybee_conf.runner_shutdown_backoff.presence
+        config.runner_shutdown_backoff = busybee_conf.runner_shutdown_backoff
+      end
       config.shutdown_on_errors = busybee_conf.shutdown_on_errors if busybee_conf.shutdown_on_errors.presence
     end
 
