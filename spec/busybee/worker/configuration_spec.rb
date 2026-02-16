@@ -251,6 +251,19 @@ RSpec.describe Busybee::Worker::Configuration do
     end
   end
 
+  describe "#streaming_options" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "returns gem default job_timeout when no DSL config is set" do
+      expect(config.streaming_options).to eq(job_timeout: Busybee.default_job_lock_timeout)
+    end
+
+    it "uses DSL job_timeout when set" do
+      config.job_timeout = 120_000
+      expect(config.streaming_options[:job_timeout]).to eq(120_000)
+    end
+  end
+
   describe "#job_timeout=" do
     let(:config) { configuration_for("TestWorker") }
 

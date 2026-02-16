@@ -138,6 +138,11 @@ module Busybee
         }
       end
 
+      # Returns resolved streaming options for client.open_job_stream.
+      def streaming_options
+        { job_timeout: job_timeout || Busybee.default_job_lock_timeout }
+      end
+
       def to_h
         {
           job_type: job_type,

@@ -1,0 +1,277 @@
+# frozen_string_literal: true
+
+require "concurrent"
+
+RSpec.describe Busybee::Runner::Streaming do
+  subject(:runner) { described_class.new(worker_class, client: client) }
+
+  let(:client) { instance_double(Busybee::Client) }
+  let(:job) { instance_double(Busybee::Job, key: 1, retries: 3, ready?: true) }
+  let(:stream) { instance_double(Busybee::JobStream) }
+
+  let(:worker_class) do
+    Class.new(Busybee::Worker) do
+      job_type "test_worker"
+
+      def perform
+        # no-op
+      end
+    end
+  end
+
+  before do
+    allow(stream).to receive(:close)
+  end
+
+  describe "#initialize" do
+    it "stores the worker class" do
+      expect(runner.instance_variable_get(:@worker_class)).to be(worker_class)
+    end
+
+    it "inherits Runner interface" do
+      expect(runner).to be_a(Busybee::Runner)
+      expect(runner.stopping?).to be false
+      expect(runner.running?).to be false
+    end
+  end
+
+  describe "#run!" do
+    it "opens a job stream with resolved options" do
+      allow(client).to receive(:open_job_stream) do |type, **opts|
+        expect(type).to eq("test_worker")
+        expect(opts).to include(:job_timeout)
+        allow(stream).to receive(:each)
+        stream
+      end
+
+      runner.run!
+
+      expect(client).to have_received(:open_job_stream)
+    end
+
+    it "does not open a stream if already stopping" do
+      allow(client).to receive(:open_job_stream) do
+        allow(stream).to receive(:each)
+        stream
+      end
+
+      runner.stop!
+      runner.run!
+
+      # Stream is opened but each exits immediately (no jobs yielded)
+      expect(client).to have_received(:open_job_stream)
+    end
+
+    it "processes jobs via worker_class.perform_job" do
+      allow(client).to receive(:open_job_stream) do
+        allow(stream).to receive(:each).and_yield(job)
+        stream
+      end
+      allow(worker_class).to receive(:perform_job) do
+        runner.stop!
+      end
+
+      runner.run!
+
+      expect(worker_class).to have_received(:perform_job).with(job)
+    end
+
+    it "sets running? to true during execution and false after" do
+      allow(client).to receive(:open_job_stream) do
+        allow(stream).to receive(:each) do
+          expect(runner.running?).to be true
+        end
+        stream
+      end
+
+      runner.run!
+
+      expect(runner.running?).to be false
+    end
+
+    it "sets running? to false even when an error is raised" do
+      allow(client).to receive(:open_job_stream).and_raise(RuntimeError, "boom")
+
+      expect { runner.run! }.to raise_error(RuntimeError, "boom")
+      expect(runner.running?).to be false
+    end
+
+    it "passes job_type from worker configuration" do
+      allow(client).to receive(:open_job_stream) do |type, **_opts|
+        expect(type).to eq("test_worker")
+        allow(stream).to receive(:each)
+        stream
+      end
+
+      runner.run!
+    end
+
+    it "passes worker DSL job_timeout override in streaming options" do
+      worker_class.job_timeout 120_000
+
+      allow(client).to receive(:open_job_stream) do |_type, **opts|
+        expect(opts[:job_timeout]).to eq(120_000)
+        allow(stream).to receive(:each)
+        stream
+      end
+
+      runner.run!
+    end
+
+    it "passes gem default job_timeout when worker has no override" do
+      allow(client).to receive(:open_job_stream) do |_type, **opts|
+        expect(opts[:job_timeout]).to eq(Busybee.default_job_lock_timeout)
+        allow(stream).to receive(:each)
+        stream
+      end
+
+      runner.run!
+    end
+
+    it "closes the stream in ensure even on normal exit" do
+      allow(client).to receive(:open_job_stream) do
+        allow(stream).to receive(:each)
+        stream
+      end
+
+      runner.run!
+
+      expect(stream).to have_received(:close)
+    end
+
+    it "closes the stream in ensure on error" do
+      allow(client).to receive(:open_job_stream) do
+        allow(stream).to receive(:each).and_raise(RuntimeError, "stream broke")
+        stream
+      end
+
+      expect { runner.run! }.to raise_error(RuntimeError, "stream broke")
+      expect(stream).to have_received(:close)
+    end
+
+    context "when worker raises Busybee::Worker::Shutdown" do
+      let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: worker_class) }
+
+      it "stores the error, stops, and re-raises after clean exit" do
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each).and_yield(job)
+          stream
+        end
+        allow(worker_class).to receive(:perform_job).and_raise(shutdown_error)
+
+        expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+        expect(runner.stopping?).to be true
+        expect(runner.running?).to be false
+      end
+
+      it "does not process more jobs after Shutdown" do
+        jobs = [
+          instance_double(Busybee::Job, key: 1, retries: 3, ready?: true),
+          instance_double(Busybee::Job, key: 2, retries: 5, ready?: true)
+        ]
+        allow(jobs[1]).to receive(:fail!)
+
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each).and_yield(jobs[0]).and_yield(jobs[1])
+          stream
+        end
+        allow(worker_class).to receive(:perform_job).and_raise(shutdown_error)
+
+        expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+        expect(worker_class).to have_received(:perform_job).once
+      end
+    end
+
+    context "when graceful shutdown is triggered" do
+      it "fails remaining yielded jobs with preserved retries" do # rubocop:disable RSpec/ExampleLength
+        jobs = [
+          instance_double(Busybee::Job, key: 1, retries: 3, ready?: true),
+          instance_double(Busybee::Job, key: 2, retries: 5, ready?: true)
+        ]
+        allow(jobs[1]).to receive(:fail!)
+
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each) do |&block|
+            block.call(jobs[0])
+            runner.stop!
+            block.call(jobs[1])
+          end
+          stream
+        end
+        allow(worker_class).to receive(:perform_job)
+
+        runner.run!
+
+        expect(worker_class).to have_received(:perform_job).with(jobs[0]).once
+        expect(worker_class).not_to have_received(:perform_job).with(jobs[1])
+        expect(jobs[1]).to have_received(:fail!).with(
+          "Worker shutting down",
+          retries: 5,
+          backoff: Busybee.runner_shutdown_backoff
+        )
+      end
+
+      it "uses the greater of shutdown_backoff and worker backoff" do # rubocop:disable RSpec/ExampleLength
+        worker_class.backoff 30_000 # 30s > default shutdown_backoff of 10s
+        job_to_fail = instance_double(Busybee::Job, key: 1, retries: 3, ready?: true)
+        allow(job_to_fail).to receive(:fail!)
+
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each) do |&block|
+            runner.stop!
+            block.call(job_to_fail)
+          end
+          stream
+        end
+
+        runner.run!
+
+        expect(job_to_fail).to have_received(:fail!).with(
+          "Worker shutting down",
+          retries: 3,
+          backoff: 30_000
+        )
+      end
+
+      it "logs a warning when failing a shutdown job raises an error" do
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        bad_job = instance_double(Busybee::Job, key: 99, retries: 1, ready?: true)
+        allow(bad_job).to receive(:fail!).and_raise(StandardError, "grpc gone")
+
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each) do |&block|
+            runner.stop!
+            block.call(bad_job)
+          end
+          stream
+        end
+
+        runner.run!
+
+        expect(logger).to have_received(:warn).with(/Failed to fail job 99 during shutdown.*grpc gone/)
+      end
+    end
+  end
+
+  describe "#stop!" do
+    it "closes the stream to unblock iteration" do
+      allow(client).to receive(:open_job_stream) do
+        allow(stream).to receive(:each) do
+          runner.stop!
+        end
+        stream
+      end
+
+      runner.run!
+
+      # close called by stop! + ensure
+      expect(stream).to have_received(:close).at_least(:twice)
+    end
+
+    it "is safe to call before stream is opened" do
+      expect { runner.stop! }.not_to raise_error
+    end
+  end
+end
