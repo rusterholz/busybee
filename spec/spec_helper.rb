@@ -9,6 +9,7 @@ end
 
 require "busybee"
 require "busybee/testing"
+require "active_support/core_ext/numeric/time"
 require "base64"
 require "securerandom"
 require "tempfile"

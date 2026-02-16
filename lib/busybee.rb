@@ -10,6 +10,7 @@ require "busybee/job"
 require "busybee/job_stream"
 require "busybee/client"
 require "busybee/worker"
+require "busybee/runner"
 
 # Top-level gem module, only holds configuration values.
 module Busybee
@@ -22,7 +23,8 @@ module Busybee
   class << self
     attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl,
                 :default_fail_job_backoff, :default_job_request_timeout, :default_job_lock_timeout, :worker_name,
-                :default_input_required, :default_output_required, :default_runner_mode
+                :default_input_required, :default_output_required, :default_runner_mode,
+                :runner_backpressure_delay, :runner_shutdown_backoff
     attr_accessor :logger
     attr_reader :credentials
 
@@ -101,6 +103,14 @@ module Busybee
 
     def default_runner_mode
       @default_runner_mode || Defaults::DEFAULT_RUNNER_MODE
+    end
+
+    def runner_backpressure_delay
+      @runner_backpressure_delay || Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
+    end
+
+    def runner_shutdown_backoff
+      @runner_shutdown_backoff || Defaults::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS
     end
 
     def shutdown_on_errors
