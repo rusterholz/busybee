@@ -12,6 +12,7 @@ RSpec.describe Busybee::Runner::Streaming do
   let(:worker_class) do
     Class.new(Busybee::Worker) do
       job_type "test_worker"
+      streaming queue: false
 
       def perform
         # no-op
@@ -268,6 +269,131 @@ RSpec.describe Busybee::Runner::Streaming do
 
     it "is safe to call before stream is opened" do
       expect { runner.stop! }.not_to raise_error
+    end
+  end
+
+  context "with queue mode (default)" do # rubocop:disable RSpec/ExampleLength
+    subject(:runner) { described_class.new(queue_worker_class, client: client) }
+
+    let(:queue_worker_class) do
+      Class.new(Busybee::Worker) do
+        job_type "test_worker"
+
+        def perform
+          # no-op
+        end
+      end
+    end
+
+    describe "#initialize" do
+      it "creates a thread-safe job queue" do
+        expect(runner.instance_variable_get(:@job_queue)).to be_a(Queue)
+      end
+
+      it "creates an AtomicReference for shutdown error" do
+        ref = runner.instance_variable_get(:@shutdown_error)
+        expect(ref).to be_a(Concurrent::AtomicReference)
+        expect(ref.get).to be_nil
+      end
+    end
+
+    describe "#run!" do
+      it "processes jobs pumped from stream through the queue" do
+        streamed_job = instance_double(Busybee::Job, key: 42, retries: 1, ready?: true)
+
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each).and_yield(streamed_job)
+          stream
+        end
+        allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
+
+        runner.run!
+
+        expect(queue_worker_class).to have_received(:perform_job).with(streamed_job)
+      end
+
+      it "blocks on queue until a job arrives" do
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each) # no jobs from stream
+          stream
+        end
+        allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
+
+        # Push a job after a short delay — run! must block until this arrives
+        Thread.new do
+          sleep 0.05
+          runner.instance_variable_get(:@job_queue).push(job)
+        end
+
+        runner.run!
+
+        expect(queue_worker_class).to have_received(:perform_job).with(job)
+      end
+
+      it "re-raises pump thread stream errors from run!" do
+        stream_error = Busybee::GRPC::Error.new("Job stream failed")
+
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each).and_raise(stream_error)
+          stream
+        end
+
+        expect { runner.run! }.to raise_error(Busybee::GRPC::Error, "Job stream failed")
+        expect(runner.stopping?).to be true
+        expect(runner.running?).to be false
+      end
+
+      it "joins pump thread and drains remaining queue during shutdown" do
+        leftover = instance_double(Busybee::Job, key: 88, retries: 2, ready?: true)
+        allow(leftover).to receive(:fail!)
+
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each)
+          stream
+        end
+
+        # Push a job then stop — the job should be failed during ensure cleanup
+        Thread.new do
+          sleep 0.05
+          runner.instance_variable_get(:@job_queue).push(leftover)
+          runner.stop!
+        end
+
+        runner.run!
+
+        expect(leftover).to have_received(:fail!).with(
+          "Worker shutting down",
+          retries: 2,
+          backoff: Busybee.runner_shutdown_backoff
+        )
+      end
+
+      context "when worker raises Busybee::Worker::Shutdown" do
+        let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: queue_worker_class) }
+
+        it "stores the error, stops, and re-raises after clean exit" do
+          allow(client).to receive(:open_job_stream) do
+            allow(stream).to receive(:each).and_yield(job)
+            stream
+          end
+          allow(queue_worker_class).to receive(:perform_job).and_raise(shutdown_error)
+
+          expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+          expect(runner.stopping?).to be true
+          expect(runner.running?).to be false
+        end
+      end
+    end
+
+    describe "#stop!" do
+      it "closes the stream and pushes :stop sentinel" do
+        runner.instance_variable_set(:@stream, stream)
+
+        runner.stop!
+
+        expect(stream).to have_received(:close)
+        expect(runner.instance_variable_get(:@job_queue).pop(true)).to eq(:stop)
+      end
     end
   end
 end

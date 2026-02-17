@@ -90,6 +90,51 @@ RSpec.describe Busybee::Runner::Streaming, :integration do
     expect(performed_job_keys).to be_empty
   end
 
+  context "with inline mode (queue: false)" do
+    let(:worker_class) do
+      keys = performed_job_keys
+      Class.new(Busybee::Worker) do
+        job_type "process-order"
+        streaming queue: false
+
+        define_method(:perform) do
+          keys << job.key
+        end
+      end
+    end
+
+    it "processes a job streamed from Zeebe end-to-end" do
+      runner_thread = Thread.new { runner.run! }
+      sleep 0.5
+
+      with_process_instance("job-process") do
+        wait_until(timeout: 10) { performed_job_keys.any? }
+
+        runner.stop!
+        runner_thread.join(5)
+
+        expect(performed_job_keys.length).to eq(1)
+        expect(runner.running?).to be false
+
+        assert_process_completed!
+      end
+    end
+
+    it "exits cleanly when stopped with no pending jobs" do
+      runner_thread = Thread.new { runner.run! }
+
+      sleep 0.5
+      expect(runner.running?).to be true
+
+      runner.stop!
+      runner_thread.join(5)
+
+      expect(runner.running?).to be false
+      expect(runner.stopping?).to be true
+      expect(performed_job_keys).to be_empty
+    end
+  end
+
   private
 
   def create_job_instance

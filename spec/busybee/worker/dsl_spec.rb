@@ -274,12 +274,30 @@ RSpec.describe Busybee::Worker::DSL do
       expect(worker.configuration.streaming_config).to eq({})
     end
 
-    it "stores kwargs for future use" do
-      worker = stub_const("StreamKwargsWorker", Class.new(Busybee::Worker) do
-        streaming buffer_size: 100
+    it "accepts queue: true" do
+      worker = stub_const("StreamQueueWorker", Class.new(Busybee::Worker) do
+        streaming queue: true
       end)
 
-      expect(worker.configuration.streaming_config).to eq(buffer_size: 100)
+      expect(worker.configuration.streaming_config).to eq(queue: true)
+      expect(worker.configuration.queue_enabled?).to be(true)
+    end
+
+    it "accepts queue: false" do
+      worker = stub_const("StreamInlineWorker", Class.new(Busybee::Worker) do
+        streaming queue: false
+      end)
+
+      expect(worker.configuration.streaming_config).to eq(queue: false)
+      expect(worker.configuration.queue_enabled?).to be(false)
+    end
+
+    it "raises on unknown kwargs" do
+      expect do
+        stub_const("BadStreamWorker", Class.new(Busybee::Worker) do
+          streaming buffer_size: 100
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /Unknown streaming config.*:buffer_size/)
     end
   end
 
