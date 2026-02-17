@@ -13,6 +13,8 @@ module Busybee
       end
 
       def run!
+        return if stopping?
+
         @running.make_true
         # [hook: runner.started]
         shutdown_error = nil

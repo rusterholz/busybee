@@ -50,16 +50,12 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     it "does not open a stream if already stopping" do
-      allow(client).to receive(:open_job_stream) do
-        allow(stream).to receive(:each)
-        stream
-      end
+      allow(client).to receive(:open_job_stream)
 
       runner.stop!
       runner.run!
 
-      # Stream is opened but each exits immediately (no jobs yielded)
-      expect(client).to have_received(:open_job_stream)
+      expect(client).not_to have_received(:open_job_stream)
     end
 
     it "processes jobs via worker_class.perform_job" do
