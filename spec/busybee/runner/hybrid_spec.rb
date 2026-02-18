@@ -20,8 +20,13 @@ RSpec.describe Busybee::Runner::Hybrid do
     end
   end
 
+  # Simulate a long-lived gRPC stream: each blocks until close is called.
+  # Without this, mock streams that return immediately trigger pump shutdown,
+  # racing with the main thread's drain/queue processing.
+  let(:stream_gate) { Concurrent::Event.new }
+
   before do
-    allow(stream).to receive(:close)
+    allow(stream).to receive(:close) { stream_gate.set }
   end
 
   describe "#initialize" do
@@ -48,9 +53,9 @@ RSpec.describe Busybee::Runner::Hybrid do
 
   # Helper: stub client for a Hybrid run! that immediately stops.
   # Yields no backlog jobs (drain exits immediately) and pushes :stop to unblock queue.
-  def stub_immediate_stop!
+  def stub_immediate_stop! # rubocop:disable Metrics/AbcSize
     allow(client).to receive(:open_job_stream).and_return(stream)
-    allow(stream).to receive(:each)
+    allow(stream).to receive(:each) { stream_gate.wait }
     allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
       runner.stop!
       0
@@ -102,7 +107,10 @@ RSpec.describe Busybee::Runner::Hybrid do
       queue = runner.instance_variable_get(:@job_queue)
 
       allow(client).to receive(:open_job_stream) do
-        allow(stream).to receive(:each).and_yield(streamed_job)
+        allow(stream).to receive(:each) do |&block|
+          block.call(streamed_job)
+          stream_gate.wait
+        end
         stream
       end
       # During drain, check that the pump thread pushed the job into the queue
@@ -128,13 +136,13 @@ RSpec.describe Busybee::Runner::Hybrid do
 
     it "closes the stream in ensure on error" do
       allow(client).to receive(:open_job_stream) do
-        allow(stream).to receive(:each)
+        allow(stream).to receive(:each) { stream_gate.wait }
         stream
       end
       allow(client).to receive(:with_each_job).and_raise(RuntimeError, "drain broke")
 
       expect { runner.run! }.to raise_error(RuntimeError, "drain broke")
-      expect(stream).to have_received(:close)
+      expect(stream).to have_received(:close).at_least(:once)
     end
 
     it "re-raises pump thread stream errors from run!" do
@@ -169,7 +177,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       # Helper: stub stream (no streamed jobs) and set up drain with given block behavior.
       def stub_stream_and_drain!(&drain_block)
         allow(client).to receive(:open_job_stream).and_return(stream)
-        allow(stream).to receive(:each)
+        allow(stream).to receive(:each) { stream_gate.wait }
         allow(client).to receive(:with_each_job, &drain_block)
       end
 
@@ -322,7 +330,7 @@ RSpec.describe Busybee::Runner::Hybrid do
         streamed_job = instance_double(Busybee::Job, key: 77, retries: 1, ready?: true)
 
         allow(client).to receive_messages(open_job_stream: stream, with_each_job: 0)
-        allow(stream).to receive(:each)
+        allow(stream).to receive(:each) { stream_gate.wait }
         allow(worker_class).to receive(:perform_job) { runner.stop! }
 
         # Push a job after a short delay — run! must block until this arrives

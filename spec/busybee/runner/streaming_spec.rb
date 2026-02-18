@@ -179,6 +179,19 @@ RSpec.describe Busybee::Runner::Streaming do
       end
     end
 
+    context "when stream ends without stop!" do
+      it "exits cleanly" do
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each) # yields nothing, returns immediately
+          stream
+        end
+
+        runner.run!
+
+        expect(runner.running?).to be false
+      end
+    end
+
     context "when graceful shutdown is triggered" do
       it "fails remaining yielded jobs with preserved retries" do # rubocop:disable RSpec/ExampleLength
         jobs = [
@@ -272,7 +285,7 @@ RSpec.describe Busybee::Runner::Streaming do
     end
   end
 
-  context "with queue mode (default)" do # rubocop:disable RSpec/ExampleLength
+  context "with queue mode (default)" do
     subject(:runner) { described_class.new(queue_worker_class, client: client) }
 
     let(:queue_worker_class) do
@@ -283,6 +296,15 @@ RSpec.describe Busybee::Runner::Streaming do
           # no-op
         end
       end
+    end
+
+    # Simulate a long-lived gRPC stream: each blocks until close is called.
+    # Without this, mock streams that return immediately trigger pump shutdown,
+    # racing with the main thread's processing.
+    let(:stream_gate) { Concurrent::Event.new }
+
+    before do
+      allow(stream).to receive(:close) { stream_gate.set }
     end
 
     describe "#initialize" do
@@ -302,7 +324,10 @@ RSpec.describe Busybee::Runner::Streaming do
         streamed_job = instance_double(Busybee::Job, key: 42, retries: 1, ready?: true)
 
         allow(client).to receive(:open_job_stream) do
-          allow(stream).to receive(:each).and_yield(streamed_job)
+          allow(stream).to receive(:each) do |&block|
+            block.call(streamed_job)
+            stream_gate.wait # stay open like a real gRPC stream
+          end
           stream
         end
         allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
@@ -314,7 +339,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
       it "blocks on queue until a job arrives" do
         allow(client).to receive(:open_job_stream) do
-          allow(stream).to receive(:each) # no jobs from stream
+          allow(stream).to receive(:each) { stream_gate.wait }
           stream
         end
         allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
@@ -343,12 +368,12 @@ RSpec.describe Busybee::Runner::Streaming do
         expect(runner.running?).to be false
       end
 
-      it "joins pump thread and drains remaining queue during shutdown" do
+      it "joins pump thread and drains remaining queue during shutdown" do # rubocop:disable RSpec/ExampleLength
         leftover = instance_double(Busybee::Job, key: 88, retries: 2, ready?: true)
         allow(leftover).to receive(:fail!)
 
         allow(client).to receive(:open_job_stream) do
-          allow(stream).to receive(:each)
+          allow(stream).to receive(:each) { stream_gate.wait }
           stream
         end
 
@@ -368,12 +393,31 @@ RSpec.describe Busybee::Runner::Streaming do
         )
       end
 
+      context "when stream ends without stop!" do
+        it "exits cleanly (does not hang)" do
+          allow(client).to receive(:open_job_stream) do
+            allow(stream).to receive(:each) # yields nothing, returns immediately
+            stream
+          end
+
+          thread = Thread.new { runner.run! }
+          joined = thread.join(3)
+
+          expect(joined).not_to be_nil, "runner.run! hung — pump thread did not unblock main thread"
+          expect(runner.running?).to be false
+          expect(runner.stopping?).to be true
+        end
+      end
+
       context "when worker raises Busybee::Worker::Shutdown" do
         let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: queue_worker_class) }
 
         it "stores the error, stops, and re-raises after clean exit" do
           allow(client).to receive(:open_job_stream) do
-            allow(stream).to receive(:each).and_yield(job)
+            allow(stream).to receive(:each) do |&block|
+              block.call(job)
+              stream_gate.wait
+            end
             stream
           end
           allow(queue_worker_class).to receive(:perform_job).and_raise(shutdown_error)

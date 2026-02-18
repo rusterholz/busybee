@@ -93,6 +93,11 @@ module Busybee
         # Normal close via stop! produces GRPC::Cancelled, which JobStream#each absorbs —
         # so this only fires on genuine failures.
         @shutdown_error.update { |prev| prev || e }
+      ensure
+        # Stream ended — either naturally (external close, server-side close),
+        # via error (handled above), or because stop! was already called.
+        # In all cases, stop! to unblock the main thread's queue pop.
+        # Idempotent when stop! was already called.
         stop!
       end
 
