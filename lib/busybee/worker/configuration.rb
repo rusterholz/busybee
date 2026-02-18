@@ -11,6 +11,7 @@ module Busybee
       VALID_SOURCES = %i[variable header].freeze
       VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
       VALID_POLLING_KWARGS = %i[max_jobs request_timeout].freeze
+      VALID_STREAMING_KWARGS = %i[queue].freeze
 
       # Represents a declared input (from variable, header, or both).
       Input = Struct.new(:name, :source, :required, :type, :description, :default,
@@ -68,8 +69,18 @@ module Busybee
         @polling_config = kwargs
       end
 
-      # TODO: add kwargs validation when streaming options are defined
-      def streaming_config=(kwargs) # rubocop:disable Style/TrivialAccessors
+      def streaming_config=(kwargs)
+        unknown = kwargs.keys - VALID_STREAMING_KWARGS
+        if unknown.any?
+          raise InvalidWorkerDefinition,
+                "Unknown streaming config: #{unknown.map(&:inspect).join(', ')}. " \
+                "Valid: #{VALID_STREAMING_KWARGS.map(&:inspect).join(', ')}"
+        end
+
+        if kwargs.key?(:queue) && ![true, false].include?(kwargs[:queue])
+          raise InvalidWorkerDefinition, "`queue:` requires a boolean, got #{kwargs[:queue].inspect}"
+        end
+
         @streaming_config = kwargs
       end
 
@@ -128,6 +139,12 @@ module Busybee
         @outputs << output
       end
 
+      # Whether this worker uses a pump thread + queue for streaming.
+      # Default: true. Set to false via `streaming queue: false` for inline stream processing.
+      def queue_enabled?
+        streaming_config.fetch(:queue, Busybee::Defaults::DEFAULT_STREAMING_QUEUE)
+      end
+
       # Returns resolved polling options for client.with_each_job, merging
       # DSL overrides with gem-level defaults.
       def polling_options
@@ -136,6 +153,11 @@ module Busybee
           request_timeout: polling_config[:request_timeout] || Busybee.default_job_request_timeout,
           job_timeout: job_timeout || Busybee.default_job_lock_timeout
         }
+      end
+
+      # Returns resolved streaming options for client.open_job_stream.
+      def streaming_options
+        { job_timeout: job_timeout || Busybee.default_job_lock_timeout }
       end
 
       def to_h

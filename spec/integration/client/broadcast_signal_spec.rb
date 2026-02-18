@@ -89,8 +89,9 @@ RSpec.describe Busybee::Client, "#broadcast_signal" do
       expect(signal_key).to be > 0
 
       # We can't verify that NO instances were created globally, but we can verify
-      # that no instances of our fixture process were created (no jobs available)
-      expect { activate_job("process-order") }.not_to have_available_jobs
+      # that no instances of our fixture process were created (no jobs available).
+      # Short timeout avoids a 60s long-poll just to confirm absence.
+      expect { activate_job("process-order", timeout: 500) }.not_to have_available_jobs
     end
 
     it "handles broadcasting a signal with variables when there are no matching subscriptions" do
@@ -101,8 +102,9 @@ RSpec.describe Busybee::Client, "#broadcast_signal" do
       expect(signal_key).to be_a(Integer)
       expect(signal_key).to be > 0
 
-      # Verify no instances of our fixture process were created
-      expect { activate_job("process-order") }.not_to have_available_jobs
+      # Verify no instances of our fixture process were created.
+      # Short timeout avoids a 60s long-poll just to confirm absence.
+      expect { activate_job("process-order", timeout: 500) }.not_to have_available_jobs
     end
   end
 

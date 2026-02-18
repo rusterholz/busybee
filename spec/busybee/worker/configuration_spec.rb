@@ -220,6 +220,50 @@ RSpec.describe Busybee::Worker::Configuration do
     end
   end
 
+  describe "#streaming_config=" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "accepts queue: true" do
+      config.streaming_config = { queue: true }
+      expect(config.streaming_config).to eq(queue: true)
+    end
+
+    it "accepts queue: false" do
+      config.streaming_config = { queue: false }
+      expect(config.streaming_config).to eq(queue: false)
+    end
+
+    it "raises on unknown kwargs" do
+      expect { config.streaming_config = { buffer_size: 100 } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Unknown streaming config.*:buffer_size/
+      )
+    end
+
+    it "raises when queue: is non-boolean" do
+      expect { config.streaming_config = { queue: :yes } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /`queue:` requires a boolean/
+      )
+    end
+  end
+
+  describe "#queue_enabled?" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "defaults to true when no streaming config is set" do
+      expect(config.queue_enabled?).to be(true)
+    end
+
+    it "returns true when streaming config has queue: true" do
+      config.streaming_config = { queue: true }
+      expect(config.queue_enabled?).to be(true)
+    end
+
+    it "returns false when streaming config has queue: false" do
+      config.streaming_config = { queue: false }
+      expect(config.queue_enabled?).to be(false)
+    end
+  end
+
   describe "#polling_options" do
     let(:config) { configuration_for("TestWorker") }
 
@@ -248,6 +292,19 @@ RSpec.describe Busybee::Worker::Configuration do
       expect(opts[:max_jobs]).to eq(5)
       expect(opts[:request_timeout]).to eq(Busybee.default_job_request_timeout)
       expect(opts[:job_timeout]).to eq(Busybee.default_job_lock_timeout)
+    end
+  end
+
+  describe "#streaming_options" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "returns gem default job_timeout when no DSL config is set" do
+      expect(config.streaming_options).to eq(job_timeout: Busybee.default_job_lock_timeout)
+    end
+
+    it "uses DSL job_timeout when set" do
+      config.job_timeout = 120_000
+      expect(config.streaming_options[:job_timeout]).to eq(120_000)
     end
   end
 
