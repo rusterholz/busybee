@@ -442,6 +442,8 @@ RSpec.describe Busybee::Runner::Streaming do
 
     describe "pump delay" do
       context "when queue_throttle is set to a positive value" do
+        subject(:runner) { described_class.new(throttled_worker_class, client: client) }
+
         let(:throttled_worker_class) do
           Class.new(Busybee::Worker) do
             job_type "test_worker"
@@ -449,9 +451,6 @@ RSpec.describe Busybee::Runner::Streaming do
             def perform; end
           end
         end
-
-        subject(:runner) { described_class.new(throttled_worker_class, client: client) }
-
         let(:stream_gate) { Concurrent::Event.new }
 
         before do
@@ -480,7 +479,7 @@ RSpec.describe Busybee::Runner::Streaming do
           end
 
           sleep_calls = []
-          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, duration|
+          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, duration| # rubocop:disable RSpec/AnyInstance
             sleep_calls << duration
           end
 
@@ -504,7 +503,7 @@ RSpec.describe Busybee::Runner::Streaming do
           end
           allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
 
-          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, _duration|
+          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, _duration| # rubocop:disable RSpec/AnyInstance
             raise "sleep should not be called when queue_throttle is false"
           end
 
@@ -515,6 +514,8 @@ RSpec.describe Busybee::Runner::Streaming do
       end
 
       context "when queue_throttle is 0 (minimal throttle)" do
+        subject(:runner) { described_class.new(zero_delay_worker_class, client: client) }
+
         let(:zero_delay_worker_class) do
           Class.new(Busybee::Worker) do
             job_type "test_worker"
@@ -522,9 +523,6 @@ RSpec.describe Busybee::Runner::Streaming do
             def perform; end
           end
         end
-
-        subject(:runner) { described_class.new(zero_delay_worker_class, client: client) }
-
         let(:stream_gate) { Concurrent::Event.new }
 
         before do
@@ -542,7 +540,7 @@ RSpec.describe Busybee::Runner::Streaming do
           allow(zero_delay_worker_class).to receive(:perform_job) { runner.stop! }
 
           sleep_calls = []
-          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, duration|
+          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, duration| # rubocop:disable RSpec/AnyInstance
             sleep_calls << duration
           end
 
