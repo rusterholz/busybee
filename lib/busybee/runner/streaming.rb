@@ -92,10 +92,13 @@ module Busybee
       end
 
       def pump_stream_into_queue
+        delay = @worker_class.configuration.queue_throttle
+
         @stream.each do |job|
           break if stopping?
 
           @job_queue.push(job)
+          sleep(delay.to_f / 1000) if delay
         end
       rescue StandardError => e
         # Stream error (e.g., GRPC::Error). Store and stop so main thread can re-raise.
