@@ -439,5 +439,31 @@ RSpec.describe Busybee::Runner::Streaming do
         expect(runner.instance_variable_get(:@job_queue).pop(true)).to eq(:stop)
       end
     end
+
+    describe "#kill!" do
+      it "terminates the pump thread" do
+        pump = Thread.new { sleep 999 }
+        runner.instance_variable_set(:@pump_thread, pump)
+        runner.instance_variable_set(:@stream, stream)
+
+        runner.kill!
+        pump.join(1)
+
+        expect(pump.alive?).to be false
+        expect(runner.stopping?).to be true
+      end
+
+      it "flushes the queue, dropping all pending jobs" do
+        queue = runner.instance_variable_get(:@job_queue)
+        queue.push(instance_double(Busybee::Job, key: 1))
+        queue.push(instance_double(Busybee::Job, key: 2))
+
+        runner.kill!
+
+        # Only :stop sentinel should remain
+        expect(queue.pop(true)).to eq(:stop)
+        expect { queue.pop(true) }.to raise_error(ThreadError) # empty
+      end
+    end
   end
 end

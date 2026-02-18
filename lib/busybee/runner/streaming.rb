@@ -52,6 +52,15 @@ module Busybee
         @job_queue&.push(:stop) if queue_enabled?
       end
 
+      def kill!
+        super
+        @pump_thread&.kill
+        return unless queue_enabled?
+
+        @job_queue.clear
+        @job_queue.push(:stop)
+      end
+
       private
 
       def run_with_queue
