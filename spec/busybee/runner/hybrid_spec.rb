@@ -516,5 +516,49 @@ RSpec.describe Busybee::Runner::Hybrid do
       expect { runner.stop! }.not_to raise_error
     end
   end
+
+  describe "#kill!" do
+    it "flushes queued stream jobs without failing them" do
+      queued_job = instance_double(Busybee::Job, key: 99, retries: 3, ready?: true)
+      allow(queued_job).to receive(:fail!)
+      allow(worker_class).to receive(:perform_job)
+
+      allow(client).to receive(:open_job_stream).and_return(stream)
+      allow(stream).to receive(:each) { stream_gate.wait }
+
+      allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
+        runner.instance_variable_get(:@job_queue).push(queued_job)
+        runner.kill!
+        0
+      end
+
+      runner.run!
+
+      expect(worker_class).not_to have_received(:perform_job).with(queued_job)
+      expect(queued_job).not_to have_received(:fail!)
+    end
+
+    it "still completes the in-flight polled job but fails subsequently-yielded ones" do
+      inflight = instance_double(Busybee::Job, key: 1, retries: 3, ready?: true)
+      yielded_after = instance_double(Busybee::Job, key: 2, retries: 5, ready?: true)
+      allow(yielded_after).to receive(:fail!)
+
+      allow(client).to receive(:open_job_stream).and_return(stream)
+      allow(stream).to receive(:each) { stream_gate.wait }
+      allow(worker_class).to receive(:perform_job) { runner.kill! }
+
+      allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
+        block.call(inflight)       # perform_job calls kill! during this
+        block.call(yielded_after)  # yielded after kill! — handled as shutdown
+        2
+      end
+
+      runner.run!
+
+      expect(worker_class).to have_received(:perform_job).with(inflight)
+      expect(worker_class).not_to have_received(:perform_job).with(yielded_after)
+      expect(yielded_after).to have_received(:fail!)
+    end
+  end
 end
 # rubocop:enable RSpec/ExampleLength
