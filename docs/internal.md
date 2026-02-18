@@ -32,6 +32,11 @@ lib/busybee/
 ├── job_stream.rb            # JobStream for streaming job activation
 ├── logging.rb               # Logging module (text/JSON, thread-safe)
 ├── railtie.rb               # Rails integration
+├── runner.rb                # Runner base class, factory method, shared shutdown logic
+├── runner/                  # Runner implementations
+│   ├── hybrid.rb            # Hybrid runner (Streaming subclass, adds poll-drain phase)
+│   ├── polling.rb           # Polling runner (with_each_job loop)
+│   └── streaming.rb         # Streaming runner (open_job_stream, pump thread + queue)
 ├── serialization.rb         # JSON serialization/deserialization
 ├── testing.rb               # Testing module entry point
 ├── testing/                 # RSpec integration
@@ -44,7 +49,11 @@ lib/busybee/
 │       ├── have_available_jobs.rb
 │       ├── have_received_headers.rb
 │       └── have_received_variables.rb
-└── version.rb               # Gem version
+├── version.rb               # Gem version
+├── worker.rb                # Worker base class, perform_job lifecycle, Shutdown error
+└── worker/                  # Worker support classes
+    ├── configuration.rb     # Stores DSL-declared metadata per worker class
+    └── dsl.rb               # Class-level DSL methods (job_type, input, output, etc.)
 ```
 
 ## Component Dependencies
@@ -59,35 +68,128 @@ lib/busybee/
               ▼              │              │
     ┌─────────────┐          │              │
     │   Testing   │          │              │
-    │   (v0.1)    │          │              │
     └─────────────┘          │              │
                              ▼              │
                     ┌─────────────┐         │
                     │   Client    │         │
-                    │   (v0.2)    │         │
                     └──────┬──────┘         │
                            │                │
-                           ▼                │
-                    ┌─────────────┐         │
+                    ┌──────┴──────┐         │
                     │   Worker    │ ────────┘
-                    │   (v0.3)    │  (also uses GRPC for streaming)
+                    │             │  (also uses GRPC for streaming)
+                    └──────┬──────┘
+                           │
+                    ┌──────┴──────┐
+                    │   Runner    │  (uses Client + Worker)
                     └─────────────┘
 
     ┌─────────────┐
-    │   Railtie   │  (optional, configures Client/Worker from Rails)
-    │   (v0.2)    │
+    │   Railtie   │  (optional, configures Client/Worker/Runner from Rails)
     └─────────────┘
 ```
 
 - **GRPC** is the foundation; all other components build on it
 - **Testing** uses GRPC directly (doesn't need Client abstraction)
 - **Client** wraps GRPC with Ruby-idiomatic interface
-- **Worker** uses Client for job operations, plus GRPC directly for streaming
-- **Railtie** is optional; it reads Rails config and sets up gem-level configuration
+- **Worker** defines job handling logic; uses Client for job operations (complete, fail), plus GRPC directly for streaming
+- **Runner** orchestrates Workers — uses Client to fetch/stream jobs, dispatches to Worker's `perform_job`
+- **Railtie** is optional; it reads Rails config and sets up gem-level configuration for Client, Worker, and Runner defaults
 
 ## Logging Module
 
 `Busybee::Logging` provides prefixed log output in text or JSON format. A mutex serializes the format + write path so concurrent threads (e.g., multiple Worker runners) cannot interleave within a single log line. The nil-logger guard runs outside the mutex to avoid unnecessary lock acquisition.
+
+## Worker Module
+
+`Busybee::Worker` is the base class for user-defined job workers. A Worker subclass declares its metadata via a class-level DSL and implements `perform` to handle jobs.
+
+### Structure
+
+```
+Worker                      # Base class: perform_job lifecycle, Shutdown error, job delegation
+├── Worker::DSL             # Class-level DSL methods (extended into Worker subclasses)
+├── Worker::Configuration   # Stores all DSL-declared metadata per worker class
+│   ├── Configuration::Input   # Struct for declared inputs
+│   └── Configuration::Output  # Struct for declared outputs
+└── Worker::Shutdown        # Error class signaling runner should shut down
+```
+
+**Configuration** is lazily instantiated per worker class (`@_configuration ||= Configuration.new(self)`). The DSL module's class methods (e.g., `job_type`, `input`, `streaming`) delegate to Configuration, which validates and stores the values. Configuration also resolves runtime options by merging DSL-level settings with gem-level defaults (e.g., `queue_throttle` falls back to `Busybee.default_queue_throttle`).
+
+### perform_job Lifecycle
+
+`Worker.perform_job(job)` is the entry point called by Runners. Its contract:
+
+- **Returns normally:** job was handled (completed, failed, or BPMN-errored). Runner continues.
+- **Raises `Worker::Shutdown`:** worker is unhealthy (matched `shutdown_on` exception). Runner should shut down.
+
+Steps:
+1. Instantiate worker with job
+2. Validate required inputs (raises `MissingInput` listing all missing names)
+3. Call `instance.perform`
+4. **On success:** if `complete_job_on_success` and `job.ready?`, validate required outputs, call `job.complete!`. GRPC errors logged and swallowed.
+5. **On error:** if `fail_job_on_error` and `job.ready?`, call `job.fail!`. Then check `shutdown_on` — if matched, wrap as `Shutdown` and re-raise.
+
+The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform`.
+
+## Runner Module
+
+Runners are long-lived processes that fetch jobs and dispatch them to Workers. All runner types inherit from `Busybee::Runner`, providing a uniform interface for the CLI.
+
+### Class Hierarchy
+
+```
+Runner                    # Base class: run!, stop!, stopping?, running?, kill!, factory
+├── Runner::Polling       # Loop using client.with_each_job
+├── Runner::Streaming     # Loop using client.open_job_stream (dual-mode: inline or pump+queue)
+│   └── Runner::Hybrid    # Subclass of Streaming, adds poll-drain phase before queue processing
+└── Runner::Multi         # Thread pool managing multiple single-worker runners (not yet implemented)
+```
+
+**Key design decision:** `Hybrid < Streaming`, not `Hybrid < Runner`. Hybrid's unique contribution is the drain phase — all pump thread and queue machinery is inherited from Streaming.
+
+### Threading Model
+
+**Sequential processing guarantee:** In v0.3, all `perform_job` calls happen on the main thread. Worker authors do not need to think about concurrency.
+
+- **Polling:** single-threaded. `with_each_job` yields jobs sequentially.
+- **Streaming (inline mode, `queue: false`):** single-threaded. `stream.each` calls `perform_job` directly.
+- **Streaming (queue mode, `queue: true`, default):** two threads. A **pump thread** reads from the gRPC stream into a `Queue`; the **main thread** pops and processes. The pump thread never calls `perform_job`.
+- **Hybrid:** two threads (inherited from Streaming queue mode). Main thread first polls to drain the backlog (interleaving stream jobs between poll batches), then transitions to queue-only processing.
+
+### concurrent-ruby Primitives
+
+| Primitive | Used For |
+|-----------|----------|
+| `Concurrent::AtomicBoolean` | `@stop_requested`, `@running` — thread-safe state flags |
+| `Concurrent::AtomicReference` | `@shutdown_error` — first-error-wins across pump + main threads |
+| Ruby `Queue` | Job queue between pump thread and main thread (thread-safe) |
+| `Concurrent::FixedThreadPool` | Multi runner thread management (future) |
+
+### Error Handling
+
+From the Runner's perspective, `perform_job` has a simple two-outcome contract (returns or raises `Shutdown`). All other exceptions are handled inside `perform_job`.
+
+At the runner level:
+- `GRPC::ResourceExhausted` → backpressure: sleep and retry
+- `Worker::Shutdown` → store error, `stop!`, re-raise after clean exit
+- Other errors → propagate up (to Multi/CLI). Likely fatal (auth, config).
+
+### Shutdown Sequence
+
+**Graceful (`stop!`):** Sets `@stop_requested` AtomicBoolean. For streaming/hybrid, also closes the stream (unblocks `stream.each`) and pushes a `:stop` sentinel to the queue (unblocks `queue.pop`). In-progress `perform_job` completes. Remaining queued/yielded jobs are failed via `handle_shutdown_job` (preserves retry count).
+
+**Forced (`kill!`):** Base calls `stop!`. Streaming also kills the pump thread and flushes the queue. Multi (future) kills the thread pool.
+
+### Queue Throttle
+
+When `queue_throttle` is configured on a worker, the pump thread sleeps between stream reads. This controls the trade-off between queue growth (affecting memory) and job latency:
+
+- `false` (default) — no sleep, pump reads as fast as possible
+- `0` — `sleep(0)`, minimal throttle (yields thread via nanosleep, ~1-5µs)
+- Positive Numeric — explicit delay in milliseconds (e.g., `0.5` = 500µs)
+
+Point of use: `sleep(delay.to_f / 1000) if delay` — works because `false` is falsey, `0` is truthy in Ruby.
 
 ## Serialization Module
 
@@ -125,14 +227,4 @@ The `Busybee::Serialization::HashAccess` module provides method-style access wit
 - Nested hashes also get this behavior
 - Only responds to methods that correspond to existing keys (no silent `nil` returns)
 
-### Usage in Codebase
-
-| Location | Uses |
-|----------|------|
-| `Client::ProcessOperations` | `to_json` for `vars` |
-| `Client::MessageOperations` | `to_json` for `vars` |
-| `Client::VariableOperations` | `to_json` for `vars` |
-| `Client::JobOperations` | `to_json` for `vars` |
-| `Job#variables`, `Job#headers` | `from_json` |
-| `Testing::ActivatedJob` | `from_json` |
-| `Testing::Helpers` | `to_json` for test variable setup |
+All Client operation modules, Job, and Testing helpers route through this module. Grep for `Serialization.to_json` and `Serialization.from_json` to find call sites.
