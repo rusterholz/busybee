@@ -3,6 +3,7 @@
 require "socket"
 require "busybee/version"
 require "busybee/defaults"
+require "busybee/configure"
 require "busybee/credentials"
 require "busybee/logging"
 require "busybee/serialization"
@@ -12,7 +13,8 @@ require "busybee/client"
 require "busybee/worker"
 require "busybee/runner"
 
-# Top-level gem module, only holds configuration values.
+# Top-level gem module. Configuration readers and defaults live here;
+# validated setters live in Busybee::Configure.
 module Busybee
   # Valid credential type identifiers. Update this as new credential classes are added.
   VALID_CREDENTIAL_TYPES = %w[insecure tls oauth camunda_cloud].freeze
@@ -20,34 +22,17 @@ module Busybee
   # Valid log format identifiers.
   VALID_LOG_FORMATS = %w[text json].freeze
 
+  # Valid runner mode identifiers.
+  VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
+
   class << self
-    attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl,
-                :default_fail_job_backoff, :default_job_request_timeout, :default_job_lock_timeout, :worker_name,
-                :default_input_required, :default_output_required, :default_queue_throttle, :default_runner_mode,
-                :runner_backpressure_delay, :runner_shutdown_backoff
+    include Configure
+
     attr_accessor :logger
     attr_reader :credentials
 
     def configure
       yield self
-    end
-
-    def log_format=(value)
-      if value.nil?
-        @log_format = nil
-        return
-      end
-
-      str_value = value.to_s
-      if VALID_LOG_FORMATS.include?(str_value)
-        @log_format = str_value.to_sym
-      else
-        Logging.warn("Invalid log_format: #{str_value.inspect}. Valid formats: #{VALID_LOG_FORMATS.join(', ')}")
-      end
-    end
-
-    def log_format
-      @log_format || :text
     end
 
     def cluster_address
@@ -121,22 +106,8 @@ module Busybee
       @shutdown_on_errors ||= []
     end
 
-    def shutdown_on_errors=(value)
-      @shutdown_on_errors = Array(value)
-    end
-
-    def credential_type=(value)
-      if value.nil?
-        @credential_type = nil
-        return
-      end
-
-      str_value = value.to_s
-      if VALID_CREDENTIAL_TYPES.include?(str_value)
-        @credential_type = str_value.to_sym
-      else
-        Logging.warn("Invalid credential_type: #{str_value.inspect}. Valid types: #{VALID_CREDENTIAL_TYPES.join(', ')}")
-      end
+    def log_format
+      @log_format || :text
     end
 
     def credential_type
@@ -148,19 +119,6 @@ module Busybee
 
       self.credential_type = env_value
       @credential_type
-    end
-
-    def credentials=(value)
-      if value.nil?
-        @credentials = nil
-        return
-      end
-
-      unless value.is_a?(Busybee::Credentials)
-        raise ArgumentError, "credentials must be a Busybee::Credentials object, got #{value.class}"
-      end
-
-      @credentials = value
     end
 
     private
