@@ -3,6 +3,65 @@
 require "logger"
 
 RSpec.describe Busybee do
+  shared_examples "a duration config setter" do |setter, getter, default_const|
+    around do |example|
+      original = described_class.instance_variable_get(:"@#{getter}")
+      example.run
+      described_class.public_send(:"#{setter}=", original)
+    end
+
+    it "defaults to #{default_const}" do
+      described_class.public_send(:"#{setter}=", nil)
+      expect(described_class.public_send(getter)).to eq(Busybee::Defaults.const_get(default_const))
+    end
+
+    it "accepts an Integer" do
+      described_class.public_send(:"#{setter}=", 42_000)
+      expect(described_class.public_send(getter)).to eq(42_000)
+    end
+
+    it "accepts an ActiveSupport::Duration and returns it as-is" do
+      duration = 30.seconds
+      described_class.public_send(:"#{setter}=", duration)
+      expect(described_class.public_send(getter)).to be(duration)
+      expect(described_class.public_send(getter)).to be_a(ActiveSupport::Duration)
+    end
+
+    it "coerces a numeric String to Integer" do
+      described_class.public_send(:"#{setter}=", "5000")
+      expect(described_class.public_send(getter)).to eq(5000)
+    end
+
+    it "coerces a decimal String to Integer (truncates)" do
+      described_class.public_send(:"#{setter}=", "5000.7")
+      expect(described_class.public_send(getter)).to eq(5000)
+    end
+
+    it "coerces a Float to Integer with a logged warning" do
+      expect(Busybee::Logging).to receive(:warn).with(/coercing Float.*to Integer/) # rubocop:disable RSpec/MessageSpies
+      described_class.public_send(:"#{setter}=", 5000.5)
+      expect(described_class.public_send(getter)).to eq(5000)
+    end
+
+    it "rejects a non-numeric String" do
+      expect { described_class.public_send(:"#{setter}=", "five seconds") }.to raise_error(
+        ArgumentError, /#{setter}.*non-numeric String/
+      )
+    end
+
+    it "rejects other types" do
+      expect { described_class.public_send(:"#{setter}=", Object.new) }.to raise_error(
+        ArgumentError, /#{setter}.*got Object/
+      )
+    end
+
+    it "resets to default when set to nil" do
+      described_class.public_send(:"#{setter}=", 99_999)
+      described_class.public_send(:"#{setter}=", nil)
+      expect(described_class.public_send(getter)).to eq(Busybee::Defaults.const_get(default_const))
+    end
+  end
+
   it "has a version number" do
     expect(Busybee::VERSION).not_to be_nil
   end
@@ -35,6 +94,15 @@ RSpec.describe Busybee do
       described_class.cluster_address = nil
       allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", "localhost:26500").and_return("localhost:26500")
       expect(described_class.cluster_address).to eq("localhost:26500")
+    end
+
+    it "accepts a Symbol and coerces to String" do
+      described_class.cluster_address = :"custom:26500"
+      expect(described_class.cluster_address).to eq("custom:26500")
+    end
+
+    it "rejects non-String/Symbol types" do
+      expect { described_class.cluster_address = 12_345 }.to raise_error(ArgumentError, /cluster_address/)
     end
   end
 
@@ -76,6 +144,15 @@ RSpec.describe Busybee do
 
       expect(described_class.worker_name).to eq("busybee-worker")
     end
+
+    it "accepts a Symbol and coerces to String" do
+      described_class.worker_name = :my_worker
+      expect(described_class.worker_name).to eq("my_worker")
+    end
+
+    it "rejects non-String/Symbol types" do
+      expect { described_class.worker_name = 12_345 }.to raise_error(ArgumentError, /worker_name/)
+    end
   end
 
   describe ".logger" do
@@ -113,19 +190,16 @@ RSpec.describe Busybee do
       described_class.grpc_retry_enabled = true
       expect(described_class.grpc_retry_enabled).to be(true)
     end
+
+    it "rejects non-boolean values" do
+      expect { described_class.grpc_retry_enabled = "true" }.to raise_error(ArgumentError, /grpc_retry_enabled/)
+      expect { described_class.grpc_retry_enabled = 1 }.to raise_error(ArgumentError, /grpc_retry_enabled/)
+    end
   end
 
   describe ".grpc_retry_delay_ms" do
-    around do |example|
-      original = described_class.instance_variable_get(:@grpc_retry_delay_ms)
-      example.run
-      described_class.grpc_retry_delay_ms = original
-    end
-
-    it "defaults to 500" do
-      described_class.grpc_retry_delay_ms = nil
-      expect(described_class.grpc_retry_delay_ms).to eq(500)
-    end
+    it_behaves_like "a duration config setter", :grpc_retry_delay_ms, :grpc_retry_delay_ms,
+                    :DEFAULT_GRPC_RETRY_DELAY_MS
   end
 
   describe ".grpc_retry_errors" do
@@ -143,155 +217,104 @@ RSpec.describe Busybee do
         GRPC::ResourceExhausted
       )
     end
+
+    it "accepts an Array of exception classes" do
+      described_class.grpc_retry_errors = [GRPC::Unavailable]
+      expect(described_class.grpc_retry_errors).to eq([GRPC::Unavailable])
+    end
+
+    it "rejects a non-Array" do
+      expect { described_class.grpc_retry_errors = GRPC::Unavailable }.to raise_error(
+        ArgumentError, /grpc_retry_errors.*Array/
+      )
+    end
+
+    it "rejects Array elements that are not exception classes" do
+      expect { described_class.grpc_retry_errors = [String] }.to raise_error(
+        ArgumentError, /grpc_retry_errors.*exception classes/
+      )
+    end
+
+    it "resets to default when set to nil" do
+      described_class.grpc_retry_errors = [GRPC::Unavailable]
+      described_class.grpc_retry_errors = nil
+      expect(described_class.grpc_retry_errors).to contain_exactly(
+        GRPC::Unavailable, GRPC::DeadlineExceeded, GRPC::ResourceExhausted
+      )
+    end
   end
 
   describe ".default_message_ttl" do
-    around do |example|
-      original = described_class.instance_variable_get(:@default_message_ttl)
-      example.run
-      described_class.default_message_ttl = original
-    end
-
-    it "defaults to Defaults::DEFAULT_MESSAGE_TTL_MS" do
-      described_class.default_message_ttl = nil
-      expect(described_class.default_message_ttl).to eq(Busybee::Defaults::DEFAULT_MESSAGE_TTL_MS)
-    end
-
-    it "can be set to a custom integer value" do
-      described_class.default_message_ttl = 30_000
-      expect(described_class.default_message_ttl).to eq(30_000)
-    end
-
-    it "can be set to an ActiveSupport::Duration and returns the Duration" do
-      duration = 30.seconds
-      described_class.default_message_ttl = duration
-      expect(described_class.default_message_ttl).to be(duration)
-      expect(described_class.default_message_ttl).to be_a(ActiveSupport::Duration)
-    end
+    it_behaves_like "a duration config setter", :default_message_ttl, :default_message_ttl,
+                    :DEFAULT_MESSAGE_TTL_MS
   end
 
   describe ".default_fail_job_backoff" do
-    around do |example|
-      original = described_class.instance_variable_get(:@default_fail_job_backoff)
-      example.run
-      described_class.default_fail_job_backoff = original
-    end
-
-    it "defaults to Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS" do
-      described_class.default_fail_job_backoff = nil
-      expect(described_class.default_fail_job_backoff).to eq(Busybee::Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS)
-    end
-
-    it "can be set to a custom integer value" do
-      described_class.default_fail_job_backoff = 10_000
-      expect(described_class.default_fail_job_backoff).to eq(10_000)
-    end
-
-    it "can be set to an ActiveSupport::Duration and returns the Duration" do
-      duration = 10.seconds
-      described_class.default_fail_job_backoff = duration
-      expect(described_class.default_fail_job_backoff).to be(duration)
-      expect(described_class.default_fail_job_backoff).to be_a(ActiveSupport::Duration)
-    end
+    it_behaves_like "a duration config setter", :default_fail_job_backoff, :default_fail_job_backoff,
+                    :DEFAULT_FAIL_JOB_BACKOFF_MS
   end
 
   describe ".default_job_request_timeout" do
-    around do |example|
-      original = described_class.instance_variable_get(:@default_job_request_timeout)
-      example.run
-      described_class.default_job_request_timeout = original
-    end
-
-    it "defaults to Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS" do
-      described_class.default_job_request_timeout = nil
-      expect(described_class.default_job_request_timeout).to eq(Busybee::Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS)
-    end
-
-    it "can be set to a custom integer value" do
-      described_class.default_job_request_timeout = 30_000
-      expect(described_class.default_job_request_timeout).to eq(30_000)
-    end
-
-    it "can be set to an ActiveSupport::Duration and returns the Duration" do
-      duration = 30.seconds
-      described_class.default_job_request_timeout = duration
-      expect(described_class.default_job_request_timeout).to be(duration)
-      expect(described_class.default_job_request_timeout).to be_a(ActiveSupport::Duration)
-    end
+    it_behaves_like "a duration config setter", :default_job_request_timeout, :default_job_request_timeout,
+                    :DEFAULT_JOB_REQUEST_TIMEOUT_MS
   end
 
   describe ".default_job_lock_timeout" do
-    around do |example|
-      original = described_class.instance_variable_get(:@default_job_lock_timeout)
-      example.run
-      described_class.default_job_lock_timeout = original
-    end
-
-    it "defaults to Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS" do
-      described_class.default_job_lock_timeout = nil
-      expect(described_class.default_job_lock_timeout).to eq(Busybee::Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS)
-    end
-
-    it "can be set to a custom integer value" do
-      described_class.default_job_lock_timeout = 120_000
-      expect(described_class.default_job_lock_timeout).to eq(120_000)
-    end
-
-    it "can be set to an ActiveSupport::Duration and returns the Duration" do
-      duration = 2.minutes
-      described_class.default_job_lock_timeout = duration
-      expect(described_class.default_job_lock_timeout).to be(duration)
-      expect(described_class.default_job_lock_timeout).to be_a(ActiveSupport::Duration)
-    end
+    it_behaves_like "a duration config setter", :default_job_lock_timeout, :default_job_lock_timeout,
+                    :DEFAULT_JOB_LOCK_TIMEOUT_MS
   end
 
   describe ".runner_backpressure_delay" do
-    around do |example|
-      original = described_class.instance_variable_get(:@runner_backpressure_delay)
-      example.run
-      described_class.runner_backpressure_delay = original
-    end
-
-    it "defaults to Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS" do
-      described_class.runner_backpressure_delay = nil
-      expect(described_class.runner_backpressure_delay).to eq(Busybee::Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS)
-    end
-
-    it "can be set to a custom integer value" do
-      described_class.runner_backpressure_delay = 10_000
-      expect(described_class.runner_backpressure_delay).to eq(10_000)
-    end
-
-    it "can be set to an ActiveSupport::Duration and returns the Duration" do
-      duration = 10.seconds
-      described_class.runner_backpressure_delay = duration
-      expect(described_class.runner_backpressure_delay).to be(duration)
-      expect(described_class.runner_backpressure_delay).to be_a(ActiveSupport::Duration)
-    end
+    it_behaves_like "a duration config setter", :runner_backpressure_delay, :runner_backpressure_delay,
+                    :DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
   end
 
   describe ".runner_shutdown_backoff" do
+    it_behaves_like "a duration config setter", :runner_shutdown_backoff, :runner_shutdown_backoff,
+                    :DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS
+  end
+
+  describe ".default_input_required" do
     around do |example|
-      original = described_class.instance_variable_get(:@runner_shutdown_backoff)
+      original = described_class.instance_variable_get(:@default_input_required)
       example.run
-      described_class.runner_shutdown_backoff = original
+      described_class.default_input_required = original
     end
 
-    it "defaults to Defaults::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS" do
-      described_class.runner_shutdown_backoff = nil
-      expect(described_class.runner_shutdown_backoff).to eq(Busybee::Defaults::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS)
+    it "defaults to true" do
+      described_class.default_input_required = nil
+      expect(described_class.default_input_required).to be(true)
     end
 
-    it "can be set to a custom integer value" do
-      described_class.runner_shutdown_backoff = 30_000
-      expect(described_class.runner_shutdown_backoff).to eq(30_000)
+    it "can be set to false" do
+      described_class.default_input_required = false
+      expect(described_class.default_input_required).to be(false)
     end
 
-    it "can be set to an ActiveSupport::Duration and returns the Duration" do
-      duration = 30.seconds
-      described_class.runner_shutdown_backoff = duration
-      expect(described_class.runner_shutdown_backoff).to be(duration)
-      expect(described_class.runner_shutdown_backoff).to be_a(ActiveSupport::Duration)
+    it "rejects non-boolean values" do
+      expect { described_class.default_input_required = "true" }.to raise_error(ArgumentError, /default_input_required/)
+    end
+  end
+
+  describe ".default_output_required" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_output_required)
+      example.run
+      described_class.default_output_required = original
+    end
+
+    it "defaults to true" do
+      described_class.default_output_required = nil
+      expect(described_class.default_output_required).to be(true)
+    end
+
+    it "can be set to false" do
+      described_class.default_output_required = false
+      expect(described_class.default_output_required).to be(false)
+    end
+
+    it "rejects non-boolean values" do
+      expect { described_class.default_output_required = 0 }.to raise_error(ArgumentError, /default_output_required/)
     end
   end
 
@@ -322,10 +345,101 @@ RSpec.describe Busybee do
       expect(described_class.default_queue_throttle).to eq(0)
     end
 
+    it "coerces true to 0" do
+      described_class.default_queue_throttle = true
+      expect(described_class.default_queue_throttle).to eq(0)
+    end
+
+    it "coerces false to false" do
+      described_class.default_queue_throttle = false
+      # false is falsy, so reader falls through to default (which is also false)
+      expect(described_class.default_queue_throttle).to be(false)
+    end
+
+    it "coerces a numeric String to Float" do
+      described_class.default_queue_throttle = "5.5"
+      expect(described_class.default_queue_throttle).to eq(5.5)
+    end
+
+    it "rejects negative values" do
+      expect { described_class.default_queue_throttle = -1 }.to raise_error(ArgumentError, /non-negative/)
+    end
+
+    it "rejects non-numeric Strings" do
+      expect { described_class.default_queue_throttle = "fast" }.to raise_error(ArgumentError, /default_queue_throttle/)
+    end
+
+    it "rejects other types" do
+      expect { described_class.default_queue_throttle = Object.new }.
+        to raise_error(ArgumentError, /default_queue_throttle/)
+    end
+
     it "resets to default when set to nil" do
       described_class.default_queue_throttle = 5
       described_class.default_queue_throttle = nil
       expect(described_class.default_queue_throttle).to be(false)
+    end
+  end
+
+  describe ".default_runner_mode" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_runner_mode)
+      example.run
+      described_class.default_runner_mode = original
+    end
+
+    it "defaults to :hybrid" do
+      described_class.default_runner_mode = nil
+      expect(described_class.default_runner_mode).to be(:hybrid)
+    end
+
+    it "accepts a valid Symbol" do
+      described_class.default_runner_mode = :polling
+      expect(described_class.default_runner_mode).to be(:polling)
+    end
+
+    it "accepts a valid String and coerces to Symbol" do
+      described_class.default_runner_mode = "streaming"
+      expect(described_class.default_runner_mode).to be(:streaming)
+    end
+
+    it "rejects an invalid mode" do
+      expect { described_class.default_runner_mode = :turbo }.to raise_error(
+        ArgumentError, /default_runner_mode.*:polling.*:streaming.*:hybrid/
+      )
+    end
+
+    it "rejects non-String/Symbol types" do
+      expect { described_class.default_runner_mode = 42 }.to raise_error(ArgumentError, /default_runner_mode/)
+    end
+  end
+
+  describe ".shutdown_on_errors" do
+    around do |example|
+      original = described_class.instance_variable_get(:@shutdown_on_errors)
+      example.run
+      described_class.instance_variable_set(:@shutdown_on_errors, original)
+    end
+
+    it "defaults to empty array" do
+      described_class.instance_variable_set(:@shutdown_on_errors, nil)
+      expect(described_class.shutdown_on_errors).to eq([])
+    end
+
+    it "accepts an Array of exception classes" do
+      described_class.shutdown_on_errors = [RuntimeError, ArgumentError]
+      expect(described_class.shutdown_on_errors).to eq([RuntimeError, ArgumentError])
+    end
+
+    it "coerces a single exception class to an Array" do
+      described_class.shutdown_on_errors = RuntimeError
+      expect(described_class.shutdown_on_errors).to eq([RuntimeError])
+    end
+
+    it "rejects non-exception classes in the Array" do
+      expect { described_class.shutdown_on_errors = [String] }.to raise_error(
+        ArgumentError, /shutdown_on_errors.*exception classes/
+      )
     end
   end
 

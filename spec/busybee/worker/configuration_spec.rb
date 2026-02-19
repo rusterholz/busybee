@@ -245,6 +245,12 @@ RSpec.describe Busybee::Worker::Configuration do
       )
     end
 
+    it "raises when queue_throttle: is set with queue: false" do
+      expect { config.streaming_config = { queue: false, queue_throttle: 5 } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /`queue_throttle:` cannot be set when `queue: false`/
+      )
+    end
+
     it "accepts queue_throttle: with an integer" do
       config.streaming_config = { queue_throttle: 5 }
       expect(config.streaming_config).to eq(queue_throttle: 5)

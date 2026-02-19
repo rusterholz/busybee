@@ -78,6 +78,7 @@ module Busybee
         end
 
         validate_queue_option!(kwargs) if kwargs.key?(:queue)
+        validate_no_throttle_without_queue!(kwargs)
         validate_queue_throttle!(kwargs) if kwargs.key?(:queue_throttle)
 
         @streaming_config = kwargs
@@ -244,6 +245,13 @@ module Busybee
         return if [true, false].include?(kwargs[:queue])
 
         raise InvalidWorkerDefinition, "`queue:` requires a boolean, got #{kwargs[:queue].inspect}"
+      end
+
+      def validate_no_throttle_without_queue!(kwargs)
+        return unless kwargs[:queue] == false && kwargs.key?(:queue_throttle)
+
+        raise InvalidWorkerDefinition,
+              "`queue_throttle:` cannot be set when `queue: false` — there is no queue to throttle"
       end
 
       def validate_queue_throttle!(kwargs)

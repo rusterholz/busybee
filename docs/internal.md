@@ -8,6 +8,7 @@ This document describes the internal architecture of the busybee gem. It is for 
 
 ```
 lib/busybee/
+├── configure.rb             # Validated setters for gem-level config (included into Busybee singleton)
 ├── client.rb                # Client class - main user-facing API
 ├── client/                  # Client operation modules
 │   ├── error_handling.rb    # Retry logic and error wrapping
@@ -94,6 +95,17 @@ lib/busybee/
 - **Worker** defines job handling logic; uses Client for job operations (complete, fail), plus GRPC directly for streaming
 - **Runner** orchestrates Workers — uses Client to fetch/stream jobs, dispatches to Worker's `perform_job`
 - **Railtie** is optional; it reads Rails config and sets up gem-level configuration for Client, Worker, and Runner defaults
+
+## Gem-Level Configuration
+
+Gem-level configuration (`Busybee.cluster_address`, `Busybee.default_message_ttl`, etc.) is split across two files:
+
+- **`busybee.rb`** — Readers, defaults, constants, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
+- **`configure.rb`** — `Busybee::Configure` module with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`).
+
+All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), queue throttle (Numeric/boolean/numeric String), runner mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
+
+The Railtie passes Rails config values through these setters. It pre-coerces booleans with `!!` (standard Rails practice) but otherwise relies on the setters for validation.
 
 ## Logging Module
 
