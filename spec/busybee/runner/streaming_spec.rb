@@ -440,6 +440,117 @@ RSpec.describe Busybee::Runner::Streaming do
       end
     end
 
+    describe "pump delay" do
+      context "when queue_throttle is set to a positive value" do
+        subject(:runner) { described_class.new(throttled_worker_class, client: client) }
+
+        let(:throttled_worker_class) do
+          Class.new(Busybee::Worker) do
+            job_type "test_worker"
+            streaming queue_throttle: 5
+            def perform; end
+          end
+        end
+        let(:stream_gate) { Concurrent::Event.new }
+
+        before do
+          allow(stream).to receive(:close) { stream_gate.set }
+        end
+
+        it "sleeps between stream reads" do # rubocop:disable RSpec/ExampleLength
+          jobs = [
+            instance_double(Busybee::Job, key: 1, retries: 1, ready?: true),
+            instance_double(Busybee::Job, key: 2, retries: 1, ready?: true)
+          ]
+
+          allow(client).to receive(:open_job_stream) do
+            allow(stream).to receive(:each) do |&block|
+              block.call(jobs[0])
+              block.call(jobs[1])
+              stream_gate.wait
+            end
+            stream
+          end
+
+          call_count = 0
+          allow(throttled_worker_class).to receive(:perform_job) do
+            call_count += 1
+            runner.stop! if call_count >= 2
+          end
+
+          sleep_calls = []
+          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, duration| # rubocop:disable RSpec/AnyInstance
+            sleep_calls << duration
+          end
+
+          runner.run!
+
+          expect(sleep_calls.length).to be >= 1
+          expect(sleep_calls).to all(eq(0.005)) # 5ms = 0.005s
+        end
+      end
+
+      context "when queue_throttle is false (default, no throttling)" do
+        # Uses the default queue_worker_class which has no queue_throttle set
+
+        it "does not sleep in the pump thread" do
+          allow(client).to receive(:open_job_stream) do
+            allow(stream).to receive(:each) do |&block|
+              block.call(job)
+              stream_gate.wait
+            end
+            stream
+          end
+          allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
+
+          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, _duration| # rubocop:disable RSpec/AnyInstance
+            raise "sleep should not be called when queue_throttle is false"
+          end
+
+          runner.run!
+
+          expect(queue_worker_class).to have_received(:perform_job).with(job)
+        end
+      end
+
+      context "when queue_throttle is 0 (minimal throttle)" do
+        subject(:runner) { described_class.new(zero_delay_worker_class, client: client) }
+
+        let(:zero_delay_worker_class) do
+          Class.new(Busybee::Worker) do
+            job_type "test_worker"
+            streaming queue_throttle: 0
+            def perform; end
+          end
+        end
+        let(:stream_gate) { Concurrent::Event.new }
+
+        before do
+          allow(stream).to receive(:close) { stream_gate.set }
+        end
+
+        it "calls sleep(0) between reads" do
+          allow(client).to receive(:open_job_stream) do
+            allow(stream).to receive(:each) do |&block|
+              block.call(job)
+              stream_gate.wait
+            end
+            stream
+          end
+          allow(zero_delay_worker_class).to receive(:perform_job) { runner.stop! }
+
+          sleep_calls = []
+          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, duration| # rubocop:disable RSpec/AnyInstance
+            sleep_calls << duration
+          end
+
+          runner.run!
+
+          expect(sleep_calls).to include(0.0)
+        end
+      end
+    end
+
     describe "#kill!" do
       it "terminates the pump thread" do
         pump = Thread.new { sleep 999 }

@@ -131,11 +131,7 @@ RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec --tag camunda_cloud
 
 ## Local Zeebe Development Environment
 
-Busybee provides a Docker Compose setup for running Zeebe and ElasticSearch locally. This environment includes:
-
-- **Zeebe Gateway & Broker**: Camunda Platform 8.8.8 - handles workflow orchestration and gRPC communication
-- **ElasticSearch**: Version 8.17.10 - stores workflow data and powers the Operate UI
-- **Operate UI**: Web interface for monitoring workflows at http://localhost:8088 (credentials: demo/demo)
+Busybee provides a Docker Compose setup for running [Zeebe](https://docs.camunda.io/docs/components/zeebe/zeebe-overview/), [ElasticSearch](https://www.elastic.co/elasticsearch), and [Operate](https://docs.camunda.io/docs/components/operate/operate-introduction/) locally. All three ship in the single `camunda/camunda` Docker image. Versions are pinned in the `.env` file at the project root.
 
 ### Version Management
 
@@ -195,13 +191,11 @@ rake zeebe:clean
 - `rake zeebe:restart` - Stop and start containers
 - `rake zeebe:clean` - Remove containers and delete all data volumes
 
-### What Each Service Does
+### Service Roles
 
-**Zeebe** is a workflow orchestration engine that executes BPMN workflows. It exposes a gRPC API (port 26500) that the busybee gem uses to deploy workflows, create workflow instances, and interact with jobs. The Zeebe broker stores workflow state and manages job distribution.
-
-**ElasticSearch** stores historical and current workflow data exported from Zeebe. This data powers the Operate web interface and enables searching and analyzing workflow execution.
-
-**Operate UI** is a web application that provides visibility into running and completed workflows. You can inspect workflow instances, view variables, and troubleshoot issues. Access it at http://localhost:8088 with username `demo` and password `demo`.
+- **Zeebe** — gRPC API on port 26500. This is what busybee connects to.
+- **ElasticSearch** — Stores exported workflow data. Required by Operate.
+- **Operate** — Web UI at http://localhost:8088 (demo/demo). Useful for inspecting workflow instances and variables during development.
 
 ### Troubleshooting
 
@@ -243,7 +237,14 @@ The `grpc:generate` task fetches the proto file from the Zeebe GitHub repository
 
 ## Running the Appraisal Matrix
 
-Busybee tests against multiple dependency versions using Appraisal:
+Busybee tests against multiple dependency versions using Appraisal. The matrix covers two axes: **Rails version** and **concurrent-ruby version**.
+
+| Axis | Versions | Notes |
+|------|----------|-------|
+| Rails | 7.0, 7.1, 7.2, 8.0, 8.1 | Plus "base" (no Rails) |
+| concurrent-ruby | ~> 1.0.0 (floor), ~> 1.3.6 (latest) | Rails 7.2+ requires >= 1.3.1 |
+
+This produces appraisals like `base-concurrent-1.0`, `rails-7.1-concurrent-1.3`, etc. See `Appraisals` for the full matrix.
 
 ```bash
 # Generate gemfiles for each appraisal
@@ -253,7 +254,19 @@ bundle exec appraisal install
 bundle exec appraisal rspec
 
 # Run tests for a specific appraisal
-bundle exec appraisal rails-7.1 rspec
+bundle exec appraisal rails-7.1-concurrent-1.3 rspec
+```
+
+### Running Railtie Specs
+
+Railtie specs require a Rails appraisal gemfile. Running them with the base gemfile will show them as pending:
+
+```bash
+# Run railtie specs with a Rails appraisal
+BUNDLE_GEMFILE=gemfiles/rails_7.1_concurrent_1.3.gemfile bundle exec rspec spec/busybee/railtie_spec.rb
+
+# Or run the full suite under a Rails appraisal
+BUNDLE_GEMFILE=gemfiles/rails_7.1_concurrent_1.3.gemfile bundle exec rspec
 ```
 
 ## Updating Platform Lockfiles
@@ -321,7 +334,7 @@ If you add new docs, ensure user-facing docs go in `docs/` (included) and mainta
 
 ## Releasing a New Version
 
-**For v0.1:** Manual release from local machine.
+Releases are published via GitHub Actions with manual trigger (`workflow_dispatch`).
 
 > **IMPORTANT:** Release tags must ALWAYS be created on `main`, never on feature branches. Complete all work, merge to `main`, then checkout `main` before tagging.
 
@@ -329,14 +342,12 @@ If you add new docs, ensure user-facing docs go in `docs/` (included) and mainta
 2. Update version in `lib/busybee/version.rb`
 3. Update CHANGELOG.md with release date
 4. Run full test suite: `RUN_INTEGRATION_TESTS=1 bundle exec rspec`
-5. Commit, PR, and merge to `main` — gem must be built from a clean `main` commit
-6. From clean `main`: `bundle exec rake build` (outputs to `pkg/`, which is gitignored)
-   - **Note:** Use `rake build`, not raw `gem build`. The rake task outputs to `pkg/` which is in `.gitignore`. Raw `gem build` outputs to cwd and would show as an unstaged change.
-7. Verify contents: `gem unpack pkg/busybee-X.Y.Z.gem` and inspect
-8. Push to RubyGems: `gem push pkg/busybee-X.Y.Z.gem`
-9. Tag: `git tag vX.Y.Z && git push --tags`
-
-**For v0.2+:** GitHub Actions with manual trigger (workflow_dispatch).
+5. Commit, PR, and merge to `main`
+6. From clean `main`: trigger the release workflow, or manually:
+   - `bundle exec rake build` (outputs to `pkg/`, which is gitignored — do not use raw `gem build`)
+   - Verify contents: `gem unpack pkg/busybee-X.Y.Z.gem` and inspect
+   - Push to RubyGems: `gem push pkg/busybee-X.Y.Z.gem`
+   - Tag: `git tag vX.Y.Z && git push --tags`
 
 ## Implementation Patterns
 
@@ -365,14 +376,4 @@ class JobStream
 end
 ```
 
-**Key points:**
-
-1. `include Enumerable` adds `map`, `select`, `first`, etc. - all built on top of `#each`
-2. Your `#each` must yield the *transformed* elements (wrapped jobs, not raw protos)
-3. Return `enum_for(:each)` when no block given - this provides Enumerator support
-4. Enumerable methods will "just work" as long as `#each` yields correctly
-
-**References:**
-
-- [Ruby Enumerable documentation](https://ruby-doc.org/3.4.1/Enumerable.html) - "The class must provide a method `#each`, which yields successive members of the collection."
-- [Ruby Object#enum_for](https://ruby-doc.org/3.4.1/Object.html#method-i-enum_for) - Creates an Enumerator that calls the named method when enumerated; the standard pattern for supporting block-less iteration.
+The important thing is that [`#each`](https://ruby-doc.org/3.4.1/Enumerable.html) yields *transformed* elements (wrapped jobs, not raw protos) and returns [`enum_for(:each)`](https://ruby-doc.org/3.4.1/Object.html#method-i-enum_for) when no block is given. See `JobStream` for the canonical implementation.

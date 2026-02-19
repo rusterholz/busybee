@@ -244,6 +244,71 @@ RSpec.describe Busybee::Worker::Configuration do
         Busybee::InvalidWorkerDefinition, /`queue:` requires a boolean/
       )
     end
+
+    it "accepts queue_throttle: with an integer" do
+      config.streaming_config = { queue_throttle: 5 }
+      expect(config.streaming_config).to eq(queue_throttle: 5)
+    end
+
+    it "accepts queue_throttle: 0 (minimal throttle)" do
+      config.streaming_config = { queue_throttle: 0 }
+      expect(config.streaming_config).to eq(queue_throttle: 0)
+    end
+
+    it "accepts queue_throttle: with a float" do
+      config.streaming_config = { queue_throttle: 0.5 }
+      expect(config.streaming_config).to eq(queue_throttle: 0.5)
+    end
+
+    it "accepts queue_throttle: with a Rational" do
+      config.streaming_config = { queue_throttle: Rational(87, 1000) }
+      expect(config.streaming_config).to eq(queue_throttle: Rational(87, 1000))
+    end
+
+    it "coerces queue_throttle: true to 0 (minimal throttle)" do
+      config.streaming_config = { queue_throttle: true }
+      expect(config.streaming_config).to eq(queue_throttle: 0)
+    end
+
+    it "coerces queue_throttle: nil to false (no throttling)" do
+      config.streaming_config = { queue_throttle: nil }
+      expect(config.streaming_config).to eq(queue_throttle: false)
+    end
+
+    it "raises when queue_throttle: is negative" do
+      expect { config.streaming_config = { queue_throttle: -1 } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /`queue_throttle:` must be a non-negative Numeric/
+      )
+    end
+
+    it "raises when queue_throttle: is non-Numeric" do
+      expect { config.streaming_config = { queue_throttle: "5" } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /`queue_throttle:` must be a non-negative Numeric/
+      )
+    end
+  end
+
+  describe "#queue_throttle" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "defaults to false (no throttling) when neither DSL nor gem-level sets it" do
+      expect(config.queue_throttle).to be(false)
+    end
+
+    it "returns the DSL value when set in streaming config" do
+      config.streaming_config = { queue_throttle: 0.5 }
+      expect(config.queue_throttle).to eq(0.5)
+    end
+
+    it "returns 0 when explicitly set (minimal throttle)" do
+      config.streaming_config = { queue_throttle: 0 }
+      expect(config.queue_throttle).to eq(0)
+    end
+
+    it "falls back to gem-level default_queue_throttle" do
+      allow(Busybee).to receive(:default_queue_throttle).and_return(2)
+      expect(config.queue_throttle).to eq(2)
+    end
   end
 
   describe "#queue_enabled?" do

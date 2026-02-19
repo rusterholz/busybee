@@ -11,7 +11,7 @@ module Busybee
       VALID_SOURCES = %i[variable header].freeze
       VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
       VALID_POLLING_KWARGS = %i[max_jobs request_timeout].freeze
-      VALID_STREAMING_KWARGS = %i[queue].freeze
+      VALID_STREAMING_KWARGS = %i[queue queue_throttle].freeze
 
       # Represents a declared input (from variable, header, or both).
       Input = Struct.new(:name, :source, :required, :type, :description, :default,
@@ -77,9 +77,8 @@ module Busybee
                 "Valid: #{VALID_STREAMING_KWARGS.map(&:inspect).join(', ')}"
         end
 
-        if kwargs.key?(:queue) && ![true, false].include?(kwargs[:queue])
-          raise InvalidWorkerDefinition, "`queue:` requires a boolean, got #{kwargs[:queue].inspect}"
-        end
+        validate_queue_option!(kwargs) if kwargs.key?(:queue)
+        validate_queue_throttle!(kwargs) if kwargs.key?(:queue_throttle)
 
         @streaming_config = kwargs
       end
@@ -137,6 +136,12 @@ module Busybee
         validate_unique_output!(output.name)
 
         @outputs << output
+      end
+
+      # Resolved queue throttle for the streaming pump thread.
+      # Returns false (no throttling), 0 (minimal throttle), or a positive Numeric (ms).
+      def queue_throttle
+        streaming_config.fetch(:queue_throttle, Busybee.default_queue_throttle)
       end
 
       # Whether this worker uses a pump thread + queue for streaming.
@@ -233,6 +238,25 @@ module Busybee
         return unless @outputs.any? { |o| o.name == name }
 
         raise InvalidWorkerDefinition, "Output :#{name} is already declared"
+      end
+
+      def validate_queue_option!(kwargs)
+        return if [true, false].include?(kwargs[:queue])
+
+        raise InvalidWorkerDefinition, "`queue:` requires a boolean, got #{kwargs[:queue].inspect}"
+      end
+
+      def validate_queue_throttle!(kwargs)
+        # Coerce: true → 0 ("enable at minimal setting"), nil → false ("no throttling")
+        kwargs[:queue_throttle] = 0 if kwargs[:queue_throttle] == true
+        kwargs[:queue_throttle] = false if kwargs[:queue_throttle].nil?
+
+        value = kwargs[:queue_throttle]
+        return if value == false
+        return if value.is_a?(Numeric) && value >= 0
+
+        raise InvalidWorkerDefinition,
+              "`queue_throttle:` must be a non-negative Numeric, got #{value.inspect}"
       end
 
       def validate_duration!(attr, value)

@@ -23,7 +23,7 @@ module Busybee
   class << self
     attr_writer :cluster_address, :grpc_retry_enabled, :grpc_retry_delay_ms, :grpc_retry_errors, :default_message_ttl,
                 :default_fail_job_backoff, :default_job_request_timeout, :default_job_lock_timeout, :worker_name,
-                :default_input_required, :default_output_required, :default_runner_mode,
+                :default_input_required, :default_output_required, :default_queue_throttle, :default_runner_mode,
                 :runner_backpressure_delay, :runner_shutdown_backoff
     attr_accessor :logger
     attr_reader :credentials
@@ -99,6 +99,10 @@ module Busybee
 
     def default_output_required
       @default_output_required.nil? ? Defaults::DEFAULT_OUTPUT_REQUIRED : @default_output_required
+    end
+
+    def default_queue_throttle
+      @default_queue_throttle || Defaults::DEFAULT_QUEUE_THROTTLE_MS
     end
 
     def default_runner_mode

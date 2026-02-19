@@ -299,6 +299,56 @@ RSpec.describe Busybee::Worker::DSL do
         end)
       end.to raise_error(Busybee::InvalidWorkerDefinition, /Unknown streaming config.*:buffer_size/)
     end
+
+    it "accepts queue_throttle: with a numeric value" do
+      worker = stub_const("PumpDelayWorker", Class.new(Busybee::Worker) do
+        streaming queue_throttle: 0.5
+      end)
+
+      expect(worker.configuration.streaming_config).to eq(queue_throttle: 0.5)
+      expect(worker.configuration.queue_throttle).to eq(0.5)
+    end
+
+    it "accepts queue_throttle: 0 for minimal throttle" do
+      worker = stub_const("MinThrottleWorker", Class.new(Busybee::Worker) do
+        streaming queue_throttle: 0
+      end)
+
+      expect(worker.configuration.queue_throttle).to eq(0)
+    end
+
+    it "accepts queue_throttle: true as sugar for 0 (minimal throttle)" do
+      worker = stub_const("TrueThrottleWorker", Class.new(Busybee::Worker) do
+        streaming queue_throttle: true
+      end)
+
+      expect(worker.configuration.queue_throttle).to eq(0)
+    end
+
+    it "accepts queue_throttle: false to explicitly disable" do
+      worker = stub_const("NoThrottleWorker", Class.new(Busybee::Worker) do
+        streaming queue_throttle: false
+      end)
+
+      expect(worker.configuration.queue_throttle).to be(false)
+    end
+
+    it "accepts queue_throttle: combined with queue:" do
+      worker = stub_const("BothOptsWorker", Class.new(Busybee::Worker) do
+        streaming queue: true, queue_throttle: 2
+      end)
+
+      expect(worker.configuration.queue_enabled?).to be(true)
+      expect(worker.configuration.queue_throttle).to eq(2)
+    end
+
+    it "raises on non-Numeric queue_throttle at load time" do
+      expect do
+        stub_const("BadPumpDelayWorker", Class.new(Busybee::Worker) do
+          streaming queue_throttle: "5"
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /queue_throttle:.*non-negative Numeric/)
+    end
   end
 
   describe ".job_timeout" do

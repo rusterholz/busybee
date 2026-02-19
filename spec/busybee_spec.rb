@@ -295,6 +295,40 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".default_queue_throttle" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_queue_throttle)
+      example.run
+      described_class.default_queue_throttle = original
+    end
+
+    it "defaults to false (no throttling)" do
+      described_class.default_queue_throttle = nil
+      expect(described_class.default_queue_throttle).to be(false)
+    end
+
+    it "can be set to an integer" do
+      described_class.default_queue_throttle = 5
+      expect(described_class.default_queue_throttle).to eq(5)
+    end
+
+    it "can be set to a float for sub-millisecond precision" do
+      described_class.default_queue_throttle = 0.5
+      expect(described_class.default_queue_throttle).to eq(0.5)
+    end
+
+    it "preserves 0 (minimal throttle via sleep(0))" do
+      described_class.default_queue_throttle = 0
+      expect(described_class.default_queue_throttle).to eq(0)
+    end
+
+    it "resets to default when set to nil" do
+      described_class.default_queue_throttle = 5
+      described_class.default_queue_throttle = nil
+      expect(described_class.default_queue_throttle).to be(false)
+    end
+  end
+
   describe ".credentials" do
     it "can be set and retrieved with valid credentials object" do
       creds = Busybee::Credentials.new
