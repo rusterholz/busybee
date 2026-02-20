@@ -28,16 +28,6 @@ module Busybee
 
     # --- Boolean configs ---
 
-    def grpc_retry_enabled=(value)
-      if value.nil?
-        @grpc_retry_enabled = nil
-        return
-      end
-
-      validate_boolean!(:grpc_retry_enabled, value)
-      @grpc_retry_enabled = value
-    end
-
     def default_input_required=(value)
       if value.nil?
         @default_input_required = nil
@@ -58,26 +48,36 @@ module Busybee
       @default_output_required = value
     end
 
+    def grpc_retry_enabled=(value)
+      if value.nil?
+        @grpc_retry_enabled = nil
+        return
+      end
+
+      validate_boolean!(:grpc_retry_enabled, value)
+      @grpc_retry_enabled = value
+    end
+
     # --- Duration configs (Integer ms or ActiveSupport::Duration) ---
-
-    def grpc_retry_delay_ms=(value)
-      @grpc_retry_delay_ms = value.nil? ? nil : validate_duration!(:grpc_retry_delay_ms, value)
-    end
-
-    def default_message_ttl=(value)
-      @default_message_ttl = value.nil? ? nil : validate_duration!(:default_message_ttl, value)
-    end
 
     def default_fail_job_backoff=(value)
       @default_fail_job_backoff = value.nil? ? nil : validate_duration!(:default_fail_job_backoff, value)
+    end
+
+    def default_job_lock_timeout=(value)
+      @default_job_lock_timeout = value.nil? ? nil : validate_duration!(:default_job_lock_timeout, value)
     end
 
     def default_job_request_timeout=(value)
       @default_job_request_timeout = value.nil? ? nil : validate_duration!(:default_job_request_timeout, value)
     end
 
-    def default_job_lock_timeout=(value)
-      @default_job_lock_timeout = value.nil? ? nil : validate_duration!(:default_job_lock_timeout, value)
+    def default_message_ttl=(value)
+      @default_message_ttl = value.nil? ? nil : validate_duration!(:default_message_ttl, value)
+    end
+
+    def grpc_retry_delay_ms=(value)
+      @grpc_retry_delay_ms = value.nil? ? nil : validate_duration!(:grpc_retry_delay_ms, value)
     end
 
     def runner_backpressure_delay=(value)

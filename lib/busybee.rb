@@ -39,47 +39,35 @@ module Busybee
       @cluster_address || ENV.fetch("CLUSTER_ADDRESS", "localhost:26500")
     end
 
-    def worker_name
-      return @worker_name if @worker_name
-      return ENV["BUSYBEE_WORKER_NAME"] if ENV["BUSYBEE_WORKER_NAME"]
+    def credential_type
+      return @credential_type if instance_variable_defined?(:@credential_type) && !@credential_type.nil?
 
-      Socket.gethostname
-    rescue StandardError
-      "busybee-worker"
-    end
+      # Env var fallback - goes through setter for validation
+      env_value = ENV.fetch("BUSYBEE_CREDENTIAL_TYPE", nil)
+      return nil if env_value.nil?
 
-    def grpc_retry_enabled
-      return @grpc_retry_enabled unless @grpc_retry_enabled.nil?
-
-      false
-    end
-
-    def grpc_retry_delay_ms
-      @grpc_retry_delay_ms || Defaults::DEFAULT_GRPC_RETRY_DELAY_MS
-    end
-
-    def grpc_retry_errors
-      @grpc_retry_errors || default_retry_errors
-    end
-
-    def default_message_ttl
-      @default_message_ttl || Defaults::DEFAULT_MESSAGE_TTL_MS
+      self.credential_type = env_value
+      @credential_type
     end
 
     def default_fail_job_backoff
       @default_fail_job_backoff || Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS
     end
 
-    def default_job_request_timeout
-      @default_job_request_timeout || Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS
+    def default_input_required
+      @default_input_required.nil? ? Defaults::DEFAULT_INPUT_REQUIRED : @default_input_required
     end
 
     def default_job_lock_timeout
       @default_job_lock_timeout || Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS
     end
 
-    def default_input_required
-      @default_input_required.nil? ? Defaults::DEFAULT_INPUT_REQUIRED : @default_input_required
+    def default_job_request_timeout
+      @default_job_request_timeout || Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS
+    end
+
+    def default_message_ttl
+      @default_message_ttl || Defaults::DEFAULT_MESSAGE_TTL_MS
     end
 
     def default_output_required
@@ -94,6 +82,24 @@ module Busybee
       @default_runner_mode || Defaults::DEFAULT_RUNNER_MODE
     end
 
+    def grpc_retry_delay_ms
+      @grpc_retry_delay_ms || Defaults::DEFAULT_GRPC_RETRY_DELAY_MS
+    end
+
+    def grpc_retry_enabled
+      return @grpc_retry_enabled unless @grpc_retry_enabled.nil?
+
+      false
+    end
+
+    def grpc_retry_errors
+      @grpc_retry_errors || default_retry_errors
+    end
+
+    def log_format
+      @log_format || :text
+    end
+
     def runner_backpressure_delay
       @runner_backpressure_delay || Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
     end
@@ -106,19 +112,13 @@ module Busybee
       @shutdown_on_errors ||= []
     end
 
-    def log_format
-      @log_format || :text
-    end
+    def worker_name
+      return @worker_name if @worker_name
+      return ENV["BUSYBEE_WORKER_NAME"] if ENV["BUSYBEE_WORKER_NAME"]
 
-    def credential_type
-      return @credential_type if instance_variable_defined?(:@credential_type) && !@credential_type.nil?
-
-      # Env var fallback - goes through setter for validation
-      env_value = ENV.fetch("BUSYBEE_CREDENTIAL_TYPE", nil)
-      return nil if env_value.nil?
-
-      self.credential_type = env_value
-      @credential_type
+      Socket.gethostname
+    rescue StandardError
+      "busybee-worker"
     end
 
     private
