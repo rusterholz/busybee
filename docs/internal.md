@@ -36,6 +36,7 @@ lib/busybee/
 ├── runner.rb                # Runner base class, factory method, shared shutdown logic
 ├── runner/                  # Runner implementations
 │   ├── hybrid.rb            # Hybrid runner (Streaming subclass, adds poll-drain phase)
+│   ├── multi.rb             # Multi runner (thread pool managing multiple single-worker runners)
 │   ├── polling.rb           # Polling runner (with_each_job loop)
 │   └── streaming.rb         # Streaming runner (open_job_stream, pump thread + queue)
 ├── serialization.rb         # JSON serialization/deserialization
@@ -155,7 +156,7 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 ├── Runner::Polling       # Loop using client.with_each_job
 ├── Runner::Streaming     # Loop using client.open_job_stream (dual-mode: inline or pump+queue)
 │   └── Runner::Hybrid    # Subclass of Streaming, adds poll-drain phase before queue processing
-└── Runner::Multi         # Thread pool managing multiple single-worker runners (not yet implemented)
+└── Runner::Multi         # Thread pool managing multiple single-worker runners
 ```
 
 **Key design decision:** `Hybrid < Streaming`, not `Hybrid < Runner`. Hybrid's unique contribution is the drain phase — all pump thread and queue machinery is inherited from Streaming.
@@ -174,9 +175,9 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 | Primitive | Used For |
 |-----------|----------|
 | `Concurrent::AtomicBoolean` | `@stop_requested`, `@running` — thread-safe state flags |
-| `Concurrent::AtomicReference` | `@shutdown_error` — first-error-wins across pump + main threads |
+| `Concurrent::AtomicReference` | `@shutdown_error` (Streaming/Hybrid), `@thread_error` (Multi) — first-error-wins |
 | Ruby `Queue` | Job queue between pump thread and main thread (thread-safe) |
-| `Concurrent::FixedThreadPool` | Multi runner thread management (future) |
+| `Concurrent::FixedThreadPool` | Multi runner — one thread per child runner |
 
 ### Error Handling
 
@@ -191,7 +192,7 @@ At the runner level:
 
 **Graceful (`stop!`):** Sets `@stop_requested` AtomicBoolean. For streaming/hybrid, also closes the stream (unblocks `stream.each`) and pushes a `:stop` sentinel to the queue (unblocks `queue.pop`). In-progress `perform_job` completes. Remaining queued/yielded jobs are failed via `handle_shutdown_job` (preserves retry count).
 
-**Forced (`kill!`):** Base calls `stop!`. Streaming also kills the pump thread and flushes the queue. Multi (future) kills the thread pool.
+**Forced (`kill!`):** Base calls `stop!`. Streaming also kills the pump thread and flushes the queue. Multi kills all child runners and the thread pool.
 
 ### Queue Throttle
 
@@ -202,6 +203,23 @@ When `queue_throttle` is configured on a worker, the pump thread sleeps between 
 - Positive Numeric — explicit delay in milliseconds (e.g., `0.5` = 500µs)
 
 Point of use: `sleep(delay.to_f / 1000) if delay` — works because `false` is falsey, `0` is truthy in Ruby.
+
+### Multi Runner
+
+`Runner::Multi` manages multiple worker types in a single process. Each worker class gets its own child runner (Polling, Streaming, or Hybrid, resolved via `Runner.for`) running in a dedicated thread.
+
+**Threading model:** A `Concurrent::FixedThreadPool` sized to the number of worker classes. Each thread calls `runner.run!` on its child runner. The main thread calls `thread_pool.wait_for_termination` and blocks until all child threads exit.
+
+**Error handling:** A `Concurrent::AtomicReference` captures the first error from any child thread (first-error-wins via `update { |prev| prev || e }`). When a child thread raises, Multi logs the error, calls `stop!` to cascade shutdown to all siblings, and after the pool terminates, re-raises the captured error.
+
+**Shutdown sequence:**
+- `stop!` — stops all child runners, then `thread_pool.shutdown` (waits for in-progress jobs to finish)
+- `stopping?` — true only when *all* child runners are stopping
+- `kill!` — kills all child runners, then `thread_pool.kill` (immediate termination)
+
+**ActiveRecord connection pool check:** On initialization, if `ActiveRecord` is defined, Multi compares `connection_pool.size` against the number of worker classes. Logs an error if the pool is undersized (common misconfiguration), or an info message confirming adequate pool size.
+
+**Shared client:** All child runners share the same `Busybee::Client` instance, passed through `Runner.for`. HTTP/2 multiplexing allows a single gRPC connection to serve all runners.
 
 ## Serialization Module
 
