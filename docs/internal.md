@@ -33,6 +33,7 @@ lib/busybee/
 ├── job_stream.rb            # JobStream for streaming job activation
 ├── logging.rb               # Logging module (text/JSON, thread-safe)
 ├── railtie.rb               # Rails integration
+├── runtime_config.rb        # Operator-specified runtime overrides (CLI/YAML → resolved config)
 ├── runner.rb                # Runner base class, factory method, shared shutdown logic
 ├── runner/                  # Runner implementations
 │   ├── hybrid.rb            # Hybrid runner (Streaming subclass, adds poll-drain phase)
@@ -144,6 +145,36 @@ Steps:
 5. **On error:** if `fail_job_on_error` and `job.ready?`, call `job.fail!`. Then check `shutdown_on` — if matched, wrap as `Shutdown` and re-raise.
 
 The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform`.
+
+## Runtime Configuration
+
+`Busybee::RuntimeConfig` holds operator-specified overrides, typically from CLI flags or YAML config. It has a two-phase lifecycle:
+
+1. **Constructed sparse** — only fields the operator explicitly set. Per-worker overrides keyed by class name. This is the YAML-shaped input.
+2. **Resolved via `resolve_for(worker_class)`** — returns a new RuntimeConfig with all values populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
+
+Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every field set.
+
+### Precedence Chain
+
+For any field (currently `runner_mode`; future: `backpressure_delay`, `shutdown_backoff`, etc.):
+
+```
+Per-worker RuntimeConfig override   (highest priority)
+         ↓
+Global RuntimeConfig value
+         ↓
+Worker DSL (worker_class.configuration)
+         ↓
+Gem default (Busybee.default_*)     (lowest priority)
+```
+
+### Integration Points
+
+- **`Runner.for`** accepts `runtime_config:`, calls `resolve_for` to determine runner class.
+- **`Runner::Multi`** calls `resolve_for` per worker class, so each child runner gets its own resolved config.
+- **CLI** (Mission 14) will construct a RuntimeConfig from parsed flags and pass it to `Runner.for`.
+- **YAML config** (Mission 15) will construct a RuntimeConfig from parsed YAML.
 
 ## Runner Module
 

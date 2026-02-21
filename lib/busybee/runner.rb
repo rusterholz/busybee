@@ -40,29 +40,29 @@ module Busybee
     end
 
     class << self
-      # Factory method. Resolves runner mode from precedence chain and returns
+      # Factory method. Resolves runner mode via RuntimeConfig and returns
       # the appropriate runner instance.
       #
       # Mode resolution (lowest to highest priority):
       #   1. Gem default: Busybee.default_runner_mode
       #   2. Worker DSL: worker_class.configuration.runner_mode
-      #   3. Explicit override: mode: parameter (from CLI/YAML)
-      def for(*worker_classes, mode: nil, client: nil)
+      #   3. RuntimeConfig override (global or per-worker)
+      def for(*worker_classes, runtime_config: nil, client: nil)
+        runtime_config ||= RuntimeConfig.new
         client ||= Busybee::Client.new
 
         if worker_classes.length > 1
-          Multi.new(worker_classes, mode: mode, client: client)
+          Multi.new(worker_classes, runtime_config: runtime_config, client: client)
         else
-          runner_class_for(worker_classes.first, mode: mode).new(worker_classes.first, client: client)
+          resolved = runtime_config.resolve_for(worker_classes.first)
+          runner_class_for(resolved).new(worker_classes.first, client: client)
         end
       end
 
       private
 
-      def runner_class_for(worker_class, mode: nil)
-        resolved_mode = mode || worker_class.configuration.runner_mode || Busybee.default_runner_mode
-
-        case resolved_mode
+      def runner_class_for(resolved_config)
+        case resolved_config.runner_mode
         when :polling then Polling
         when :streaming then Streaming
         when :hybrid then Hybrid

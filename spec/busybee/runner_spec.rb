@@ -77,38 +77,27 @@ RSpec.describe Busybee::Runner do
     end
 
     context "with a single worker class" do
-      it "resolves to Polling when mode is :polling" do
-        runner = described_class.for(worker_class, mode: :polling, client: client)
+      it "uses runtime_config to resolve runner type" do
+        rc = Busybee::RuntimeConfig.new(runner_mode: :polling)
+        runner = described_class.for(worker_class, runtime_config: rc, client: client)
         expect(runner).to be_a(Busybee::Runner::Polling)
       end
 
-      it "uses the worker's configured runner_mode when no mode override" do
+      it "falls back to worker DSL when no runtime_config" do
         worker_class.runner_mode :polling
         runner = described_class.for(worker_class, client: client)
         expect(runner).to be_a(Busybee::Runner::Polling)
       end
 
-      it "uses the gem default when worker has no runner_mode and no override" do
+      it "falls back to gem default when no runtime_config and no worker DSL" do
         Busybee.default_runner_mode = :polling
         runner = described_class.for(worker_class, client: client)
         expect(runner).to be_a(Busybee::Runner::Polling)
       end
 
-      it "prefers mode override over worker DSL" do
-        worker_class.runner_mode :streaming
-        runner = described_class.for(worker_class, mode: :polling, client: client)
-        expect(runner).to be_a(Busybee::Runner::Polling)
-      end
-
-      it "prefers worker DSL over gem default" do
-        Busybee.default_runner_mode = :streaming
-        worker_class.runner_mode :polling
-        runner = described_class.for(worker_class, client: client)
-        expect(runner).to be_a(Busybee::Runner::Polling)
-      end
-
       it "passes the client to the runner" do
-        runner = described_class.for(worker_class, mode: :polling, client: client)
+        rc = Busybee::RuntimeConfig.new(runner_mode: :polling)
+        runner = described_class.for(worker_class, runtime_config: rc, client: client)
         expect(runner.instance_variable_get(:@client)).to be(client)
       end
 
@@ -116,13 +105,15 @@ RSpec.describe Busybee::Runner do
         default_client = instance_double(Busybee::Client)
         allow(Busybee::Client).to receive(:new).and_return(default_client)
 
-        runner = described_class.for(worker_class, mode: :polling)
+        rc = Busybee::RuntimeConfig.new(runner_mode: :polling)
+        runner = described_class.for(worker_class, runtime_config: rc)
         expect(runner.instance_variable_get(:@client)).to be(default_client)
       end
 
-      it "raises ArgumentError for invalid mode" do
-        expect { described_class.for(worker_class, mode: :invalid, client: client) }.
-          to raise_error(ArgumentError, /Invalid runner mode.*:invalid.*:polling.*:streaming.*:hybrid/)
+      it "raises ArgumentError for invalid resolved mode" do
+        worker_class.instance_variable_get(:@configuration).instance_variable_set(:@runner_mode, :invalid)
+        expect { described_class.for(worker_class, client: client) }.
+          to raise_error(ArgumentError, /Invalid runner mode.*:invalid/)
       end
     end
 
@@ -138,7 +129,8 @@ RSpec.describe Busybee::Runner do
       end
 
       it "returns a Multi runner" do
-        runner = described_class.for(worker_class, other_worker_class, mode: :polling, client: client)
+        rc = Busybee::RuntimeConfig.new(runner_mode: :polling)
+        runner = described_class.for(worker_class, other_worker_class, runtime_config: rc, client: client)
         expect(runner).to be_a(Busybee::Runner::Multi)
       end
     end
