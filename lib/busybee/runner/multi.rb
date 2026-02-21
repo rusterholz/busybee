@@ -13,10 +13,12 @@ module Busybee
     class Multi < Runner
       attr_reader :runners
 
-      def initialize(worker_classes, mode: nil, client: nil)
+      def initialize(worker_classes, runtime_config: nil, client: nil)
         super(client: client)
+        runtime_config ||= RuntimeConfig.new
         @runners = worker_classes.map do |worker_class|
-          Runner.for(worker_class, mode: mode, client: @client)
+          resolved = runtime_config.resolve_for(worker_class)
+          Runner.for(worker_class, runtime_config: resolved, client: @client)
         end
         @thread_pool = Concurrent::FixedThreadPool.new(worker_classes.length)
         @thread_error = Concurrent::AtomicReference.new(nil)

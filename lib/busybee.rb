@@ -11,6 +11,7 @@ require "busybee/job"
 require "busybee/job_stream"
 require "busybee/client"
 require "busybee/worker"
+require "busybee/runtime_config"
 require "busybee/runner"
 
 # Top-level gem module. Configuration readers and defaults live here;

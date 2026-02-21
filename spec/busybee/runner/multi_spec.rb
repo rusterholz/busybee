@@ -53,10 +53,25 @@ RSpec.describe Busybee::Runner::Multi do
       expect(multi.runners[1]).to be_a(Busybee::Runner::Streaming)
     end
 
-    it "applies mode override to all child runners" do
-      multi = described_class.new(worker_classes, mode: :polling, client: client)
+    it "applies runtime_config override to all child runners" do
+      rc = Busybee::RuntimeConfig.new(runner_mode: :polling)
+      multi = described_class.new(worker_classes, runtime_config: rc, client: client)
 
       expect(multi.runners).to all(be_a(Busybee::Runner::Polling))
+    end
+
+    it "resolves per-worker overrides from runtime_config" do
+      rc = Busybee::RuntimeConfig.new(
+        runner_mode: :hybrid,
+        workers: {
+          "TestMultiWorker1" => { runner_mode: :polling },
+          "TestMultiWorker2" => { runner_mode: :streaming }
+        }
+      )
+      multi = described_class.new(worker_classes, runtime_config: rc, client: client)
+
+      expect(multi.runners[0]).to be_a(Busybee::Runner::Polling)
+      expect(multi.runners[1]).to be_a(Busybee::Runner::Streaming)
     end
 
     it "creates a thread pool sized to the number of workers" do
