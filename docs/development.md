@@ -242,9 +242,9 @@ Busybee tests against multiple dependency versions using Appraisal. The matrix c
 | Axis | Versions | Notes |
 |------|----------|-------|
 | Rails | 7.0, 7.1, 7.2, 8.0, 8.1 | Plus "base" (no Rails) |
-| concurrent-ruby | ~> 1.0.0 (floor), ~> 1.3.6 (latest) | Rails 7.2+ requires >= 1.3.1 |
+| concurrent-ruby | ~> 1.1.7 (floor), ~> 1.3.6 (latest) | Rails 7.2+ requires >= 1.3.1 |
 
-This produces appraisals like `base-concurrent-1.0`, `rails-7.1-concurrent-1.3`, etc. See `Appraisals` for the full matrix.
+This produces appraisals like `base-concurrent-1.1`, `rails-7.1-concurrent-1.3`, etc. See `Appraisals` for the full matrix.
 
 ```bash
 # Generate gemfiles for each appraisal

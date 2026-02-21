@@ -138,7 +138,6 @@ RSpec.describe Busybee::Runner do
       end
 
       it "returns a Multi runner" do
-        pending "Runner::Multi implementation (Mission 13)"
         runner = described_class.for(worker_class, other_worker_class, mode: :polling, client: client)
         expect(runner).to be_a(Busybee::Runner::Multi)
       end

@@ -98,3 +98,4 @@ end
 require "busybee/runner/polling"
 require "busybee/runner/streaming"
 require "busybee/runner/hybrid"
+require "busybee/runner/multi"

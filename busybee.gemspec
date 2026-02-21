@@ -38,6 +38,6 @@ Gem::Specification.new do |spec|
   # Runtime dependencies
   spec.add_dependency "activesupport", ">= 7.0"
   spec.add_dependency "base64"
-  spec.add_dependency "concurrent-ruby", "~> 1.0"
+  spec.add_dependency "concurrent-ruby", ">= 1.1.7", "< 2.0"
   spec.add_dependency "grpc", "~> 1.76"
 end
