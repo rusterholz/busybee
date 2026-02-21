@@ -44,12 +44,12 @@ jobs:
       run: bundle exec appraisal install
     - name: Appraisal RSpec
       run: bundle exec appraisal rspec
-  integration:
+  zeebe-integration:
     strategy:
       fail-fast: false
       matrix:
         tenancy: [single, multi]
-    name: Integration Tests (${{ matrix.tenancy }}-tenant)
+    name: "Zeebe Integration (${{ matrix.tenancy }}-tenant)"
     runs-on: ubuntu-latest
     needs: [lint, test]
     steps:
@@ -77,21 +77,48 @@ jobs:
       if: always()
       run: bundle exec rake zeebe:stop
 
+  rails-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in sync with Rails versions in Appraisals
+        rails: ['7.0', '7.1', '7.2', '8.0', '8.1']
+    name: "Rails Integration (${{ matrix.rails }})"
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+    - name: Install Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '.ruby-version'
+        bundler: Gemfile.lock
+        bundler-cache: true
+    - name: Install Dependencies
+      run: bundle exec appraisal install
+    - name: Run Rails Integration Tests
+      env:
+        TEST_RAILS_INTEGRATION: "1"
+      run: bundle exec appraisal rails-${{ matrix.rails }}-concurrent-1.3 rspec spec/integration/rails/
+
   final-results:
     name: Final Results
     runs-on: ubuntu-latest
-    needs: [lint, test, integration]
+    needs: [lint, test, zeebe-integration, rails-integration]
     if: always()
     steps:
       - name: Check results
         run: |
           if [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
-             [ "${{ needs.integration.result }}" != "success" ]; then
+             [ "${{ needs.zeebe-integration.result }}" != "success" ] || \
+             [ "${{ needs.rails-integration.result }}" != "success" ]; then
             echo "One or more jobs failed"
             echo "  lint: ${{ needs.lint.result }}"
             echo "  test: ${{ needs.test.result }}"
-            echo "  integration: ${{ needs.integration.result }}"
+            echo "  zeebe-integration: ${{ needs.zeebe-integration.result }}"
+            echo "  rails-integration: ${{ needs.rails-integration.result }}"
             exit 1
           fi
           echo "All checks passed"

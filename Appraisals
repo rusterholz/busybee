@@ -3,6 +3,7 @@
 # Axes: Rails version × concurrent-ruby version
 # concurrent-ruby floor (1.1.x) and latest (1.3.x) are tested across compatible combos.
 # Rails 7.2+ requires concurrent-ruby >= 1.3.1, so only 7.0/7.1 pair with the 1.1 floor.
+# When adding/removing Rails versions, update the matrix in .github/workflows/ci.yml too.
 
 CONCURRENT_RUBY_VERSIONS = {
   "concurrent-1.1" => "~> 1.1.7",

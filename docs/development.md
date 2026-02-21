@@ -269,6 +269,20 @@ BUNDLE_GEMFILE=gemfiles/rails_7.1_concurrent_1.3.gemfile bundle exec rspec spec/
 BUNDLE_GEMFILE=gemfiles/rails_7.1_concurrent_1.3.gemfile bundle exec rspec
 ```
 
+### Running Rails Integration Tests (dummy app)
+
+The `TEST_RAILS_INTEGRATION=1` env var boots a full dummy Rails app whose railtie sets gem-level config (cluster address, timeouts, credential type, etc.). These values leak into the Busybee singleton and contaminate unit specs that assume gem defaults. **Run Rails integration tests separately**, not combined with the unit suite:
+
+```bash
+# Rails integration tests only (separate run)
+TEST_RAILS_INTEGRATION=1 bundle exec appraisal rails-8.1-concurrent-1.3 rspec spec/integration/rails/
+
+# Unit + Zeebe integration tests (separate run, no TEST_RAILS_INTEGRATION)
+RUN_INTEGRATION_TESTS=1 bundle exec rspec
+```
+
+Combining `TEST_RAILS_INTEGRATION=1` with the full suite will cause spurious failures in timeout, credentials, and default-value specs.
+
 ## Updating Platform Lockfiles
 
 After touching Gemfile, Appraisals, or gemspec, ensure all platform variants are present:
