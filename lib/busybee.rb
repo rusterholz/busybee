@@ -13,6 +13,7 @@ require "busybee/client"
 require "busybee/worker"
 require "busybee/runtime_config"
 require "busybee/runner"
+require "busybee/cli"
 
 # Top-level gem module. Configuration readers and defaults live here;
 # validated setters live in Busybee::Configure.

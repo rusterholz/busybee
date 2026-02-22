@@ -7,7 +7,10 @@ This document describes the internal architecture of the busybee gem. It is for 
 ## Architecture Overview
 
 ```
+exe/
+└── busybee                  # CLI executable (thin shim)
 lib/busybee/
+├── cli.rb                   # CLI entry point: arg parsing, env loading, signal handling, runner wiring
 ├── configure.rb             # Validated setters for gem-level config (included into Busybee singleton)
 ├── client.rb                # Client class - main user-facing API
 ├── client/                  # Client operation modules
@@ -84,6 +87,10 @@ lib/busybee/
                            │
                     ┌──────┴──────┐
                     │   Runner    │  (uses Client + Worker)
+                    └──────┬──────┘
+                           │
+                    ┌──────┴──────┐
+                    │     CLI     │  (uses Client + Runner + RuntimeConfig)
                     └─────────────┘
 
     ┌─────────────┐
@@ -173,7 +180,7 @@ Gem default (Busybee.default_*)     (lowest priority)
 
 - **`Runner.for`** accepts `runtime_config:`, calls `resolve_for` to determine runner class.
 - **`Runner::Multi`** calls `resolve_for` per worker class, so each child runner gets its own resolved config.
-- **CLI** (Mission 14) will construct a RuntimeConfig from parsed flags and pass it to `Runner.for`.
+- **CLI** constructs a RuntimeConfig from parsed flags (`--runner-mode`) and passes it to `Runner.for`.
 - **YAML config** (Mission 15) will construct a RuntimeConfig from parsed YAML.
 
 ## Runner Module
@@ -251,6 +258,40 @@ Point of use: `sleep(delay.to_f / 1000) if delay` — works because `false` is f
 **ActiveRecord connection pool check:** On initialization, if `ActiveRecord` is defined, Multi compares `connection_pool.size` against the number of worker classes. Logs an error if the pool is undersized (common misconfiguration), or an info message confirming adequate pool size.
 
 **Shared client:** All child runners share the same `Busybee::Client` instance, passed through `Runner.for`. HTTP/2 multiplexing allows a single gRPC connection to serve all runners.
+
+## CLI Module
+
+`Busybee::CLI` is the entry point for the `busybee` executable. It parses arguments, loads the environment, resolves worker classes, and runs the appropriate runner.
+
+### Structure
+
+```
+exe/busybee          # Thin shim: require "busybee" + CLI.main(ARGV)
+lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
+```
+
+### Lifecycle
+
+1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
+2. **`initialize(args)`** — all setup: parse options (`OptionParser`), load Rails environment, load worker classes, build `RuntimeConfig`.
+3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks).
+
+### Signal Handling
+
+Traps `INT`, `QUIT`, `TERM` — all mapped to the same handler. The trap block spawns a thread and joins it (`Thread.new { handle_signal(signal) }.join`) to work around Ruby's signal trap restrictions (no mutex/thread pool operations in trap context).
+
+**Two-signal pattern:**
+- First signal → `runner.stop!` (graceful shutdown)
+- Second signal (while `stopping?`) → `runner.kill!` + `exit!(1)` (forced shutdown, non-zero exit code, skips at_exit handlers)
+
+### Rails Environment Loading
+
+Attempts `require "rails"` — if `LoadError`, Rails is not available and loading is skipped silently. If Rails is present, loads `./config/environment` to boot the app (which triggers the Railtie). If environment loading fails, logs an error with the exception class and message, and suggests `BUSYBEE_SKIP_RAILS=1` as an escape hatch. The env var check happens before any `require` calls (chicken-and-egg: gem config isn't available yet since it's set by the Railtie).
+
+### Error Classes
+
+- **`Busybee::NoWorkersSpecified`** — no positional arguments given
+- **`Busybee::WorkerNotFound`** — `Kernel.const_get` fails for a worker class name
 
 ## Serialization Module
 

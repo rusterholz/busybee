@@ -27,7 +27,7 @@ Gem::Specification.new do |spec|
 
   # Explicit file list - audit before each release (see docs/development.md)
   spec.files = Dir.glob(
-    %w[lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]
+    %w[exe/**/* lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]
   ).reject { |f| f.include?("docs/internal.md") || f.include?("docs/development.md") }
   spec.bindir        = "exe"
   spec.executables   = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }

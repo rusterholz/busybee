@@ -68,7 +68,7 @@ module Busybee
         when :hybrid then Hybrid
         else
           raise ArgumentError,
-                "Invalid runner mode: #{resolved_mode.inspect}. Valid: :polling, :streaming, :hybrid"
+                "Invalid runner mode: #{resolved_config.runner_mode.inspect}. Valid: :polling, :streaming, :hybrid"
         end
       end
     end
