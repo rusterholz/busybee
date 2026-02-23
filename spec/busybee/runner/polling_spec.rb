@@ -220,12 +220,12 @@ RSpec.describe Busybee::Runner::Polling do
         expect(jobs[1]).to have_received(:fail!).with(
           "Worker shutting down",
           retries: 5,
-          backoff: Busybee.runner_shutdown_backoff
+          backoff: Busybee.default_fail_job_backoff
         )
       end
 
-      it "uses the greater of shutdown_backoff and worker backoff" do
-        worker_class.backoff 30_000 # 30s > default shutdown_backoff of 10s
+      it "uses the worker's configured backoff during shutdown" do
+        worker_class.backoff 30_000
         job_to_fail = instance_double(Busybee::Job, key: 1, retries: 3, ready?: true)
         allow(job_to_fail).to receive(:fail!)
 

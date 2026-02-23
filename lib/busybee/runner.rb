@@ -76,21 +76,16 @@ module Busybee
     private
 
     # Fails a job during graceful shutdown, preserving its retry count.
-    # Uses the greater of runner_shutdown_backoff and the worker's configured backoff,
-    # ensuring job types that need long backoffs always get them.
+    # Uses the worker's configured backoff (or gem default).
     def handle_shutdown_job(job)
+      backoff = @worker_class.configuration.backoff || Busybee.default_fail_job_backoff
       job.fail!(
         "Worker shutting down",
         retries: job.retries,
-        backoff: shutdown_backoff
+        backoff: backoff
       )
     rescue StandardError => e
       Busybee.logger&.warn("Failed to fail job #{job.key} during shutdown: #{e.message}")
-    end
-
-    def shutdown_backoff
-      worker_backoff = @worker_class.configuration.backoff || Busybee.default_fail_job_backoff
-      [Busybee.runner_shutdown_backoff, worker_backoff].max
     end
   end
 end

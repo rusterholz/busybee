@@ -371,6 +371,29 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
+  describe ".backpressure_delay" do
+    it "sets backpressure_delay on configuration" do
+      worker = stub_const("BPDelayWorker", Class.new(Busybee::Worker) do
+        backpressure_delay 10_000
+      end)
+
+      expect(worker.configuration.backpressure_delay).to eq(10_000)
+    end
+
+    it "returns current value when called without arguments" do
+      worker = stub_const("BPDelayGetterWorker", Class.new(Busybee::Worker) do
+        backpressure_delay 10_000
+      end)
+
+      expect(worker.backpressure_delay).to eq(10_000)
+    end
+
+    it "returns nil when not set" do
+      worker = stub_const("NoBPDelayWorker", Class.new(Busybee::Worker))
+      expect(worker.backpressure_delay).to be_nil
+    end
+  end
+
   describe "load-time validation" do
     it "raises on input without source" do
       expect do
@@ -510,6 +533,14 @@ RSpec.describe Busybee::Worker::DSL do
           backoff "30 seconds"
         end)
       end.to raise_error(Busybee::InvalidWorkerDefinition, /backoff.*Integer.*ActiveSupport::Duration/)
+    end
+
+    it "raises on backpressure_delay with invalid type" do
+      expect do
+        stub_const("BadBPDelayWorker", Class.new(Busybee::Worker) do
+          backpressure_delay "5 seconds"
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /backpressure_delay.*Integer.*ActiveSupport::Duration/)
     end
 
     it "deduplicates sources silently" do

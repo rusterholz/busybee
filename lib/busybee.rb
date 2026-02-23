@@ -106,10 +106,6 @@ module Busybee
       @runner_backpressure_delay || Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
     end
 
-    def runner_shutdown_backoff
-      @runner_shutdown_backoff || Defaults::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS
-    end
-
     def shutdown_on_errors
       @shutdown_on_errors ||= []
     end

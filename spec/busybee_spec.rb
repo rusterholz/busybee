@@ -269,11 +269,6 @@ RSpec.describe Busybee do
                     :DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
   end
 
-  describe ".runner_shutdown_backoff" do
-    it_behaves_like "a duration config setter", :runner_shutdown_backoff, :runner_shutdown_backoff,
-                    :DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS
-  end
-
   describe ".default_input_required" do
     around do |example|
       original = described_class.instance_variable_get(:@default_input_required)

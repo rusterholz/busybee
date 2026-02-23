@@ -22,7 +22,8 @@ module Busybee
 
       attr_accessor :description
       attr_reader :inputs, :outputs, :runner_mode, :polling_config, :streaming_config,
-                  :job_timeout, :backoff, :complete_job_on_success, :fail_job_on_error, :shutdown_on
+                  :job_timeout, :backoff, :backpressure_delay,
+                  :complete_job_on_success, :fail_job_on_error, :shutdown_on
 
       def initialize(worker_class)
         @worker_class = worker_class
@@ -35,6 +36,7 @@ module Busybee
         @streaming_config = {}
         @job_timeout = nil
         @backoff = nil
+        @backpressure_delay = nil
         @complete_job_on_success = true
         @fail_job_on_error = true
         @shutdown_on = []
@@ -92,6 +94,11 @@ module Busybee
       def backoff=(value)
         validate_duration!(:backoff, value)
         @backoff = value
+      end
+
+      def backpressure_delay=(value)
+        validate_duration!(:backpressure_delay, value)
+        @backpressure_delay = value
       end
 
       def complete_job_on_success=(value)
@@ -177,6 +184,7 @@ module Busybee
           streaming_config: streaming_config,
           job_timeout: job_timeout,
           backoff: backoff,
+          backpressure_delay: backpressure_delay,
           complete_job_on_success: complete_job_on_success,
           fail_job_on_error: fail_job_on_error,
           shutdown_on: shutdown_on

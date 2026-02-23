@@ -84,10 +84,6 @@ module Busybee
       @runner_backpressure_delay = value.nil? ? nil : validate_duration!(:runner_backpressure_delay, value)
     end
 
-    def runner_shutdown_backoff=(value)
-      @runner_shutdown_backoff = value.nil? ? nil : validate_duration!(:runner_shutdown_backoff, value)
-    end
-
     # --- Queue throttle (three-state: false/nil = off, true → 0, Numeric = ms) ---
 
     def default_queue_throttle=(value)

@@ -164,7 +164,7 @@ Runners hold the resolved config at runtime. The resolved config is a flat Runti
 
 ### Precedence Chain
 
-For any field (currently `runner_mode`; future: `backpressure_delay`, `shutdown_backoff`, etc.):
+For any field (currently `runner_mode`, `backpressure_delay`; future: additional CLI-configurable fields):
 
 ```
 Per-worker RuntimeConfig override   (highest priority)

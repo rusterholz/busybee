@@ -10,7 +10,7 @@ def busybee_config_ivars
     @cluster_address @credential_type @credentials @default_fail_job_backoff
     @default_job_lock_timeout @default_job_request_timeout @default_message_ttl
     @default_queue_throttle @grpc_retry_delay_ms @grpc_retry_enabled @grpc_retry_errors
-    @log_format @logger @runner_backpressure_delay @runner_shutdown_backoff
+    @log_format @logger @runner_backpressure_delay
     @worker_name
   ]
 end
@@ -259,19 +259,6 @@ RSpec.describe "Busybee::Railtie", :rails do
         configure_and_initialize
         expect(Busybee.instance_variable_get(:@default_queue_throttle)).to be_nil
         expect(Busybee.default_queue_throttle).to be(false)
-      end
-    end
-
-    describe "runner_shutdown_backoff" do
-      it "sets runner_shutdown_backoff when configured" do
-        configure_and_initialize(runner_shutdown_backoff: 30_000)
-        expect(Busybee.instance_variable_get(:@runner_shutdown_backoff)).to eq(30_000)
-      end
-
-      it "leaves nil when not configured (uses default from Defaults)" do
-        configure_and_initialize
-        expect(Busybee.instance_variable_get(:@runner_shutdown_backoff)).to be_nil
-        expect(Busybee.runner_shutdown_backoff).to eq(Busybee::Defaults::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS)
       end
     end
 

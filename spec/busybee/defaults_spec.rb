@@ -28,8 +28,4 @@ RSpec.describe Busybee::Defaults do
   it "defines DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS as 5 seconds" do
     expect(described_class::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS).to eq(5_000)
   end
-
-  it "defines DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS as 10 seconds" do
-    expect(described_class::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS).to eq(10_000)
-  end
 end
