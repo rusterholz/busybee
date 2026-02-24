@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.43.1">
+  <bpmn:process id="deliver_shipment" name="Deliver Shipment" isExecutable="true">
+    <bpmn:startEvent id="start" name="Start:&#10;Shipment Packed">
+      <bpmn:outgoing>Flow_ToSplit1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToSplit1" sourceRef="start" targetRef="prepare_delivery" />
+    <bpmn:parallelGateway id="prepare_delivery">
+      <bpmn:incoming>Flow_ToSplit1</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToBranchA</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ToBranchB</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:sequenceFlow id="Flow_ToBranchA" sourceRef="prepare_delivery" targetRef="load_order_address" />
+    <bpmn:serviceTask id="load_order_address" name="Load Order Address">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="load_order_address" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= shipment.order_id" target="order_id" />
+          <zeebe:output source="= lat" target="destination.lat" />
+          <zeebe:output source="= lon" target="destination.lon" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToBranchA</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToCalcDeliveryDist</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToCalcDeliveryDist" sourceRef="load_order_address" targetRef="calculate_distance" />
+    <bpmn:serviceTask id="calculate_distance" name="Calculate Delivery Distance">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="calculate_distance" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="algorithm" value="pythagorean" />
+        </zeebe:taskHeaders>
+        <zeebe:ioMapping>
+          <zeebe:input source="= shipment.warehouse.address.lat" target="from_lat" />
+          <zeebe:input source="= shipment.warehouse.address.lon" target="from_lon" />
+          <zeebe:input source="= destination.lat" target="to_lat" />
+          <zeebe:input source="= destination.lon" target="to_lon" />
+          <zeebe:output source="= distance" target="shipment.distance" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToCalcDeliveryDist</bpmn:incoming>
+      <bpmn:outgoing>Flow_BranchAToJoin1</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_BranchAToJoin1" sourceRef="calculate_distance" targetRef="ready_to_deliver" />
+    <bpmn:sequenceFlow id="Flow_ToBranchB" sourceRef="prepare_delivery" targetRef="assign_driver" />
+    <bpmn:serviceTask id="assign_driver" name="Assign Driver">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="assign_driver" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= shipment.id" target="shipment_id" />
+          <zeebe:output source="= driver_id" target="driver.id" />
+          <zeebe:output source="= driver_name" target="driver.name" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToBranchB</bpmn:incoming>
+      <bpmn:outgoing>Flow_BranchBToJoin1</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_BranchBToJoin1" sourceRef="assign_driver" targetRef="ready_to_deliver" />
+    <bpmn:parallelGateway id="ready_to_deliver">
+      <bpmn:incoming>Flow_BranchAToJoin1</bpmn:incoming>
+      <bpmn:incoming>Flow_BranchBToJoin1</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToDeliverRun</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:sequenceFlow id="Flow_ToDeliverRun" sourceRef="ready_to_deliver" targetRef="simulate_delivery_run" />
+    <bpmn:serviceTask id="simulate_delivery_run" name="Deliver Shipment">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="simulate_delivery_run" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= shipment.id" target="shipment_id" />
+          <zeebe:input source="= shipment.distance" target="distance" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToDeliverRun</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToSplit2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToSplit2" sourceRef="simulate_delivery_run" targetRef="after_delivery" />
+    <bpmn:parallelGateway id="after_delivery">
+      <bpmn:incoming>Flow_ToSplit2</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToBranchC</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ToBranchD</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:sequenceFlow id="Flow_ToBranchC" sourceRef="after_delivery" targetRef="mark_shipment_delivered" />
+    <bpmn:serviceTask id="mark_shipment_delivered" name="Mark Shipment Delivered">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="mark_shipment_delivered" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= shipment.id" target="shipment_id" />
+          <zeebe:output source="= all_delivered" target="shipment.was_final_delivery" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToBranchC</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToExclusiveGw</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToExclusiveGw" sourceRef="mark_shipment_delivered" targetRef="all_shipments_delivered" />
+    <bpmn:exclusiveGateway id="all_shipments_delivered" name="All Shipments Delivered?" default="Flow_NotAllDelivered">
+      <bpmn:incoming>Flow_ToExclusiveGw</bpmn:incoming>
+      <bpmn:outgoing>Flow_AllDelivered</bpmn:outgoing>
+      <bpmn:outgoing>Flow_NotAllDelivered</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_AllDelivered" name="Yes" sourceRef="all_shipments_delivered" targetRef="mark_order_fulfilled">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= shipment.was_final_delivery = true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:serviceTask id="mark_order_fulfilled" name="Mark Order Fulfilled">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="mark_order_fulfilled" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= shipment.order_id" target="order_id" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_AllDelivered</bpmn:incoming>
+      <bpmn:outgoing>Flow_FulfilledToMerge</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_FulfilledToMerge" sourceRef="mark_order_fulfilled" targetRef="ex_merge" />
+    <bpmn:sequenceFlow id="Flow_NotAllDelivered" name="No" sourceRef="all_shipments_delivered" targetRef="ex_merge" />
+    <bpmn:exclusiveGateway id="ex_merge">
+      <bpmn:incoming>Flow_FulfilledToMerge</bpmn:incoming>
+      <bpmn:incoming>Flow_NotAllDelivered</bpmn:incoming>
+      <bpmn:outgoing>Flow_BranchCToJoin2</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_BranchCToJoin2" sourceRef="ex_merge" targetRef="para_merge" />
+    <bpmn:sequenceFlow id="Flow_ToBranchD" sourceRef="after_delivery" targetRef="complete_driver_delivery" />
+    <bpmn:serviceTask id="complete_driver_delivery" name="Complete Driver Delivery">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="complete_driver_delivery" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= driver.id" target="driver_id" />
+          <zeebe:input source="= shipment.distance" target="distance" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToBranchD</bpmn:incoming>
+      <bpmn:outgoing>Flow_BranchDToJoin2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_BranchDToJoin2" sourceRef="complete_driver_delivery" targetRef="para_merge" />
+    <bpmn:parallelGateway id="para_merge">
+      <bpmn:incoming>Flow_BranchCToJoin2</bpmn:incoming>
+      <bpmn:incoming>Flow_BranchDToJoin2</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="para_merge" targetRef="end" />
+    <bpmn:endEvent id="end" name="End:&#10;Shipment Delivered">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="deliver_shipment">
+      <bpmndi:BPMNShape id="StartEvent_di" bpmnElement="start">
+        <dc:Bounds x="192" y="102" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="167" y="142" width="87" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ParallelSplit1_di" bpmnElement="prepare_delivery">
+        <dc:Bounds x="265" y="95" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="250" y="325" width="51" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_LoadOrderAddress_di" bpmnElement="load_order_address">
+        <dc:Bounds x="350" y="190" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CalcDeliveryDistance_di" bpmnElement="calculate_distance">
+        <dc:Bounds x="490" y="190" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_AssignDriver_di" bpmnElement="assign_driver">
+        <dc:Bounds x="350" y="80" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ParallelJoin1_di" bpmnElement="ready_to_deliver">
+        <dc:Bounds x="515" y="95" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="690" y="325" width="71" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_DeliveryRun_di" bpmnElement="simulate_delivery_run">
+        <dc:Bounds x="600" y="80" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ParallelSplit2_di" bpmnElement="after_delivery">
+        <dc:Bounds x="735" y="95" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="795" y="286" width="54" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_MarkShipmentDelivered_di" bpmnElement="mark_shipment_delivered">
+        <dc:Bounds x="710" y="190" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ExclusiveGw_AllDelivered_di" bpmnElement="all_shipments_delivered" isMarkerVisible="true">
+        <dc:Bounds x="855" y="205" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="846" y="175" width="68" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_MarkOrderFulfilled_di" bpmnElement="mark_order_fulfilled">
+        <dc:Bounds x="950" y="190" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ExclusiveMerge_di" bpmnElement="ex_merge" isMarkerVisible="true">
+        <dc:Bounds x="1095" y="205" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CompleteDriverDelivery_di" bpmnElement="complete_driver_delivery">
+        <dc:Bounds x="950" y="80" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ParallelJoin2_di" bpmnElement="para_merge">
+        <dc:Bounds x="1095" y="95" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1086" y="237.5" width="67" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_di" bpmnElement="end">
+        <dc:Bounds x="1182" y="102" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1177" y="143" width="47" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_ToSplit1_di" bpmnElement="Flow_ToSplit1">
+        <di:waypoint x="228" y="120" />
+        <di:waypoint x="265" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToBranchA_di" bpmnElement="Flow_ToBranchA">
+        <di:waypoint x="290" y="145" />
+        <di:waypoint x="290" y="230" />
+        <di:waypoint x="350" y="230" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToCalcDeliveryDist_di" bpmnElement="Flow_ToCalcDeliveryDist">
+        <di:waypoint x="450" y="230" />
+        <di:waypoint x="490" y="230" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_BranchAToJoin1_di" bpmnElement="Flow_BranchAToJoin1">
+        <di:waypoint x="540" y="190" />
+        <di:waypoint x="540" y="145" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToBranchB_di" bpmnElement="Flow_ToBranchB">
+        <di:waypoint x="315" y="120" />
+        <di:waypoint x="350" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_BranchBToJoin1_di" bpmnElement="Flow_BranchBToJoin1">
+        <di:waypoint x="450" y="120" />
+        <di:waypoint x="515" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToDeliverRun_di" bpmnElement="Flow_ToDeliverRun">
+        <di:waypoint x="565" y="120" />
+        <di:waypoint x="600" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToSplit2_di" bpmnElement="Flow_ToSplit2">
+        <di:waypoint x="700" y="120" />
+        <di:waypoint x="735" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToBranchC_di" bpmnElement="Flow_ToBranchC">
+        <di:waypoint x="760" y="145" />
+        <di:waypoint x="760" y="190" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToExclusiveGw_di" bpmnElement="Flow_ToExclusiveGw">
+        <di:waypoint x="810" y="230" />
+        <di:waypoint x="855" y="230" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AllDelivered_di" bpmnElement="Flow_AllDelivered">
+        <di:waypoint x="905" y="230" />
+        <di:waypoint x="950" y="230" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="907" y="234" width="18" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_FulfilledToMerge_di" bpmnElement="Flow_FulfilledToMerge">
+        <di:waypoint x="1050" y="230" />
+        <di:waypoint x="1095" y="230" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_NotAllDelivered_di" bpmnElement="Flow_NotAllDelivered">
+        <di:waypoint x="880" y="255" />
+        <di:waypoint x="880" y="290" />
+        <di:waypoint x="1120" y="290" />
+        <di:waypoint x="1120" y="255" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="885" y="264" width="15" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_BranchCToJoin2_di" bpmnElement="Flow_BranchCToJoin2">
+        <di:waypoint x="1120" y="205" />
+        <di:waypoint x="1120" y="145" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToBranchD_di" bpmnElement="Flow_ToBranchD">
+        <di:waypoint x="785" y="120" />
+        <di:waypoint x="950" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_BranchDToJoin2_di" bpmnElement="Flow_BranchDToJoin2">
+        <di:waypoint x="1050" y="120" />
+        <di:waypoint x="1095" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEnd_di" bpmnElement="Flow_ToEnd">
+        <di:waypoint x="1145" y="120" />
+        <di:waypoint x="1182" y="120" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
