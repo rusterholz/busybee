@@ -1,0 +1,30 @@
+# frozen_string_literal: true
+
+require_relative "config/environment"
+
+# Load Rails tasks (db:migrate, db:seed, etc.)
+Rails.application.load_tasks
+
+namespace :demo do
+  desc "Deploy all BPMN process definitions to Zeebe"
+  task deploy_bpmns: :environment do
+    bpmn_dir = Rails.root.join("app/bpmn")
+    bpmn_files = Dir[bpmn_dir.join("*.bpmn")]
+
+    if bpmn_files.empty?
+      puts "No BPMN files found in #{bpmn_dir}"
+      next
+    end
+
+    client = Busybee::Client.new
+
+    bpmn_files.each do |file|
+      name = File.basename(file)
+      print "Deploying #{name}... "
+      client.deploy_resource(file)
+      puts "done"
+    end
+
+    puts "Deployed #{bpmn_files.size} BPMN process(es)."
+  end
+end

@@ -3,15 +3,31 @@
 require_relative "boot"
 require "rails"
 require "action_controller/railtie"
+require "action_view/railtie"
+
+# ActiveRecord is required for the demo app's models and database, but may not
+# be available when the Railtie integration tests boot this app from the busybee
+# project root (where sqlite3 isn't in the appraisal gemfiles).
+begin
+  require "active_record/railtie"
+rescue LoadError
+  # ActiveRecord not available — running in Railtie-test-only mode
+end
 
 # Require gems (including busybee) so Railties are loaded before Rails.application.initialize!
 Bundler.require(*Rails.groups)
 
-module Dummy
+module Demo
   class Application < Rails::Application
     config.load_defaults Rails::VERSION::STRING.to_f
     config.eager_load = false
-    config.api_only = true
+
+    # Autoload paths for namespaced models and services
+    config.autoload_paths += %W[
+      #{root}/app/models
+      #{root}/app/services
+      #{root}/app/workers
+    ]
 
     # Busybee configuration for integration testing
     # Use TLS (not insecure) to prove credentials are built from config, not defaulted
