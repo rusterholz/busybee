@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# Loose Rails constraint — the demo app works with all Rails versions that
+# busybee supports (see Appraisals in the busybee repo root).
+gem "rails", ">= 7.0"
+
+# The demo app uses busybee from the parent repo.
+# In a real app this would be: gem "busybee", "~> 0.3"
+gem "busybee", path: "../.."
+
+gem "rspec", "~> 3.13"

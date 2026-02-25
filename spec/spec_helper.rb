@@ -4,7 +4,7 @@
 # This ensures busybee sees Rails::Railtie as defined and loads the railtie
 if ENV["TEST_RAILS_INTEGRATION"]
   ENV["RAILS_ENV"] = "test"
-  require File.expand_path("dummy/config/environment", __dir__)
+  require File.expand_path("demo/config/environment", __dir__)
 end
 
 require "busybee"

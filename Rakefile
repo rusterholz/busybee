@@ -32,6 +32,9 @@ namespace :gemfile do
       lock_with_platforms.call(gemfile)
     end
 
+    # Lock demo app Gemfile
+    lock_with_platforms.call("spec/demo/Gemfile")
+
     puts "\nAll lockfiles updated with platforms: #{platforms.join(', ')}"
   end
 end
