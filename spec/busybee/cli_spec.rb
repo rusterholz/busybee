@@ -199,7 +199,7 @@ RSpec.describe Busybee::CLI do
 
       it "logs when overriding a value already set (e.g., by the Railtie)" do
         Busybee.log_format = :text
-        logger = instance_double(Logger, info: nil)
+        logger = instance_double(Logger, info: nil, error: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
         described_class.new(["-l", "json", "TestCLIWorker"])
@@ -209,7 +209,7 @@ RSpec.describe Busybee::CLI do
 
       it "does not log when no prior value was configured" do
         Busybee.instance_variable_set(:@worker_name, nil)
-        logger = instance_double(Logger, info: nil)
+        logger = instance_double(Logger, info: nil, error: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
         described_class.new(["-n", "my-worker", "TestCLIWorker"])
