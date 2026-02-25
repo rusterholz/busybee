@@ -38,6 +38,10 @@ module Busybee
       @default_input_required = value
     end
 
+    def default_max_jobs=(value)
+      @default_max_jobs = value.nil? ? nil : validate_positive_integer!(:default_max_jobs, value)
+    end
+
     def default_output_required=(value)
       if value.nil?
         @default_output_required = nil
@@ -46,6 +50,16 @@ module Busybee
 
       validate_boolean!(:default_output_required, value)
       @default_output_required = value
+    end
+
+    def default_queue_enabled=(value)
+      if value.nil?
+        @default_queue_enabled = nil
+        return
+      end
+
+      validate_boolean!(:default_queue_enabled, value)
+      @default_queue_enabled = value
     end
 
     def grpc_retry_enabled=(value)
@@ -203,6 +217,24 @@ module Busybee
       return if [true, false].include?(value)
 
       raise ArgumentError, "#{name} accepts true or false, got #{value.inspect} (#{value.class})"
+    end
+
+    def validate_positive_integer!(name, value)
+      if value.is_a?(Integer)
+        raise ArgumentError, "#{name} must be positive, got #{value}" unless value.positive?
+
+        return value
+      end
+
+      if value.is_a?(String) && value.match?(/\A\d+\z/)
+        int_value = value.to_i
+        raise ArgumentError, "#{name} must be positive, got #{int_value}" unless int_value.positive?
+
+        return int_value
+      end
+
+      raise ArgumentError,
+            "#{name} accepts a positive Integer or numeric String, got #{value.inspect} (#{value.class})"
     end
 
     def validate_string!(name, value)

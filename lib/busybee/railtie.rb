@@ -67,13 +67,15 @@ module Busybee
     end
 
     # @api private
-    def self.configure_worker_defaults(config, busybee_conf) # rubocop:disable Metrics/AbcSize
+    def self.configure_worker_defaults(config, busybee_conf) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
       unless busybee_conf.default_input_required.nil?
         config.default_input_required = !!busybee_conf.default_input_required
       end
+      config.default_max_jobs = busybee_conf.default_max_jobs if busybee_conf.default_max_jobs.presence
       unless busybee_conf.default_output_required.nil?
         config.default_output_required = !!busybee_conf.default_output_required
       end
+      config.default_queue_enabled = !!busybee_conf.default_queue_enabled unless busybee_conf.default_queue_enabled.nil?
       unless busybee_conf.default_queue_throttle.nil?
         config.default_queue_throttle = busybee_conf.default_queue_throttle
       end

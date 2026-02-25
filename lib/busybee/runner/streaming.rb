@@ -14,9 +14,8 @@ module Busybee
     # - queue: false — stream.each calls perform_job inline on the main thread.
     #   Simpler model for workers that don't need queue features.
     class Streaming < Runner
-      def initialize(worker_class, client: nil)
-        super(client: client)
-        @worker_class = worker_class
+      def initialize(worker_class, runtime_config: nil, client: nil)
+        super
         return unless queue_enabled?
 
         @job_queue = Queue.new
@@ -29,7 +28,7 @@ module Busybee
         @running.make_true
         # [hook: runner.started]
 
-        @stream = @client.open_job_stream(job_type, **streaming_options)
+        @stream = @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
 
         if queue_enabled?
           run_with_queue
@@ -92,7 +91,7 @@ module Busybee
       end
 
       def pump_stream_into_queue
-        delay = @worker_class.configuration.queue_throttle
+        delay = @runtime_config.queue_throttle
 
         @stream.each do |job|
           break if stopping?
@@ -149,15 +148,11 @@ module Busybee
       end
 
       def queue_enabled?
-        @worker_class.configuration.queue_enabled?
+        @runtime_config.queue_enabled
       end
 
       def job_type
         @worker_class.configuration.job_type
-      end
-
-      def streaming_options
-        @worker_class.configuration.streaming_options
       end
     end
   end

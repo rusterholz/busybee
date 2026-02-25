@@ -8,11 +8,6 @@ module Busybee
     class Polling < Runner
       BACKPRESSURE_ERRORS = [::GRPC::ResourceExhausted].freeze
 
-      def initialize(worker_class, client: nil)
-        super(client: client)
-        @worker_class = worker_class
-      end
-
       def run!
         return if stopping?
 
@@ -26,7 +21,7 @@ module Busybee
           process_all_available_jobs { |e| shutdown_error = e }
         rescue *BACKPRESSURE_ERRORS
           # [hook: runner.backpressure]
-          sleep Busybee.runner_backpressure_delay
+          sleep @runtime_config.backpressure_delay
         end
 
         raise shutdown_error if shutdown_error
@@ -38,7 +33,7 @@ module Busybee
       private
 
       def process_all_available_jobs
-        @client.with_each_job(job_type, **polling_options) do |job|
+        @client.with_each_job(job_type, **@runtime_config.polling_options) do |job|
           if stopping?
             handle_shutdown_job(job)
           else
@@ -53,10 +48,6 @@ module Busybee
 
       def job_type
         @worker_class.configuration.job_type
-      end
-
-      def polling_options
-        @worker_class.configuration.polling_options
       end
     end
   end

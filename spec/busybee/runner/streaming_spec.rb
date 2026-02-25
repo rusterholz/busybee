@@ -3,11 +3,12 @@
 require "concurrent"
 
 RSpec.describe Busybee::Runner::Streaming do
-  subject(:runner) { described_class.new(worker_class, client: client) }
+  subject(:runner) { described_class.new(worker_class, runtime_config: runtime_config, client: client) }
 
   let(:client) { instance_double(Busybee::Client) }
   let(:job) { instance_double(Busybee::Job, key: 1, retries: 3, ready?: true) }
   let(:stream) { instance_double(Busybee::JobStream) }
+  let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
 
   let(:worker_class) do
     Class.new(Busybee::Worker) do
@@ -286,8 +287,9 @@ RSpec.describe Busybee::Runner::Streaming do
   end
 
   context "with queue mode (default)" do
-    subject(:runner) { described_class.new(queue_worker_class, client: client) }
+    subject(:runner) { described_class.new(queue_worker_class, runtime_config: runtime_config, client: client) }
 
+    let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(queue_worker_class) }
     let(:queue_worker_class) do
       Class.new(Busybee::Worker) do
         job_type "test_worker"
@@ -442,8 +444,9 @@ RSpec.describe Busybee::Runner::Streaming do
 
     describe "pump delay" do
       context "when queue_throttle is set to a positive value" do
-        subject(:runner) { described_class.new(throttled_worker_class, client: client) }
+        subject(:runner) { described_class.new(throttled_worker_class, runtime_config: runtime_config, client: client) }
 
+        let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(throttled_worker_class) }
         let(:throttled_worker_class) do
           Class.new(Busybee::Worker) do
             job_type "test_worker"
@@ -514,8 +517,11 @@ RSpec.describe Busybee::Runner::Streaming do
       end
 
       context "when queue_throttle is 0 (minimal throttle)" do
-        subject(:runner) { described_class.new(zero_delay_worker_class, client: client) }
+        subject(:runner) do
+          described_class.new(zero_delay_worker_class, runtime_config: runtime_config, client: client)
+        end
 
+        let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(zero_delay_worker_class) }
         let(:zero_delay_worker_class) do
           Class.new(Busybee::Worker) do
             job_type "test_worker"

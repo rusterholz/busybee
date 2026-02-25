@@ -8,8 +8,9 @@ require "busybee/credentials/insecure"
 def busybee_config_ivars
   %i[
     @cluster_address @credential_type @credentials @default_fail_job_backoff
-    @default_job_lock_timeout @default_job_request_timeout @default_message_ttl
-    @default_queue_throttle @grpc_retry_delay_ms @grpc_retry_enabled @grpc_retry_errors
+    @default_job_lock_timeout @default_job_request_timeout @default_max_jobs
+    @default_message_ttl @default_queue_enabled @default_queue_throttle
+    @grpc_retry_delay_ms @grpc_retry_enabled @grpc_retry_errors
     @log_format @logger @runner_backpressure_delay
     @worker_name
   ]
@@ -246,6 +247,32 @@ RSpec.describe "Busybee::Railtie", :rails do
         configure_and_initialize
         expect(Busybee.instance_variable_get(:@runner_backpressure_delay)).to be_nil
         expect(Busybee.runner_backpressure_delay).to eq(Busybee::Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS)
+      end
+    end
+
+    describe "default_max_jobs" do
+      it "sets default_max_jobs when configured" do
+        configure_and_initialize(default_max_jobs: 50)
+        expect(Busybee.instance_variable_get(:@default_max_jobs)).to eq(50)
+      end
+
+      it "leaves nil when not configured (uses default from Defaults)" do
+        configure_and_initialize
+        expect(Busybee.instance_variable_get(:@default_max_jobs)).to be_nil
+        expect(Busybee.default_max_jobs).to eq(Busybee::Defaults::DEFAULT_MAX_JOBS)
+      end
+    end
+
+    describe "default_queue_enabled" do
+      it "sets default_queue_enabled when configured" do
+        configure_and_initialize(default_queue_enabled: false)
+        expect(Busybee.instance_variable_get(:@default_queue_enabled)).to be(false)
+      end
+
+      it "leaves nil when not configured (uses default from Defaults)" do
+        configure_and_initialize
+        expect(Busybee.instance_variable_get(:@default_queue_enabled)).to be_nil
+        expect(Busybee.default_queue_enabled).to be(true)
       end
     end
 

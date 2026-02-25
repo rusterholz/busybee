@@ -155,7 +155,7 @@ module Busybee
       # Whether this worker uses a pump thread + queue for streaming.
       # Default: true. Set to false via `streaming queue: false` for inline stream processing.
       def queue_enabled?
-        streaming_config.fetch(:queue, Busybee::Defaults::DEFAULT_STREAMING_QUEUE)
+        streaming_config.fetch(:queue, Busybee::Defaults::DEFAULT_STREAMING_QUEUE_ENABLED)
       end
 
       # Returns resolved polling options for client.with_each_job, merging

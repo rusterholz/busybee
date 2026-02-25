@@ -17,11 +17,27 @@ RSpec.describe Busybee::CLI do
 
   before { stub_const("TestCLIWorker", worker_class) }
 
+  # Save/restore gem-level config that apply_global_config! may modify
+  around do |example|
+    saved = %i[@log_format @worker_name @cluster_address].to_h do |ivar|
+      [ivar, Busybee.instance_variable_get(ivar)]
+    end
+    example.run
+  ensure
+    saved.each { |ivar, val| Busybee.instance_variable_set(ivar, val) }
+  end
+
   describe "#initialize" do
     context "with option parsing" do
       it "prints version and exits for --version" do
         expect do
           described_class.new(["--version"])
+        end.to output(/#{Regexp.escape(Busybee::VERSION)}/).to_stdout.and raise_error(SystemExit)
+      end
+
+      it "prints version and exits for -v" do
+        expect do
+          described_class.new(["-v"])
         end.to output(/#{Regexp.escape(Busybee::VERSION)}/).to_stdout.and raise_error(SystemExit)
       end
 
@@ -50,6 +66,21 @@ RSpec.describe Busybee::CLI do
         expect do
           described_class.new(["--runner-mode", "bogus", "TestCLIWorker"])
         end.to raise_error(ArgumentError, /Invalid runner mode/)
+      end
+
+      it "parses --log-format and its short form -l" do
+        cli = described_class.new(["-l", "json", "TestCLIWorker"])
+        expect(cli.runtime_config.log_format).to eq(:json)
+      end
+
+      it "parses --worker-name and its short form -n" do
+        cli = described_class.new(["-n", "my-worker", "TestCLIWorker"])
+        expect(cli.runtime_config.worker_name).to eq("my-worker")
+      end
+
+      it "parses --cluster-address and its short form -a" do
+        cli = described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
+        expect(cli.runtime_config.cluster_address).to eq("zeebe.example.com:26500")
       end
 
       it "collects remaining positional args as worker class names" do
@@ -141,6 +172,49 @@ RSpec.describe Busybee::CLI do
         expect do
           described_class.new(["NonexistentWorker"])
         end.to raise_error(Busybee::WorkerNotFound, /NonexistentWorker/)
+      end
+    end
+
+    context "with process-wide config application" do
+      it "applies log_format to gem config" do
+        described_class.new(["-l", "json", "TestCLIWorker"])
+        expect(Busybee.log_format).to eq(:json)
+      end
+
+      it "applies worker_name to gem config" do
+        described_class.new(["-n", "my-worker", "TestCLIWorker"])
+        expect(Busybee.worker_name).to eq("my-worker")
+      end
+
+      it "applies cluster_address to gem config" do
+        described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
+        expect(Busybee.cluster_address).to eq("zeebe.example.com:26500")
+      end
+
+      it "does not override gem config when flags are not provided" do
+        original_format = Busybee.log_format
+        described_class.new(["TestCLIWorker"])
+        expect(Busybee.log_format).to eq(original_format)
+      end
+
+      it "logs when overriding a value already set (e.g., by the Railtie)" do
+        Busybee.log_format = :text
+        logger = instance_double(Logger, info: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        described_class.new(["-l", "json", "TestCLIWorker"])
+
+        expect(logger).to have_received(:info).with(/--log-format overriding.*:text.*:json/)
+      end
+
+      it "does not log when no prior value was configured" do
+        Busybee.instance_variable_set(:@worker_name, nil)
+        logger = instance_double(Logger, info: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        described_class.new(["-n", "my-worker", "TestCLIWorker"])
+
+        expect(logger).not_to have_received(:info)
       end
     end
   end

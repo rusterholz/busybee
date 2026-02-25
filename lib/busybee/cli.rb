@@ -12,11 +12,12 @@ module Busybee
 
     def initialize(args)
       @worker_class_names = []
-      @runner_mode = nil
+      @parsed_options = {}
       parse_options!(args.dup)
       load_environment!
       load_workers!
-      @runtime_config = RuntimeConfig.new(runner_mode: @runner_mode)
+      @runtime_config = RuntimeConfig.new(**@parsed_options)
+      apply_global_config!
     end
 
     def run
@@ -78,11 +79,11 @@ module Busybee
       @worker_class_names = args
     end
 
-    def option_parser
+    def option_parser # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
       OptionParser.new do |opts|
         opts.banner = "Usage: busybee [options] WorkerClass [WorkerClass ...]"
 
-        opts.on("--version", "Print version and exit") do
+        opts.on("-v", "--version", "Print version and exit") do
           puts Busybee::VERSION
           exit
         end
@@ -93,9 +94,42 @@ module Busybee
         end
 
         opts.on("-m", "--runner-mode MODE", "Runner mode (polling, streaming, hybrid)") do |mode|
-          @runner_mode = mode.to_sym
+          @parsed_options[:runner_mode] = mode.to_sym
+        end
+
+        opts.on("-l", "--log-format FORMAT", "Log format (text, json)") do |format|
+          @parsed_options[:log_format] = format.to_sym
+        end
+
+        opts.on("-n", "--worker-name NAME", "Worker name for identification") do |name|
+          @parsed_options[:worker_name] = name
+        end
+
+        opts.on("-a", "--cluster-address ADDR", "Cluster address (host:port)") do |addr|
+          @parsed_options[:cluster_address] = addr
         end
       end
+    end
+
+    # Applies process-wide flags to gem-level config before runners start.
+    # Only sets values that were explicitly provided via CLI flags.
+    # Logs when overriding a value already set (e.g., by the Railtie).
+    def apply_global_config!
+      apply_global_setting!(:log_format)
+      apply_global_setting!(:worker_name)
+      apply_global_setting!(:cluster_address)
+    end
+
+    def apply_global_setting!(field)
+      cli_value = @runtime_config.public_send(field)
+      return unless cli_value
+
+      existing = Busybee.instance_variable_get(:"@#{field}")
+      if existing
+        flag = "--#{field.to_s.tr('_', '-')}"
+        Busybee.logger&.info("#{flag} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
+      end
+      Busybee.public_send(:"#{field}=", cli_value)
     end
   end
 end

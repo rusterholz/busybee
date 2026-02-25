@@ -31,11 +31,15 @@ module Busybee
         raise err if err
       end
 
-      def drain_backlog_while_also_processing_queue
+      def drain_options
+        @drain_options ||= @runtime_config.polling_options.merge(request_timeout: -1)
+      end
+
+      def drain_backlog_while_also_processing_queue # rubocop:disable Metrics/AbcSize
         loop do
           break if stopping?
 
-          polled_count = @client.with_each_job(job_type, **polling_options) do |job|
+          polled_count = @client.with_each_job(job_type, **drain_options) do |job|
             if stopping?
               handle_shutdown_job(job)
             else
@@ -49,20 +53,11 @@ module Busybee
             stop!
           end
 
-          break if polled_count < max_jobs # Caught up: fewer than requested
+          break if polled_count < drain_options[:max_jobs] # Caught up: fewer than requested
         rescue *BACKPRESSURE_ERRORS
           # [hook: runner.backpressure]
-          sleep Busybee.runner_backpressure_delay
+          sleep @runtime_config.backpressure_delay
         end
-      end
-
-      def max_jobs
-        polling_options[:max_jobs]
-      end
-
-      # For draining, polls always use request_timeout: -1 (immediate return) to avoid long-polling.
-      def polling_options
-        @worker_class.configuration.polling_options.merge(request_timeout: -1)
       end
     end
   end
