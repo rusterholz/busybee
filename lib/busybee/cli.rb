@@ -59,7 +59,7 @@ module Busybee
       end
 
       require "./config/environment"
-    rescue StandardError => e
+    rescue StandardError, LoadError => e
       Busybee.logger&.error("Failed to load Rails environment: [#{e.class}] #{e.message}. " \
                             "Set BUSYBEE_SKIP_RAILS=1 to skip Rails loading.")
     end
