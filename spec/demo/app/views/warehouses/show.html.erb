@@ -1,0 +1,52 @@
+<hgroup>
+  <h1><%= @warehouse.name %></h1>
+  <p>(<%= @warehouse.lat %>, <%= @warehouse.lon %>) — <%= [@warehouse.address_line_1, @warehouse.city, @warehouse.state, @warehouse.zip].compact.join(", ") %></p>
+</hgroup>
+
+<section>
+  <h2>Inventory</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Item Type</th>
+        <th>Quantity</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @warehouse.stock_items.order(:item_type).each do |si| %>
+        <tr>
+          <td><%= si.item_type.tr("-", " ").capitalize %></td>
+          <td><%= si.quantity %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</section>
+
+<% if @shipments.any? %>
+  <section>
+    <h2>Recent Shipments</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Shipment</th>
+          <th>Order</th>
+          <th>Status</th>
+          <th>Items</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @shipments.each do |shipment| %>
+          <tr>
+            <td><%= shipment.short_id %></td>
+            <td><%= link_to Oms::Order.find_by(id: shipment.order_id)&.short_id || shipment.order_id[0..7], order_path(shipment.order_id) %></td>
+            <td><span class="status-<%= shipment.status %>"><%= shipment.status.capitalize %></span></td>
+            <td><%= shipment.item_count %></td>
+            <td><%= shipment.created_at.strftime("%b %d, %H:%M") %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </section>
+<% end %>

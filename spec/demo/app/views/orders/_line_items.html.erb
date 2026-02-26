@@ -1,0 +1,16 @@
+<table>
+  <thead>
+    <tr>
+      <th>Item Type</th>
+      <th>Qty</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% line_items.each do |li| %>
+      <tr>
+        <td><%= li.item_type.tr("-", " ").capitalize %></td>
+        <td><%= li.quantity %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

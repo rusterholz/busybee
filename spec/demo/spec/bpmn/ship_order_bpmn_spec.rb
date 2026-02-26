@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe "ship_order BPMN" do
+RSpec.describe "ship_order BPMN", :zeebe do
   let(:test_variables) do
     {
       order: { id: "order-#{SecureRandom.hex(4)}" }

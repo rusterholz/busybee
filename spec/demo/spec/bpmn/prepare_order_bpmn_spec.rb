@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe "prepare_order BPMN" do
+RSpec.describe "prepare_order BPMN", :zeebe do
   let(:test_variables) do
     {
       order: {

@@ -1,0 +1,68 @@
+<h1>New Order</h1>
+
+<%= form_with scope: :order, url: orders_path, method: :post do |f| %>
+  <fieldset>
+    <legend>Customer</legend>
+    <%= f.label :customer_name, "Name" %>
+    <%= f.text_field :customer_name, required: true, value: @defaults[:customer_name] %>
+  </fieldset>
+
+  <fieldset>
+    <legend>Delivery Address</legend>
+    <div class="grid">
+      <label>
+        Address
+        <%= f.text_field :address_line_1, value: @defaults[:address_line_1] %>
+      </label>
+      <label>
+        City
+        <%= f.text_field :city, value: @defaults[:city] %>
+      </label>
+    </div>
+    <div class="grid">
+      <label>
+        State
+        <%= f.text_field :state, value: @defaults[:state] %>
+      </label>
+      <label>
+        Zip
+        <%= f.text_field :zip, value: @defaults[:zip] %>
+      </label>
+    </div>
+    <div class="grid">
+      <label>
+        Latitude (-10 to 10)
+        <%= f.number_field :lat, step: 0.1, min: -10, max: 10, required: true, value: @defaults[:lat] %>
+      </label>
+      <label>
+        Longitude (-10 to 10)
+        <%= f.number_field :lon, step: 0.1, min: -10, max: 10, required: true, value: @defaults[:lon] %>
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Items</legend>
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Qty</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @item_catalog.each do |item_type| %>
+          <tr>
+            <td><%= item_type.tr("-", " ").capitalize %></td>
+            <td>
+              <input type="number" name="items[<%= item_type %>][qty]"
+                     min="0" max="10" value="0" style="width: 5rem">
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </fieldset>
+
+  <%= f.submit "Place Order" %>
+<% end %>

@@ -57,33 +57,23 @@ RSpec.describe Logistics::Shipment do
     end
   end
 
-  describe "#on_packed_start_deliver_shipment" do
-    it "starts the deliver_shipment process with shipment JSON minus item_count" do
-      client = instance_double(Busybee::Client, start_instance: 99_999)
-      allow(Busybee::Client).to receive(:new).and_return(client)
+  describe "callbacks" do
+    it "delegates to StartDeliverShipment when status becomes packed" do
+      allow(Logistics::StartDeliverShipment).to receive(:call)
 
       shipment.update!(status: "packed")
-      shipment.send(:on_packed_start_deliver_shipment)
+      shipment.send(:start_deliver_shipment)
 
-      expect(client).to have_received(:start_instance).with(
-        "deliver_shipment",
-        vars: {
-          shipment: {
-            id: shipment.id,
-            order_id: shipment.order_id,
-            warehouse: { id: warehouse.id, address: { lat: 34.0, lon: -118.2 } }
-          }
-        }
-      )
+      expect(Logistics::StartDeliverShipment).to have_received(:call).with(shipment)
     end
 
-    it "does not fire when status changes to something other than packed" do
-      allow(Busybee::Client).to receive(:new)
+    it "does not start deliver_shipment when status changes to something other than packed" do
+      allow(Logistics::StartDeliverShipment).to receive(:call)
 
       shipment.update!(status: "delivered")
-      shipment.send(:on_packed_start_deliver_shipment)
+      shipment.send(:start_deliver_shipment)
 
-      expect(Busybee::Client).not_to have_received(:new)
+      expect(Logistics::StartDeliverShipment).not_to have_received(:call)
     end
   end
 end

@@ -34,43 +34,39 @@ RSpec.describe Oms::Order do
     end
   end
 
-  describe "#on_create_start_prepare_order" do
-    it "starts the prepare_order process with full order JSON" do
-      client = instance_double(Busybee::Client, start_instance: 12_345)
-      allow(Busybee::Client).to receive(:new).and_return(client)
+  describe "callbacks" do
+    it "restocks inventory via the restock callback" do
       allow(Sim::GuaranteedRestock).to receive(:call)
 
-      order.send(:on_create_start_prepare_order)
+      order.send(:restock_inventory)
 
       expect(Sim::GuaranteedRestock).to have_received(:call).with(order)
-      expect(client).to have_received(:start_instance).with(
-        "prepare_order",
-        vars: { order: order.as_json }
-      )
     end
-  end
 
-  describe "#on_processing_start_ship_order" do
-    it "starts the ship_order process with only the order ID" do
-      client = instance_double(Busybee::Client, start_instance: 67_890)
-      allow(Busybee::Client).to receive(:new).and_return(client)
+    it "delegates to StartPrepareOrder" do
+      allow(Oms::StartPrepareOrder).to receive(:call)
+
+      order.send(:start_prepare_order)
+
+      expect(Oms::StartPrepareOrder).to have_received(:call).with(order)
+    end
+
+    it "delegates to StartShipOrder when status becomes processing" do
+      allow(Oms::StartShipOrder).to receive(:call)
 
       order.update!(status: "processing")
-      order.send(:on_processing_start_ship_order)
+      order.send(:start_ship_order)
 
-      expect(client).to have_received(:start_instance).with(
-        "ship_order",
-        vars: { order: { id: order.id } }
-      )
+      expect(Oms::StartShipOrder).to have_received(:call).with(order)
     end
 
-    it "does not fire when status changes to something other than processing" do
-      allow(Busybee::Client).to receive(:new)
+    it "does not start ship_order when status changes to something other than processing" do
+      allow(Oms::StartShipOrder).to receive(:call)
 
       order.update!(status: "shipping")
-      order.send(:on_processing_start_ship_order)
+      order.send(:start_ship_order)
 
-      expect(Busybee::Client).not_to have_received(:new)
+      expect(Oms::StartShipOrder).not_to have_received(:call)
     end
   end
 end

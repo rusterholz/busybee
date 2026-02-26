@@ -1,0 +1,33 @@
+<hgroup>
+  <h1>Dashboard</h1>
+  <p>Operational overview for Dropship Co.</p>
+</hgroup>
+
+<div class="stat-grid">
+  <article class="stat-card">
+    <h2><%= @total_orders %></h2>
+    <small>Total Orders</small>
+  </article>
+  <article class="stat-card">
+    <h2><%= @active_shipments %></h2>
+    <small>Active Shipments (of <%= @total_shipments %>)</small>
+  </article>
+  <article class="stat-card">
+    <h2><%= @available_drivers %> / <%= @total_drivers %></h2>
+    <small>Drivers Available</small>
+  </article>
+  <article class="stat-card">
+    <h2><%= link_to "New Order", new_order_path %></h2>
+    <small>Create a customer order</small>
+  </article>
+</div>
+
+<h2>Orders by Status</h2>
+<div class="stat-grid">
+  <% %w[submitted processing shipping fulfilled].each do |status| %>
+    <article class="stat-card">
+      <h2 class="status-<%= status %>"><%= @order_counts[status] || 0 %></h2>
+      <small><%= status.capitalize %></small>
+    </article>
+  <% end %>
+</div>

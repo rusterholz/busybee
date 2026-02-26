@@ -13,6 +13,9 @@ require_relative "../config/environment"
 require "rspec"
 require "busybee"
 
+# Disable CSRF protection in tests so Rack::Test requests work without tokens.
+ActionController::Base.allow_forgery_protection = false
+
 # Ensure test database exists and is migrated.
 ActiveRecord::Tasks::DatabaseTasks.create_current
 ActiveRecord::MigrationContext.new(

@@ -8,3 +8,9 @@
 Rails.application.config.x.demo.simulation_speed = ENV.fetch("DEMO_SPEED", "1.0").to_f
 Rails.application.config.x.demo.order_interval = ENV.fetch("DEMO_ORDER_INTERVAL", "30").to_i # seconds
 Rails.application.config.x.demo.restock_strategy = ENV.fetch("DEMO_RESTOCK_STRATEGY", "guaranteed").to_sym
+
+Rails.application.config.x.demo.item_catalog = %w[
+  wireless-mouse usb-c-hub laptop-stand mechanical-keyboard monitor-arm
+  webcam headset desk-lamp cable-organizer mouse-pad
+  usb-drive power-strip tablet-stylus phone-charger screen-protector
+].freeze

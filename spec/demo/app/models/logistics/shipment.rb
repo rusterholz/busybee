@@ -30,7 +30,7 @@ module Logistics
     scope :for_order, ->(order_id) { where(order_id: order_id) }
     scope :by_status, ->(status) { where(status: status) }
 
-    after_commit :on_packed_start_deliver_shipment, on: :update
+    after_commit :start_deliver_shipment, on: :update
 
     def item_count
       (items || []).sum { |i| i["qty"] || 1 }
@@ -47,15 +47,13 @@ module Logistics
 
     private
 
-    # In a real distributed system, the process instances should be kicked off by some other
-    # asynchronous event-driven mechanism. For this demo app, we just use ActiveRecord callbacks:
+    # In a real distributed system, process instances would be kicked off by an asynchronous
+    # event-driven mechanism. For this demo app, we use ActiveRecord callbacks + service classes:
 
-    def on_packed_start_deliver_shipment
+    def start_deliver_shipment
       return unless saved_change_to_status? && status == "packed"
 
-      # TODO: Use busybee async mode when available. Production apps need error handling here.
-      key = Busybee::Client.new.start_instance("deliver_shipment", vars: { shipment: as_json.except(:item_count) })
-      update_column(:deliver_shipment_instance_key, key)
+      Logistics::StartDeliverShipment.call(self)
     end
   end
 end

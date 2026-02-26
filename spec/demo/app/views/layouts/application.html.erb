@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Busybee Demo — Dropship Co.</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <%= csrf_meta_tags %>
+  <style>
+    :root {
+      --pico-font-size: 16px;
+    }
+    nav ul { margin-bottom: 0; }
+    .status-submitted    { color: #666; }
+    .status-processing   { color: #b45309; }
+    .status-shipping     { color: #2563eb; }
+    .status-fulfilled    { color: #16a34a; }
+    .status-pending      { color: #666; }
+    .status-packed       { color: #7c3aed; }
+    .status-in_transit   { color: #2563eb; }
+    .status-delivered    { color: #16a34a; }
+    .status-available    { color: #16a34a; }
+    .status-delivering   { color: #b45309; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+    .stat-card { padding: 1rem; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); text-align: center; }
+    .stat-card h2 { margin-bottom: 0.25rem; }
+    .stat-card small { color: var(--pico-muted-color); }
+    table { width: 100%; }
+  </style>
+</head>
+<body>
+  <header class="container">
+    <nav>
+      <ul>
+        <li><strong><a href="<%= root_path %>">Dropship Co.</a></strong></li>
+      </ul>
+      <ul>
+        <li><a href="<%= orders_path %>">Orders</a></li>
+        <li><a href="<%= warehouses_path %>">Warehouses</a></li>
+        <li><a href="<%= drivers_path %>">Drivers</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="container">
+    <% if notice.present? %>
+      <p role="alert"><%= notice %></p>
+    <% end %>
+    <%= yield %>
+  </main>
+
+  <footer class="container">
+    <small>Busybee Demo App — BPMN-orchestrated order management</small>
+  </footer>
+</body>
+</html>
