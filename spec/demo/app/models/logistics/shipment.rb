@@ -32,24 +32,29 @@ module Logistics
 
     after_commit :on_packed_start_deliver_shipment, on: :update
 
+    def item_count
+      (items || []).sum { |i| i["qty"] || 1 }
+    end
+
+    def as_json(*)
+      {
+        id: id,
+        order_id: order_id,
+        item_count: item_count,
+        warehouse: warehouse.as_json.except(:name)
+      }
+    end
+
     private
+
+    # In a real distributed system, the process instances should be kicked off by some other
+    # asynchronous event-driven mechanism. For this demo app, we just use ActiveRecord callbacks:
 
     def on_packed_start_deliver_shipment
       return unless saved_change_to_status? && status == "packed"
 
-      vars = {
-        shipment: {
-          id: id,
-          order_id: order_id,
-          warehouse: {
-            id: warehouse_id,
-            address: { lat: warehouse.lat.to_f, lon: warehouse.lon.to_f }
-          }
-        }
-      }
-
       # TODO: Use busybee async mode when available. Production apps need error handling here.
-      key = Busybee::Client.new.start_instance("deliver_shipment", vars: vars)
+      key = Busybee::Client.new.start_instance("deliver_shipment", vars: { shipment: as_json.except(:item_count) })
       update_column(:deliver_shipment_instance_key, key)
     end
   end

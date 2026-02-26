@@ -23,8 +23,8 @@ RSpec.describe "ship_order BPMN" do
 
   it "activates simulate_pick_and_pack for each shipment in the multi-instance" do
     with_process_instance("ship_order", test_variables) do
-      activate_job("load_order_shipments")
-        .and_complete(shipments: mock_shipments)
+      activate_job("load_order_shipments").
+        and_complete(shipments: mock_shipments)
 
       sleep(0.3)
 

@@ -25,9 +25,9 @@ RSpec.describe "prepare_order BPMN" do
   it "activates load_warehouses on Branch A and load_item_availability on Branch B in parallel" do
     with_process_instance("prepare_order", test_variables) do
       # Branch A: load_warehouses should activate
-      activate_job("load_warehouses")
-        .expect_variables(order: test_variables[:order])
-        .and_complete(warehouses: mock_warehouses)
+      activate_job("load_warehouses").
+        expect_variables(order: test_variables[:order]).
+        and_complete(warehouses: mock_warehouses)
 
       # Branch B: load_item_availability should activate for each item
       jobs = activate_jobs("load_item_availability", max_jobs: 10).to_a
@@ -43,8 +43,8 @@ RSpec.describe "prepare_order BPMN" do
 
   it "activates calculate_distance for each warehouse after load_warehouses completes" do
     with_process_instance("prepare_order", test_variables) do
-      activate_job("load_warehouses")
-        .and_complete(warehouses: mock_warehouses)
+      activate_job("load_warehouses").
+        and_complete(warehouses: mock_warehouses)
 
       # Complete Branch B so it doesn't block later steps
       activate_jobs("load_item_availability", max_jobs: 10).each do |job|

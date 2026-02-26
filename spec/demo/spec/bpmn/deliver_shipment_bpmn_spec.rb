@@ -27,11 +27,11 @@ RSpec.describe "deliver_shipment BPMN" do
 
   it "activates calculate_distance after load_order_address with correct I/O mappings" do
     with_process_instance("deliver_shipment", test_variables) do
-      activate_job("load_order_address")
-        .and_complete(lat: 5.3, lon: -2.1)
+      activate_job("load_order_address").
+        and_complete(lat: 5.3, lon: -2.1)
 
-      activate_job("assign_driver")
-        .and_complete(driver_id: "drv-1", driver_name: "Test Driver")
+      activate_job("assign_driver").
+        and_complete(driver_id: "drv-1", driver_name: "Test Driver")
 
       sleep(0.3)
 
@@ -123,8 +123,8 @@ RSpec.describe "deliver_shipment BPMN" do
         sleep(0.3)
 
         # mark_order_fulfilled should NOT activate - process should complete without it
-        expect { activate_job("mark_order_fulfilled") }
-          .to raise_error(Busybee::Testing::NoJobAvailable)
+        expect { activate_job("mark_order_fulfilled") }.
+          to raise_error(Busybee::Testing::NoJobAvailable)
 
         assert_process_completed!
       end

@@ -30,9 +30,7 @@ RSpec.configure do |config|
   config.before(:suite) do
     runner = Class.new { include Busybee::Testing::Helpers }.new
     unless runner.zeebe_available?
-      if ENV["ZEEBE_REQUIRED"]
-        raise "Zeebe is required but not available. Start with: rake zeebe:start"
-      end
+      raise "Zeebe is required but not available. Start with: rake zeebe:start" if ENV["ZEEBE_REQUIRED"]
 
       warn "Zeebe is not running - skipping demo specs (start with: rake zeebe:start)"
       exit 0

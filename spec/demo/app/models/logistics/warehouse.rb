@@ -21,5 +21,9 @@ module Logistics
     has_many :stock_items, class_name: "Logistics::StockItem",
                            foreign_key: :warehouse_id, inverse_of: :warehouse, dependent: :destroy
     has_many :shipments, class_name: "Logistics::Shipment", foreign_key: :warehouse_id, inverse_of: :warehouse
+
+    def as_json(*)
+      { id: id, name: name, address: { lat: lat.to_f, lon: lon.to_f } }
+    end
   end
 end
