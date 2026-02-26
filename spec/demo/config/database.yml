@@ -3,6 +3,8 @@ development:
   database: db/development.sqlite3
   pool: 5
   timeout: 10000
+  pragma:
+    journal_mode: wal
 
 test:
   adapter: sqlite3

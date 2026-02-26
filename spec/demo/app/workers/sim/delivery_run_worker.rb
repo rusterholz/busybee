@@ -9,11 +9,13 @@ module Sim
 
     BASE_DELAY = 1.5 # seconds per distance unit
 
-    def perform
+    def perform # rubocop:disable Metrics/AbcSize
       speed = Rails.application.config.x.demo.simulation_speed
       jitter = 0.8 + (rand * 0.4)
       delay = distance.to_f * BASE_DELAY * jitter / speed
+      Rails.logger.info("Driver en route, #{distance} units to go (simulating #{delay.round(1)}s delay)...")
       sleep(delay)
+      Rails.logger.info("Driver arrived after #{delay.round(1)}s")
       # No hash return — busybee will complete the job with no output variables
     end
   end

@@ -10,7 +10,7 @@ module Logistics
 
     def perform
       ids = StockItem.where(item_type: item_type).where("quantity > 0").pluck(:warehouse_id)
-
+      Rails.logger.info("#{item_type} available at #{ids.size} warehouse(s)")
       { warehouse_ids: ids }
     end
   end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe "deliver_shipment BPMN" do
+RSpec.describe "deliver_shipment BPMN", :zeebe do
   let(:test_variables) do
     {
       shipment: {
@@ -73,9 +73,11 @@ RSpec.describe "deliver_shipment BPMN" do
       # Both should activate from the second parallel split
       delivered_job = activate_job("mark_shipment_delivered")
       expect(delivered_job.variables["shipment_id"]).to eq(test_variables[:shipment][:id])
+      expect(delivered_job.variables["order_id"]).to eq(test_variables[:shipment][:order_id])
 
       driver_job = activate_job("complete_driver_delivery")
       expect(driver_job.variables["driver_id"]).to eq("drv-1")
+      expect(driver_job.variables["shipment_id"]).to eq(test_variables[:shipment][:id])
       expect(driver_job.variables["distance"]).to eq(12.45)
     end
   end

@@ -21,7 +21,7 @@ namespace :demo do
     bpmn_files.each do |file|
       name = File.basename(file)
       print "Deploying #{name}... "
-      client.deploy_resource(file)
+      client.deploy_process(file)
       puts "done"
     end
 

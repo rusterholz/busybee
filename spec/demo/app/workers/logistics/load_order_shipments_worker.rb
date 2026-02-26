@@ -9,7 +9,9 @@ module Logistics
     output :shipments, description: "Array of {id, item_count} for the order's shipments"
 
     def perform
-      { shipments: shipments }
+      result = shipments
+      Rails.logger.info("Loaded #{result.size} shipment(s) for Order #{order_id[..7]}")
+      { shipments: result }
     end
 
     private

@@ -85,6 +85,7 @@
         <zeebe:taskDefinition type="mark_shipment_delivered" retries="3" />
         <zeebe:ioMapping>
           <zeebe:input source="= shipment.id" target="shipment_id" />
+          <zeebe:input source="= shipment.order_id" target="order_id" />
           <zeebe:output source="= all_delivered" target="shipment.was_final_delivery" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>
@@ -124,6 +125,7 @@
         <zeebe:taskDefinition type="complete_driver_delivery" retries="3" />
         <zeebe:ioMapping>
           <zeebe:input source="= driver.id" target="driver_id" />
+          <zeebe:input source="= shipment.id" target="shipment_id" />
           <zeebe:input source="= shipment.distance" target="distance" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>

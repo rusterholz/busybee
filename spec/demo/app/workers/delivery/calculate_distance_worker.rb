@@ -16,7 +16,9 @@ module Delivery
     ALGORITHMS = { "pythagorean" => :pythagorean_distance }.freeze
 
     def perform
-      { distance: send(algorithm_method_name).round(3) }
+      dist = send(algorithm_method_name).round(3)
+      Rails.logger.info("Calculated distance: #{dist} units (#{from_lat},#{from_lon}) -> (#{to_lat},#{to_lon})")
+      { distance: dist }
     end
 
     private

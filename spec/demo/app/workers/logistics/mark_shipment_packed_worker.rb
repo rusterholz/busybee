@@ -7,9 +7,9 @@ module Logistics
     variable :shipment_id, type: :uuid, description: "Shipment to mark as packed"
 
     def perform
-      Shipment.transaction do
-        Shipment.find(shipment_id).update!(status: "packed")
-      end
+      shipment = Shipment.find(shipment_id)
+      shipment.update!(status: "packed")
+      Rails.logger.info("Shipment ##{shipment.short_id} marked as packed")
       # No hash return — busybee will complete the job with no output variables
     end
   end

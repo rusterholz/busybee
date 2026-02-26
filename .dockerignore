@@ -1,0 +1,16 @@
+# Exclude everything, then whitelist what the demo app needs
+**
+
+# Busybee gem source (needed for path: "../.." in demo Gemfile)
+!busybee.gemspec
+!Gemfile
+!lib/
+!exe/
+
+# Demo app
+!spec/demo/
+
+# Exclude runtime artifacts within demo
+spec/demo/db/*.sqlite3
+spec/demo/tmp/
+spec/demo/log/

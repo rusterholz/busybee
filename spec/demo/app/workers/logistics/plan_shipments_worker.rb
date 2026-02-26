@@ -17,6 +17,8 @@ module Logistics
 
       raise "Unable to plan shipments!" if plan.nil?
 
+      item_count = item_list.sum { |i| i["qty"] || 1 }
+      Rails.logger.info("Planned #{plan.size} shipment(s) for #{item_count} items across #{plan.size} warehouse(s)")
       { planned_shipments: plan }
     end
 

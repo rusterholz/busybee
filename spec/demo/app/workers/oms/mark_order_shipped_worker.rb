@@ -7,9 +7,9 @@ module Oms
     variable :order_id, type: :uuid, description: "Order to transition"
 
     def perform
-      Order.transaction do
-        Order.find(order_id).update!(status: "shipping")
-      end
+      order = Order.find(order_id)
+      order.update!(status: "shipping")
+      Rails.logger.info("Order ##{order.short_id} marked as shipping")
       # No hash return — busybee will complete the job with no output variables
     end
   end

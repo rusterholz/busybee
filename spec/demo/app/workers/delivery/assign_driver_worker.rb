@@ -16,6 +16,8 @@ module Delivery
         end
       end
 
+      shipment = Logistics::Shipment.find(shipment_id)
+      Rails.logger.info("Assigned Driver #{driver.name} to Shipment ##{shipment.short_id}")
       { driver_id: driver.id, driver_name: driver.name }
     end
   end
