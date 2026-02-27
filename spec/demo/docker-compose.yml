@@ -13,7 +13,7 @@ x-app: &app
   networks:
     - camunda
   volumes:
-    - sqlite-data:/app/spec/demo/db
+    - sqlite-data:/app/spec/demo/db/data
 
 services:
   elasticsearch:
@@ -87,7 +87,7 @@ services:
   workers_oms:
     <<: *app
     container_name: busybee-demo-workers-oms
-    command: bundle exec busybee Oms::LoadOrderAddressWorker Oms::MarkOrderPreparedWorker Oms::MarkOrderShippedWorker Oms::MarkOrderFulfilledWorker
+    command: bundle exec busybee Oms::LoadOrderAddressWorker Oms::MarkOrderPreparedWorker Oms::MarkOrderPackedWorker Oms::MarkOrderShippingWorker Oms::MarkOrderFulfilledWorker
     depends_on:
       zeebe:
         condition: service_healthy
@@ -95,7 +95,7 @@ services:
   workers_logistics:
     <<: *app
     container_name: busybee-demo-workers-logistics
-    command: bundle exec busybee Logistics::LoadWarehousesWorker Logistics::LoadItemAvailabilityWorker Logistics::PlanShipmentsWorker Logistics::CreateShipmentWorker Logistics::LoadOrderShipmentsWorker Logistics::MarkShipmentPackedWorker Logistics::MarkShipmentDeliveredWorker
+    command: bundle exec busybee Logistics::LoadWarehousesWorker Logistics::LoadItemAvailabilityWorker Logistics::PlanShipmentsWorker Logistics::CreateShipmentWorker Logistics::LoadOrderShipmentsWorker Logistics::MarkShipmentPackedWorker Logistics::MarkShipmentInTransitWorker Logistics::MarkShipmentDeliveredWorker
     depends_on:
       zeebe:
         condition: service_healthy
@@ -115,6 +115,16 @@ services:
     depends_on:
       zeebe:
         condition: service_healthy
+
+  clockwork:
+    <<: *app
+    container_name: busybee-demo-clockwork
+    command: bundle exec clockwork clock.rb
+    depends_on:
+      web:
+        condition: service_healthy
+    profiles:
+      - auto
 
 networks:
   camunda:
