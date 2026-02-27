@@ -45,13 +45,30 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
     end
   end
 
-  it "activates simulate_delivery_run after parallel join with shipment distance" do
+  it "activates mark_shipment_in_transit after parallel join" do
     with_process_instance("deliver_shipment", test_variables) do
       activate_job("load_order_address").and_complete(lat: 5.3, lon: -2.1)
       activate_job("assign_driver").and_complete(driver_id: "drv-1", driver_name: "Test Driver")
       sleep(0.3)
 
       activate_job("calculate_distance").and_complete(distance: 12.45)
+      sleep(0.3)
+
+      transit_job = activate_job("mark_shipment_in_transit")
+      expect(transit_job.variables["shipment_id"]).to eq(test_variables[:shipment][:id])
+    end
+  end
+
+  it "activates simulate_delivery_run after mark_shipment_in_transit" do
+    with_process_instance("deliver_shipment", test_variables) do
+      activate_job("load_order_address").and_complete(lat: 5.3, lon: -2.1)
+      activate_job("assign_driver").and_complete(driver_id: "drv-1", driver_name: "Test Driver")
+      sleep(0.3)
+
+      activate_job("calculate_distance").and_complete(distance: 12.45)
+      sleep(0.3)
+
+      activate_job("mark_shipment_in_transit").and_complete
       sleep(0.3)
 
       delivery_job = activate_job("simulate_delivery_run")
@@ -66,6 +83,8 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
       activate_job("assign_driver").and_complete(driver_id: "drv-1", driver_name: "Test Driver")
       sleep(0.3)
       activate_job("calculate_distance").and_complete(distance: 12.45)
+      sleep(0.3)
+      activate_job("mark_shipment_in_transit").and_complete
       sleep(0.3)
       activate_job("simulate_delivery_run").and_complete
       sleep(0.3)
@@ -89,6 +108,8 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
         activate_job("assign_driver").and_complete(driver_id: "drv-1", driver_name: "Test Driver")
         sleep(0.3)
         activate_job("calculate_distance").and_complete(distance: 12.45)
+        sleep(0.3)
+        activate_job("mark_shipment_in_transit").and_complete
         sleep(0.3)
         activate_job("simulate_delivery_run").and_complete
         sleep(0.3)
@@ -115,6 +136,8 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
         activate_job("assign_driver").and_complete(driver_id: "drv-1", driver_name: "Test Driver")
         sleep(0.3)
         activate_job("calculate_distance").and_complete(distance: 12.45)
+        sleep(0.3)
+        activate_job("mark_shipment_in_transit").and_complete
         sleep(0.3)
         activate_job("simulate_delivery_run").and_complete
         sleep(0.3)

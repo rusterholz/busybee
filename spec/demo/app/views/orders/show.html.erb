@@ -14,7 +14,7 @@
   </section>
 <% end %>
 
-<% if %w[processing shipping fulfilled].include?(@order.status) && @order.ship_order_instance_key.nil? %>
+<% if %w[processing packed shipping fulfilled].include?(@order.status) && @order.ship_order_instance_key.nil? %>
   <section>
     <p>
       <strong>No ship_order process instance.</strong>

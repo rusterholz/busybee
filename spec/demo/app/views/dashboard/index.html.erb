@@ -24,7 +24,7 @@
 
 <h2>Orders by Status</h2>
 <div class="stat-grid">
-  <% %w[submitted processing shipping fulfilled].each do |status| %>
+  <% %w[submitted processing packed shipping fulfilled].each do |status| %>
     <article class="stat-card">
       <h2 class="status-<%= status %>"><%= @order_counts[status] || 0 %></h2>
       <small><%= status.capitalize %></small>
