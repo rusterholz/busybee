@@ -1,0 +1,355 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Offline simulation tuner for the busybee demo app.
+#
+# Analyzes inventory coverage to determine shipment count distributions,
+# and models driver utilization from throughput parameters — all without
+# needing Rails, Zeebe, or Docker.
+#
+# Usage: ruby bin/tune_simulation [iterations]
+
+ITERATIONS = (ARGV[0] || 10_000).to_i
+
+CATALOG = %w[
+  wireless-mouse usb-c-hub laptop-stand mechanical-keyboard monitor-arm
+  webcam headset desk-lamp cable-organizer mouse-pad
+  usb-drive power-strip tablet-stylus phone-charger screen-protector
+].freeze
+
+# ─── Inventory Configurations ──────────────────────────────────────────────────
+
+# Current: 10 items/warehouse, 5 items at 2 WH, 10 at 3 WH.
+# Problem: Beta+Gamma and Beta+Delta cover all 15 → no 3-shipment orders.
+CURRENT = {
+  name: "Current (10 items/wh, 2 pairs cover all)",
+  warehouses: {
+    "Alpha" => { lat: -6.0, lon: 5.0, items: %w[
+      wireless-mouse usb-c-hub laptop-stand mechanical-keyboard monitor-arm
+      webcam headset desk-lamp cable-organizer mouse-pad
+    ] },
+    "Beta" => { lat: 5.0, lon: 7.0, items: %w[
+      wireless-mouse usb-c-hub laptop-stand mechanical-keyboard webcam
+      headset cable-organizer usb-drive power-strip tablet-stylus
+    ] },
+    "Gamma" => { lat: -4.0, lon: -5.0, items: %w[
+      wireless-mouse usb-c-hub monitor-arm webcam desk-lamp
+      mouse-pad usb-drive power-strip phone-charger screen-protector
+    ] },
+    "Delta" => { lat: 6.0, lon: -3.0, items: %w[
+      mechanical-keyboard monitor-arm headset desk-lamp mouse-pad
+      power-strip tablet-stylus phone-charger screen-protector cable-organizer
+    ] },
+  },
+  drivers: 6,
+  order_interval: 30.0,
+  delivery_base_delay: 1.0,
+  item_count_range: 3..8,
+}.freeze
+
+# Proposed: 8-9 items/wh. Each pair of warehouses misses exactly 2 items.
+# 12 items at 2 warehouses (2 per complementary pair), 3 items at 3 warehouses.
+# Every triple covers all 15 → 4-shipment orders impossible, 3-shipment possible.
+#
+# Coverage design (each pair blocks its complement):
+#   {A,B}: wireless-mouse, laptop-stand    → blocks {G,D}
+#   {A,G}: usb-c-hub, monitor-arm          → blocks {B,D}
+#   {A,D}: mechanical-keyboard, headset    → blocks {B,G}
+#   {B,G}: usb-drive, power-strip          → blocks {A,D}
+#   {B,D}: tablet-stylus, cable-organizer  → blocks {A,G}
+#   {G,D}: phone-charger, screen-protector → blocks {A,B}
+#   3-wh:  webcam {A,B,G}, desk-lamp {B,G,D}, mouse-pad {A,G,D}
+PROPOSED = {
+  name: "Proposed (8-9 items/wh, no pair covers all)",
+  warehouses: {
+    "Alpha" => { lat: -6.0, lon: 5.0, items: %w[
+      wireless-mouse laptop-stand usb-c-hub monitor-arm
+      mechanical-keyboard headset webcam mouse-pad
+    ] },
+    "Beta" => { lat: 5.0, lon: 7.0, items: %w[
+      wireless-mouse laptop-stand usb-drive power-strip
+      tablet-stylus cable-organizer webcam desk-lamp
+    ] },
+    "Gamma" => { lat: -4.0, lon: -5.0, items: %w[
+      usb-c-hub monitor-arm usb-drive power-strip
+      phone-charger screen-protector webcam desk-lamp mouse-pad
+    ] },
+    "Delta" => { lat: 6.0, lon: -3.0, items: %w[
+      mechanical-keyboard headset tablet-stylus cable-organizer
+      phone-charger screen-protector desk-lamp mouse-pad
+    ] },
+  },
+  drivers: 4,
+  order_interval: 15.0,
+  delivery_base_delay: 1.5,
+  item_count_range: 3..8,
+}.freeze
+
+# ─── Analysis Functions ────────────────────────────────────────────────────────
+
+def item_availability(config)
+  CATALOG.map do |item|
+    wh_names = config[:warehouses].select { |_, wh| wh[:items].include?(item) }.keys
+    [item, wh_names]
+  end.to_h
+end
+
+def pair_coverage(config)
+  names = config[:warehouses].keys
+  names.combination(2).map do |pair|
+    combined = pair.flat_map { |n| config[:warehouses][n][:items] }.uniq
+    missing = CATALOG - combined
+    [pair, { covered: combined.size, missing: missing }]
+  end.to_h
+end
+
+def min_warehouses_for(items, config)
+  names = config[:warehouses].keys
+  avail = items.map { |item| config[:warehouses].select { |_, wh| wh[:items].include?(item) }.keys }
+
+  (1..names.size).each do |size|
+    names.combination(size).each do |combo|
+      return size if avail.all? { |wh_list| (wh_list & combo).any? }
+    end
+  end
+  names.size
+end
+
+def pythagorean(lat1, lon1, lat2, lon2)
+  Math.sqrt((lat2 - lat1)**2 + (lon2 - lon1)**2)
+end
+
+def avg_delivery_distance(config)
+  samples = 2000
+  total = 0.0
+  samples.times do
+    lat = rand(-90..90) / 10.0
+    lon = rand(-90..90) / 10.0
+    avg_wh_dist = config[:warehouses].values.sum { |wh| pythagorean(wh[:lat], wh[:lon], lat, lon) } / config[:warehouses].size
+    total += avg_wh_dist
+  end
+  total / samples
+end
+
+def simulate_orders(n, config)
+  shipment_counts = Hash.new(0)
+  n.times do
+    item_count = rand(config[:item_count_range])
+    items = CATALOG.sample(item_count)
+    shipments = min_warehouses_for(items, config)
+    shipment_counts[shipments] += 1
+  end
+  shipment_counts
+end
+
+# ─── Report ────────────────────────────────────────────────────────────────────
+
+def analyze(config)
+  puts "\n#{"=" * 70}"
+  puts "  #{config[:name]}"
+  puts "=" * 70
+
+  # Item availability
+  puts "\n── Item Availability ──"
+  avail = item_availability(config)
+  avail.sort_by { |_, whs| whs.size }.each do |item, whs|
+    puts "  %-25s %d WH: %s" % [item, whs.size, whs.join(", ")]
+  end
+  sizes = config[:warehouses].map { |n, w| "#{n}: #{w[:items].size}" }
+  puts "  Warehouse sizes: #{sizes.join(', ')}"
+
+  # Pair coverage
+  puts "\n── Pair Coverage ──"
+  pairs = pair_coverage(config)
+  any_full = false
+  pairs.each do |pair, info|
+    status = info[:missing].empty? ? "FULL ⚠" : "miss #{info[:missing].size}: #{info[:missing].join(', ')}"
+    any_full = true if info[:missing].empty?
+    puts "  %-15s %2d/#{CATALOG.size}  %s" % [pair.join(" + "), info[:covered], status]
+  end
+  puts any_full ? "\n  ⚠  A pair covers all → 3-shipment IMPOSSIBLE" : "\n  ✓  No pair covers all → 3-shipment possible"
+
+  # Shipment count simulation
+  puts "\n── Shipment Distribution (#{ITERATIONS} orders) ──"
+  counts = simulate_orders(ITERATIONS, config)
+  total = counts.values.sum
+  (1..4).each do |n|
+    c = counts[n] || 0
+    pct = (c.to_f / total * 100).round(1)
+    bar = "█" * (pct / 2).to_i
+    puts "  %d shipment(s): %5d  (%5.1f%%)  %s" % [n, c, pct, bar]
+  end
+  avg_shipments = counts.sum { |n, c| n * c }.to_f / total
+  puts "  Average: #{avg_shipments.round(2)} shipments/order"
+
+  # Distance model
+  avg_dist = avg_delivery_distance(config)
+
+  # Driver utilization (Little's Law)
+  overhead = 2.0  # seconds for non-sim tasks in delivery pipeline
+  delivery_time = avg_dist * config[:delivery_base_delay] + overhead
+  shipments_per_sec = avg_shipments / config[:order_interval]
+  avg_busy = shipments_per_sec * delivery_time
+  util_pct = (avg_busy / config[:drivers]) * 100
+
+  puts "\n── Driver Utilization (Little's Law) ──"
+  puts "  Drivers: #{config[:drivers]}"
+  puts "  Order interval: #{config[:order_interval]}s"
+  puts "  Delivery BASE_DELAY: #{config[:delivery_base_delay]}s/unit"
+  puts "  Avg distance: #{avg_dist.round(1)} units"
+  puts "  Delivery time/shipment: #{delivery_time.round(1)}s"
+  puts "  Shipment throughput: #{(shipments_per_sec * 60).round(1)}/min"
+  puts "  Avg busy drivers: #{avg_busy.round(2)} / #{config[:drivers]}"
+  puts "  Utilization: #{util_pct.round(1)}%"
+
+  # Scorecard
+  pcts = (1..4).map { |n| ((counts[n] || 0).to_f / total * 100).round(1) }
+  puts "\n── Scorecard ──"
+  puts "  1-ship: %5.1f%%  (want ~25%%)" % pcts[0]
+  puts "  2-ship: %5.1f%%  (want ~60%%)" % pcts[1]
+  puts "  3-ship: %5.1f%%  (want ~12%%)" % pcts[2]
+  puts "  4-ship: %5.1f%%  (want  ~0%%)" % pcts[3]
+  puts "  Driver: %5.1f%%  (want 55-60%%)" % util_pct
+end
+
+# Variant 2: 9 items/wh uniform. 9 items at 2WH, 6 at 3WH.
+# Asymmetric pair misses: 3 pairs miss 2, 3 pairs miss 1.
+# More 1-shipment (larger warehouses) while still enabling 3-shipment.
+#
+# 2WH assignments:
+#   {A,B}: wireless-mouse, laptop-stand         → blocks {G,D}
+#   {A,G}: usb-c-hub                            → blocks {B,D}
+#   {A,D}: mechanical-keyboard                  → blocks {B,G}
+#   {B,G}: usb-drive, power-strip               → blocks {A,D}
+#   {B,D}: tablet-stylus                        → blocks {A,G}
+#   {G,D}: phone-charger, screen-protector      → blocks {A,B}
+# 3WH assignments:
+#   monitor-arm {A,G,D}, webcam {A,B,G}, headset {A,B,D}
+#   desk-lamp {B,G,D}, cable-organizer {A,B,D}, mouse-pad {A,G,D}
+VARIANT2 = {
+  name: "Variant 2 (9 items/wh, mixed pair gaps)",
+  warehouses: {
+    "Alpha" => { lat: -6.0, lon: 5.0, items: %w[
+      wireless-mouse laptop-stand usb-c-hub mechanical-keyboard
+      monitor-arm webcam headset cable-organizer mouse-pad
+    ] },
+    "Beta" => { lat: 5.0, lon: 7.0, items: %w[
+      wireless-mouse laptop-stand usb-drive power-strip
+      tablet-stylus webcam headset desk-lamp cable-organizer
+    ] },
+    "Gamma" => { lat: -4.0, lon: -5.0, items: %w[
+      usb-c-hub usb-drive power-strip phone-charger screen-protector
+      monitor-arm webcam desk-lamp mouse-pad
+    ] },
+    "Delta" => { lat: 6.0, lon: -3.0, items: %w[
+      mechanical-keyboard tablet-stylus phone-charger screen-protector
+      monitor-arm headset desk-lamp cable-organizer mouse-pad
+    ] },
+  },
+  drivers: 4,
+  order_interval: 15.0,
+  delivery_base_delay: 1.5,
+  item_count_range: 3..8,
+}.freeze
+
+# Variant 3: Same inventory as Variant 2, tuned for driver utilization.
+VARIANT3 = VARIANT2.merge(
+  name: "Variant 3 (= V2 inventory, driver tuning)",
+  drivers: 4,
+  order_interval: 12.0,
+  delivery_base_delay: 1.5,
+).freeze
+
+# Variant 4: Original proposed inventory, bigger orders (4..9 items).
+# Bigger orders hit more blocking items → more 3-ship.
+VARIANT4 = PROPOSED.merge(
+  name: "Variant 4 (= proposed inventory, items 4..9)",
+  item_count_range: 4..9,
+  drivers: 4,
+  order_interval: 15.0,
+  delivery_base_delay: 1.5,
+).freeze
+
+# Variant 5: Original proposed inventory, items 4..8, 4 drivers, 12s interval.
+VARIANT5 = PROPOSED.merge(
+  name: "Variant 5 (= proposed inventory, items 4..8, 12s interval)",
+  item_count_range: 4..8,
+  drivers: 4,
+  order_interval: 12.0,
+  delivery_base_delay: 1.5,
+).freeze
+
+# Variant 6: Proposed inventory, wider order range 3..10.
+# Small orders (3-4) → 1-ship; large orders (8-10) → 3-ship.
+# Wider range should pull probability from 2-ship to both tails.
+VARIANT6 = PROPOSED.merge(
+  name: "Variant 6 (= proposed, items 3..10)",
+  item_count_range: 3..10,
+  drivers: 4,
+  order_interval: 14.0,
+  delivery_base_delay: 1.5,
+).freeze
+
+# Variant 7: Proposed inventory, 3..11 items (even wider).
+VARIANT7 = PROPOSED.merge(
+  name: "Variant 7 (= proposed, items 3..11)",
+  item_count_range: 3..11,
+  drivers: 4,
+  order_interval: 14.0,
+  delivery_base_delay: 1.5,
+).freeze
+
+# Variant 8: Proposed inventory, 3..10 items, tuned driver params.
+VARIANT8 = PROPOSED.merge(
+  name: "Variant 8 (= proposed, items 3..10, 12s interval)",
+  item_count_range: 3..10,
+  drivers: 4,
+  order_interval: 12.0,
+  delivery_base_delay: 1.5,
+).freeze
+
+# Variant 9: Uniform 9 items/wh. Promote 3WH items to 4WH (all warehouses).
+# Same pair coverage as proposed (each pair misses exactly 2).
+# +1 item per warehouse → more 1-ship without hurting 3-ship.
+VARIANT9 = {
+  name: "Variant 9 (9/wh uniform, items 3..10, 14s)",
+  warehouses: {
+    "Alpha" => { lat: -6.0, lon: 5.0, items: %w[
+      wireless-mouse laptop-stand usb-c-hub monitor-arm
+      mechanical-keyboard headset webcam desk-lamp mouse-pad
+    ] },
+    "Beta" => { lat: 5.0, lon: 7.0, items: %w[
+      wireless-mouse laptop-stand usb-drive power-strip
+      tablet-stylus cable-organizer webcam desk-lamp mouse-pad
+    ] },
+    "Gamma" => { lat: -4.0, lon: -5.0, items: %w[
+      usb-c-hub monitor-arm usb-drive power-strip
+      phone-charger screen-protector webcam desk-lamp mouse-pad
+    ] },
+    "Delta" => { lat: 6.0, lon: -3.0, items: %w[
+      mechanical-keyboard headset tablet-stylus cable-organizer
+      phone-charger screen-protector webcam desk-lamp mouse-pad
+    ] },
+  },
+  drivers: 4,
+  order_interval: 14.0,
+  delivery_base_delay: 1.5,
+  item_count_range: 3..10,
+}.freeze
+
+# Variant 10: Same as V9 but items 3..9 (narrower top end).
+VARIANT10 = VARIANT9.merge(
+  name: "Variant 10 (9/wh uniform, items 3..9, 14s)",
+  item_count_range: 3..9,
+).freeze
+
+# Variant 11: Same as V9 but items 3..10, 13s interval.
+VARIANT11 = VARIANT9.merge(
+  name: "Variant 11 (9/wh uniform, items 3..10, 13s)",
+  order_interval: 13.0,
+).freeze
+
+analyze(VARIANT6)
+analyze(VARIANT9)
+analyze(VARIANT10)
+analyze(VARIANT11)
