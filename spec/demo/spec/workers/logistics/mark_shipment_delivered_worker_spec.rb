@@ -17,7 +17,7 @@ RSpec.describe Logistics::MarkShipmentDeliveredWorker do
   it "returns false when other shipments remain undelivered" do
     wh = Logistics::Warehouse.create!(name: "Alpha", lat: 0, lon: 0)
     s1 = Logistics::Shipment.create!(order_id: "order-1", warehouse: wh, status: "in_transit")
-    Logistics::Shipment.create!(order_id: "order-1", warehouse: wh, status: "pending")
+    Logistics::Shipment.create!(order_id: "order-1", warehouse: wh, status: "planned")
 
     result = execute_worker(described_class, variables: { shipment_id: s1.id, order_id: "order-1" })
 

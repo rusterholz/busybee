@@ -27,7 +27,7 @@ class CreateLogisticsTables < ActiveRecord::Migration[7.0]
       t.string :id, null: false, primary_key: true
       t.string :order_id, null: false
       t.string :warehouse_id, null: false
-      t.string :status, null: false, default: "pending"
+      t.string :status, null: false, default: "planned"
       t.json :items
       t.bigint :deliver_shipment_instance_key
       t.timestamps

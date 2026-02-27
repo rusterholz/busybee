@@ -10,7 +10,7 @@ RSpec.describe Logistics::Shipment do
   let(:shipment) do
     described_class.create!(
       id: SecureRandom.uuid, order_id: SecureRandom.uuid,
-      warehouse: warehouse, status: "pending",
+      warehouse: warehouse, status: "planned",
       items: [{ "type" => "widget", "qty" => 3 }, { "type" => "gadget", "qty" => 2 }]
     )
   end
@@ -52,7 +52,7 @@ RSpec.describe Logistics::Shipment do
 
   describe ".by_status" do
     it "filters by status" do
-      expect(described_class.by_status("pending")).to include(shipment)
+      expect(described_class.by_status("planned")).to include(shipment)
       expect(described_class.by_status("packed")).not_to include(shipment)
     end
   end

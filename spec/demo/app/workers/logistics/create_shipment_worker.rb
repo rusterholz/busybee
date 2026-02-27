@@ -16,7 +16,7 @@ module Logistics
         Shipment.create!(
           order_id: order_id,
           warehouse_id: warehouse_id,
-          status: "pending",
+          status: "planned",
           items: item_list
         ).tap { decrement_stock!(item_list) }
       end

@@ -16,9 +16,15 @@ module Delivery
         end
       end
 
-      shipment = Logistics::Shipment.find(shipment_id)
-      Rails.logger.info("Assigned Driver #{driver.name} to Shipment ##{shipment.short_id}")
+      Rails.logger.info("Assigned Driver #{driver.name} to Shipment ##{short_shipment_id}")
       { driver_id: driver.id, driver_name: driver.name }
+    end
+
+    private
+
+    def short_shipment_id
+      hex = shipment_id.delete("-").last(5).upcase
+      "#{hex[0..2]}-#{hex[3..4]}"
     end
   end
 end

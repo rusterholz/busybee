@@ -22,7 +22,7 @@ ActiveRecord::Schema[8.1].define(version: 3) do
     t.bigint "deliver_shipment_instance_key"
     t.json "items"
     t.string "order_id", null: false
-    t.string "status", default: "pending", null: false
+    t.string "status", default: "planned", null: false
     t.datetime "updated_at", null: false
     t.string "warehouse_id", null: false
     t.index ["order_id"], name: "index_logistics_shipments_on_order_id"
