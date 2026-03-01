@@ -37,6 +37,10 @@ module Delivery
       return if driver.created_at > retirement_cooldown.ago
       return if retired_too_recently?
 
+      retire!(driver)
+    end
+
+    def retire!(driver)
       record_retirement!
       driver.destroy!
       avail = Driver.available.count
@@ -52,8 +56,8 @@ module Delivery
     end
 
     def record_retirement!
-      self.class.instance_variable_get(:@last_retirement_at)
-                .set(Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond))
+      self.class.instance_variable_get(:@last_retirement_at).
+        set(Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond))
     end
 
     def retirement_interval_ms

@@ -33,9 +33,7 @@ RSpec.configure do |config|
 
   # Skip BPMN specs when Zeebe is not running, unless ZEEBE_REQUIRED is set
   unless ZEEBE_AVAILABLE
-    if ENV["ZEEBE_REQUIRED"]
-      raise "Zeebe is required but not available. Start with: rake zeebe:start"
-    end
+    raise "Zeebe is required but not available. Start with: rake zeebe:start" if ENV["ZEEBE_REQUIRED"]
 
     config.filter_run_excluding zeebe: true
     config.before(:each, :zeebe) do

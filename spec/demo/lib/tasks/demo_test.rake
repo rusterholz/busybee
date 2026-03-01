@@ -48,14 +48,14 @@ namespace :demo do
 
       if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
         statuses = Oms::Order.where(id: order_ids).group(:status).count
-        $stderr.puts "\nTIMEOUT after #{timeout.round}s — #{remaining} orders not fulfilled"
-        $stderr.puts "Order statuses: #{statuses.inspect}"
+        warn "\nTIMEOUT after #{timeout.round}s — #{remaining} orders not fulfilled"
+        warn "Order statuses: #{statuses.inspect}"
 
         # Diagnostic: show stuck orders
         Oms::Order.where(id: order_ids).where.not(status: "fulfilled").limit(5).each do |order|
           shipments = Logistics::Shipment.where(order_id: order.id)
-          $stderr.puts "  Order #{order.short_id} (#{order.status}): " \
-                       "#{shipments.count} shipments — #{shipments.group(:status).count.inspect}"
+          warn "  Order #{order.short_id} (#{order.status}): " \
+               "#{shipments.count} shipments — #{shipments.group(:status).count.inspect}"
         end
 
         exit 1
@@ -76,8 +76,8 @@ namespace :demo do
     errors << "#{busy_drivers} drivers still assigned" if busy_drivers > 0
 
     if errors.any?
-      $stderr.puts "\nVerification failed:"
-      errors.each { |e| $stderr.puts "  - #{e}" }
+      warn "\nVerification failed:"
+      errors.each { |e| warn "  - #{e}" }
       exit 1
     end
 
