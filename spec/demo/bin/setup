@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$APP_ROOT"
+
+echo "=== Installing dependencies ==="
+bundle install
+
+echo ""
+echo "=== Setting up database ==="
+bin/rails db:create db:migrate db:seed
+
+echo ""
+echo "=== Deploying BPMN processes ==="
+echo "(Requires Zeebe to be running — start with: rake zeebe:start from the busybee root)"
+bin/rake demo:deploy_bpmns || echo "WARNING: BPMN deployment failed. Is Zeebe running?"
+
+echo ""
+echo "=== Setup complete ==="
+echo "Start the app with: bin/rails server (or use the Procfile)"

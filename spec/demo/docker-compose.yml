@@ -1,0 +1,136 @@
+# Docker Compose for the Busybee demo app.
+# Run: docker compose up
+# Then visit: http://localhost:3000
+
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: spec/demo/Dockerfile
+  environment: &app-env
+    CLUSTER_ADDRESS: zeebe:26500
+    RAILS_ENV: development
+    RAILS_LOG_TO_STDOUT: "true"
+    DEMO_SPEED: ${DEMO_SPEED:-1.0}
+  networks:
+    - camunda
+  volumes:
+    - sqlite-data:/app/spec/demo/db/data
+
+services:
+  elasticsearch:
+    container_name: busybee-demo-elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.10
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.ml.enabled=false
+    networks:
+      - camunda
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  zeebe:
+    container_name: busybee-demo-zeebe
+    image: camunda/camunda:8.8.8
+    ports:
+      - "26500:26500"
+      - "9600:9600"
+      - "8088:8080"
+    environment:
+      - CAMUNDA_SECURITY_AUTHENTICATION_UNPROTECTEDAPI=true
+      - CAMUNDA_SECURITY_AUTHORIZATIONS_ENABLED=false
+      - CAMUNDA_DATA_SECONDARYSTORAGE_TYPE=elasticsearch
+      - CAMUNDA_DATA_SECONDARYSTORAGE_ELASTICSEARCH_URL=http://elasticsearch:9200
+      - JAVA_OPTS=-Xms512m -Xmx512m
+    networks:
+      - camunda
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/9600' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  web:
+    <<: *app
+    container_name: busybee-demo-web
+    command: bash -c "bin/rails db:prepare && bin/rails demo:deploy_bpmns && bin/rails server -b 0.0.0.0 -p 3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      zeebe:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/orders || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  workers_oms:
+    <<: *app
+    container_name: busybee-demo-workers-oms
+    command: bundle exec busybee Oms::LoadOrderAddressWorker Oms::MarkOrderPreparedWorker Oms::MarkOrderPackedWorker Oms::MarkOrderShippingWorker Oms::MarkOrderFulfilledWorker
+    depends_on:
+      zeebe:
+        condition: service_healthy
+
+  workers_logistics:
+    <<: *app
+    container_name: busybee-demo-workers-logistics
+    command: bundle exec busybee Logistics::LoadWarehousesWorker Logistics::LoadItemAvailabilityWorker Logistics::PlanShipmentsWorker Logistics::CreateShipmentWorker Logistics::LoadOrderShipmentsWorker Logistics::MarkShipmentPackedWorker Logistics::MarkShipmentInTransitWorker Logistics::MarkShipmentDeliveredWorker
+    depends_on:
+      zeebe:
+        condition: service_healthy
+
+  workers_delivery:
+    <<: *app
+    container_name: busybee-demo-workers-delivery
+    command: bundle exec busybee Delivery::CalculateDistanceWorker Delivery::AssignDriverWorker Delivery::CompleteDriverDeliveryWorker
+    depends_on:
+      zeebe:
+        condition: service_healthy
+
+  workers_sim:
+    <<: *app
+    container_name: busybee-demo-workers-sim
+    command: bundle exec busybee Sim::PickAndPackWorker Sim::DeliveryRunWorker
+    depends_on:
+      zeebe:
+        condition: service_healthy
+
+  clockwork:
+    <<: *app
+    container_name: busybee-demo-clockwork
+    command: bundle exec clockwork clock.rb
+    depends_on:
+      web:
+        condition: service_healthy
+    profiles:
+      - auto
+
+networks:
+  camunda:
+    driver: bridge
+
+volumes:
+  sqlite-data:
+    driver: local

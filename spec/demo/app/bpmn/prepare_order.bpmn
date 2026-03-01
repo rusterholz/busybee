@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.43.1">
+  <bpmn:process id="prepare_order" name="Prepare Order" isExecutable="true">
+    <bpmn:startEvent id="start" name="Start:&#10;Order Submitted">
+      <bpmn:outgoing>Flow_ToSplit1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToSplit1" sourceRef="start" targetRef="load_all_data" />
+    <bpmn:parallelGateway id="load_all_data">
+      <bpmn:incoming>Flow_ToSplit1</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToBranchA</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ToBranchB</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:sequenceFlow id="Flow_ToBranchA" sourceRef="load_all_data" targetRef="load_warehouses" />
+    <bpmn:serviceTask id="load_warehouses" name="Load Warehouse Data">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="load_warehouses" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:output source="= warehouses" target="warehouses" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToBranchA</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToCalcDistSubprocess</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToCalcDistSubprocess" sourceRef="load_warehouses" targetRef="calculate_warehouse_distances" />
+    <bpmn:subProcess id="calculate_warehouse_distances" name="Calculate Warehouse Distances">
+      <bpmn:incoming>Flow_ToCalcDistSubprocess</bpmn:incoming>
+      <bpmn:outgoing>Flow_BranchAToJoin1</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics>
+        <bpmn:extensionElements>
+          <zeebe:loopCharacteristics inputCollection="= warehouses" inputElement="warehouse" outputCollection="warehouses" outputElement="= warehouse" />
+        </bpmn:extensionElements>
+      </bpmn:multiInstanceLoopCharacteristics>
+      <bpmn:startEvent id="start_calculate_distances">
+        <bpmn:outgoing>Flow_Sub_ToCalcDist</bpmn:outgoing>
+      </bpmn:startEvent>
+      <bpmn:sequenceFlow id="Flow_Sub_ToCalcDist" sourceRef="start_calculate_distances" targetRef="calculate_distance" />
+      <bpmn:serviceTask id="calculate_distance" name="Calculate Distance">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="calculate_distance" retries="3" />
+          <zeebe:taskHeaders>
+            <zeebe:header key="algorithm" value="pythagorean" />
+          </zeebe:taskHeaders>
+          <zeebe:ioMapping>
+            <zeebe:input source="= warehouse.address.lat" target="from_lat" />
+            <zeebe:input source="= warehouse.address.lon" target="from_lon" />
+            <zeebe:input source="= order.address.lat" target="to_lat" />
+            <zeebe:input source="= order.address.lon" target="to_lon" />
+            <zeebe:output source="= distance" target="warehouse.distance" />
+          </zeebe:ioMapping>
+        </bpmn:extensionElements>
+        <bpmn:incoming>Flow_Sub_ToCalcDist</bpmn:incoming>
+        <bpmn:outgoing>Flow_Sub_CalcDistEnd</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="Flow_Sub_CalcDistEnd" sourceRef="calculate_distance" targetRef="end_calculate_distances" />
+      <bpmn:endEvent id="end_calculate_distances">
+        <bpmn:incoming>Flow_Sub_CalcDistEnd</bpmn:incoming>
+      </bpmn:endEvent>
+    </bpmn:subProcess>
+    <bpmn:sequenceFlow id="Flow_BranchAToJoin1" sourceRef="calculate_warehouse_distances" targetRef="all_data_loaded" />
+    <bpmn:sequenceFlow id="Flow_ToBranchB" sourceRef="load_all_data" targetRef="check_availability" />
+    <bpmn:subProcess id="check_availability" name="Check Item Availability">
+      <bpmn:incoming>Flow_ToBranchB</bpmn:incoming>
+      <bpmn:outgoing>Flow_BranchBToJoin1</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics>
+        <bpmn:extensionElements>
+          <zeebe:loopCharacteristics inputCollection="= order.items" inputElement="item" outputCollection="items_with_availability" outputElement="= item" />
+        </bpmn:extensionElements>
+      </bpmn:multiInstanceLoopCharacteristics>
+      <bpmn:startEvent id="start_check_availability">
+        <bpmn:outgoing>Flow_Sub_ToCheckAvail</bpmn:outgoing>
+      </bpmn:startEvent>
+      <bpmn:sequenceFlow id="Flow_Sub_ToCheckAvail" sourceRef="start_check_availability" targetRef="load_item_availability" />
+      <bpmn:serviceTask id="load_item_availability" name="Load Availability">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="load_item_availability" retries="3" />
+          <zeebe:ioMapping>
+            <zeebe:input source="= item.type" target="item_type" />
+            <zeebe:input source="= item.quantity" target="quantity" />
+            <zeebe:output source="= warehouse_ids" target="item.available_at" />
+          </zeebe:ioMapping>
+        </bpmn:extensionElements>
+        <bpmn:incoming>Flow_Sub_ToCheckAvail</bpmn:incoming>
+        <bpmn:outgoing>Flow_Sub_CheckAvailEnd</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="Flow_Sub_CheckAvailEnd" sourceRef="load_item_availability" targetRef="end_check_availability" />
+      <bpmn:endEvent id="end_check_availability">
+        <bpmn:incoming>Flow_Sub_CheckAvailEnd</bpmn:incoming>
+      </bpmn:endEvent>
+    </bpmn:subProcess>
+    <bpmn:sequenceFlow id="Flow_BranchBToJoin1" sourceRef="check_availability" targetRef="all_data_loaded" />
+    <bpmn:parallelGateway id="all_data_loaded" name="All Data Loaded">
+      <bpmn:incoming>Flow_BranchAToJoin1</bpmn:incoming>
+      <bpmn:incoming>Flow_BranchBToJoin1</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToPlanShipments</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:sequenceFlow id="Flow_ToPlanShipments" sourceRef="all_data_loaded" targetRef="Task_PlanShipments" />
+    <bpmn:serviceTask id="Task_PlanShipments" name="Plan Shipments">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="plan_shipments" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= warehouses" target="warehouses" />
+          <zeebe:input source="= items_with_availability" target="items" />
+          <zeebe:output source="= planned_shipments" target="planned_shipments" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToPlanShipments</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToCreateShipSubprocess</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToCreateShipSubprocess" sourceRef="Task_PlanShipments" targetRef="create_planned_shipments" />
+    <bpmn:subProcess id="create_planned_shipments" name="Create Planned Shipments">
+      <bpmn:incoming>Flow_ToCreateShipSubprocess</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToMarkPrepared</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics>
+        <bpmn:extensionElements>
+          <zeebe:loopCharacteristics inputCollection="= planned_shipments" inputElement="planned_shipment" outputCollection="created_shipments" outputElement="= created_shipment" />
+        </bpmn:extensionElements>
+      </bpmn:multiInstanceLoopCharacteristics>
+      <bpmn:startEvent id="start_create_shipments">
+        <bpmn:outgoing>Flow_Sub_ToCreateShip</bpmn:outgoing>
+      </bpmn:startEvent>
+      <bpmn:sequenceFlow id="Flow_Sub_ToCreateShip" sourceRef="start_create_shipments" targetRef="create_shipment" />
+      <bpmn:serviceTask id="create_shipment" name="Create Shipment">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="create_shipment" retries="3" />
+          <zeebe:ioMapping>
+            <zeebe:input source="= order.id" target="order_id" />
+            <zeebe:input source="= planned_shipment.warehouse_id" target="warehouse_id" />
+            <zeebe:input source="= planned_shipment.items" target="items" />
+            <zeebe:output source="= shipment_id" target="created_shipment.id" />
+            <zeebe:output source="= item_count" target="created_shipment.item_count" />
+          </zeebe:ioMapping>
+        </bpmn:extensionElements>
+        <bpmn:incoming>Flow_Sub_ToCreateShip</bpmn:incoming>
+        <bpmn:outgoing>Flow_Sub_CreateShipEnd</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="Flow_Sub_CreateShipEnd" sourceRef="create_shipment" targetRef="end_create_shipments" />
+      <bpmn:endEvent id="end_create_shipments">
+        <bpmn:incoming>Flow_Sub_CreateShipEnd</bpmn:incoming>
+      </bpmn:endEvent>
+    </bpmn:subProcess>
+    <bpmn:sequenceFlow id="Flow_ToMarkPrepared" sourceRef="create_planned_shipments" targetRef="mark_order_prepared" />
+    <bpmn:serviceTask id="mark_order_prepared" name="Mark Order Prepared">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="mark_order_prepared" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= order.id" target="order_id" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToMarkPrepared</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="mark_order_prepared" targetRef="end" />
+    <bpmn:endEvent id="end" name="Done:&#10;Order Prepared">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="prepare_order">
+      <bpmndi:BPMNShape id="StartEvent_di" bpmnElement="start">
+        <dc:Bounds x="160" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="138" y="173" width="81" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ParallelSplit1_di" bpmnElement="load_all_data">
+        <dc:Bounds x="235" y="125" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="309.5" y="313" width="79" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_LoadWarehouses_di" bpmnElement="load_warehouses">
+        <dc:Bounds x="210" y="290" width="100" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ParallelJoin1_di" bpmnElement="all_data_loaded">
+        <dc:Bounds x="655" y="125" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="641" y="107" width="79" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_PlanShipments_di" bpmnElement="Task_PlanShipments">
+        <dc:Bounds x="740" y="110" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_MarkOrderPrepared_di" bpmnElement="mark_order_prepared">
+        <dc:Bounds x="1180" y="110" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_di" bpmnElement="end">
+        <dc:Bounds x="1322" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1302" y="174" width="77" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubProcess_CheckAvailability_di" bpmnElement="check_availability" isExpanded="true">
+        <dc:Bounds x="350" y="80" width="260" height="140" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CheckAvailability_di" bpmnElement="load_item_availability">
+        <dc:Bounds x="430" y="110" width="100" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubStart_CheckAvail_di" bpmnElement="start_check_availability">
+        <dc:Bounds x="372" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubEnd_CheckAvail_di" bpmnElement="end_check_availability">
+        <dc:Bounds x="552" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Sub_ToCheckAvail_di" bpmnElement="Flow_Sub_ToCheckAvail">
+        <di:waypoint x="408" y="150" />
+        <di:waypoint x="430" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Sub_CheckAvailEnd_di" bpmnElement="Flow_Sub_CheckAvailEnd">
+        <di:waypoint x="530" y="150" />
+        <di:waypoint x="552" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="SubProcess_CalcDistances_di" bpmnElement="calculate_warehouse_distances" isExpanded="true">
+        <dc:Bounds x="350" y="260" width="260" height="140" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CalcDistance_A_di" bpmnElement="calculate_distance">
+        <dc:Bounds x="430" y="290" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubEnd_CalcDist_di" bpmnElement="end_calculate_distances">
+        <dc:Bounds x="552" y="312" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubStart_CalcDist_di" bpmnElement="start_calculate_distances">
+        <dc:Bounds x="372" y="312" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Sub_ToCalcDist_di" bpmnElement="Flow_Sub_ToCalcDist">
+        <di:waypoint x="408" y="330" />
+        <di:waypoint x="430" y="330" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Sub_CalcDistEnd_di" bpmnElement="Flow_Sub_CalcDistEnd">
+        <di:waypoint x="530" y="330" />
+        <di:waypoint x="552" y="330" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="SubProcess_CreateShipments_di" bpmnElement="create_planned_shipments" isExpanded="true">
+        <dc:Bounds x="880" y="80" width="260" height="140" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CreateShipment_di" bpmnElement="create_shipment">
+        <dc:Bounds x="960" y="110" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubEnd_CreateShip_di" bpmnElement="end_create_shipments">
+        <dc:Bounds x="1082" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubStart_CreateShip_di" bpmnElement="start_create_shipments">
+        <dc:Bounds x="902" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Sub_ToCreateShip_di" bpmnElement="Flow_Sub_ToCreateShip">
+        <di:waypoint x="938" y="150" />
+        <di:waypoint x="960" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Sub_CreateShipEnd_di" bpmnElement="Flow_Sub_CreateShipEnd">
+        <di:waypoint x="1060" y="150" />
+        <di:waypoint x="1082" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToSplit1_di" bpmnElement="Flow_ToSplit1">
+        <di:waypoint x="196" y="150" />
+        <di:waypoint x="235" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToBranchA_di" bpmnElement="Flow_ToBranchA">
+        <di:waypoint x="260" y="175" />
+        <di:waypoint x="260" y="290" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToCalcDistSubprocess_di" bpmnElement="Flow_ToCalcDistSubprocess">
+        <di:waypoint x="310" y="330" />
+        <di:waypoint x="350" y="330" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_BranchAToJoin1_di" bpmnElement="Flow_BranchAToJoin1">
+        <di:waypoint x="610" y="330" />
+        <di:waypoint x="680" y="330" />
+        <di:waypoint x="680" y="175" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToBranchB_di" bpmnElement="Flow_ToBranchB">
+        <di:waypoint x="285" y="150" />
+        <di:waypoint x="350" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_BranchBToJoin1_di" bpmnElement="Flow_BranchBToJoin1">
+        <di:waypoint x="610" y="150" />
+        <di:waypoint x="655" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToPlanShipments_di" bpmnElement="Flow_ToPlanShipments">
+        <di:waypoint x="705" y="150" />
+        <di:waypoint x="740" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToCreateShipSubprocess_di" bpmnElement="Flow_ToCreateShipSubprocess">
+        <di:waypoint x="840" y="150" />
+        <di:waypoint x="880" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToMarkPrepared_di" bpmnElement="Flow_ToMarkPrepared">
+        <di:waypoint x="1140" y="150" />
+        <di:waypoint x="1180" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEnd_di" bpmnElement="Flow_ToEnd">
+        <di:waypoint x="1280" y="150" />
+        <di:waypoint x="1322" y="150" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

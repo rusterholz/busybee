@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.43.1">
+  <bpmn:process id="ship_order" name="Ship Order" isExecutable="true">
+    <bpmn:startEvent id="start" name="Start:&#10;Order Ready">
+      <bpmn:outgoing>Flow_ToLoadShipments</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToLoadShipments" sourceRef="start" targetRef="load_order_shipments" />
+    <bpmn:serviceTask id="load_order_shipments" name="Load Order Shipments">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="load_order_shipments" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= order.id" target="order_id" />
+          <zeebe:output source="= shipments" target="order.shipments" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToLoadShipments</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToPackSubprocess</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToPackSubprocess" sourceRef="load_order_shipments" targetRef="pack_shipments" />
+    <bpmn:subProcess id="pack_shipments" name="Pick and Pack Shipments">
+      <bpmn:incoming>Flow_ToPackSubprocess</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToMarkPacked</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics>
+        <bpmn:extensionElements>
+          <zeebe:loopCharacteristics inputCollection="= order.shipments" inputElement="shipment" />
+        </bpmn:extensionElements>
+      </bpmn:multiInstanceLoopCharacteristics>
+      <bpmn:startEvent id="start_pack_shipments">
+        <bpmn:outgoing>Flow_Sub_ToPickPack</bpmn:outgoing>
+      </bpmn:startEvent>
+      <bpmn:sequenceFlow id="Flow_Sub_ToPickPack" sourceRef="start_pack_shipments" targetRef="simulate_pick_and_pack" />
+      <bpmn:serviceTask id="simulate_pick_and_pack" name="Pick and Pack">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="simulate_pick_and_pack" retries="3" />
+          <zeebe:ioMapping>
+            <zeebe:input source="= shipment.id" target="shipment_id" />
+            <zeebe:input source="= shipment.item_count" target="item_count" />
+          </zeebe:ioMapping>
+        </bpmn:extensionElements>
+        <bpmn:incoming>Flow_Sub_ToPickPack</bpmn:incoming>
+        <bpmn:outgoing>Flow_Sub_ToMarkPacked</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="Flow_Sub_ToMarkPacked" sourceRef="simulate_pick_and_pack" targetRef="mark_shipment_packed" />
+      <bpmn:serviceTask id="mark_shipment_packed" name="Mark Shipment Packed">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="mark_shipment_packed" retries="3" />
+          <zeebe:ioMapping>
+            <zeebe:input source="= shipment.id" target="shipment_id" />
+          </zeebe:ioMapping>
+        </bpmn:extensionElements>
+        <bpmn:incoming>Flow_Sub_ToMarkPacked</bpmn:incoming>
+        <bpmn:outgoing>Flow_Sub_PackEnd</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="Flow_Sub_PackEnd" sourceRef="mark_shipment_packed" targetRef="end_pack_shipments" />
+      <bpmn:endEvent id="end_pack_shipments">
+        <bpmn:incoming>Flow_Sub_PackEnd</bpmn:incoming>
+      </bpmn:endEvent>
+    </bpmn:subProcess>
+    <bpmn:sequenceFlow id="Flow_ToMarkPacked" sourceRef="pack_shipments" targetRef="mark_order_packed" />
+    <bpmn:serviceTask id="mark_order_packed" name="Mark Order Packed">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="mark_order_packed" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="= order.id" target="order_id" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToMarkPacked</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="mark_order_packed" targetRef="end" />
+    <bpmn:endEvent id="end" name="End:&#10;Order Packed">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="ship_order">
+      <bpmndi:BPMNShape id="StartEvent_di" bpmnElement="start">
+        <dc:Bounds x="162" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="149" y="173" width="63" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_LoadOrderShipments_di" bpmnElement="load_order_shipments">
+        <dc:Bounds x="240" y="110" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubProcess_PackShipments_di" bpmnElement="pack_shipments" isExpanded="true">
+        <dc:Bounds x="380" y="80" width="440" height="140" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubStart_Pack_di" bpmnElement="start_pack_shipments">
+        <dc:Bounds x="405" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_PickAndPack_di" bpmnElement="simulate_pick_and_pack">
+        <dc:Bounds x="480" y="110" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_MarkShipmentPacked_di" bpmnElement="mark_shipment_packed">
+        <dc:Bounds x="620" y="110" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubEnd_Pack_di" bpmnElement="end_pack_shipments">
+        <dc:Bounds x="762" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Sub_ToPickPack_di" bpmnElement="Flow_Sub_ToPickPack">
+        <di:waypoint x="441" y="150" />
+        <di:waypoint x="480" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Sub_ToMarkPacked_di" bpmnElement="Flow_Sub_ToMarkPacked">
+        <di:waypoint x="580" y="150" />
+        <di:waypoint x="620" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Sub_PackEnd_di" bpmnElement="Flow_Sub_PackEnd">
+        <di:waypoint x="720" y="150" />
+        <di:waypoint x="762" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="Task_MarkOrderPacked_di" bpmnElement="mark_order_packed">
+        <dc:Bounds x="860" y="110" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_di" bpmnElement="end">
+        <dc:Bounds x="1002" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="985" y="173" width="72" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_ToLoadShipments_di" bpmnElement="Flow_ToLoadShipments">
+        <di:waypoint x="198" y="150" />
+        <di:waypoint x="240" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToPackSubprocess_di" bpmnElement="Flow_ToPackSubprocess">
+        <di:waypoint x="340" y="150" />
+        <di:waypoint x="380" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToMarkPacked_di" bpmnElement="Flow_ToMarkPacked">
+        <di:waypoint x="820" y="150" />
+        <di:waypoint x="860" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEnd_di" bpmnElement="Flow_ToEnd">
+        <di:waypoint x="960" y="150" />
+        <di:waypoint x="1002" y="150" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

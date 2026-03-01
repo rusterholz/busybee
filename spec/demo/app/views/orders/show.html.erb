@@ -1,0 +1,77 @@
+<hgroup>
+  <h1>Order <%= @order.short_id %></h1>
+  <p><span class="status-<%= @order.status %>"><%= @order.status.capitalize %></span></p>
+</hgroup>
+
+<% if @order.prepare_order_instance_key.nil? %>
+  <section>
+    <p>
+      <strong>No prepare_order process instance.</strong>
+      <%= form_tag(start_prepare_order_order_path(@order), method: :post, style: "display:inline") do %>
+        <button type="submit" class="outline">Start prepare_order</button>
+      <% end %>
+    </p>
+  </section>
+<% end %>
+
+<% if %w[processing packed shipping fulfilled].include?(@order.status) && @order.ship_order_instance_key.nil? %>
+  <section>
+    <p>
+      <strong>No ship_order process instance.</strong>
+      <%= form_tag(start_ship_order_order_path(@order), method: :post, style: "display:inline") do %>
+        <button type="submit" class="outline">Start ship_order</button>
+      <% end %>
+    </p>
+  </section>
+<% end %>
+
+<section>
+  <h2>Customer</h2>
+  <dl>
+    <dt>Name</dt>
+    <dd><%= @order.customer_name %></dd>
+    <dt>Address</dt>
+    <dd><%= [@order.address_line_1, @order.city, @order.state, @order.zip].compact.join(", ") %></dd>
+    <dt>Coordinates</dt>
+    <dd>(<%= @order.lat %>, <%= @order.lon %>)</dd>
+  </dl>
+</section>
+
+<section>
+  <h2>Line Items</h2>
+  <%= render "line_items", line_items: @order.line_items %>
+</section>
+
+<% if @shipments.any? %>
+  <section>
+    <h2>Shipments</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Shipment</th>
+          <th>Warehouse</th>
+          <th>Status</th>
+          <th>Items</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @shipments.each do |shipment| %>
+          <tr>
+            <td><%= shipment.short_id %></td>
+            <td><%= link_to shipment.warehouse.name, warehouse_path(shipment.warehouse) %></td>
+            <td><span class="status-<%= shipment.status %>"><%= shipment.status.capitalize %></span></td>
+            <td><%= shipment.item_count %></td>
+            <td>
+              <% if %w[packed in_transit delivered].include?(shipment.status) && shipment.deliver_shipment_instance_key.nil? %>
+                <%= form_tag(start_deliver_shipment_shipment_path(shipment), method: :post, style: "display:inline") do %>
+                  <button type="submit" class="outline" style="margin:0;padding:0.25rem 0.5rem;font-size:0.85rem;">Start deliver</button>
+                <% end %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </section>
+<% end %>

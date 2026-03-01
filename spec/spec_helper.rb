@@ -4,7 +4,7 @@
 # This ensures busybee sees Rails::Railtie as defined and loads the railtie
 if ENV["TEST_RAILS_INTEGRATION"]
   ENV["RAILS_ENV"] = "test"
-  require File.expand_path("dummy/config/environment", __dir__)
+  require File.expand_path("demo/config/environment", __dir__)
 end
 
 require "busybee"
@@ -49,7 +49,7 @@ RSpec.configure do |config|
   rescue LoadError
     config.filter_run_excluding rails: true
     config.before(:each, :rails) do
-      skip "Requires a Rails appraisal (e.g., `bundle exec appraisal rails-7.1 rspec --tag rails`)"
+      skip "[APPRAISAL REQUIRED] Requires a Rails appraisal (e.g., `bundle exec appraisal rails-7.1 rspec --tag rails`)"
     end
   end
 

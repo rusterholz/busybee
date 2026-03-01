@@ -1,0 +1,24 @@
+<h1>Warehouses</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Coordinates</th>
+      <th>Item Types</th>
+      <th>Total Stock</th>
+      <th>Active Shipments</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @warehouses.each do |wh| %>
+      <tr>
+        <td><%= link_to wh.name, warehouse_path(wh) %></td>
+        <td>(<%= wh.lat %>, <%= wh.lon %>)</td>
+        <td><%= wh.stock_items.count %></td>
+        <td><%= wh.stock_items.sum(&:quantity) %></td>
+        <td><%= wh.shipments.where.not(status: "delivered").count %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

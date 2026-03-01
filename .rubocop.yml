@@ -48,11 +48,13 @@ RSpec/DescribeClass:
   Exclude:
     - "spec/integration/**/*"
     - "spec/**/matchers/**/*"
+    - "spec/demo/spec/bpmn/**/*"
 
 RSpec/ExampleLength:
   Max: 15
   Exclude:
     - "spec/integration/**/*"
+    - "spec/demo/spec/bpmn/**/*"
 
 RSpec/MessageSpies:
   EnforcedStyle: have_received

@@ -1,0 +1,31 @@
+<hgroup>
+  <h1>Orders</h1>
+  <p><%= link_to "New Order", new_order_path %></p>
+</hgroup>
+
+<% if @orders.any? %>
+  <table>
+    <thead>
+      <tr>
+        <th>Order</th>
+        <th>Customer</th>
+        <th>Status</th>
+        <th>Items</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @orders.each do |order| %>
+        <tr>
+          <td><%= link_to order.short_id, order_path(order) %></td>
+          <td><%= order.customer_name %></td>
+          <td><span class="status-<%= order.status %>"><%= order.status.capitalize %></span></td>
+          <td><%= order.line_items.sum(&:quantity) %></td>
+          <td><%= order.created_at.strftime("%b %d, %H:%M") %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% else %>
+  <p>No orders yet. <%= link_to "Create one", new_order_path %>.</p>
+<% end %>

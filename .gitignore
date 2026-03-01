@@ -12,5 +12,12 @@
 # rspec failure tracking
 .rspec_status
 
+# Demo app — Rails runtime artifacts
+spec/demo/db/*.sqlite3
+spec/demo/db/*.sqlite3-*
+spec/demo/log/
+spec/demo/tmp/
+spec/demo/storage/
+
 # Docker volumes (data is stored in named volumes, not tracked in git)
 .docker/

@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Entry point for the busybee demo app Docker stack.
+#
+# Usage:
+#   bin/demo start              Start with auto-ordering at speed 1
+#   bin/demo start --speed 40   Start with auto-ordering at speed 40
+#   bin/demo start --manual     Start without auto-ordering (no clockwork)
+#   bin/demo stop               Stop containers, preserve data
+#   bin/demo clean              Stop and destroy volumes/data
+#   bin/demo status             Show running containers and order counts
+
+DEMO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+usage() {
+  cat <<EOF
+Usage: bin/demo <command> [options]
+
+Commands:
+  start [--speed N] [--manual]   Start the Docker stack
+  stop                           Stop containers (preserves data)
+  clean                          Stop and destroy all data
+  status                         Show container and order status
+
+Options for start:
+  --speed N    Set simulation speed (default: 1)
+  --manual     Start without auto-ordering (no clockwork process)
+EOF
+  exit 1
+}
+
+cmd_start() {
+  local speed=1
+  local profile="--profile auto"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --speed)
+        speed="${2:?--speed requires a value}"
+        shift 2
+        ;;
+      --manual)
+        profile=""
+        shift
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage
+        ;;
+    esac
+  done
+
+  echo "Starting demo app (speed=${speed}, mode=$([ -n "$profile" ] && echo "auto" || echo "manual"))..."
+  cd "$DEMO_DIR"
+  DEMO_SPEED="$speed" docker compose $profile up -d --build
+  echo ""
+  echo "Dashboard: http://localhost:3000"
+}
+
+cmd_stop() {
+  echo "Stopping demo app (preserving data)..."
+  cd "$DEMO_DIR"
+  docker compose --profile auto down
+}
+
+cmd_clean() {
+  echo "Stopping demo app and destroying all data..."
+  cd "$DEMO_DIR"
+  docker compose --profile auto down -v
+}
+
+cmd_status() {
+  cd "$DEMO_DIR"
+  docker compose ps
+
+  # If the web container is running, query order counts
+  if docker compose ps --format json 2>/dev/null | grep -q '"busybee-demo-web"'; then
+    echo ""
+    echo "── Order Status ──"
+    docker compose exec -T web bin/rails runner "
+      counts = Oms::Order.group(:status).count
+      total = counts.values.sum
+      counts.sort_by { |s, _| %w[submitted processing packed shipping fulfilled].index(s) || 99 }
+            .each { |status, count| puts \"  %-12s %d\" % [status, count] }
+      puts \"  %-12s %d\" % ['TOTAL', total]
+    " 2>/dev/null || echo "  (web container not ready)"
+  fi
+}
+
+# ── Main ──
+
+command="${1:-}"
+shift || true
+
+case "$command" in
+  start)  cmd_start "$@" ;;
+  stop)   cmd_stop ;;
+  clean)  cmd_clean ;;
+  status) cmd_status ;;
+  *)      usage ;;
+esac

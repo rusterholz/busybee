@@ -1,0 +1,34 @@
+<h1>Drivers</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Status</th>
+      <th>Current Shipment</th>
+      <th>Total Mileage</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @drivers.each do |driver| %>
+      <% assigned = driver.current_shipment_id.present? %>
+      <tr>
+        <td><%= driver.name %></td>
+        <td>
+          <span class="status-<%= assigned ? 'delivering' : 'available' %>">
+            <%= assigned ? "Delivering" : "Available" %>
+          </span>
+        </td>
+        <td>
+          <% if assigned %>
+            <% shipment = Logistics::Shipment.find_by(id: driver.current_shipment_id) %>
+            <%= shipment ? shipment.short_id : driver.current_shipment_id[0..7] %>
+          <% else %>
+            —
+          <% end %>
+        </td>
+        <td><%= format("%.1f", driver.total_mileage) %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

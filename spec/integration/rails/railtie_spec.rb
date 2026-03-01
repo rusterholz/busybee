@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
-# This spec tests the Railtie with a real Rails boot via the dummy app.
-# It requires TEST_RAILS_INTEGRATION=1 to run, which loads the dummy Rails app.
+# This spec tests the Railtie with a real Rails boot via the demo app.
+# It requires TEST_RAILS_INTEGRATION=1 to run, which loads the demo Rails app.
 #
 # To run: TEST_RAILS_INTEGRATION=1 bundle exec rspec spec/integration/rails/railtie_spec.rb
 
 require "spec_helper"
 
-RSpec.describe "Railtie integration with dummy Rails app", :rails do
+RSpec.describe "Railtie integration with demo Rails app", :rails do
   # These tests only make sense when we've booted the full Rails app
   before do
-    skip "Requires TEST_RAILS_INTEGRATION=1 to boot dummy Rails app" unless ENV["TEST_RAILS_INTEGRATION"]
+    skip "Requires TEST_RAILS_INTEGRATION=1 to boot demo Rails app" unless ENV["TEST_RAILS_INTEGRATION"]
   end
 
   describe "after Rails initialization" do
@@ -30,7 +30,7 @@ RSpec.describe "Railtie integration with dummy Rails app", :rails do
 
   describe "configuration from config.x.busybee" do
     # The dummy app sets distinct values (not defaults) to verify wiring works.
-    # See spec/dummy/config/application.rb for the configured values.
+    # See spec/demo/config/application.rb for the configured values.
 
     it "sets cluster_address from config" do
       expect(Busybee.cluster_address).to eq("dummy.zeebe.test:443")
