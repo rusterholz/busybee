@@ -45,7 +45,7 @@
     <bpmn:sequenceFlow id="Flow_ToBranchB" sourceRef="prepare_delivery" targetRef="assign_driver" />
     <bpmn:serviceTask id="assign_driver" name="Assign Driver">
       <bpmn:extensionElements>
-        <zeebe:taskDefinition type="assign_driver" retries="3" />
+        <zeebe:taskDefinition type="assign_driver" retries="10" />
         <zeebe:ioMapping>
           <zeebe:input source="= shipment.id" target="shipment_id" />
           <zeebe:output source="= driver_id" target="driver.id" />

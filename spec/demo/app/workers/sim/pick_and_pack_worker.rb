@@ -3,11 +3,16 @@
 require "concurrent"
 
 module Sim
+  # Non-blocking: runs delays in background Futures so a single worker thread can
+  # handle many concurrent pick-and-pack operations. The semaphore limits concurrency
+  # to 3 simultaneous pickers. The 5-minute job_timeout covers semaphore wait time;
+  # update_timeout tightens the deadline once a picker is acquired.
   class PickAndPackWorker < Busybee::Worker
     job_type "simulate_pick_and_pack"
     description "Simulates warehouse workers picking and packing items with realistic delays"
     complete_job_on_success false
     fail_job_on_error false
+    job_timeout 5.minutes
 
     variable :item_count, type: :integer, description: "Number of items to pick and pack"
 
@@ -22,7 +27,7 @@ module Sim
                         "(#{delay.round(1)}s delay, #{PICKERS.available_permits}/3 pickers free)")
 
       Concurrent::Promises.
-        future { run_pick_and_pack(delay) }.
+        future { run_pick_and_pack(current_job, delay) }.
         then { on_pick_and_pack_done(current_job) }.
         rescue { |err| on_pick_and_pack_error(current_job, err) }
     end
@@ -35,8 +40,9 @@ module Sim
       item_count.to_f * BASE_DELAY * jitter / speed
     end
 
-    def run_pick_and_pack(delay)
+    def run_pick_and_pack(current_job, delay)
       PICKERS.acquire
+      current_job.update_timeout((delay.ceil + 2).seconds)
       Rails.logger.info("Picker started on #{item_count} items (#{delay.round(1)}s)...")
       sleep(delay)
     ensure

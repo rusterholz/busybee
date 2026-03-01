@@ -2,7 +2,7 @@
 
 # Seed data for the busybee demo app.
 #
-# Creates 4 warehouses with curated inventory, and 4 drivers.
+# Creates 4 warehouses with curated inventory, and prehires drivers scaled to speed.
 # Uses a fixed Faker seed for reproducible driver names.
 
 # rubocop:disable Layout/HashAlignment, Style/TrailingCommaInHashLiteral
@@ -132,11 +132,14 @@ WAREHOUSE_DATA.each do |name, data|
   end
 end
 
-puts "Seeding drivers..."
+speed = Rails.application.config.x.demo.simulation_speed
+driver_count_target = [3, (speed / 6).floor].max
+
+puts "Seeding #{driver_count_target} drivers (speed #{speed})..."
 
 Faker::Config.random = Random.new(42) # Fixed seed for reproducible names
 
-4.times do
+driver_count_target.times do
   name = Faker::Name.name
   Delivery::Driver.find_or_create_by!(name: name) do |d|
     d.total_mileage = 0.0
