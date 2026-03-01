@@ -49,7 +49,7 @@ RSpec.configure do |config|
   rescue LoadError
     config.filter_run_excluding rails: true
     config.before(:each, :rails) do
-      skip "Requires a Rails appraisal (e.g., `bundle exec appraisal rails-7.1 rspec --tag rails`)"
+      skip "[APPRAISAL REQUIRED] Requires a Rails appraisal (e.g., `bundle exec appraisal rails-7.1 rspec --tag rails`)"
     end
   end
 
