@@ -4,11 +4,12 @@ require "concurrent"
 
 # rubocop:disable RSpec/ExampleLength
 RSpec.describe Busybee::Runner::Hybrid do
-  subject(:runner) { described_class.new(worker_class, client: client) }
+  subject(:runner) { described_class.new(worker_class, runtime_config: runtime_config, client: client) }
 
   let(:client) { instance_double(Busybee::Client) }
   let(:job) { instance_double(Busybee::Job, key: 1, retries: 3, ready?: true) }
   let(:stream) { instance_double(Busybee::JobStream) }
+  let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
 
   let(:worker_class) do
     Class.new(Busybee::Worker) do
@@ -297,7 +298,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         runner.run!
 
-        expect(runner).to have_received(:sleep).with(Busybee.runner_backpressure_delay) # rubocop:disable RSpec/SubjectStub
+        expect(runner).to have_received(:sleep).with(runtime_config.backpressure_delay) # rubocop:disable RSpec/SubjectStub
         expect(call_count).to eq(2)
       end
     end
@@ -367,12 +368,12 @@ RSpec.describe Busybee::Runner::Hybrid do
         expect(leftover).to have_received(:fail!).with(
           "Worker shutting down",
           retries: 2,
-          backoff: Busybee.runner_shutdown_backoff
+          backoff: Busybee.default_fail_job_backoff
         )
       end
 
-      it "uses the greater of shutdown_backoff and worker backoff" do
-        worker_class.backoff 30_000 # 30s > default shutdown_backoff of 10s
+      it "uses the worker's configured backoff during shutdown" do
+        worker_class.backoff 30_000
         leftover = instance_double(Busybee::Job, key: 1, retries: 3, ready?: true)
         allow(leftover).to receive(:fail!)
 
@@ -419,7 +420,7 @@ RSpec.describe Busybee::Runner::Hybrid do
         expect(jobs[1]).to have_received(:fail!).with(
           "Worker shutting down",
           retries: 5,
-          backoff: Busybee.runner_shutdown_backoff
+          backoff: Busybee.default_fail_job_backoff
         )
       end
 

@@ -25,6 +25,9 @@ module Busybee
   # Raised when required outputs are missing from perform's return value
   MissingOutput = Class.new(Error)
 
+  # Raised when the CLI is invoked with no worker class arguments
+  NoWorkersSpecified = Class.new(Error)
+
   # Raised when attempting to complete, fail, or throw error on a job that has already been handled
   JobAlreadyHandled = Class.new(Error)
 
@@ -33,4 +36,7 @@ module Busybee
 
   # Raised when attempting to iterate a stream that has been closed
   StreamAlreadyClosed = Class.new(Error)
+
+  # Raised when a worker class name cannot be resolved to a constant
+  WorkerNotFound = Class.new(Error)
 end

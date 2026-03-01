@@ -13,6 +13,7 @@ require "busybee/client"
 require "busybee/worker"
 require "busybee/runtime_config"
 require "busybee/runner"
+require "busybee/cli"
 
 # Top-level gem module. Configuration readers and defaults live here;
 # validated setters live in Busybee::Configure.
@@ -55,6 +56,10 @@ module Busybee
       @default_fail_job_backoff || Defaults::DEFAULT_FAIL_JOB_BACKOFF_MS
     end
 
+    def default_max_jobs
+      @default_max_jobs || Defaults::DEFAULT_MAX_JOBS
+    end
+
     def default_input_required
       @default_input_required.nil? ? Defaults::DEFAULT_INPUT_REQUIRED : @default_input_required
     end
@@ -73,6 +78,10 @@ module Busybee
 
     def default_output_required
       @default_output_required.nil? ? Defaults::DEFAULT_OUTPUT_REQUIRED : @default_output_required
+    end
+
+    def default_queue_enabled
+      @default_queue_enabled.nil? ? Defaults::DEFAULT_STREAMING_QUEUE_ENABLED : @default_queue_enabled
     end
 
     def default_queue_throttle
@@ -103,10 +112,6 @@ module Busybee
 
     def runner_backpressure_delay
       @runner_backpressure_delay || Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
-    end
-
-    def runner_shutdown_backoff
-      @runner_shutdown_backoff || Defaults::DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS
     end
 
     def shutdown_on_errors

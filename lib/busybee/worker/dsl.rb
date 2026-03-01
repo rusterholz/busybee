@@ -98,6 +98,14 @@ module Busybee
         configuration.backoff = value
       end
 
+      def backpressure_delay(value = nil)
+        if value.nil?
+          configuration.backpressure_delay
+        else
+          configuration.backpressure_delay = value
+        end
+      end
+
       def complete_job_on_success(value = nil)
         if value.nil?
           configuration.complete_job_on_success

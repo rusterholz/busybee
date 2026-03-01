@@ -7,7 +7,10 @@ This document describes the internal architecture of the busybee gem. It is for 
 ## Architecture Overview
 
 ```
+exe/
+└── busybee                  # CLI executable (thin shim)
 lib/busybee/
+├── cli.rb                   # CLI entry point: arg parsing, env loading, signal handling, runner wiring
 ├── configure.rb             # Validated setters for gem-level config (included into Busybee singleton)
 ├── client.rb                # Client class - main user-facing API
 ├── client/                  # Client operation modules
@@ -84,6 +87,10 @@ lib/busybee/
                            │
                     ┌──────┴──────┐
                     │   Runner    │  (uses Client + Worker)
+                    └──────┬──────┘
+                           │
+                    ┌──────┴──────┐
+                    │     CLI     │  (uses Client + Runner + RuntimeConfig)
                     └─────────────┘
 
     ┌─────────────┐
@@ -155,9 +162,28 @@ The `job.ready?` guard on both auto-complete and auto-fail respects manual `comp
 
 Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every field set.
 
-### Precedence Chain
+### Fields
 
-For any field (currently `runner_mode`; future: `backpressure_delay`, `shutdown_backoff`, etc.):
+RuntimeConfig fields are divided into two categories:
+
+**Runner-scoped** — participate in the full 4-level precedence chain (per-worker RC → global RC → worker DSL → gem default). Only `runner_mode` has a CLI flag (`-m`); the rest are YAML-only:
+- `runner_mode` — `:polling`, `:streaming`, or `:hybrid`
+- `backpressure_delay` — ms to sleep on `GRPC::ResourceExhausted`
+- `max_jobs` — max jobs per poll request
+- `request_timeout` — long-poll timeout in ms
+- `queue_enabled` — whether the streaming pump+queue is used (`true` by default)
+- `queue_throttle` — pump thread delay in ms (`false` = no throttle)
+- `job_timeout` — job lock timeout in ms
+- `backoff` — fail-job backoff in ms
+
+**Process-wide** — apply globally, no per-worker overrides (global RC → gem default):
+- `log_format` — `:text` or `:json`
+- `worker_name` — identifier for this worker process
+- `cluster_address` — Zeebe gateway address
+
+### Precedence Chains
+
+All runner-scoped fields use the same 4-level chain:
 
 ```
 Per-worker RuntimeConfig override   (highest priority)
@@ -169,11 +195,21 @@ Worker DSL (worker_class.configuration)
 Gem default (Busybee.default_*)     (lowest priority)
 ```
 
+All process-wide fields use the same 2-level chain:
+
+```
+Global RuntimeConfig value          (highest priority)
+         ↓
+Gem default (Busybee.*)             (lowest priority)
+```
+
+Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit values (important for `queue_throttle: false` meaning "no throttle" and `backpressure_delay: 0` for testing).
+
 ### Integration Points
 
-- **`Runner.for`** accepts `runtime_config:`, calls `resolve_for` to determine runner class.
+- **`Runner.for`** accepts `runtime_config:`, calls `resolve_for` to determine runner class and build the resolved config passed to the runner.
 - **`Runner::Multi`** calls `resolve_for` per worker class, so each child runner gets its own resolved config.
-- **CLI** (Mission 14) will construct a RuntimeConfig from parsed flags and pass it to `Runner.for`.
+- **CLI** constructs a RuntimeConfig from parsed flags and passes it to `Runner.for`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are applied to gem config during initialization.
 - **YAML config** (Mission 15) will construct a RuntimeConfig from parsed YAML.
 
 ## Runner Module
@@ -251,6 +287,51 @@ Point of use: `sleep(delay.to_f / 1000) if delay` — works because `false` is f
 **ActiveRecord connection pool check:** On initialization, if `ActiveRecord` is defined, Multi compares `connection_pool.size` against the number of worker classes. Logs an error if the pool is undersized (common misconfiguration), or an info message confirming adequate pool size.
 
 **Shared client:** All child runners share the same `Busybee::Client` instance, passed through `Runner.for`. HTTP/2 multiplexing allows a single gRPC connection to serve all runners.
+
+## CLI Module
+
+`Busybee::CLI` is the entry point for the `busybee` executable. It parses arguments, loads the environment, resolves worker classes, and runs the appropriate runner.
+
+### Structure
+
+```
+exe/busybee          # Thin shim: require "busybee" + CLI.main(ARGV)
+lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
+```
+
+### Lifecycle
+
+1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
+2. **`initialize(args)`** — all setup: parse options (`OptionParser`), load Rails environment, load worker classes, build `RuntimeConfig`, apply process-wide config.
+3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks).
+
+### CLI Flags
+
+The CLI exposes only 4 flags. Runner-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, queue_enabled, queue_throttle, job_timeout, backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
+
+- `--runner-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`
+- `--log-format` / `-l` — `:text` or `:json`
+- `--worker-name` / `-n` — worker process identifier
+- `--cluster-address` / `-a` — Zeebe gateway address
+
+**Process-wide application:** `apply_global_config!` applies process-wide flags to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding values already set by the Railtie.
+
+### Signal Handling
+
+Traps `INT`, `QUIT`, `TERM` — all mapped to the same handler. The trap block spawns a thread and joins it (`Thread.new { handle_signal(signal) }.join`) to work around Ruby's signal trap restrictions (no mutex/thread pool operations in trap context).
+
+**Two-signal pattern:**
+- First signal → `runner.stop!` (graceful shutdown)
+- Second signal (while `stopping?`) → `runner.kill!` + `exit!(1)` (forced shutdown, non-zero exit code, skips at_exit handlers)
+
+### Rails Environment Loading
+
+Attempts `require "rails"` — if `LoadError`, Rails is not available and loading is skipped silently. If Rails is present, loads `./config/environment` to boot the app (which triggers the Railtie). If environment loading fails, logs an error with the exception class and message, and suggests `BUSYBEE_SKIP_RAILS=1` as an escape hatch. The env var check happens before any `require` calls (chicken-and-egg: gem config isn't available yet since it's set by the Railtie).
+
+### Error Classes
+
+- **`Busybee::NoWorkersSpecified`** — no positional arguments given
+- **`Busybee::WorkerNotFound`** — `Kernel.const_get` fails for a worker class name
 
 ## Serialization Module
 

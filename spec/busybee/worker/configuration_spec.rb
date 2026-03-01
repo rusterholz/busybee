@@ -409,6 +409,25 @@ RSpec.describe Busybee::Worker::Configuration do
     end
   end
 
+  describe "#backpressure_delay=" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "defaults to nil" do
+      expect(config.backpressure_delay).to be_nil
+    end
+
+    it "accepts an Integer" do
+      config.backpressure_delay = 10_000
+      expect(config.backpressure_delay).to eq(10_000)
+    end
+
+    it "raises on non-Integer, non-Duration" do
+      expect { config.backpressure_delay = "5 seconds" }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /backpressure_delay.*Integer.*ActiveSupport::Duration/
+      )
+    end
+  end
+
   describe Busybee::Worker::Configuration::Input do
     subject(:input) do
       described_class.new(
@@ -478,6 +497,7 @@ RSpec.describe Busybee::Worker::Configuration do
         c.polling_config = { max_jobs: 10 }
         c.job_timeout = 300_000
         c.backoff = 30_000
+        c.backpressure_delay = 10_000
       end
     end
 
@@ -496,6 +516,7 @@ RSpec.describe Busybee::Worker::Configuration do
       expect(result[:streaming_config]).to eq({})
       expect(result[:job_timeout]).to eq(300_000)
       expect(result[:backoff]).to eq(30_000)
+      expect(result[:backpressure_delay]).to eq(10_000)
     end
 
     it "includes lifecycle defaults" do

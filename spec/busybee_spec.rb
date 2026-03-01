@@ -269,9 +269,45 @@ RSpec.describe Busybee do
                     :DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
   end
 
-  describe ".runner_shutdown_backoff" do
-    it_behaves_like "a duration config setter", :runner_shutdown_backoff, :runner_shutdown_backoff,
-                    :DEFAULT_RUNNER_SHUTDOWN_BACKOFF_MS
+  describe ".default_max_jobs" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_max_jobs)
+      example.run
+      described_class.default_max_jobs = original
+    end
+
+    it "defaults to 25" do
+      described_class.default_max_jobs = nil
+      expect(described_class.default_max_jobs).to eq(25)
+    end
+
+    it "accepts a positive Integer" do
+      described_class.default_max_jobs = 50
+      expect(described_class.default_max_jobs).to eq(50)
+    end
+
+    it "coerces a numeric String to Integer" do
+      described_class.default_max_jobs = "100"
+      expect(described_class.default_max_jobs).to eq(100)
+    end
+
+    it "rejects zero" do
+      expect { described_class.default_max_jobs = 0 }.to raise_error(ArgumentError, /must be positive/)
+    end
+
+    it "rejects negative values" do
+      expect { described_class.default_max_jobs = -1 }.to raise_error(ArgumentError, /must be positive/)
+    end
+
+    it "rejects non-Integer types" do
+      expect { described_class.default_max_jobs = 5.5 }.to raise_error(ArgumentError, /default_max_jobs/)
+    end
+
+    it "resets to default when set to nil" do
+      described_class.default_max_jobs = 50
+      described_class.default_max_jobs = nil
+      expect(described_class.default_max_jobs).to eq(25)
+    end
   end
 
   describe ".default_input_required" do
@@ -315,6 +351,28 @@ RSpec.describe Busybee do
 
     it "rejects non-boolean values" do
       expect { described_class.default_output_required = 0 }.to raise_error(ArgumentError, /default_output_required/)
+    end
+  end
+
+  describe ".default_queue_enabled" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_queue_enabled)
+      example.run
+      described_class.default_queue_enabled = original
+    end
+
+    it "defaults to true" do
+      described_class.default_queue_enabled = nil
+      expect(described_class.default_queue_enabled).to be(true)
+    end
+
+    it "can be set to false" do
+      described_class.default_queue_enabled = false
+      expect(described_class.default_queue_enabled).to be(false)
+    end
+
+    it "rejects non-boolean values" do
+      expect { described_class.default_queue_enabled = "true" }.to raise_error(ArgumentError, /default_queue_enabled/)
     end
   end
 

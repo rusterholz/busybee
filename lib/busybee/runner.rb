@@ -8,7 +8,9 @@ module Busybee
   #
   # Subclasses must implement #run! to define their job-fetching loop.
   class Runner
-    def initialize(client: nil)
+    def initialize(worker_class = nil, runtime_config: nil, client: nil)
+      @worker_class = worker_class
+      @runtime_config = runtime_config
       @client = client || Busybee::Client.new
       @stop_requested = Concurrent::AtomicBoolean.new(false)
       @running = Concurrent::AtomicBoolean.new(false)
@@ -55,7 +57,7 @@ module Busybee
           Multi.new(worker_classes, runtime_config: runtime_config, client: client)
         else
           resolved = runtime_config.resolve_for(worker_classes.first)
-          runner_class_for(resolved).new(worker_classes.first, client: client)
+          runner_class_for(resolved).new(worker_classes.first, runtime_config: resolved, client: client)
         end
       end
 
@@ -68,7 +70,7 @@ module Busybee
         when :hybrid then Hybrid
         else
           raise ArgumentError,
-                "Invalid runner mode: #{resolved_mode.inspect}. Valid: :polling, :streaming, :hybrid"
+                "Invalid runner mode: #{resolved_config.runner_mode.inspect}. Valid: :polling, :streaming, :hybrid"
         end
       end
     end
@@ -76,21 +78,15 @@ module Busybee
     private
 
     # Fails a job during graceful shutdown, preserving its retry count.
-    # Uses the greater of runner_shutdown_backoff and the worker's configured backoff,
-    # ensuring job types that need long backoffs always get them.
+    # Uses the worker's configured backoff (or gem default).
     def handle_shutdown_job(job)
       job.fail!(
         "Worker shutting down",
         retries: job.retries,
-        backoff: shutdown_backoff
+        backoff: @runtime_config.backoff
       )
     rescue StandardError => e
       Busybee.logger&.warn("Failed to fail job #{job.key} during shutdown: #{e.message}")
-    end
-
-    def shutdown_backoff
-      worker_backoff = @worker_class.configuration.backoff || Busybee.default_fail_job_backoff
-      [Busybee.runner_shutdown_backoff, worker_backoff].max
     end
   end
 end

@@ -110,6 +110,14 @@ RSpec.describe Busybee::Runner do
         expect(runner.instance_variable_get(:@client)).to be(default_client)
       end
 
+      it "passes resolved runtime_config to the runner" do
+        rc = Busybee::RuntimeConfig.new(runner_mode: :polling, max_jobs: 42)
+        runner = described_class.for(worker_class, runtime_config: rc, client: client)
+        resolved_config = runner.instance_variable_get(:@runtime_config)
+        expect(resolved_config.max_jobs).to eq(42)
+        expect(resolved_config.runner_mode).to eq(:polling)
+      end
+
       it "raises ArgumentError for invalid resolved mode" do
         worker_class.instance_variable_get(:@configuration).instance_variable_set(:@runner_mode, :invalid)
         expect { described_class.for(worker_class, client: client) }.
