@@ -3,10 +3,11 @@
 require "concurrent"
 
 RSpec.describe Busybee::Runner::Hybrid, :integration do
-  subject(:runner) { described_class.new(worker_class, client: client) }
+  subject(:runner) { described_class.new(worker_class, runtime_config: runtime_config, client: client) }
 
   let(:job_bpmn_path) { File.expand_path("../../fixtures/job_process.bpmn", __dir__) }
   let(:client) { local_busybee_client }
+  let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
   let(:performed_job_keys) { Concurrent::Array.new }
 
   # max_jobs: 3 forces multiple poll cycles during drain — 10 jobs = 4 polls (3+3+3+1).
