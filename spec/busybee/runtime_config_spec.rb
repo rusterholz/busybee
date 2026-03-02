@@ -468,15 +468,15 @@ RSpec.describe Busybee::RuntimeConfig do
       )
     end
 
-    it "parses workers key into per-worker overrides" do
+    it "parses workers list into per-worker overrides" do
       path = write_yaml("workers.yml", <<~YAML)
         runner_mode: hybrid
         workers:
-          OrderProcessor:
-            runner_mode: polling
-            max_jobs: 5
-          NotificationSender:
-            runner_mode: streaming
+          - OrderProcessor:
+              runner_mode: polling
+              max_jobs: 5
+          - NotificationSender:
+              runner_mode: streaming
       YAML
       result = described_class.parse_yaml(path)
       expect(result[:workers]).to eq(
@@ -490,13 +490,56 @@ RSpec.describe Busybee::RuntimeConfig do
         runner_mode: polling
         max_jobs: 10
         workers:
-          TestWorker:
-            runner_mode: streaming
+          - TestWorker:
+              runner_mode: streaming
       YAML
       result = described_class.parse_yaml(path)
       config = described_class.new(**result)
       expect(config.runner_mode).to eq(:polling)
       expect(config.max_jobs).to eq(10)
+    end
+
+    it "parses bare string workers with no overrides" do
+      path = write_yaml("bare_workers.yml", <<~YAML)
+        workers:
+          - SimpleWorker
+          - AnotherWorker
+      YAML
+      result = described_class.parse_yaml(path)
+      expect(result[:workers]).to eq(
+        "SimpleWorker" => {},
+        "AnotherWorker" => {}
+      )
+    end
+
+    it "parses mixed list of bare strings and workers with overrides" do
+      path = write_yaml("mixed.yml", <<~YAML)
+        max_jobs: 10
+        workers:
+          - SimpleWorker
+          - TunedWorker:
+              max_jobs: 32
+          - AnotherSimpleWorker
+      YAML
+      result = described_class.parse_yaml(path)
+      expect(result[:workers]).to eq(
+        "SimpleWorker" => {},
+        "TunedWorker" => { max_jobs: 32 },
+        "AnotherSimpleWorker" => {}
+      )
+    end
+
+    it "handles flat override syntax (overrides as sibling keys)" do
+      path = write_yaml("flat.yml", <<~YAML)
+        workers:
+          - OrderProcessor:
+            runner_mode: polling
+            max_jobs: 5
+      YAML
+      result = described_class.parse_yaml(path)
+      expect(result[:workers]).to eq(
+        "OrderProcessor" => { runner_mode: "polling", max_jobs: 5 }
+      )
     end
 
     it "returns empty hash for YAML with no keys" do
@@ -516,8 +559,8 @@ RSpec.describe Busybee::RuntimeConfig do
     it "symbolizes per-worker override keys but keeps worker names as strings" do
       path = write_yaml("worker_keys.yml", <<~YAML)
         workers:
-          MyWorker:
-            max_jobs: 10
+          - MyWorker:
+              max_jobs: 10
       YAML
       result = described_class.parse_yaml(path)
       expect(result[:workers].keys).to eq(["MyWorker"])
@@ -575,9 +618,9 @@ RSpec.describe Busybee::RuntimeConfig do
       it "rejects unrecognized per-worker override keys" do
         path = write_yaml("bad_worker_key.yml", <<~YAML)
           workers:
-            MyWorker:
-              runner_mode: polling
-              bogus_setting: true
+            - MyWorker:
+                runner_mode: polling
+                bogus_setting: true
         YAML
         expect { described_class.parse_yaml(path) }.to raise_error(
           ArgumentError, /unrecognized.*MyWorker.*bogus_setting/i

@@ -157,7 +157,7 @@ The `job.ready?` guard on both auto-complete and auto-fail respects manual `comp
 
 `Busybee::RuntimeConfig` holds operator-specified overrides, typically from CLI flags or YAML config. It has a two-phase lifecycle:
 
-1. **Constructed sparse** — only fields the operator explicitly set. Per-worker overrides keyed by class name. This is the YAML-shaped input.
+1. **Constructed sparse** — only fields the operator explicitly set. Per-worker overrides keyed by class name.
 2. **Resolved via `resolve_for(worker_class)`** — returns a new RuntimeConfig with all values populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
 
 Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every field set.
@@ -210,6 +210,18 @@ Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit va
 `RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `runner_mode`).
 
 **Valid YAML keys:** All runner-scoped fields (`runner_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `queue_enabled`, `queue_throttle`, `job_timeout`, `backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
+
+**Workers format:** The `workers` key is a YAML list. Each entry is either a bare string (worker class name, no overrides) or a mapping with the worker name as key and overrides nested beneath it:
+
+```yaml
+workers:
+  - SimpleWorker
+  - TunedWorker:
+      max_jobs: 32
+      runner_mode: polling
+```
+
+`parse_workers` normalizes both forms into a hash keyed by worker name: `{ "SimpleWorker" => {}, "TunedWorker" => { max_jobs: 32, runner_mode: :polling } }`.
 
 **Validation:** `parse_yaml` validates top-level keys (rejects unrecognized keys and process-wide fields) and per-worker override keys (rejects anything not in the runner-scoped set). Errors include the invalid key name and list valid options.
 

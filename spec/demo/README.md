@@ -17,6 +17,7 @@ Other commands:
 ```bash
 bin/demo stop       # Stop containers, keep data
 bin/demo clean      # Stop and destroy everything
+bin/demo test       # Smoke test: start, run 5 orders, tear down
 bin/demo status     # Show containers + order status counts
 ```
 
@@ -104,7 +105,8 @@ This process demonstrates **parallel data loading with backoff/retry**, **condit
 Docker Compose runs the full stack: Zeebe (with Elasticsearch for storage), a Rails web server, 4 worker processes (one per domain), and an optional clockwork process for auto-ordering.
 
 - **Database**: SQLite with WAL mode. Single file, shared across containers via a Docker volume.
-- **Workers**: Each domain runs as a separate `busybee` CLI process. Workers are single-threaded (MRI), but the Sim workers use `Concurrent::Promises` for non-blocking delays.
+- **Workers**: Each domain runs as a separate `busybee` CLI process, configured via per-domain YAML files in `config/busybee/`. Workers are single-threaded (MRI), but the Sim workers use `Concurrent::Promises` for non-blocking delays.
+- **YAML configuration**: Worker containers use `busybee --config config/busybee/<domain>.yml` instead of listing class names on the command line. Each YAML file defines which workers run in that process and any per-worker tuning (e.g., higher `max_jobs` for the bottleneck `LoadItemAvailabilityWorker`). See `config/busybee/` for examples.
 - **Process chaining**: `prepare_order` → `ship_order` → `deliver_shipment` are chained via ActiveRecord `after_commit` callbacks, not BPMN call activities.
 - **Speed scaling**: The `DEMO_SPEED` env var (set via `--speed` flag) scales all timing — order creation rate, worker delays, backoff intervals, and fleet dynamics parameters.
 

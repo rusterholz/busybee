@@ -1,0 +1,11 @@
+# Logistics domain workers — shipment planning and fulfillment.
+
+workers:
+  - Logistics::LoadWarehousesWorker
+  - Logistics::LoadItemAvailabilityWorker
+  - Logistics::PlanShipmentsWorker
+  - Logistics::CreateShipmentWorker
+  - Logistics::LoadOrderShipmentsWorker
+  - Logistics::MarkShipmentPackedWorker
+  - Logistics::MarkShipmentInTransitWorker
+  - Logistics::MarkShipmentDeliveredWorker

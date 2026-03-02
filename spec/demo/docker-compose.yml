@@ -88,7 +88,7 @@ services:
   workers_oms:
     <<: *app
     container_name: busybee-demo-workers-oms
-    command: bundle exec busybee Oms::LoadOrderAddressWorker Oms::MarkOrderPreparedWorker Oms::MarkOrderPackedWorker Oms::MarkOrderShippingWorker Oms::MarkOrderFulfilledWorker
+    command: bundle exec busybee --config config/busybee/oms.yml
     depends_on:
       zeebe:
         condition: service_healthy
@@ -96,7 +96,7 @@ services:
   workers_logistics:
     <<: *app
     container_name: busybee-demo-workers-logistics
-    command: bundle exec busybee Logistics::LoadWarehousesWorker Logistics::LoadItemAvailabilityWorker Logistics::PlanShipmentsWorker Logistics::CreateShipmentWorker Logistics::LoadOrderShipmentsWorker Logistics::MarkShipmentPackedWorker Logistics::MarkShipmentInTransitWorker Logistics::MarkShipmentDeliveredWorker
+    command: bundle exec busybee --config config/busybee/logistics.yml
     depends_on:
       zeebe:
         condition: service_healthy
@@ -104,7 +104,7 @@ services:
   workers_delivery:
     <<: *app
     container_name: busybee-demo-workers-delivery
-    command: bundle exec busybee Delivery::CalculateDistanceWorker Delivery::AssignDriverWorker Delivery::CompleteDriverDeliveryWorker
+    command: bundle exec busybee --config config/busybee/delivery.yml
     depends_on:
       zeebe:
         condition: service_healthy
@@ -112,7 +112,7 @@ services:
   workers_sim:
     <<: *app
     container_name: busybee-demo-workers-sim
-    command: bundle exec busybee Sim::PickAndPackWorker Sim::DeliveryRunWorker
+    command: bundle exec busybee --config config/busybee/sim.yml
     depends_on:
       zeebe:
         condition: service_healthy

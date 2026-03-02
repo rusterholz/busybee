@@ -9,6 +9,8 @@ set -euo pipefail
 #   bin/demo start --manual     Start without auto-ordering (no clockwork)
 #   bin/demo stop               Stop containers, preserve data
 #   bin/demo clean              Stop and destroy volumes/data
+#   bin/demo test               Smoke test: start stack, run 25 orders, tear down
+#   bin/demo test 20            Smoke test with 20 orders
 #   bin/demo status             Show running containers and order counts
 
 DEMO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +23,7 @@ Commands:
   start [--speed N] [--manual]   Start the Docker stack
   stop                           Stop containers (preserves data)
   clean                          Stop and destroy all data
+  test [N]                       Smoke test: start, run N orders (default: 25), tear down
   status                         Show container and order status
 
 Options for start:
@@ -70,6 +73,49 @@ cmd_clean() {
   docker compose --profile auto down -v
 }
 
+cmd_test() {
+  local count="${1:-25}"
+  local speed=30
+  cd "$DEMO_DIR"
+
+  echo "Smoke test: ${count} orders at speed ${speed}"
+  echo ""
+
+  # Start a clean stack at high speed for fast feedback
+  echo "Starting demo stack..."
+  DEMO_SPEED="$speed" docker compose up -d --build
+  echo ""
+
+  # Wait for web to be healthy
+  echo "Waiting for stack to be ready..."
+  local deadline=$((SECONDS + 120))
+  while ! docker compose exec -T web curl -sf http://localhost:3000/orders > /dev/null 2>&1; do
+    if (( SECONDS > deadline )); then
+      echo "Timed out waiting for demo stack to become healthy" >&2
+      docker compose down -v
+      exit 1
+    fi
+    sleep 2
+  done
+
+  # Run the smoke test
+  echo "Running orders through the pipeline..."
+  local result=0
+  docker compose exec -T web bin/rails "demo:run_orders[${count}]" || result=$?
+
+  # Clean up
+  echo ""
+  echo "Tearing down demo stack..."
+  docker compose down -v
+
+  if (( result != 0 )); then
+    echo "SMOKE TEST FAILED" >&2
+    exit "$result"
+  fi
+
+  echo "SMOKE TEST PASSED"
+}
+
 cmd_status() {
   cd "$DEMO_DIR"
   docker compose ps
@@ -97,6 +143,7 @@ case "$command" in
   start)  cmd_start "$@" ;;
   stop)   cmd_stop ;;
   clean)  cmd_clean ;;
+  test)   cmd_test "$@" ;;
   status) cmd_status ;;
   *)      usage ;;
 esac

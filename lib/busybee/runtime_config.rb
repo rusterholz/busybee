@@ -58,16 +58,33 @@ module Busybee
     end
     private_class_method :validate_yaml_key!
 
-    def self.parse_workers(workers_hash)
-      return {} unless workers_hash
+    def self.parse_workers(workers_list)
+      return {} unless workers_list
 
-      workers_hash.each_with_object({}) do |(name, overrides), acc|
-        symbolized = (overrides || {}).transform_keys(&:to_sym)
-        validate_worker_override_keys!(name, symbolized)
-        acc[name.to_s] = symbolized
+      workers_list.each_with_object({}) do |entry, acc|
+        name, overrides = case entry
+                          when String then [entry, {}]
+                          when Hash   then extract_worker_entry(entry)
+                          end
+        validate_worker_override_keys!(name, overrides)
+        acc[name.to_s] = overrides
       end
     end
     private_class_method :parse_workers
+
+    # A worker entry hash comes in two forms depending on YAML indentation:
+    #   Nested:  { "Worker" => { "max_jobs" => 32 } }
+    #   Flat:    { "Worker" => nil, "max_jobs" => 32 }
+    def self.extract_worker_entry(hash)
+      first_key, first_value = hash.first
+      if first_value.is_a?(Hash)
+        [first_key, first_value.transform_keys(&:to_sym)]
+      else
+        overrides = hash.compact.transform_keys(&:to_sym)
+        [first_key, overrides]
+      end
+    end
+    private_class_method :extract_worker_entry
 
     def self.validate_worker_override_keys!(worker_name, overrides)
       unknown = overrides.keys - RUNNER_SCOPED_KEYS

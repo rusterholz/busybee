@@ -1,0 +1,12 @@
+# Simulation workers — non-blocking, manage their own job lifecycle.
+#
+# These workers use semaphores to limit concurrency and sleep to simulate
+# real-world delays. The long job_timeout (5 minutes) covers semaphore
+# wait time; the DSL sets complete_job_on_success and fail_job_on_error
+# to false since these workers call complete!/fail! manually.
+
+job_timeout: 300000
+
+workers:
+  - Sim::PickAndPackWorker
+  - Sim::DeliveryRunWorker
