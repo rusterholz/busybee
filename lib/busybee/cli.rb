@@ -15,8 +15,9 @@ module Busybee
       @parsed_options = {}
       parse_options!(args.dup)
       load_environment!
+      extract_workers_from_yaml! if @parsed_options[:config_file]
       load_workers!
-      @runtime_config = RuntimeConfig.new(**@parsed_options)
+      build_config!
       apply_global_config!
     end
 
@@ -64,6 +65,24 @@ module Busybee
                             "Set BUSYBEE_SKIP_RAILS=1 to skip Rails loading.")
     end
 
+    def extract_workers_from_yaml!
+      @yaml_kwargs = RuntimeConfig.parse_yaml(@parsed_options[:config_file])
+      @worker_class_names = (@yaml_kwargs[:workers] || {}).keys
+    end
+
+    def build_config!
+      if @yaml_kwargs
+        kwargs = @yaml_kwargs.dup
+        # Merge CLI process-wide flags into YAML-sourced kwargs
+        %i[log_format worker_name cluster_address].each do |field|
+          kwargs[field] = @parsed_options[field] if @parsed_options[field]
+        end
+        @runtime_config = RuntimeConfig.new(**kwargs)
+      else
+        @runtime_config = RuntimeConfig.new(**@parsed_options)
+      end
+    end
+
     def load_workers!
       raise Busybee::NoWorkersSpecified, "No worker classes specified" if @worker_class_names.empty?
 
@@ -77,6 +96,21 @@ module Busybee
     def parse_options!(args)
       option_parser.parse!(args)
       @worker_class_names = args
+      validate_config_exclusions!
+    end
+
+    def validate_config_exclusions!
+      return unless @parsed_options[:config_file]
+
+      if @parsed_options[:runner_mode]
+        raise ArgumentError, "--config and --runner-mode are mutually exclusive. " \
+                             "Set runner_mode in the YAML config file instead."
+      end
+
+      return if @worker_class_names.empty?
+
+      raise ArgumentError, "--config and positional worker args are mutually exclusive. " \
+                           "List workers in the YAML config file instead."
     end
 
     def option_parser # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
@@ -91,6 +125,10 @@ module Busybee
         opts.on("-h", "--help", "Print this help message and exit") do
           puts opts
           exit
+        end
+
+        opts.on("-c", "--config FILE", "YAML configuration file") do |file|
+          @parsed_options[:config_file] = file
         end
 
         opts.on("-m", "--runner-mode MODE", "Runner mode (polling, streaming, hybrid)") do |mode|

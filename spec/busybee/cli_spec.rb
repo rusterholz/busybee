@@ -101,6 +101,139 @@ RSpec.describe Busybee::CLI do
       end
     end
 
+    context "with --config flag" do
+      let(:yaml_dir) { File.join(__dir__, "..", "..", "tmp", "yaml_fixtures") }
+
+      before { FileUtils.mkdir_p(yaml_dir) }
+
+      after { FileUtils.rm_rf(yaml_dir) }
+
+      def write_yaml(filename, content)
+        path = File.join(yaml_dir, filename)
+        File.write(path, content)
+        path
+      end
+
+      it "stores config_file path from -c" do
+        cli = described_class.allocate
+        cli.send(:instance_variable_set, :@worker_class_names, [])
+        cli.send(:instance_variable_set, :@parsed_options, {})
+        cli.send(:parse_options!, ["-c", "config/busybee.yml"])
+        expect(cli.instance_variable_get(:@parsed_options)[:config_file]).to eq("config/busybee.yml")
+      end
+
+      it "raises when --config and --runner-mode are both provided" do
+        expect do
+          described_class.new(["--config", "config/busybee.yml", "--runner-mode", "polling"])
+        end.to raise_error(ArgumentError, /--config.*--runner-mode.*mutually exclusive/i)
+      end
+
+      it "raises when --config and positional worker args are both provided" do
+        expect do
+          described_class.new(["--config", "config/busybee.yml", "TestCLIWorker"])
+        end.to raise_error(ArgumentError, /--config.*positional.*mutually exclusive/i)
+      end
+
+      it "allows process-wide flags alongside --config without mutual exclusion error" do
+        yaml_path = write_yaml("process_wide.yml", <<~YAML)
+          runner_mode: polling
+          workers:
+            TestCLIWorker: {}
+        YAML
+        expect do
+          described_class.new(["-c", yaml_path, "-l", "json", "-n", "my-worker"])
+        end.not_to raise_error
+      end
+
+      it "loads worker classes from YAML workers keys" do
+        path = write_yaml("workers.yml", <<~YAML)
+          workers:
+            TestCLIWorker: {}
+        YAML
+        cli = described_class.new(["-c", path])
+        expect(cli.worker_classes).to eq([TestCLIWorker])
+      end
+
+      it "loads multiple worker classes from YAML" do
+        stub_const("SecondCLIWorker", second_worker_class)
+        path = write_yaml("multi.yml", <<~YAML)
+          workers:
+            TestCLIWorker:
+              runner_mode: polling
+            SecondCLIWorker:
+              runner_mode: streaming
+        YAML
+        cli = described_class.new(["-c", path])
+        expect(cli.worker_classes).to contain_exactly(TestCLIWorker, SecondCLIWorker)
+      end
+
+      it "builds RuntimeConfig from YAML runner-scoped fields" do
+        path = write_yaml("runner.yml", <<~YAML)
+          runner_mode: hybrid
+          max_jobs: 20
+          workers:
+            TestCLIWorker: {}
+        YAML
+        cli = described_class.new(["-c", path])
+        expect(cli.runtime_config).to have_attributes(runner_mode: :hybrid, max_jobs: 20)
+      end
+
+      it "includes per-worker overrides from YAML in RuntimeConfig" do
+        path = write_yaml("per_worker.yml", <<~YAML)
+          runner_mode: hybrid
+          workers:
+            TestCLIWorker:
+              runner_mode: polling
+              max_jobs: 5
+        YAML
+        cli = described_class.new(["-c", path])
+        resolved = cli.runtime_config.resolve_for(worker_class)
+        expect(resolved).to have_attributes(runner_mode: :polling, max_jobs: 5)
+      end
+
+      it "merges CLI process-wide flags into YAML config" do
+        path = write_yaml("merge.yml", <<~YAML)
+          runner_mode: polling
+          workers:
+            TestCLIWorker: {}
+        YAML
+        cli = described_class.new(["-c", path, "-l", "json", "-n", "my-worker", "-a", "zeebe:26500"])
+        expect(cli.runtime_config).to have_attributes(
+          log_format: :json,
+          worker_name: "my-worker",
+          cluster_address: "zeebe:26500"
+        )
+      end
+
+      it "applies process-wide flags to gem config" do
+        path = write_yaml("apply.yml", <<~YAML)
+          workers:
+            TestCLIWorker: {}
+        YAML
+        described_class.new(["-c", path, "-l", "json"])
+        expect(Busybee.log_format).to eq(:json)
+      end
+
+      it "raises when YAML specifies an unknown worker class" do
+        path = write_yaml("bad_worker.yml", <<~YAML)
+          workers:
+            NonexistentWorker: {}
+        YAML
+        expect do
+          described_class.new(["-c", path])
+        end.to raise_error(Busybee::WorkerNotFound, /NonexistentWorker/)
+      end
+
+      it "raises when YAML has no workers key" do
+        path = write_yaml("no_workers.yml", <<~YAML)
+          runner_mode: polling
+        YAML
+        expect do
+          described_class.new(["-c", path])
+        end.to raise_error(Busybee::NoWorkersSpecified)
+      end
+    end
+
     context "with Rails environment loading" do
       it "requires config/environment when Rails is available" do
         loaded_paths = []

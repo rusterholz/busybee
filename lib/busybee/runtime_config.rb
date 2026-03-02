@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "yaml"
+
 module Busybee
   # Operator-specified runtime configuration, typically from CLI flags or YAML.
   #
@@ -17,6 +19,65 @@ module Busybee
   # Runners hold the resolved config at runtime.
   class RuntimeConfig
     VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
+    VALID_LOG_FORMATS = %i[text json].freeze
+
+    # Top-level keys allowed in YAML config (runner-scoped fields + workers).
+    RUNNER_SCOPED_KEYS = %i[runner_mode backpressure_delay max_jobs request_timeout
+                            queue_enabled queue_throttle job_timeout backoff].freeze
+    VALID_YAML_KEYS = (RUNNER_SCOPED_KEYS + %i[workers]).freeze
+    PROCESS_WIDE_KEYS = %i[log_format worker_name cluster_address].freeze
+
+    # Parses a YAML config file and returns a kwargs hash suitable for
+    # RuntimeConfig.new(**result). Raw YAML types flow through — the
+    # constructor handles coercion (e.g., string → symbol for runner_mode).
+    def self.parse_yaml(path)
+      raw = YAML.safe_load_file(path) || {}
+      result = {}
+
+      raw.each do |key, value|
+        sym_key = key.to_sym
+        validate_yaml_key!(sym_key)
+        if sym_key == :workers
+          result[:workers] = parse_workers(value)
+        else
+          result[sym_key] = value
+        end
+      end
+
+      result
+    end
+
+    def self.validate_yaml_key!(key)
+      if PROCESS_WIDE_KEYS.include?(key)
+        raise ArgumentError, "#{key} is CLI-only and cannot be set in YAML. Use the corresponding CLI flag instead."
+      end
+      return if VALID_YAML_KEYS.include?(key)
+
+      raise ArgumentError,
+            "Unrecognized YAML key: #{key}. Valid keys: #{VALID_YAML_KEYS.join(', ')}"
+    end
+    private_class_method :validate_yaml_key!
+
+    def self.parse_workers(workers_hash)
+      return {} unless workers_hash
+
+      workers_hash.each_with_object({}) do |(name, overrides), acc|
+        symbolized = (overrides || {}).transform_keys(&:to_sym)
+        validate_worker_override_keys!(name, symbolized)
+        acc[name.to_s] = symbolized
+      end
+    end
+    private_class_method :parse_workers
+
+    def self.validate_worker_override_keys!(worker_name, overrides)
+      unknown = overrides.keys - RUNNER_SCOPED_KEYS
+      return if unknown.empty?
+
+      raise ArgumentError,
+            "Unrecognized override keys for #{worker_name}: #{unknown.join(', ')}. " \
+            "Valid keys: #{RUNNER_SCOPED_KEYS.join(', ')}"
+    end
+    private_class_method :validate_worker_override_keys!
 
     # Runner-scoped fields (CLI: runner_mode only; all configurable via YAML)
     attr_reader :runner_mode, :backpressure_delay, :max_jobs, :request_timeout,
@@ -30,8 +91,7 @@ module Busybee
                    job_timeout: nil, backoff: nil,
                    log_format: nil, worker_name: nil, cluster_address: nil,
                    workers: {})
-      validate_runner_mode!(runner_mode) if runner_mode
-      @runner_mode = runner_mode
+      @runner_mode = coerce_symbol!(runner_mode, VALID_RUNNER_MODES, "runner mode") if runner_mode
       @backpressure_delay = backpressure_delay
       @max_jobs = max_jobs
       @request_timeout = request_timeout
@@ -39,11 +99,14 @@ module Busybee
       @queue_throttle = queue_throttle
       @job_timeout = job_timeout
       @backoff = backoff
-      @log_format = log_format
+      @log_format = coerce_symbol!(log_format, VALID_LOG_FORMATS, "log format") if log_format
       @worker_name = worker_name
       @cluster_address = cluster_address
       @workers = workers.each_with_object({}) do |(name, overrides), validated|
-        validate_runner_mode!(overrides[:runner_mode]) if overrides[:runner_mode]
+        if overrides[:runner_mode]
+          mode = coerce_symbol!(overrides[:runner_mode], VALID_RUNNER_MODES, "runner mode")
+          overrides = overrides.merge(runner_mode: mode)
+        end
         validated[name.to_s] = overrides
       end
     end
@@ -93,11 +156,12 @@ module Busybee
       values.find { |v| !v.nil? }
     end
 
-    def validate_runner_mode!(value)
-      return if VALID_RUNNER_MODES.include?(value)
+    def coerce_symbol!(value, valid_set, label)
+      sym = value.to_s.to_sym
+      return sym if valid_set.include?(sym)
 
       raise ArgumentError,
-            "Invalid runner mode: #{value.inspect}. Valid: #{VALID_RUNNER_MODES.map(&:inspect).join(', ')}"
+            "Invalid #{label}: #{value.inspect}. Valid: #{valid_set.map(&:inspect).join(', ')}"
     end
   end
 end

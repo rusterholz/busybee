@@ -94,6 +94,46 @@ RSpec.describe Busybee::RuntimeConfig do
       expect { described_class.new(workers: { "TestWorker" => { runner_mode: :bogus } }) }.
         to raise_error(ArgumentError, /Invalid runner mode.*:bogus/)
     end
+
+    context "with string inputs (YAML compatibility)" do
+      it "coerces string runner_mode to symbol" do
+        config = described_class.new(runner_mode: "polling")
+        expect(config.runner_mode).to eq(:polling)
+      end
+
+      it "rejects invalid string runner_mode" do
+        expect { described_class.new(runner_mode: "bogus") }.
+          to raise_error(ArgumentError, /Invalid runner mode/)
+      end
+
+      it "coerces string log_format to symbol" do
+        config = described_class.new(log_format: "json")
+        expect(config.log_format).to eq(:json)
+      end
+
+      it "rejects invalid string log_format" do
+        expect { described_class.new(log_format: "xml") }.
+          to raise_error(ArgumentError, /Invalid log format/)
+      end
+
+      it "coerces per-worker string runner_mode to symbol" do
+        config = described_class.new(
+          workers: { "TestWorker" => { runner_mode: "streaming" } }
+        )
+        resolved = config.resolve_for(worker_class)
+        expect(resolved.runner_mode).to eq(:streaming)
+      end
+
+      it "still accepts symbol runner_mode" do
+        config = described_class.new(runner_mode: :hybrid)
+        expect(config.runner_mode).to eq(:hybrid)
+      end
+
+      it "still accepts symbol log_format" do
+        config = described_class.new(log_format: :json)
+        expect(config.log_format).to eq(:json)
+      end
+    end
   end
 
   describe "#resolve_for" do
@@ -378,6 +418,171 @@ RSpec.describe Busybee::RuntimeConfig do
       )
       resolved = config.resolve_for(other_worker)
       expect(resolved).to have_attributes(runner_mode: :hybrid, max_jobs: 50)
+    end
+  end
+
+  describe ".parse_yaml" do
+    let(:yaml_dir) { File.join(__dir__, "..", "..", "tmp", "yaml_fixtures") }
+
+    before { FileUtils.mkdir_p(yaml_dir) }
+
+    def write_yaml(filename, content)
+      path = File.join(yaml_dir, filename)
+      File.write(path, content)
+      path
+    end
+
+    after { FileUtils.rm_rf(yaml_dir) }
+
+    it "parses top-level runner-scoped keys into kwargs" do
+      path = write_yaml("basic.yml", <<~YAML)
+        runner_mode: hybrid
+        max_jobs: 20
+        backpressure_delay: 5000
+      YAML
+      result = described_class.parse_yaml(path)
+      expect(result).to eq(runner_mode: "hybrid", max_jobs: 20, backpressure_delay: 5000)
+    end
+
+    it "parses all runner-scoped keys" do # rubocop:disable RSpec/ExampleLength
+      path = write_yaml("all_runner.yml", <<~YAML)
+        runner_mode: polling
+        backpressure_delay: 3000
+        max_jobs: 10
+        request_timeout: 30000
+        queue_enabled: true
+        queue_throttle: 500
+        job_timeout: 90000
+        backoff: 15000
+      YAML
+      result = described_class.parse_yaml(path)
+      expect(result).to include(
+        runner_mode: "polling",
+        backpressure_delay: 3000,
+        max_jobs: 10,
+        request_timeout: 30_000,
+        queue_enabled: true,
+        queue_throttle: 500,
+        job_timeout: 90_000,
+        backoff: 15_000
+      )
+    end
+
+    it "parses workers key into per-worker overrides" do
+      path = write_yaml("workers.yml", <<~YAML)
+        runner_mode: hybrid
+        workers:
+          OrderProcessor:
+            runner_mode: polling
+            max_jobs: 5
+          NotificationSender:
+            runner_mode: streaming
+      YAML
+      result = described_class.parse_yaml(path)
+      expect(result[:workers]).to eq(
+        "OrderProcessor" => { runner_mode: "polling", max_jobs: 5 },
+        "NotificationSender" => { runner_mode: "streaming" }
+      )
+    end
+
+    it "returns kwargs usable by RuntimeConfig.new" do
+      path = write_yaml("usable.yml", <<~YAML)
+        runner_mode: polling
+        max_jobs: 10
+        workers:
+          TestWorker:
+            runner_mode: streaming
+      YAML
+      result = described_class.parse_yaml(path)
+      config = described_class.new(**result)
+      expect(config.runner_mode).to eq(:polling)
+      expect(config.max_jobs).to eq(10)
+    end
+
+    it "returns empty hash for YAML with no keys" do
+      path = write_yaml("empty.yml", "")
+      result = described_class.parse_yaml(path)
+      expect(result).to eq({})
+    end
+
+    it "symbolizes top-level keys" do
+      path = write_yaml("string_keys.yml", <<~YAML)
+        runner_mode: hybrid
+      YAML
+      result = described_class.parse_yaml(path)
+      expect(result.keys).to all(be_a(Symbol))
+    end
+
+    it "symbolizes per-worker override keys but keeps worker names as strings" do
+      path = write_yaml("worker_keys.yml", <<~YAML)
+        workers:
+          MyWorker:
+            max_jobs: 10
+      YAML
+      result = described_class.parse_yaml(path)
+      expect(result[:workers].keys).to eq(["MyWorker"])
+      expect(result[:workers]["MyWorker"].keys).to all(be_a(Symbol))
+    end
+
+    context "with invalid YAML content" do
+      it "rejects unrecognized top-level keys" do
+        path = write_yaml("bad_key.yml", <<~YAML)
+          runner_mode: polling
+          typo_key: 42
+        YAML
+        expect { described_class.parse_yaml(path) }.to raise_error(
+          ArgumentError, /unrecognized.*typo_key/i
+        )
+      end
+
+      it "lists valid keys in the error for unrecognized top-level keys" do
+        path = write_yaml("bad_key2.yml", <<~YAML)
+          nope: true
+        YAML
+        expect { described_class.parse_yaml(path) }.to raise_error(
+          ArgumentError, /runner_mode.*workers/
+        )
+      end
+
+      it "rejects process-wide fields in YAML (log_format)" do
+        path = write_yaml("log_format.yml", <<~YAML)
+          runner_mode: polling
+          log_format: json
+        YAML
+        expect { described_class.parse_yaml(path) }.to raise_error(
+          ArgumentError, /log_format.*CLI-only/i
+        )
+      end
+
+      it "rejects process-wide fields in YAML (worker_name)" do
+        path = write_yaml("worker_name.yml", <<~YAML)
+          worker_name: my-worker
+        YAML
+        expect { described_class.parse_yaml(path) }.to raise_error(
+          ArgumentError, /worker_name.*CLI-only/i
+        )
+      end
+
+      it "rejects process-wide fields in YAML (cluster_address)" do
+        path = write_yaml("cluster.yml", <<~YAML)
+          cluster_address: zeebe:26500
+        YAML
+        expect { described_class.parse_yaml(path) }.to raise_error(
+          ArgumentError, /cluster_address.*CLI-only/i
+        )
+      end
+
+      it "rejects unrecognized per-worker override keys" do
+        path = write_yaml("bad_worker_key.yml", <<~YAML)
+          workers:
+            MyWorker:
+              runner_mode: polling
+              bogus_setting: true
+        YAML
+        expect { described_class.parse_yaml(path) }.to raise_error(
+          ArgumentError, /unrecognized.*MyWorker.*bogus_setting/i
+        )
+      end
     end
   end
 

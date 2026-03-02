@@ -205,12 +205,22 @@ Gem default (Busybee.*)             (lowest priority)
 
 Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit values (important for `queue_throttle: false` meaning "no throttle" and `backpressure_delay: 0` for testing).
 
+### YAML Parsing
+
+`RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `runner_mode`).
+
+**Valid YAML keys:** All runner-scoped fields (`runner_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `queue_enabled`, `queue_throttle`, `job_timeout`, `backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
+
+**Validation:** `parse_yaml` validates top-level keys (rejects unrecognized keys and process-wide fields) and per-worker override keys (rejects anything not in the runner-scoped set). Errors include the invalid key name and list valid options.
+
+**String-to-symbol coercion:** The constructor accepts strings for `runner_mode` and `log_format` (necessary since `YAML.safe_load` produces strings). Values are validated against the string allowlist before coercion to prevent symbol injection. Both strings and symbols are accepted (backwards-compatible).
+
 ### Integration Points
 
 - **`Runner.for`** accepts `runtime_config:`, calls `resolve_for` to determine runner class and build the resolved config passed to the runner.
 - **`Runner::Multi`** calls `resolve_for` per worker class, so each child runner gets its own resolved config.
-- **CLI** constructs a RuntimeConfig from parsed flags and passes it to `Runner.for`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are applied to gem config during initialization.
-- **YAML config** (Mission 15) will construct a RuntimeConfig from parsed YAML.
+- **CLI** constructs a RuntimeConfig from parsed flags (or YAML config) and passes it to `Runner.for`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are applied to gem config during initialization.
+- **YAML config** (`--config` / `-c`) — `RuntimeConfig.parse_yaml(path)` reads a YAML file and returns a kwargs hash. The CLI merges process-wide CLI flags into the YAML-sourced kwargs and constructs RuntimeConfig from the result.
 
 ## Runner Module
 
@@ -302,17 +312,22 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 ### Lifecycle
 
 1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
-2. **`initialize(args)`** — all setup: parse options (`OptionParser`), load Rails environment, load worker classes, build `RuntimeConfig`, apply process-wide config.
+2. **`initialize(args)`** — all setup: parse options (`OptionParser`), load Rails environment, extract workers from YAML if `--config`, load worker classes, build `RuntimeConfig`, apply process-wide config.
 3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks).
 
 ### CLI Flags
 
-The CLI exposes only 4 flags. Runner-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, queue_enabled, queue_throttle, job_timeout, backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
+The CLI exposes 5 flags. Runner-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, queue_enabled, queue_throttle, job_timeout, backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
 
+- `--config` / `-c` — YAML configuration file path
 - `--runner-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`
 - `--log-format` / `-l` — `:text` or `:json`
 - `--worker-name` / `-n` — worker process identifier
 - `--cluster-address` / `-a` — Zeebe gateway address
+
+**Mutual exclusions:** `--config` is mutually exclusive with `--runner-mode` (set runner_mode in YAML instead) and with positional worker args (list workers in YAML instead). Process-wide flags (`-l`, `-n`, `-a`) are allowed alongside `--config`.
+
+**YAML config flow:** When `--config` is provided, the CLI calls `RuntimeConfig.parse_yaml` to get YAML-sourced kwargs, extracts worker class names from the `workers:` keys, merges CLI process-wide flags into the kwargs, and constructs RuntimeConfig from the result.
 
 **Process-wide application:** `apply_global_config!` applies process-wide flags to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding values already set by the Railtie.
 
