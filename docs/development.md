@@ -209,6 +209,68 @@ If services fail to start or become unresponsive:
 
 The health check task (`rake zeebe:health`) will wait up to 60 seconds for each service to become healthy. If services don't become healthy in that time, check the logs for errors.
 
+## Demo Application
+
+Busybee includes a full-featured demo app at `spec/demo/` — a simulated dropship fulfillment system ("Dropship Co.") that serves as both a showcase of busybee's orchestration capabilities and an integration testbed for gem development.
+
+### Purpose
+
+The demo app exercises busybee features in a realistic Rails application with 18 workers across 4 business domains, 3 BPMN processes with parallel gateways, multi-instance subprocesses, and process chaining. It runs as a Docker Compose stack with its own Zeebe instance, web dashboard, and simulation engine.
+
+See `spec/demo/README.md` for full architecture details and `spec/demo/docs/internal.md` for maintainer notes on simulation tuning and internals.
+
+### Running the Demo
+
+```bash
+# Start the full stack (web + workers + Zeebe + simulation)
+spec/demo/bin/demo start
+
+# Start at higher simulation speed
+spec/demo/bin/demo start --speed 10
+
+# Start without auto-ordering (manual mode)
+spec/demo/bin/demo start --manual
+
+# Check status
+spec/demo/bin/demo status
+
+# Stop (preserves data)
+spec/demo/bin/demo stop
+
+# Stop and destroy all data
+spec/demo/bin/demo clean
+```
+
+The dashboard is at http://localhost:3000 when running.
+
+### Smoke Testing Against the Demo App
+
+After making changes to busybee, verify they don't break the demo app. The `test` command handles the full lifecycle — starts a fresh stack at high speed, runs orders through the pipeline, and tears down:
+
+```bash
+# Run 25 orders (default) through the full pipeline
+spec/demo/bin/demo test
+
+# Run more orders for heavier verification
+spec/demo/bin/demo test 20
+```
+
+This should be run:
+- **After completing a mission**, before pushing — catches regressions early
+- **Before cutting a release** — final verification gate
+
+The test starts the Docker stack at speed 30 for fast feedback, creates orders, polls until all reach "fulfilled" status, verifies final state (all shipments delivered, all drivers released), and cleans up. Exits non-zero on failure.
+
+**Note:** The demo stack uses ports 26500 and 9200, which conflict with the gem's own Zeebe dev environment. Stop `rake zeebe:stop` first if it's running.
+
+### Maintaining the Demo App
+
+The demo app should be kept current as busybee evolves. When adding new features to the gem:
+
+- **Update the demo app** to use and showcase new features where appropriate
+- **Run the smoke test** to verify existing functionality isn't broken
+- **Update demo docs** (`spec/demo/README.md` and `spec/demo/docs/internal.md`) if behavior changes
+
 ## Regenerating GRPC Classes
 
 The protocol buffer classes in `lib/busybee/grpc/` are generated from the Zeebe proto file. To regenerate after upgrading Zeebe:
@@ -356,7 +418,8 @@ Releases are published via GitHub Actions with manual trigger (`workflow_dispatc
 2. Update version in `lib/busybee/version.rb`
 3. Update CHANGELOG.md with release date
 4. Run full test suite: `RUN_INTEGRATION_TESTS=1 bundle exec rspec`
-5. Commit, PR, and merge to `main`
+5. Run demo app smoke test: `spec/demo/bin/demo test`
+6. Commit, PR, and merge to `main`
 6. From clean `main`: trigger the release workflow, or manually:
    - `bundle exec rake build` (outputs to `pkg/`, which is gitignored — do not use raw `gem build`)
    - Verify contents: `gem unpack pkg/busybee-X.Y.Z.gem` and inspect

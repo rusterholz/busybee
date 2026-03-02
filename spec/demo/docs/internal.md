@@ -68,7 +68,7 @@ The driver fleet auto-scales to match demand.
 
 ## Pipeline Throughput
 
-The primary bottleneck is `LoadItemAvailabilityWorker` in the `prepare_order` process. Each order fans out to 3–10 availability checks (one per line item), and these are multi-instance but still limited by the Zeebe job poll interval and single-threaded worker execution.
+The primary bottleneck is `LoadItemAvailabilityWorker` in the `prepare_order` process. Each order fans out to 3–10 availability checks (one per line item), and these are multi-instance but still limited by the Zeebe job poll interval and single-threaded worker execution. The logistics YAML config (`config/busybee/logistics.yml`) gives this worker a higher `max_jobs: 32` to help keep up.
 
 **Diagnosing bottlenecks**: At high speeds, grep the logs for submitted backlog counts:
 
@@ -105,11 +105,37 @@ All constants with their formulas and derivation:
 | Order interval | `clock.rb` | `12/speed` seconds | Base order rate |
 | Item count range | `clock.rb` | 3–10 items | Wide range for shipment count variety |
 
+## YAML Configuration
+
+Worker containers use per-domain YAML config files (`config/busybee/<domain>.yml`) loaded via `busybee --config`. This replaces the earlier approach of listing worker class names on the command line in `docker-compose.yml`.
+
+Each file demonstrates a different aspect of YAML configuration:
+
+| File | What it shows |
+|------|---------------|
+| `oms.yml` | Basic worker listing — no per-worker overrides needed |
+| `logistics.yml` | Global `max_jobs` default + per-worker override for the bottleneck worker |
+| `delivery.yml` | Per-worker `runner_mode` selection (polling for pure computation) |
+| `sim.yml` | Global `job_timeout` override for long-running workers |
+
+Note that some worker settings remain in the DSL (e.g., `AssignDriverWorker`'s speed-dependent `backoff`, Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning — settings that might vary by environment or deployment.
+
 ## Test Hardpoints
+
+### Smoke Test: `bin/demo test`
+
+Self-contained smoke test that starts a fresh stack at speed 30, runs orders through the pipeline, and tears down:
+
+```bash
+bin/demo test           # 5 orders (default)
+bin/demo test 20        # 20 orders
+```
+
+This is the primary verification command for gem maintainers — run it after completing a mission and before pushing.
 
 ### Integration Test: `demo:run_orders[count]`
 
-A rake task that creates orders and verifies end-to-end completion:
+The underlying rake task used by `bin/demo test`. Useful when the stack is already running:
 
 ```bash
 bin/rails demo:run_orders[50]          # Create 50 orders, verify all complete

@@ -1,0 +1,7 @@
+# Delivery domain workers — driver assignment and delivery tracking.
+
+workers:
+  - Delivery::CalculateDistanceWorker
+  - Delivery::AssignDriverWorker:
+      job_timeout: 120000
+  - Delivery::CompleteDriverDeliveryWorker

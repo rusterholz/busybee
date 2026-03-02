@@ -138,7 +138,7 @@ RSpec.describe Busybee::CLI do
         yaml_path = write_yaml("process_wide.yml", <<~YAML)
           runner_mode: polling
           workers:
-            TestCLIWorker: {}
+            - TestCLIWorker
         YAML
         expect do
           described_class.new(["-c", yaml_path, "-l", "json", "-n", "my-worker"])
@@ -148,7 +148,7 @@ RSpec.describe Busybee::CLI do
       it "loads worker classes from YAML workers keys" do
         path = write_yaml("workers.yml", <<~YAML)
           workers:
-            TestCLIWorker: {}
+            - TestCLIWorker
         YAML
         cli = described_class.new(["-c", path])
         expect(cli.worker_classes).to eq([TestCLIWorker])
@@ -158,10 +158,10 @@ RSpec.describe Busybee::CLI do
         stub_const("SecondCLIWorker", second_worker_class)
         path = write_yaml("multi.yml", <<~YAML)
           workers:
-            TestCLIWorker:
-              runner_mode: polling
-            SecondCLIWorker:
-              runner_mode: streaming
+            - TestCLIWorker:
+                runner_mode: polling
+            - SecondCLIWorker:
+                runner_mode: streaming
         YAML
         cli = described_class.new(["-c", path])
         expect(cli.worker_classes).to contain_exactly(TestCLIWorker, SecondCLIWorker)
@@ -172,7 +172,7 @@ RSpec.describe Busybee::CLI do
           runner_mode: hybrid
           max_jobs: 20
           workers:
-            TestCLIWorker: {}
+            - TestCLIWorker
         YAML
         cli = described_class.new(["-c", path])
         expect(cli.runtime_config).to have_attributes(runner_mode: :hybrid, max_jobs: 20)
@@ -182,9 +182,9 @@ RSpec.describe Busybee::CLI do
         path = write_yaml("per_worker.yml", <<~YAML)
           runner_mode: hybrid
           workers:
-            TestCLIWorker:
-              runner_mode: polling
-              max_jobs: 5
+            - TestCLIWorker:
+                runner_mode: polling
+                max_jobs: 5
         YAML
         cli = described_class.new(["-c", path])
         resolved = cli.runtime_config.resolve_for(worker_class)
@@ -195,7 +195,7 @@ RSpec.describe Busybee::CLI do
         path = write_yaml("merge.yml", <<~YAML)
           runner_mode: polling
           workers:
-            TestCLIWorker: {}
+            - TestCLIWorker
         YAML
         cli = described_class.new(["-c", path, "-l", "json", "-n", "my-worker", "-a", "zeebe:26500"])
         expect(cli.runtime_config).to have_attributes(
@@ -208,7 +208,7 @@ RSpec.describe Busybee::CLI do
       it "applies process-wide flags to gem config" do
         path = write_yaml("apply.yml", <<~YAML)
           workers:
-            TestCLIWorker: {}
+            - TestCLIWorker
         YAML
         described_class.new(["-c", path, "-l", "json"])
         expect(Busybee.log_format).to eq(:json)
@@ -217,7 +217,7 @@ RSpec.describe Busybee::CLI do
       it "raises when YAML specifies an unknown worker class" do
         path = write_yaml("bad_worker.yml", <<~YAML)
           workers:
-            NonexistentWorker: {}
+            - NonexistentWorker
         YAML
         expect do
           described_class.new(["-c", path])
