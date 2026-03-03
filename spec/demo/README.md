@@ -68,14 +68,15 @@ This process demonstrates **sequential multi-instance** — iterating over a col
 
 Triggered per-shipment when it reaches "packed" status. The most complex process.
 
-This process demonstrates **parallel data loading with backoff/retry**, **conditional branching**, and **cross-process coordination**:
+This process demonstrates **BPMN message correlation**, **conditional branching**, and **cross-process coordination**:
 
-1. **Parallel split**: load delivery address + calculate distance (Branch A) while assigning a driver (Branch B, with **backoff and retry** when all drivers are busy, and **inline recruitment** when below fleet ceiling)
-2. **Parallel join** — driver assigned, distance known
-3. Update shipment status → "in_transit", returning whether this is the **first shipment in transit** for the order
-4. **Exclusive gateway**: if first in transit, update order status → "shipping" (demonstrates **conditional routing** based on worker output)
-5. `simulate_delivery_run` — non-blocking distance-proportional delay
-6. **Parallel split** for post-delivery: update shipment status → "delivered" and check if **all shipments are delivered** (Branch C, with a conditional gateway to update order status → "fulfilled") while recording driver mileage and releasing the driver (Branch D, with possible **fleet retirement**)
+1. **Parallel split**: load delivery address + calculate distance (Branch A) while assigning a driver (Branch B — creates a `DriverRequest` and assigns immediately if a driver is available)
+2. **Exclusive gateway**: if no driver was available, the process waits at an **intermediate message catch event** for a `driver_available` message (published by `CompleteDriverDeliveryWorker` when another delivery finishes)
+3. **Parallel join** — driver assigned, distance known
+4. Update shipment status → "in_transit", returning whether this is the **first shipment in transit** for the order
+5. **Exclusive gateway**: if first in transit, update order status → "shipping" (demonstrates **conditional routing** based on worker output)
+6. `simulate_delivery_run` — non-blocking distance-proportional delay
+7. **Parallel split** for post-delivery: update shipment status → "delivered" and check if **all shipments are delivered** (Branch C, with a conditional gateway to update order status → "fulfilled") while recording driver mileage, releasing the driver, and **fulfilling queued driver requests** (Branch D)
 
 ## Workers at a Glance
 
@@ -90,10 +91,10 @@ This process demonstrates **parallel data loading with backoff/retry**, **condit
 | `LoadOrderShipmentsWorker` | Logistics | Cross-domain data loading (reads shipments for an OMS order ID) |
 | `UpdateShipmentStatusWorker` | Logistics | **Header-driven status transitions** with **conditional outputs** — handles `packed`, `in_transit`, and `delivered` via a BPMN header, returning `first_in_transit` or `all_delivered` booleans depending on the transition |
 | `CalculateDistanceWorker` | Delivery | **Header-driven behavior** — reads `algorithm` from the job header to select computation strategy |
-| `AssignDriverWorker` | Delivery | **Backoff and retry** with dynamic **fleet scaling** — recruits drivers when all are busy, up to `4*sqrt(speed)` max |
-| `CompleteDriverDeliveryWorker` | Delivery | **Fleet lifecycle management** — retires excess drivers with cooldown, rate limiting, and idle-percentage thresholds to damp oscillation |
+| `AssignDriverWorker` | Delivery | **Request-based assignment with BPMN message correlation** — creates a `DriverRequest`, assigns a driver if available, or returns nil to trigger a message catch event in the BPMN |
+| `CompleteDriverDeliveryWorker` | Delivery | **Request fulfillment and message publishing** — records mileage, releases the driver, then claims the oldest queued `DriverRequest` and publishes a `driver_available` message to unblock a waiting process instance |
 | `PickAndPackWorker` | Sim | **Non-blocking worker with custom job lifecycle** — runs delays in `Concurrent::Promises` futures, manages its own `complete_job`/`fail_job` calls, uses a semaphore to limit concurrent pickers |
-| `DeliveryRunWorker` | Sim | **Auto-scaling semaphore** — lazy-loads permit count from Driver table, expands when new drivers are recruited |
+| `DeliveryRunWorker` | Sim | **Semaphore-limited concurrency** — lazy-loads permit count from Driver table, limits concurrent delivery simulations to fleet size |
 
 ## Architecture
 
@@ -103,6 +104,6 @@ Docker Compose runs the full stack: Zeebe (with Elasticsearch for storage), a Ra
 - **Workers**: Each domain runs as a separate `busybee` CLI process, configured via per-domain YAML files in `config/busybee/`. Workers are single-threaded (MRI), but the Sim workers use `Concurrent::Promises` for non-blocking delays.
 - **YAML configuration**: Worker containers use `busybee --config config/busybee/<domain>.yml` instead of listing class names on the command line. Each YAML file defines which workers run in that process and any per-worker tuning (e.g., higher `max_jobs` for the bottleneck `LoadItemAvailabilityWorker`). See `config/busybee/` for examples.
 - **Process chaining**: `prepare_order` → `ship_order` → `deliver_shipment` are chained via ActiveRecord `after_commit` callbacks, not BPMN call activities.
-- **Speed scaling**: The `DEMO_SPEED` env var (set via `--speed` flag) scales all timing — order creation rate, worker delays, backoff intervals, and fleet dynamics parameters.
+- **Speed scaling**: The `DEMO_SPEED` env var (set via `--speed` flag) scales all timing — order creation rate, worker delays, and fleet size.
 
 See [docs/internal.md](docs/internal.md) for simulation architecture details, speed scaling formulas, and fleet dynamics rationale.

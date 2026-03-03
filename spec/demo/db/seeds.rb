@@ -133,7 +133,7 @@ WAREHOUSE_DATA.each do |name, data|
 end
 
 speed = Rails.application.config.x.demo.simulation_speed
-driver_count_target = [3, (speed / 6).floor].max
+driver_count_target = (((4 * speed) + 83) / 29.0).round
 
 puts "Seeding #{driver_count_target} drivers (speed #{speed})..."
 

@@ -2,6 +2,5 @@
 
 workers:
   - Delivery::CalculateDistanceWorker
-  - Delivery::AssignDriverWorker:
-      job_timeout: 120000
+  - Delivery::AssignDriverWorker
   - Delivery::CompleteDriverDeliveryWorker

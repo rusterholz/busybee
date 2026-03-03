@@ -117,3 +117,64 @@ output :all_delivered,    type: :boolean, optional: true
 When an optional output is omitted from the return hash (key absent, not just nil), busybee would skip it in the `complete_job` variables payload. This lets a single worker serve multiple BPMN tasks that need different subsets of its outputs, without requiring every BPMN task to add ioMapping to filter out irrelevant variables.
 
 **For the demo app:** The unified worker always returns both keys (nil for irrelevant ones). The BPMN tasks that don't need a particular output rely on downstream gateways ignoring nil, which works but is fragile — a nil `first_in_transit` could confuse a gateway condition that doesn't explicitly handle it.
+
+---
+
+## Publishing messages from workers
+
+**Discovered during:** Rearchitecting driver assignment to use BPMN message correlation
+
+**Context:** The `CompleteDriverDeliveryWorker` needs to publish a `driver_available` BPMN message after releasing a driver, to unblock a process instance that's waiting at an intermediate message catch event. This is a natural pattern: a worker in one process instance completing work that should wake up a different process instance.
+
+**The friction:** Workers have no access to the Zeebe client. The `Job` stores `@client` privately (used internally for `complete!`/`fail!`), and `Worker` doesn't expose it. To publish a message, we had to instantiate a separate `Busybee::Client.new` inside the worker — creating a second gRPC connection to do something the existing connection could handle.
+
+**What made it harder than it should have been:**
+
+1. **Discoverability**: Finding `Busybee::Client#publish_message` required reading source code. The method is well-documented in `lib/busybee/client/message_operations.rb`, but there's no user-facing guide that says "here's how workers communicate across process instances." The concept of message correlation is central to BPMN, so this should be a prominent topic in docs.
+
+2. **Parameter inconsistency between client and testing helper**: The client uses `vars:` and `ttl:` (accepts `ActiveSupport::Duration`). The testing helper uses `variables:` and `ttl_ms:` (integer only). This is a paper-cut — you write the test with one API shape, then the production code with a different one. Aligning them (or at least cross-referencing them in docs) would reduce confusion.
+
+3. **No guidance on client instantiation from workers**: `Busybee::Client.new` works because the Railtie sets up credential config (`config.x.busybee.cluster_address`, `config.x.busybee.credential_type`). But this isn't documented anywhere a worker author would find it. We only knew it worked because we saw `Busybee::Client.new` in the demo's service objects and inferred it would pick up the same config.
+
+**The need:** Two things would help:
+
+1. **Expose the client on the job** (or provide a class-level accessor): Workers that need to publish messages, set variables, or cancel instances shouldn't need to create a separate connection. Even a simple `Busybee.client` singleton would be better than requiring `Busybee::Client.new` (which creates a new gRPC channel each time).
+
+```ruby
+# Hypothetical: reuse the existing connection
+class MyWorker < Busybee::Worker
+  def perform
+    # ... do work ...
+    job.client.publish_message("event_name", correlation_key: id, vars: { foo: "bar" })
+  end
+end
+```
+
+2. **A "Message Correlation" guide in user docs**: Cover the pattern (worker publishes → catch event receives), show the BPMN setup (message definition, subscription, correlation key), show the Ruby side (client.publish_message), and explain TTL. This is one of the most powerful BPMN patterns and busybee already supports it — it just needs a spotlight.
+
+**For the demo app:** We use `job.instance_variable_get(:@client)` to reach the private client on the job, reusing the existing gRPC connection. This works but relies on a private API — busybee should expose this publicly so workers can publish messages without ceremony.
+
+---
+
+## Worker readiness signal for container orchestration
+
+**Discovered during:** Debugging cold-start timeouts in the smoke test
+
+**Context:** The demo's Docker Compose stack runs 4 worker containers (one per domain). The `clockwork` container (which creates orders) needs to start *after* all workers are healthy and streaming jobs. Without a readiness signal from busybee, there's no reliable way to know when a worker is actually connected to Zeebe and processing — only that the OS process is alive.
+
+**The problem:** Docker Compose healthchecks need a concrete signal to gate `depends_on: condition: service_healthy`. The best we can do today is `kill -0 1` (PID 1 alive) with a generous `start_period`, which is a rough proxy — the process could be alive but still booting Rails or waiting for Zeebe. This led to orders arriving before workers were streaming, causing early burst backlog and timeout failures in the smoke test.
+
+**The need:** Busybee should emit a readiness signal once all configured workers are connected and streaming. Two natural options:
+
+1. **Readiness file**: Write a file (e.g., `/tmp/busybee-ready`) when all worker streams are established. Docker healthcheck becomes `test -f /tmp/busybee-ready`. This is the pattern used by Puma (`--control-url`), Sidekiq (`config.alive_url`), and Kubernetes readiness probes.
+
+```ruby
+# Hypothetical: busybee CLI writes a readiness file
+busybee --config config.yml --ready-file /tmp/busybee-ready
+```
+
+2. **Readiness HTTP endpoint**: Expose a lightweight HTTP server on a configurable port (e.g., `--ready-port 9292`) that returns 200 once streaming. More standard for Kubernetes liveness/readiness probes.
+
+Option 1 is simpler and sufficient for Docker Compose. Option 2 is better for Kubernetes. Both could coexist.
+
+**For the demo app:** We use `kill -0 1` with `start_period: 30s` as a rough healthcheck, and make clockwork depend on all workers being healthy. It works but can't distinguish "process alive" from "worker streaming."

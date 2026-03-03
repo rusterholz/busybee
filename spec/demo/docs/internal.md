@@ -28,43 +28,32 @@ Each tick, `accumulator += orders_per_tick`, then `batch = accumulator.floor` or
 | Parameter | Formula | Effect |
 |-----------|---------|--------|
 | Order creation rate | `base_interval / speed` (clamped to 1s ticks with batching) | Higher speed → more orders per second |
-| Backoff interval (AssignDriver) | `50 / speed` seconds | Faster retry when drivers are busy |
 | Pick-and-pack delay | `item_count * 1.4s * jitter / speed` | Faster warehouse processing |
 | Delivery delay | `distance * 1.5s * jitter / speed` | Faster deliveries |
-| Fleet ceiling | `4 * sqrt(speed)` drivers max | More drivers at higher throughput |
-| Retirement cooldown | `max(1, 125/speed)` seconds per driver | Newly recruited drivers survive longer at low speed |
-| Retirement rate limit | `max(1000, 250_000/speed)` ms between retirements | Prevents mass layoffs |
+| Fleet size | `round((4 * speed + 83) / 29)` drivers | Linear scaling — more drivers at higher throughput |
 
 Jitter is uniform in `[0.8, 1.2)` for both Sim workers.
 
 ### Example Values
 
-| Parameter | Speed 1 | Speed 10 | Speed 40 | Speed 50 |
+| Parameter | Speed 1 | Speed 10 | Speed 30 | Speed 50 |
 |-----------|---------|----------|----------|----------|
-| Order interval | 12s | 1.2s | 1s (3.3/tick) | 1s (4.2/tick) |
-| Backoff | 50s | 5s | 1.25s | 1s |
-| Pick-and-pack (5 items) | ~7s | ~0.7s | ~0.18s | ~0.14s |
-| Delivery (8 units) | ~12s | ~1.2s | ~0.3s | ~0.24s |
-| Max drivers | 4 | 13 | 26 | 29 |
-| Retirement cooldown | 125s | 12.5s | 3.1s | 2.5s |
-| Retirement interval | 250s | 25s | 6.25s | 5s |
+| Order interval | 12s | 1.2s | 1s (2.5/tick) | 1s (4.2/tick) |
+| Pick-and-pack (5 items) | ~7s | ~0.7s | ~0.23s | ~0.14s |
+| Delivery (8 units) | ~12s | ~1.2s | ~0.4s | ~0.24s |
+| Fleet size | 3 | 4 | 7 | 10 |
 
 ## Fleet Dynamics
 
-The driver fleet auto-scales to match demand.
+The driver fleet is a fixed size, seeded at startup via `db/seeds.rb`. Fleet size scales linearly with speed: `round((4 * speed + 83) / 29)` — giving 3 drivers at speed 1 and 7 at speed 30.
 
-**Recruitment** (`AssignDriverWorker`): When a shipment needs a driver and all existing drivers are busy, a new driver is recruited inline — no backoff needed. Recruitment is capped at `4 * sqrt(speed)` total drivers.
+**Assignment** (`AssignDriverWorker`): When a shipment needs a driver, the worker creates a `DriverRequest` record and tries to assign the available driver with the lowest total mileage. If a driver is available, it's assigned immediately and the process continues. If all drivers are busy, the worker returns nil driver info along with the request ID, and the BPMN process waits at an intermediate message catch event.
 
-**Retirement** (`CompleteDriverDeliveryWorker`): After completing a delivery, a driver may be retired if all of these conditions hold:
+**Request fulfillment** (`CompleteDriverDeliveryWorker`): After completing a delivery, the worker releases the driver (adds mileage, clears assignment) and checks for queued `DriverRequest` records. If an open request exists, it claims the oldest one atomically (using `SELECT FOR UPDATE` via ActiveRecord's `lock` scope), assigns the driver to the new shipment, and publishes a `driver_available` BPMN message. This unblocks the waiting process instance via Zeebe message correlation.
 
-1. Fleet is above the minimum baseline (3 drivers)
-2. More than 40% of drivers are idle (`available * 5 > total * 2`)
-3. The driver has existed longer than the cooldown period (`125 / speed` seconds)
-4. No other driver was retired in the last `max(1000, 250_000/speed)` ms (global rate limit via `Concurrent::AtomicReference`)
+**Message correlation**: The BPMN `deliver_shipment` process uses an exclusive gateway after `assign_driver` to check if a driver was assigned (`driver.id != null`). If not, an intermediate message catch event waits for a `driver_available` message correlated on the `DriverRequest` ID. The message payload carries `driver_id` and `driver_name`, which are mapped into the process variable space via I/O mappings.
 
-**Oscillation damping**: Without guards, recruitment and retirement can chase each other — recruit when all busy, immediately retire when idle. The cooldown prevents newly recruited drivers from being retired before they get work. The rate limit prevents mass retirement when a batch of deliveries complete simultaneously. The idle threshold (40%) provides hysteresis — recruitment fires at 100% utilization, retirement only kicks in below 60%.
-
-**Steady state**: At any speed, the fleet converges to a size where roughly 55–65% of drivers are busy at any given time. Fleet churn (recruit → work → retire) is an accepted trade-off for the self-tuning behavior.
+**Idempotent retry**: `CompleteDriverDeliveryWorker` handles three retry states: (A) not yet processed (`current_shipment_id == shipment_id`), (B) released but no request claimed (`current_shipment_id == nil`), and (C) released and already reassigned to a queued request (`current_shipment_id` is a different shipment). The mileage addition is skipped if the driver was already released, and the message is re-published if a request was already claimed.
 
 ## Pipeline Throughput
 
@@ -96,12 +85,8 @@ All constants with their formulas and derivation:
 | `BASE_DELAY` (pick-and-pack) | `PickAndPackWorker` | 1.4s/item | ~7s for a 5-item order at speed 1 |
 | `BASE_DELAY` (delivery) | `DeliveryRunWorker` | 1.5s/distance unit | ~12s for avg 8-unit delivery |
 | Picker concurrency | `PickAndPackWorker::PICKERS` | 3 | Simulates 3 warehouse pickers |
-| `MIN_DRIVER_COUNT` | `CompleteDriverDeliveryWorker` | 3 | Floor for fleet downsizing |
-| Idle retirement threshold | `CompleteDriverDeliveryWorker` | 40% idle | Hysteresis band with 100% recruitment trigger |
-| Retirement cooldown | `CompleteDriverDeliveryWorker` | `125/speed` seconds | Prevents retiring just-recruited drivers |
-| Retirement rate limit | `CompleteDriverDeliveryWorker` | `250_000/speed` ms | Prevents mass retirement |
-| Max fleet size | `AssignDriverWorker` | `4 * sqrt(speed)` | Sub-linear scaling — driver count grows slower than throughput |
-| Backoff interval | `AssignDriverWorker` | `50/speed` seconds | Proportional retry delay |
+| Fleet size | `db/seeds.rb` | `round((4*speed + 83) / 29)` | Linear scaling — 3 at speed 1, 7 at speed 30 |
+| Message TTL | `CompleteDriverDeliveryWorker` | 30 seconds | Time window for message correlation before expiry |
 | Order interval | `clock.rb` | `12/speed` seconds | Base order rate |
 | Item count range | `clock.rb` | 3–10 items | Wide range for shipment count variety |
 
@@ -118,7 +103,7 @@ Each file demonstrates a different aspect of YAML configuration:
 | `delivery.yml` | Per-worker `runner_mode` selection (polling for pure computation) |
 | `sim.yml` | Global `job_timeout` override for long-running workers |
 
-Note that some worker settings remain in the DSL (e.g., `AssignDriverWorker`'s speed-dependent `backoff`, Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning — settings that might vary by environment or deployment.
+Note that some worker settings remain in the DSL (e.g., Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning — settings that might vary by environment or deployment.
 
 ## Test Hardpoints
 
@@ -127,7 +112,7 @@ Note that some worker settings remain in the DSL (e.g., `AssignDriverWorker`'s s
 Self-contained smoke test that starts a fresh stack at speed 30, runs orders through the pipeline, and tears down:
 
 ```bash
-bin/demo test           # 5 orders (default)
+bin/demo test           # 25 orders (default)
 bin/demo test 20        # 20 orders
 ```
 
@@ -148,7 +133,7 @@ bin/rails demo:run_orders[10]          # Quick smoke test
 - All drivers are released (no dangling assignments)
 - Inventory was decremented (stock items have been consumed)
 
-**Expected timing**: At speed 1, each order takes roughly 30–60 seconds to complete. At speed 50, orders complete in ~1–2 seconds. The task uses a polling timeout of `count * 120 / speed` seconds (clamped to a minimum of 30s).
+**Expected timing**: At speed 1, each order takes roughly 30–60 seconds to complete. At speed 50, orders complete in ~1–2 seconds. The task uses a polling timeout of `count * 300 / speed` seconds (clamped to a minimum of 30s).
 
 **How outer busybee specs connect**: The busybee gem's Railtie specs already load the demo app's environment (`spec/demo/config/environment.rb`). The rake task can be invoked from busybee's spec suite:
 
@@ -197,6 +182,6 @@ For bulk order creation in a running Docker stack, prefer the `demo:run_orders` 
 
 - **Single-threaded per worker type** (MRI Ruby). The Sim workers work around this with `Concurrent::Promises` futures, but other workers process one job at a time. This is fine for the demo's throughput but wouldn't scale for production.
 - **SQLite as single-node store**. WAL mode allows concurrent reads, but writes are serialized. At very high speeds (50+), write contention on the shared SQLite database can become a bottleneck.
-- **Fleet churn is accepted**. The recruit/retire cycle is intentionally visible — it demonstrates dynamic scaling. In a real system you'd want more dampening or a separate scaling controller.
+- **Fixed fleet size**. The driver fleet is seeded at startup and doesn't scale dynamically. The checkout/wait queue handles burst load gracefully, but under sustained overload, orders queue up rather than triggering new driver creation.
 - **No BPMN call activities for process chaining**. The `prepare_order` → `ship_order` → `deliver_shipment` chain uses ActiveRecord callbacks instead. This is pragmatic (call activities require parent process awareness of child details) but means the chain isn't visible in a single BPMN diagram.
 - **Inventory is guaranteed**. `GuaranteedRestock` ensures every order can be fulfilled. This makes the demo reliable but removes the "out of stock" scenario that a real system would need to handle.
