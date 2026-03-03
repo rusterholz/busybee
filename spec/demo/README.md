@@ -17,7 +17,7 @@ Other commands:
 ```bash
 bin/demo stop       # Stop containers, keep data
 bin/demo clean      # Stop and destroy everything
-bin/demo test       # Smoke test: start, run 5 orders, tear down
+bin/demo test       # Smoke test: start, run 25 orders, tear down
 bin/demo status     # Show containers + order status counts
 ```
 
@@ -50,7 +50,7 @@ This process demonstrates **fan-out/fan-in with data enrichment** — loading da
 4. **Parallel join** — all distance and availability data now in scope
 5. **Plan shipments** — a single worker optimizes shipment groupings given the enriched data
 6. **Multi-instance subprocess** creates each planned shipment (decrementing inventory)
-7. **Mark order prepared** — transitions status from "submitted" to "processing"
+7. **Update order status** → "processing" — transitions status via a BPMN header
 
 ### `ship_order`
 
@@ -61,8 +61,8 @@ This process demonstrates **sequential multi-instance** — iterating over a col
 1. Load all shipments for the order
 2. **Multi-instance subprocess** over shipments — each one gets:
    - `simulate_pick_and_pack` — a non-blocking worker that simulates warehouse picking delay proportional to item count (demonstrates workers with **custom job lifecycle management**)
-   - `mark_shipment_packed` — triggers the next process via callback
-3. Mark order as "packed"
+   - `update_shipment_status` → "packed" — triggers the next process via callback
+3. Update order status → "packed"
 
 ### `deliver_shipment`
 
@@ -72,28 +72,23 @@ This process demonstrates **parallel data loading with backoff/retry**, **condit
 
 1. **Parallel split**: load delivery address + calculate distance (Branch A) while assigning a driver (Branch B, with **backoff and retry** when all drivers are busy, and **inline recruitment** when below fleet ceiling)
 2. **Parallel join** — driver assigned, distance known
-3. Mark shipment in transit, returning whether this is the **first shipment in transit** for the order
-4. **Exclusive gateway**: if first in transit, mark the order as "shipping" (demonstrates **conditional routing** based on worker output)
+3. Update shipment status → "in_transit", returning whether this is the **first shipment in transit** for the order
+4. **Exclusive gateway**: if first in transit, update order status → "shipping" (demonstrates **conditional routing** based on worker output)
 5. `simulate_delivery_run` — non-blocking distance-proportional delay
-6. **Parallel split** for post-delivery: mark shipment delivered and check if **all shipments are delivered** (Branch C, with a conditional gateway to mark order "fulfilled") while recording driver mileage and releasing the driver (Branch D, with possible **fleet retirement**)
+6. **Parallel split** for post-delivery: update shipment status → "delivered" and check if **all shipments are delivered** (Branch C, with a conditional gateway to update order status → "fulfilled") while recording driver mileage and releasing the driver (Branch D, with possible **fleet retirement**)
 
 ## Workers at a Glance
 
 | Worker | Domain | What it demonstrates |
 |--------|--------|---------------------|
 | `LoadOrderAddressWorker` | OMS | Simple data loading — reads one model, outputs coordinates |
-| `MarkOrderPreparedWorker` | OMS | Status transition via worker output (no return value needed) |
-| `MarkOrderPackedWorker` | OMS | Same pattern as above |
-| `MarkOrderShippingWorker` | OMS | Conditional status update (only first shipment triggers this) |
-| `MarkOrderFulfilledWorker` | OMS | Terminal status — completes the order lifecycle |
+| `UpdateOrderStatusWorker` | OMS | **Header-driven status transitions** — a single worker handles all order status changes (`processing`, `packed`, `shipping`, `fulfilled`), receiving the target status via a BPMN `header` and validating against an allowlist |
 | `LoadWarehousesWorker` | Logistics | Returns a **collection** as a process variable (array of warehouse objects) |
 | `LoadItemAvailabilityWorker` | Logistics | Per-item availability check used inside a **multi-instance subprocess** — shows how each instance enriches its element |
 | `PlanShipmentsWorker` | Logistics | **Pure computation worker** — receives enriched data, runs a greedy optimization algorithm, returns planned shipments. No database access. |
 | `CreateShipmentWorker` | Logistics | **Transactional worker** — creates a shipment and decrements inventory atomically in an ActiveRecord transaction |
 | `LoadOrderShipmentsWorker` | Logistics | Cross-domain data loading (reads shipments for an OMS order ID) |
-| `MarkShipmentPackedWorker` | Logistics | Status transition that triggers process chaining via `after_commit` callback |
-| `MarkShipmentInTransitWorker` | Logistics | Returns a **boolean output** (`first_in_transit`) used by a downstream exclusive gateway |
-| `MarkShipmentDeliveredWorker` | Logistics | Returns a **boolean output** (`all_delivered`) for conditional order fulfillment |
+| `UpdateShipmentStatusWorker` | Logistics | **Header-driven status transitions** with **conditional outputs** — handles `packed`, `in_transit`, and `delivered` via a BPMN header, returning `first_in_transit` or `all_delivered` booleans depending on the transition |
 | `CalculateDistanceWorker` | Delivery | **Header-driven behavior** — reads `algorithm` from the job header to select computation strategy |
 | `AssignDriverWorker` | Delivery | **Backoff and retry** with dynamic **fleet scaling** — recruits drivers when all are busy, up to `4*sqrt(speed)` max |
 | `CompleteDriverDeliveryWorker` | Delivery | **Fleet lifecycle management** — retires excess drivers with cooldown, rate limiting, and idle-percentage thresholds to damp oscillation |

@@ -135,7 +135,7 @@ RSpec.describe "prepare_order BPMN", :zeebe do
     end
   end
 
-  it "activates mark_order_prepared after all shipments are created" do
+  it "activates update_order_status (processing) after all shipments are created" do
     with_process_instance("prepare_order", test_variables) do
       # Complete all steps through create_shipment
       activate_job("load_warehouses").and_complete(warehouses: mock_warehouses)
@@ -157,8 +157,8 @@ RSpec.describe "prepare_order BPMN", :zeebe do
       end
       sleep(0.3)
 
-      # mark_order_prepared should now activate
-      final_job = activate_job("mark_order_prepared")
+      # update_order_status should now activate
+      final_job = activate_job("update_order_status")
       expect(final_job.variables["order_id"]).to eq(test_variables[:order][:id])
 
       final_job.mark_completed

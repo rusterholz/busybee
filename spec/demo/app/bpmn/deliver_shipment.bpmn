@@ -64,7 +64,10 @@
     <bpmn:sequenceFlow id="Flow_ToMarkInTransit" sourceRef="ready_to_deliver" targetRef="mark_shipment_in_transit" />
     <bpmn:serviceTask id="mark_shipment_in_transit" name="Mark In Transit">
       <bpmn:extensionElements>
-        <zeebe:taskDefinition type="mark_shipment_in_transit" retries="3" />
+        <zeebe:taskDefinition type="update_shipment_status" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="status" value="in_transit" />
+        </zeebe:taskHeaders>
         <zeebe:ioMapping>
           <zeebe:input source="= shipment.id" target="shipment_id" />
           <zeebe:input source="= shipment.order_id" target="order_id" />
@@ -84,7 +87,10 @@
     </bpmn:sequenceFlow>
     <bpmn:serviceTask id="mark_order_shipping" name="Mark Order Shipping">
       <bpmn:extensionElements>
-        <zeebe:taskDefinition type="mark_order_shipping" retries="3" />
+        <zeebe:taskDefinition type="update_order_status" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="status" value="shipping" />
+        </zeebe:taskHeaders>
         <zeebe:ioMapping>
           <zeebe:input source="= shipment.order_id" target="order_id" />
         </zeebe:ioMapping>
@@ -115,7 +121,10 @@
     <bpmn:sequenceFlow id="Flow_ToBranchC" sourceRef="after_delivery" targetRef="mark_shipment_delivered" />
     <bpmn:serviceTask id="mark_shipment_delivered" name="Mark Shipment Delivered">
       <bpmn:extensionElements>
-        <zeebe:taskDefinition type="mark_shipment_delivered" retries="3" />
+        <zeebe:taskDefinition type="update_shipment_status" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="status" value="delivered" />
+        </zeebe:taskHeaders>
         <zeebe:ioMapping>
           <zeebe:input source="= shipment.id" target="shipment_id" />
           <zeebe:input source="= shipment.order_id" target="order_id" />
@@ -136,7 +145,10 @@
     </bpmn:sequenceFlow>
     <bpmn:serviceTask id="mark_order_fulfilled" name="Mark Order Fulfilled">
       <bpmn:extensionElements>
-        <zeebe:taskDefinition type="mark_order_fulfilled" retries="3" />
+        <zeebe:taskDefinition type="update_order_status" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="status" value="fulfilled" />
+        </zeebe:taskHeaders>
         <zeebe:ioMapping>
           <zeebe:input source="= shipment.order_id" target="order_id" />
         </zeebe:ioMapping>

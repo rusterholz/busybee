@@ -43,7 +43,10 @@
       <bpmn:sequenceFlow id="Flow_Sub_ToMarkPacked" sourceRef="simulate_pick_and_pack" targetRef="mark_shipment_packed" />
       <bpmn:serviceTask id="mark_shipment_packed" name="Mark Shipment Packed">
         <bpmn:extensionElements>
-          <zeebe:taskDefinition type="mark_shipment_packed" retries="3" />
+          <zeebe:taskDefinition type="update_shipment_status" retries="3" />
+          <zeebe:taskHeaders>
+            <zeebe:header key="status" value="packed" />
+          </zeebe:taskHeaders>
           <zeebe:ioMapping>
             <zeebe:input source="= shipment.id" target="shipment_id" />
           </zeebe:ioMapping>
@@ -59,7 +62,10 @@
     <bpmn:sequenceFlow id="Flow_ToMarkPacked" sourceRef="pack_shipments" targetRef="mark_order_packed" />
     <bpmn:serviceTask id="mark_order_packed" name="Mark Order Packed">
       <bpmn:extensionElements>
-        <zeebe:taskDefinition type="mark_order_packed" retries="3" />
+        <zeebe:taskDefinition type="update_order_status" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="status" value="packed" />
+        </zeebe:taskHeaders>
         <zeebe:ioMapping>
           <zeebe:input source="= order.id" target="order_id" />
         </zeebe:ioMapping>

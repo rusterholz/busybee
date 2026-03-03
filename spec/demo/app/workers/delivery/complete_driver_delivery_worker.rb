@@ -44,7 +44,7 @@ module Delivery
       record_retirement!
       driver.destroy!
       avail = Driver.available.count
-      remaining = total - 1
+      remaining = Driver.count
       Rails.logger.info("Retired Driver #{driver.name} (fleet: #{remaining}, #{avail} idle, " \
                         "#{((remaining - avail) * 100.0 / remaining).round}% utilized)")
     end

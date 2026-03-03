@@ -141,7 +141,10 @@
     <bpmn:sequenceFlow id="Flow_ToMarkPrepared" sourceRef="create_planned_shipments" targetRef="mark_order_prepared" />
     <bpmn:serviceTask id="mark_order_prepared" name="Mark Order Prepared">
       <bpmn:extensionElements>
-        <zeebe:taskDefinition type="mark_order_prepared" retries="3" />
+        <zeebe:taskDefinition type="update_order_status" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="status" value="processing" />
+        </zeebe:taskHeaders>
         <zeebe:ioMapping>
           <zeebe:input source="= order.id" target="order_id" />
         </zeebe:ioMapping>

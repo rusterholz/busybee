@@ -93,3 +93,27 @@ end
 ```
 
 **For the demo app:** We relied on `docker compose logs --timestamps` and grep/awk to reconstruct this picture. It worked but took significant effort and wouldn't scale to production debugging.
+
+---
+
+## Optional output variables
+
+**Discovered during:** Unifying status workers with BPMN headers
+
+**Context:** We consolidated 3 separate `MarkShipment*Workers` into a single `UpdateShipmentStatusWorker` that receives the target status via a BPMN header. Two of the original workers returned boolean outputs (`first_in_transit`, `all_delivered`) used by downstream exclusive gateways, while the third (`packed`) had no outputs.
+
+The unified worker declares both outputs, but busybee requires all declared outputs to be returned from `perform` every time. So the `packed` path must return `{ first_in_transit: nil, all_delivered: nil }` even though those values are meaningless in that context.
+
+**The problem:** Without I/O mapping in the BPMN to filter outputs, those nil values leak into the process instance variable space. A worker that only conditionally produces a value has no way to say "I don't have this output" — it must always return something, and nil pollutes the variable scope.
+
+**The need:** Support for optional output variables that are only written to the process instance when the worker explicitly returns them:
+
+```ruby
+# Hypothetical API
+output :first_in_transit, type: :boolean, optional: true
+output :all_delivered,    type: :boolean, optional: true
+```
+
+When an optional output is omitted from the return hash (key absent, not just nil), busybee would skip it in the `complete_job` variables payload. This lets a single worker serve multiple BPMN tasks that need different subsets of its outputs, without requiring every BPMN task to add ioMapping to filter out irrelevant variables.
+
+**For the demo app:** The unified worker always returns both keys (nil for irrelevant ones). The BPMN tasks that don't need a particular output rely on downstream gateways ignoring nil, which works but is fragile — a nil `first_in_transit` could confuse a gateway condition that doesn't explicitly handle it.
