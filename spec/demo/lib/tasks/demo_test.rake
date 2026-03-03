@@ -31,7 +31,7 @@ namespace :demo do
     puts " created #{order_ids.size} orders"
 
     # Poll until all orders reach fulfilled status
-    timeout = [count * 120.0 / speed, 30].max
+    timeout = [count * 300.0 / speed, 60].max
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
     poll_interval = [2.0 / speed, 0.5].max
 
@@ -51,11 +51,37 @@ namespace :demo do
         warn "\nTIMEOUT after #{timeout.round}s — #{remaining} orders not fulfilled"
         warn "Order statuses: #{statuses.inspect}"
 
-        # Diagnostic: show stuck orders
+        # Diagnostic: show stuck orders and their shipments
         Oms::Order.where(id: order_ids).where.not(status: "fulfilled").limit(5).each do |order|
           shipments = Logistics::Shipment.where(order_id: order.id)
           warn "  Order #{order.short_id} (#{order.status}): " \
                "#{shipments.count} shipments — #{shipments.group(:status).count.inspect}"
+        end
+
+        # Check Zeebe for incidents via Camunda REST API
+        begin
+          require "net/http"
+          require "json"
+          uri = URI("http://zeebe:8080/v2/incidents/search")
+          req = Net::HTTP::Post.new(uri, "Content-Type" => "application/json")
+          req.body = "{}"
+          resp = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(req) }
+          if resp.is_a?(Net::HTTPSuccess)
+            data = JSON.parse(resp.body)
+            incidents = data["items"] || []
+            if incidents.any?
+              warn "\nZeebe incidents (#{incidents.size}):"
+              incidents.each do |inc|
+                warn "  [#{inc['state']}] #{inc['errorType']}: #{inc['errorMessage']} (process instance #{inc['processInstanceKey']})" # rubocop:disable Layout/LineLength
+              end
+            else
+              warn "\nNo Zeebe incidents found — jobs may be stuck without errors"
+            end
+          else
+            warn "\nCould not query Zeebe incidents: HTTP #{resp.code}"
+          end
+        rescue StandardError => e
+          warn "\nCould not query Zeebe incidents: #{e.message}"
         end
 
         exit 1

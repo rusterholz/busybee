@@ -1,11 +1,8 @@
 # OMS domain workers — order lifecycle tracking.
 #
-# Simple transactional workers that update order status at each pipeline stage.
-# No per-worker overrides needed; defaults work well for this domain.
+# UpdateOrderStatusWorker is a single worker that handles all order status
+# transitions, receiving the target status via a BPMN header.
 
 workers:
   - Oms::LoadOrderAddressWorker
-  - Oms::MarkOrderPreparedWorker
-  - Oms::MarkOrderPackedWorker
-  - Oms::MarkOrderShippingWorker
-  - Oms::MarkOrderFulfilledWorker
+  - Oms::UpdateOrderStatusWorker

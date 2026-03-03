@@ -90,39 +90,69 @@ services:
     container_name: busybee-demo-workers-oms
     command: bundle exec busybee --config config/busybee/oms.yml
     depends_on:
-      zeebe:
+      web:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   workers_logistics:
     <<: *app
     container_name: busybee-demo-workers-logistics
     command: bundle exec busybee --config config/busybee/logistics.yml
     depends_on:
-      zeebe:
+      web:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   workers_delivery:
     <<: *app
     container_name: busybee-demo-workers-delivery
     command: bundle exec busybee --config config/busybee/delivery.yml
     depends_on:
-      zeebe:
+      web:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   workers_sim:
     <<: *app
     container_name: busybee-demo-workers-sim
     command: bundle exec busybee --config config/busybee/sim.yml
     depends_on:
-      zeebe:
+      web:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   clockwork:
     <<: *app
     container_name: busybee-demo-clockwork
     command: bundle exec clockwork clock.rb
     depends_on:
-      web:
+      workers_oms:
+        condition: service_healthy
+      workers_logistics:
+        condition: service_healthy
+      workers_delivery:
+        condition: service_healthy
+      workers_sim:
         condition: service_healthy
     profiles:
       - auto

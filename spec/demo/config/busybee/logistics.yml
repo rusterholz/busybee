@@ -6,6 +6,4 @@ workers:
   - Logistics::PlanShipmentsWorker
   - Logistics::CreateShipmentWorker
   - Logistics::LoadOrderShipmentsWorker
-  - Logistics::MarkShipmentPackedWorker
-  - Logistics::MarkShipmentInTransitWorker
-  - Logistics::MarkShipmentDeliveredWorker
+  - Logistics::UpdateShipmentStatusWorker

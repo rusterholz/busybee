@@ -39,7 +39,7 @@ RSpec.describe "ship_order BPMN", :zeebe do
     end
   end
 
-  it "activates mark_shipment_packed after pick-and-pack for each shipment" do
+  it "activates update_shipment_status (packed) after pick-and-pack for each shipment" do
     with_process_instance("ship_order", test_variables) do
       activate_job("load_order_shipments").and_complete(shipments: mock_shipments)
       sleep(0.3)
@@ -48,8 +48,8 @@ RSpec.describe "ship_order BPMN", :zeebe do
       activate_jobs("simulate_pick_and_pack", max_jobs: 10).each(&:mark_completed)
       sleep(0.3)
 
-      # mark_shipment_packed should activate for each shipment
-      pack_jobs = activate_jobs("mark_shipment_packed", max_jobs: 10).to_a
+      # update_shipment_status (packed) should activate for each shipment
+      pack_jobs = activate_jobs("update_shipment_status", max_jobs: 10).to_a
       expect(pack_jobs.size).to eq(2)
 
       shipment_ids = pack_jobs.map { |j| j.variables["shipment_id"] }.sort
@@ -57,7 +57,7 @@ RSpec.describe "ship_order BPMN", :zeebe do
     end
   end
 
-  it "activates mark_order_shipped after all shipments are packed" do
+  it "activates update_order_status (packed) after all shipments are packed" do
     with_process_instance("ship_order", test_variables) do
       activate_job("load_order_shipments").and_complete(shipments: mock_shipments)
       sleep(0.3)
@@ -65,11 +65,11 @@ RSpec.describe "ship_order BPMN", :zeebe do
       activate_jobs("simulate_pick_and_pack", max_jobs: 10).each(&:mark_completed)
       sleep(0.3)
 
-      activate_jobs("mark_shipment_packed", max_jobs: 10).each(&:mark_completed)
+      activate_jobs("update_shipment_status", max_jobs: 10).each(&:mark_completed)
       sleep(0.3)
 
-      # mark_order_shipped should activate after all subprocess instances complete
-      job = activate_job("mark_order_shipped")
+      # update_order_status should activate after all subprocess instances complete
+      job = activate_job("update_order_status")
       expect(job.variables["order_id"]).to eq(test_variables[:order][:id])
 
       job.mark_completed
