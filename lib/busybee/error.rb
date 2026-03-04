@@ -5,6 +5,14 @@ module Busybee
   # Never raised directly; exists for `rescue Busybee::Error`.
   Error = Class.new(StandardError)
 
+  # There are two error classes not contained here which serve special purposes:
+  # - Busybee::GRPC::Error is used by the GRPC layer to wrap GRPC::BadStatus errors
+  # - Busybee::Worker::Shutdown is used to signal the need to shut down a running process
+  # Both of these inherit from Busybee::Error. See their class files for details.
+
+  # Errors below this point are specific and semantic -- they are used in just one or two
+  # places, and their name tells you exactly what went wrong:
+
   # Raised when Credentials.build cannot determine credential type from provided params.
   # This happens when params are provided but don't match any known credential type pattern,
   # and no explicit credential_type is configured.
