@@ -44,6 +44,22 @@ rake zeebe:stop
 
 Integration tests will automatically skip if Zeebe is not running, so you can safely run the full test suite without having Zeebe started. The tests use the generated GRPC classes directly to verify that the protocol buffer bindings work correctly against a real Zeebe cluster.
 
+### CLI Integration Tests
+
+The CLI integration tests (`spec/integration/cli/cli_spec.rb`) verify the full CLI stack by spawning `busybee` as a subprocess against a live Zeebe instance. They test end-to-end job processing, YAML configuration loading, graceful shutdown via signals, and error scenarios.
+
+**Architecture:**
+- `spec/integration/cli/test_harness.rb` — Subprocess entry point that loads busybee, test workers, sets insecure credentials, and delegates to `CLI.main`
+- `spec/integration/cli/test_workers.rb` — Named worker classes (`CLITestWorker`, `CLITestWorkerA`, `CLITestWorkerB`) that write processed job keys to a signal file for test verification
+- `spec/integration/cli/cli_spec.rb` — Tests that spawn the harness via `Process.spawn`, create Zeebe jobs, wait for the signal file to confirm processing, and send signals for shutdown
+
+The signal file pattern allows the test process to detect when the subprocess has processed jobs without shared memory. Each test gets a fresh temp file.
+
+```bash
+# Run CLI integration tests
+RUN_INTEGRATION_TESTS=1 bundle exec rspec spec/integration/cli/cli_spec.rb
+```
+
 ### Multi-Tenancy Testing
 
 Busybee supports testing in both single-tenant and multi-tenant modes. Integration tests are automatically filtered based on the `MULTITENANCY_ENABLED` environment variable:
