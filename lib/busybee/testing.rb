@@ -3,7 +3,7 @@
 require "busybee/grpc"
 
 module Busybee
-  # Testing support for BPMN workflows with RSpec.
+  # Testing support for BPMN workflows and workers with RSpec.
   module Testing
   end
 end
