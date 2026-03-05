@@ -2,7 +2,7 @@
 
 require "busybee/testing"
 
-RSpec.describe Busybee::Testing::WorkerExecution do
+RSpec.describe Busybee::Testing::Helpers::Execution do
   # Minimal worker for testing the helpers
   let(:worker_class) do
     Class.new(Busybee::Worker) do
