@@ -18,8 +18,10 @@ RSpec.describe Oms::UpdateOrderStatusWorker do
   end
 
   it "fails the job on an invalid status" do
-    job = build_worker_job(variables: { order_id: order.id }, headers: { status: "bogus" })
-    described_class.perform_job(job)
+    job = build_test_job(variables: { order_id: order.id }, headers: { status: "bogus" })
+    expect do
+      execute_worker(described_class, job: job)
+    end.to raise_error(ArgumentError, /Invalid order status/)
     expect(job).to be_failed
   end
 end

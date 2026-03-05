@@ -11,8 +11,10 @@ RSpec.describe Delivery::CalculateDistanceWorker do
   end
 
   it "fails the job on an unsupported algorithm" do
-    job = build_worker_job(variables: coords, headers: { algorithm: "haversine" })
-    described_class.perform_job(job)
+    job = build_test_job(variables: coords, headers: { algorithm: "haversine" })
+    expect do
+      execute_worker(described_class, job: job)
+    end.to raise_error(RuntimeError, /Unknown distance algorithm/)
     expect(job).to be_failed
   end
 end

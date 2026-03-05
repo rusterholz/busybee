@@ -4,10 +4,10 @@ require_relative "../../rails_helper"
 
 RSpec.describe Delivery::CompleteDriverDeliveryWorker do
   # The worker uses job.instance_variable_get(:@client) to publish messages.
-  # build_worker_job creates a mock client — we add publish_message to it for
-  # tests that exercise request fulfillment.
+  # build_test_job creates an instance_double(Busybee::Client) — we add
+  # publish_message stubbing for tests that exercise request fulfillment.
   def build_job_with_message_support(variables:)
-    job = build_worker_job(variables: variables)
+    job = build_test_job(variables: variables)
     allow(mock_client_for(job)).to receive(:publish_message)
     job
   end
@@ -36,7 +36,7 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
     Delivery::DriverRequest.create!(shipment_id: "ship-waiting-2", requested_at: 1.minute.ago)
 
     job = build_job_with_message_support(variables: delivery_vars(driver))
-    described_class.perform_job(job)
+    execute_worker(described_class, job: job)
     expect(job).not_to be_failed
 
     driver.reload
@@ -55,7 +55,7 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
     driver = Delivery::Driver.create!(name: "Alice", total_mileage: 50.0, current_shipment_id: "ship-1")
 
     job = build_job_with_message_support(variables: delivery_vars(driver))
-    described_class.perform_job(job)
+    execute_worker(described_class, job: job)
     expect(job).not_to be_failed
 
     expect(mock_client_for(job)).not_to have_received(:publish_message)
