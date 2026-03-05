@@ -64,8 +64,10 @@ RSpec.describe Logistics::UpdateShipmentStatusWorker do
   it "fails the job on an invalid status" do
     shipment = Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "planned")
 
-    job = build_worker_job(variables: { shipment_id: shipment.id }, headers: { status: "bogus" })
-    described_class.perform_job(job)
+    job = build_test_job(variables: { shipment_id: shipment.id }, headers: { status: "bogus" })
+    expect do
+      execute_worker(described_class, job: job)
+    end.to raise_error(ArgumentError, /Invalid shipment status/)
     expect(job).to be_failed
   end
 end
