@@ -143,6 +143,22 @@ system("cd spec/demo && bin/rails demo:run_orders[100]") or fail "Demo orders di
 
 This tests busybee end-to-end: process deployment, worker execution, variable passing, multi-instance fan-out, and conditional routing — all exercised through a realistic application rather than synthetic fixtures.
 
+### Worker Unit Tests
+
+Worker specs live in `spec/workers/` and use the busybee gem's testing helpers (`require "busybee/testing"`). Two patterns:
+
+**Matcher pattern** (preferred for most workers): Uses `fail_job`, `complete_job`, and `throw_bpmn_error_on` matchers with `let`-based job setup. See `calculate_distance_worker_spec.rb`, `update_order_status_worker_spec.rb`, and `update_shipment_status_worker_spec.rb`.
+
+```ruby
+let(:job) { build_test_job(variables: variables, headers: headers) }
+
+it "completes the job" do
+  expect(described_class).to complete_job(job).with_vars(hash_including(distance: 5.0))
+end
+```
+
+**Direct pattern** (for client interaction testing): Uses `build_test_job` + `execute_worker` directly when you need to stub or assert on the underlying client (e.g., `publish_message`). See `complete_driver_delivery_worker_spec.rb` for an example.
+
 ## Creating Orders Programmatically
 
 The web UI at `/orders/new` is the simplest way to create orders. For scripting or testing without the UI, you can create orders via curl. The form uses Rails CSRF protection, so you need a cookie jar:

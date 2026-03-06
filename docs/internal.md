@@ -49,12 +49,16 @@ lib/busybee/
 │   ├── activated_job.rb     # Fluent job wrapper for tests
 │   ├── helpers.rb           # deploy_process, with_process_instance, etc.
 │   ├── helpers/
+│   │   ├── execution.rb     # build_test_job, execute_worker (unit testing workers)
 │   │   └── support.rb       # Private helper methods
 │   └── matchers/            # RSpec custom matchers
+│       ├── complete_job.rb  # expect(Worker).to complete_job(job).with_vars(...)
+│       ├── fail_job.rb      # expect(Worker).to fail_job(job).with_error(...)
 │       ├── have_activated.rb
 │       ├── have_available_jobs.rb
 │       ├── have_received_headers.rb
-│       └── have_received_variables.rb
+│       ├── have_received_variables.rb
+│       └── throw_bpmn_error_on.rb  # expect(Worker).to throw_bpmn_error_on(job).with_code(...)
 ├── version.rb               # Gem version
 ├── worker.rb                # Worker base class, perform_job lifecycle, Shutdown error
 └── worker/                  # Worker support classes
@@ -397,3 +401,42 @@ The `Busybee::Serialization::HashAccess` module provides method-style access wit
 - Only responds to methods that correspond to existing keys (no silent `nil` returns)
 
 All Client operation modules, Job, and Testing helpers route through this module. Grep for `Serialization.to_json` and `Serialization.from_json` to find call sites.
+
+## Testing Module
+
+`Busybee::Testing` provides RSpec integration for both BPMN integration tests (against a real Zeebe cluster) and unit tests (no Zeebe required).
+
+### Architecture
+
+- `testing.rb` — Entry point. Auto-loads helpers and matchers when RSpec is defined, includes `Helpers` into all examples.
+- `testing/helpers.rb` — Integration test helpers (`deploy_process`, `with_process_instance`, `activate_job`, etc.) that talk to Zeebe via gRPC.
+- `testing/helpers/execution.rb` — Unit test helpers (`build_test_job`, `execute_worker`) that run the full `Worker.perform_job` lifecycle against stub doubles. Uses `instance_double(Busybee::Client)` for the stub client (verifiable) and plain `double` for the protobuf raw job (dynamic accessors prevent verification).
+- `testing/helpers/support.rb` — Private module-level helpers shared by integration test methods.
+- `testing/matchers/` — Custom RSpec matchers for both integration and unit testing.
+
+### Worker Unit Testing
+
+`execute_worker` wraps `handle_failure` via `and_wrap_original` to re-raise errors after production failure logic runs. This lets tests assert both error type and job status. The three worker matchers (`fail_job`, `complete_job`, `throw_bpmn_error_on`) are built on top of `execute_worker` — they call it internally, then inspect the job and/or rescue the re-raised error.
+
+### When to Use Matchers vs. execute_worker Directly
+
+The matchers (`fail_job`, `complete_job`, `throw_bpmn_error_on`) cover the common case: assert job status and optionally verify error/vars/code. Use them when that's all you need.
+
+Use `build_test_job` + `execute_worker` directly when you need to:
+- Stub additional client methods (e.g., `publish_message`) and verify them with `have_received`
+- Inspect side effects between execution and assertion
+- Test retry/idempotency scenarios that call `perform_job` directly
+
+See `spec/demo/spec/workers/delivery/complete_driver_delivery_worker_spec.rb` for an example of the "long" form with client interaction testing.
+
+### Matchers
+
+| Matcher | Subject | Chains | Purpose |
+|---------|---------|--------|---------|
+| `fail_job(job)` | Worker class | `.with_error(class, msg)` | Asserts job failed with optional error match |
+| `complete_job(job)` | Worker class | `.with_vars(hash)`, `.with_no_vars` | Asserts job completed with optional return value match |
+| `throw_bpmn_error_on(job)` | Worker class | `.with_code(code, message: msg)` | Asserts BPMN error thrown with optional code/message match |
+| `have_activated(type)` | Helper instance | `.with_variables(hash)`, `.with_headers(hash)` | Integration: asserts job activation |
+| `have_available_jobs` | Block | — | Integration: asserts jobs exist |
+| `have_received_variables(hash)` | ActivatedJob | — | Integration: asserts job variables |
+| `have_received_headers(hash)` | ActivatedJob | — | Integration: asserts job headers |

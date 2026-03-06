@@ -16,6 +16,9 @@ if defined?(RSpec)
   require "busybee/testing/matchers/have_received_headers"
   require "busybee/testing/matchers/have_activated"
   require "busybee/testing/matchers/have_available_jobs"
+  require "busybee/testing/matchers/fail_job"
+  require "busybee/testing/matchers/complete_job"
+  require "busybee/testing/matchers/throw_bpmn_error_on"
 
   RSpec.configure do |config|
     config.include Busybee::Testing::Helpers
