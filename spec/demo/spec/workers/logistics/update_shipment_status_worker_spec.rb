@@ -4,70 +4,92 @@ require_relative "../../rails_helper"
 
 RSpec.describe Logistics::UpdateShipmentStatusWorker do
   let(:warehouse) { Logistics::Warehouse.create!(name: "Alpha", lat: 0, lon: 0) }
-
-  def execute_update_shipment_worker(shipment, status:)
-    execute_worker(described_class, variables: { shipment_id: shipment.id }, headers: { status: status })
-  end
+  let(:variables) { { shipment_id: shipment.id } }
+  let(:headers) { { status: status } }
+  let(:job) { build_test_job(variables: variables, headers: headers) }
 
   describe "packed" do
-    it "transitions the shipment to packed" do
-      shipment = Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "planned")
+    let(:shipment) { Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "planned") }
+    let(:status) { "packed" }
 
-      result = execute_update_shipment_worker(shipment, status: "packed")
-
+    it "transitions the shipment and completes with no transit/delivery flags" do
+      expect(described_class).to complete_job(job).
+        with_vars(first_in_transit: nil, all_delivered: nil)
       expect(shipment.reload.status).to eq("packed")
-      expect(result).to eq(first_in_transit: nil, all_delivered: nil)
     end
   end
 
   describe "in_transit" do
-    it "transitions and returns first_in_transit true when this is the only in-transit shipment" do
-      shipment = Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "packed")
+    let(:status) { "in_transit" }
 
-      result = execute_update_shipment_worker(shipment, status: "in_transit")
+    context "when this is the only in-transit shipment" do
+      let(:shipment) { Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "packed") }
 
-      expect(shipment.reload.status).to eq("in_transit")
-      expect(result[:first_in_transit]).to be true
+      it "transitions and returns first_in_transit true" do
+        expect(described_class).to complete_job(job).
+          with_vars(hash_including(first_in_transit: true))
+        expect(shipment.reload.status).to eq("in_transit")
+      end
     end
 
-    it "returns first_in_transit false when another shipment is already in transit" do
-      Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "in_transit")
-      shipment = Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "packed")
+    context "when another shipment is already in transit" do
+      let(:shipment) do
+        Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "packed")
+      end
 
-      result = execute_update_shipment_worker(shipment, status: "in_transit")
+      before do
+        Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "in_transit")
+      end
 
-      expect(result[:first_in_transit]).to be false
+      it "returns first_in_transit false" do
+        expect(described_class).to complete_job(job).
+          with_vars(hash_including(first_in_transit: false))
+      end
     end
   end
 
   describe "delivered" do
-    it "transitions and returns all_delivered true when every shipment is now delivered" do
-      Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "delivered")
-      shipment = Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "in_transit")
+    let(:status) { "delivered" }
 
-      result = execute_update_shipment_worker(shipment, status: "delivered")
+    context "when every shipment is now delivered" do
+      let(:shipment) do
+        Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "in_transit")
+      end
 
-      expect(shipment.reload.status).to eq("delivered")
-      expect(result[:all_delivered]).to be true
+      before do
+        Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "delivered")
+      end
+
+      it "transitions and returns all_delivered true" do
+        expect(described_class).to complete_job(job).
+          with_vars(hash_including(all_delivered: true))
+        expect(shipment.reload.status).to eq("delivered")
+      end
     end
 
-    it "returns all_delivered false when other shipments remain undelivered" do
-      Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "planned")
-      shipment = Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "in_transit")
+    context "when other shipments remain undelivered" do
+      let(:shipment) do
+        Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "in_transit")
+      end
 
-      result = execute_update_shipment_worker(shipment, status: "delivered")
+      before do
+        Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "planned")
+      end
 
-      expect(result[:all_delivered]).to be false
+      it "returns all_delivered false" do
+        expect(described_class).to complete_job(job).
+          with_vars(hash_including(all_delivered: false))
+      end
     end
   end
 
-  it "fails the job on an invalid status" do
-    shipment = Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "planned")
+  context "with an invalid status" do
+    let(:shipment) { Logistics::Shipment.create!(order_id: "order-1", warehouse: warehouse, status: "planned") }
+    let(:status) { "bogus" }
 
-    job = build_test_job(variables: { shipment_id: shipment.id }, headers: { status: "bogus" })
-    expect do
-      execute_worker(described_class, job: job)
-    end.to raise_error(ArgumentError, /Invalid shipment status/)
-    expect(job).to be_failed
+    it "fails the job" do
+      expect(described_class).to fail_job(job).
+        with_error(ArgumentError, /Invalid shipment status/)
+    end
   end
 end

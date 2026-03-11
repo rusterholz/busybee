@@ -3,6 +3,13 @@
 require_relative "../../rails_helper"
 
 RSpec.describe Delivery::CompleteDriverDeliveryWorker do
+  # This spec intentionally uses execute_worker + manual assertions instead of
+  # the fail_job/complete_job/throw_bpmn_error_on matchers. The matchers are
+  # great for the common case (assert job status + error/vars), but this worker
+  # needs to verify client-level interactions (publish_message) that the matchers
+  # don't cover. When your test needs to stub or assert on the underlying client,
+  # use build_test_job + execute_worker directly.
+  #
   # The worker uses job.instance_variable_get(:@client) to publish messages.
   # build_test_job creates an instance_double(Busybee::Client) — we add
   # publish_message stubbing for tests that exercise request fulfillment.
