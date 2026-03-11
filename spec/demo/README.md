@@ -2,6 +2,8 @@
 
 A multi-domain e-commerce fulfillment system orchestrated by BPMN workflows, built on [busybee](https://github.com/busybee-org/busybee). Orders flow through warehouse planning, pick-and-pack simulation, driver assignment, and delivery — all coordinated by Zeebe with busybee workers doing the actual work.
 
+For reference documentation on the busybee features used here, see [Workers](../../docs/workers.md) (defining, running, and testing workers) and [Gem Configuration](../../docs/configuration.md) (connection, credentials, and defaults).
+
 ## Quick Start
 
 ```bash
@@ -102,7 +104,7 @@ Docker Compose runs the full stack: Zeebe (with Elasticsearch for storage), a Ra
 
 - **Database**: SQLite with WAL mode. Single file, shared across containers via a Docker volume.
 - **Workers**: Each domain runs as a separate `busybee` CLI process, configured via per-domain YAML files in `config/busybee/`. Workers are single-threaded (MRI), but the Sim workers use `Concurrent::Promises` for non-blocking delays.
-- **YAML configuration**: Worker containers use `busybee --config config/busybee/<domain>.yml` instead of listing class names on the command line. Each YAML file defines which workers run in that process and any per-worker tuning (e.g., higher `max_jobs` for the bottleneck `LoadItemAvailabilityWorker`). See `config/busybee/` for examples.
+- **YAML configuration**: Worker containers use `busybee --config config/busybee/<domain>.yml` instead of listing class names on the command line. Each YAML file defines which workers run in that process and any per-worker tuning (e.g., higher `max_jobs` for the bottleneck `LoadItemAvailabilityWorker`). See `config/busybee/` for examples, and [Workers: YAML Configuration](../../docs/workers.md#yaml-configuration) for the full reference.
 - **Process chaining**: `prepare_order` → `ship_order` → `deliver_shipment` are chained via ActiveRecord `after_commit` callbacks, not BPMN call activities.
 - **Speed scaling**: The `DEMO_SPEED` env var (set via `--speed` flag) scales all timing — order creation rate, worker delays, and fleet size.
 
