@@ -18,7 +18,7 @@ Busybee provides everything you need to work with Camunda Platform or self-hoste
 |---------|---------|--------|
 | v0.1 | BPMN Testing Tools, GRPC Layer | Available now! |
 | v0.2 | Client, Rails Integration | Available now! |
-| v0.3 | Worker Pattern & CLI | Early 2026 |
+| v0.3 | Worker Pattern & CLI | Available now! |
 | v0.4 | Instrumentation Hooks, Deployment Tools | Mid 2026 |
 | v1.0 | Production Polish | Late 2026 |
 
@@ -44,35 +44,48 @@ gem install busybee
 
 ## Usage
 
-### Worker Pattern Framework (coming in early 2026)
+### Worker Pattern Framework (available now!)
 
-Define job handlers as Ruby classes. Busybee manages the process lifecycle, the connection to Camunda Cloud, and requesting jobs from Zeebe. If you've used Racecar to build Kafka handlers, or Sidekiq to build background jobs, this should feel very familiar.
-
-> This feature is still being designed. The example shown here is only representative and will change before implementation.
+Define job handlers as Ruby classes. Busybee manages the process lifecycle, the connection to Camunda Cloud, and requesting jobs from Zeebe. If you've used Sidekiq to build background jobs, this should feel very familiar.
 
 ```ruby
 class ProcessOrderWorker < Busybee::Worker
-  type "process-order"
+  job_type "process_order"
 
-  input :order_id, required: true
-  input :customer_email
+  variable :order_id, type: :uuid
+  variable :customer_email, required: false
 
-  output :confirmation_number
+  output :confirmation_number, type: :string
 
   def perform
-    confirmation = OrderService.process(order_id)
-    complete(confirmation_number: confirmation)
+    order = Order.find(order_id)
+    confirmation = order.process!
+    EmailService.send_confirmation(customer_email, confirmation) if customer_email
+    { confirmation_number: confirmation }
   end
 end
 ```
 
-Planned capabilities:
+Run workers from the command line:
 
-- Declarative input/output definitions with validation
-- Automatic job activation and completion
-- Configurable timeouts and retry behavior
-- Graceful shutdown on SIGTERM
-- CLI for running workers: `bundle exec busybee work` or similar
+```bash
+bundle exec busybee ProcessOrderWorker ShipOrderWorker
+
+# Or with a YAML config file
+bundle exec busybee --config config/busybee.yml
+```
+
+Capabilities:
+
+- Declarative input/output definitions with validation and accessor methods
+- Automatic job completion and failure reporting
+- Three runner modes (polling, streaming, hybrid) for different workload patterns
+- Configurable timeouts, retry backoff, and backpressure handling
+- Graceful shutdown on SIGTERM/SIGINT
+- YAML configuration with per-worker overrides
+- RSpec matchers for unit testing workers without Zeebe
+
+**[Full worker documentation &rarr;](docs/workers.md)**
 
 ### Idiomatic Zeebe Client (available now!)
 
@@ -97,7 +110,7 @@ client.publish_message("payment-received",
   vars: { amount: 99.99 }
 )
 
-# Process jobs
+# Process jobs (for ad-hoc use; for production job processing, use the Worker pattern above)
 client.with_each_job("send-confirmation") do |job|
   EmailService.send(job.variables.customer_email)
   job.complete!(sent_at: Time.now.iso8601)
@@ -165,9 +178,9 @@ end
 - `assert_process_completed!` - Verify workflow reached an end event
 - `have_activated`, `have_received_variables`, `have_received_headers` - RSpec matchers
 
-**For more info, see our [full testing documentation here](docs/testing.md).**
+**For more info, see our [full testing documentation here](docs/testing.md).** For unit testing workers, see [Workers: Testing Workers](docs/workers.md#testing-workers).
 
-### Deployment Tools (coming in early 2026)
+### Deployment Tools (coming in mid 2026)
 
 CI/CD tooling for deploying BPMN processes to your Zeebe clusters. Version tracking, environment-specific deployments, and pre-deployment validation.
 
@@ -191,6 +204,10 @@ puts response.brokers.map(&:host)
 ```
 
 **For more info, see the [full GRPC documentation here](docs/grpc.md).**
+
+### Demo Application
+
+The [Dropship Co. demo app](spec/demo/README.md) is a multi-domain Rails application that showcases busybee in action. It orchestrates order fulfillment across warehousing, logistics, and delivery services using BPMN workflows and busybee workers. It's a good place to see realistic usage patterns and to experiment with the framework.
 
 ## Ruby Implementation Support
 

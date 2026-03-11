@@ -1,6 +1,8 @@
-# Testing BPMN Workflows with Busybee
+# Testing BPMN Workflows
 
-Busybee provides RSpec helpers and matchers for testing BPMN workflows against Zeebe. This testing module makes it easy to write integration tests that deploy processes, create instances, activate jobs, and verify workflow behavior.
+Busybee provides RSpec helpers and matchers for testing BPMN workflows against a running Zeebe instance. This testing module lets you deploy processes, create instances, activate jobs, and verify that your workflow definitions route work correctly.
+
+This document covers **workflow-level testing** — verifying that your BPMN process definitions behave as expected. If you're looking to **unit test your worker classes** (the Ruby code that handles individual jobs), see [Workers: Testing Workers](workers.md#testing-workers). The two complement each other: workflow tests verify the orchestration, worker tests verify the business logic.
 
 ## Installation
 
@@ -720,18 +722,20 @@ cancel_instance(key) # Easy to forget in error paths
 Assert expected inputs before completing jobs:
 
 ```ruby
-# Good: Verify then complete
-job = activate_job("send-email")
-expect(job).to have_received_variables(
-  recipient: "user@example.com",
-  template: "order_confirmation"
-)
-job.mark_completed(sent_at: Time.now.iso8601)
-
-# Also Good: fluent style
+# Good: fluent style — verify and complete in one chain
 activate_job("send-email")
   .expect_variables(recipient: "user@example.com")
   .and_complete(sent_at: Time.now.iso8601)
+
+# Also Good: separate verification and completion — useful when you need to
+# activate multiple jobs of the same type and distinguish between them
+jobs = activate_jobs("send-comms", max_jobs: 2)
+  .group_by { |j| j.headers["medium"] }
+  .transform_values(&:first)
+
+expect(jobs["sms"]).to have_received_variables(template: "order_sms")
+expect(jobs["email"]).to have_received_variables(template: "order_confirmation")
+jobs.each_value(&:mark_completed)
 ```
 
 ## Troubleshooting
