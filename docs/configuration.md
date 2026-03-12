@@ -355,7 +355,7 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_max_jobs` | `Busybee.default_max_jobs` |
 | `config.x.busybee.default_buffer` | `Busybee.default_buffer` |
 | `config.x.busybee.default_buffer_throttle` | `Busybee.default_buffer_throttle` |
-| `config.x.busybee.runner_backpressure_delay` | `Busybee.runner_backpressure_delay` |
+| `config.x.busybee.default_backpressure_delay` | `Busybee.default_backpressure_delay` |
 | `config.x.busybee.default_input_required` | `Busybee.default_input_required` |
 | `config.x.busybee.default_output_required` | `Busybee.default_output_required` |
 | `config.x.busybee.shutdown_on_errors` | `Busybee.shutdown_on_errors` |
@@ -452,7 +452,7 @@ Default worker mode for workers.
 Busybee.default_worker_mode = :polling
 ```
 
-See [Workers: Worker Modes](workers.md#runner-modes) for details on each mode.
+See [Workers: Worker Modes](workers.md#worker-modes) for details on each mode.
 
 #### `default_max_jobs`
 
@@ -497,7 +497,7 @@ Busybee.default_buffer_throttle = 5  # 5ms pump delay
 
 See [Workers: Buffer Throttle](workers.md#buffer-throttle) for guidance on choosing a value.
 
-#### `runner_backpressure_delay`
+#### `default_backpressure_delay`
 
 How long to wait after a backpressure error (`GRPC::ResourceExhausted`) before retrying.
 
@@ -507,7 +507,7 @@ How long to wait after a backpressure error (`GRPC::ResourceExhausted`) before r
 | **Default** | `2_000` (2 seconds) |
 
 ```ruby
-Busybee.runner_backpressure_delay = 10_000
+Busybee.default_backpressure_delay = 10_000
 ```
 
 #### `default_input_required`

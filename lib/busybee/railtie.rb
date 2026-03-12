@@ -80,8 +80,8 @@ module Busybee
         config.default_buffer_throttle = busybee_conf.default_buffer_throttle
       end
       config.default_worker_mode = busybee_conf.default_worker_mode if busybee_conf.default_worker_mode.presence
-      if busybee_conf.runner_backpressure_delay.presence
-        config.runner_backpressure_delay = busybee_conf.runner_backpressure_delay
+      if busybee_conf.default_backpressure_delay.presence
+        config.default_backpressure_delay = busybee_conf.default_backpressure_delay
       end
       config.shutdown_on_errors = busybee_conf.shutdown_on_errors if busybee_conf.shutdown_on_errors.presence
     end

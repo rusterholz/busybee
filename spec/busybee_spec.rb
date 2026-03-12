@@ -264,9 +264,9 @@ RSpec.describe Busybee do
                     :DEFAULT_JOB_LOCK_TIMEOUT_MS
   end
 
-  describe ".runner_backpressure_delay" do
-    it_behaves_like "a duration config setter", :runner_backpressure_delay, :runner_backpressure_delay,
-                    :DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
+  describe ".default_backpressure_delay" do
+    it_behaves_like "a duration config setter", :default_backpressure_delay, :default_backpressure_delay,
+                    :DEFAULT_BACKPRESSURE_DELAY_MS
   end
 
   describe ".default_max_jobs" do

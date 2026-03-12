@@ -13,7 +13,7 @@ RSpec.describe Busybee::RuntimeConfig do
   # Save/restore gem-level config that tests may modify
   around do |example|
     saved = %i[
-      @default_worker_mode @runner_backpressure_delay @default_buffer_throttle
+      @default_worker_mode @default_backpressure_delay @default_buffer_throttle
       @log_format @worker_name @cluster_address
     ].to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
     example.run
@@ -208,7 +208,7 @@ RSpec.describe Busybee::RuntimeConfig do
       it "falls back to gem default" do
         config = described_class.new
         expect(config.resolve_for(worker_class).backpressure_delay).to eq(
-          Busybee::Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
+          Busybee::Defaults::DEFAULT_BACKPRESSURE_DELAY_MS
         )
       end
     end

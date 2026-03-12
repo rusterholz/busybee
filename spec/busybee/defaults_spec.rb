@@ -25,7 +25,7 @@ RSpec.describe Busybee::Defaults do
     expect(described_class::DEFAULT_GRPC_RETRY_DELAY_MS).to eq(500)
   end
 
-  it "defines DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS as 2 seconds" do
-    expect(described_class::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS).to eq(2_000)
+  it "defines DEFAULT_BACKPRESSURE_DELAY_MS as 2 seconds" do
+    expect(described_class::DEFAULT_BACKPRESSURE_DELAY_MS).to eq(2_000)
   end
 end

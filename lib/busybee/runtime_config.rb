@@ -147,7 +147,7 @@ module Busybee
       # rubocop:disable Layout/HashAlignment, Layout/LineLength
       self.class.new(
         worker_mode:        first_non_nil(wo[:worker_mode], @worker_mode, dsl.worker_mode, Busybee.default_worker_mode),
-        backpressure_delay: first_non_nil(wo[:backpressure_delay], @backpressure_delay, dsl.backpressure_delay, Busybee.runner_backpressure_delay),
+        backpressure_delay: first_non_nil(wo[:backpressure_delay], @backpressure_delay, dsl.backpressure_delay, Busybee.default_backpressure_delay),
         max_jobs:           first_non_nil(wo[:max_jobs], @max_jobs, dsl.polling_config[:max_jobs], Busybee.default_max_jobs),
         request_timeout:    first_non_nil(wo[:request_timeout], @request_timeout, dsl.polling_config[:request_timeout], Busybee.default_job_request_timeout),
         buffer:     first_non_nil(wo[:buffer], @buffer, dsl.streaming_config[:buffer], Busybee.default_buffer),

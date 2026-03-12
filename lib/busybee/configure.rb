@@ -94,8 +94,8 @@ module Busybee
       @grpc_retry_delay_ms = value.nil? ? nil : validate_duration!(:grpc_retry_delay_ms, value)
     end
 
-    def runner_backpressure_delay=(value)
-      @runner_backpressure_delay = value.nil? ? nil : validate_duration!(:runner_backpressure_delay, value)
+    def default_backpressure_delay=(value)
+      @default_backpressure_delay = value.nil? ? nil : validate_duration!(:default_backpressure_delay, value)
     end
 
     # --- Buffer throttle (three-state: false/nil = off, true → 0, Numeric = ms) ---

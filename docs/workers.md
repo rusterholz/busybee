@@ -24,7 +24,7 @@ Busybee is built around a workflow engine named [Zeebe](https://docs.camunda.io/
   - [CLI Reference](#cli-reference)
   - [Rails Integration](#rails-integration)
   - [Signal Handling](#signal-handling)
-  - [Runner Modes](#runner-modes)
+  - [Worker Modes](#worker-modes)
   - [Multiple Workers in One Process](#multiple-workers-in-one-process)
   - [YAML Configuration](#yaml-configuration)
   - [Configuration Precedence](#configuration-precedence)
@@ -454,7 +454,7 @@ backoff 30.seconds # same, with ActiveSupport
 
 Default: `5_000` ms (5 seconds), configurable via [`Busybee.default_fail_job_backoff`](configuration.md).
 
-#### Runner Configuration in the DSL
+#### Mode Configuration in the DSL
 
 Workers can declare their preferred worker mode and any mode-specific options. These serve as defaults that can be overridden at deploy time via CLI flags or YAML configuration (see [Configuration Precedence](#configuration-precedence)):
 
@@ -478,7 +478,7 @@ class BatchWorker < Busybee::Worker
 end
 ```
 
-See [Runner Modes](#runner-modes) for what these options mean and when to use each mode.
+See [Worker Modes](#worker-modes) for what these options mean and when to use each mode.
 
 #### DSL Quick Reference
 
@@ -491,8 +491,8 @@ See [Runner Modes](#runner-modes) for what these options mean and when to use ea
 | `input` | name, `source:`, opts | | Declare an input from any source |
 | `output` | name, opts | | Declare an output |
 | `worker_mode` | Symbol | `:hybrid` | `:polling`, `:streaming`, or `:hybrid` |
-| `polling` | `max_jobs:`, `request_timeout:` | `25`, `60_000` | Polling runner options |
-| `streaming` | `buffer:`, `buffer_throttle:` | `true`, `false` | Streaming runner options |
+| `polling` | `max_jobs:`, `request_timeout:` | `25`, `60_000` | Polling mode options |
+| `streaming` | `buffer:`, `buffer_throttle:` | `true`, `false` | Streaming mode options |
 | `job_timeout` | Integer or Duration | `60_000` | Job lock timeout (ms) |
 | `backoff` | Integer or Duration | `5_000` | Retry backoff delay (ms) |
 | `backpressure_delay` | Integer or Duration | `2_000` | Delay after backpressure error (ms) |
@@ -568,7 +568,7 @@ The worker process responds to standard Unix signals:
 
 During graceful shutdown, any jobs that were received from the workflow engine but not yet started are failed back to the workflow engine with their retry count preserved, so they'll be picked up by another worker.
 
-### Runner Modes
+### Worker Modes
 
 Zeebe supports two different ways of fetching jobs for your worker: long-polling or streaming. Both of them have advantages and disadvantages. Busybee supports both modes, as well as a third hybrid mode which eliminates the downsides of using either polling or streaming alone.
 

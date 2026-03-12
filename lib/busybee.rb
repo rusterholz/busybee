@@ -110,8 +110,8 @@ module Busybee
       @log_format || :text
     end
 
-    def runner_backpressure_delay
-      @runner_backpressure_delay || Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
+    def default_backpressure_delay
+      @default_backpressure_delay || Defaults::DEFAULT_BACKPRESSURE_DELAY_MS
     end
 
     def shutdown_on_errors
