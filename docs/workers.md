@@ -495,7 +495,7 @@ See [Runner Modes](#runner-modes) for what these options mean and when to use ea
 | `streaming` | `queue:`, `queue_throttle:` | `true`, `false` | Streaming runner options |
 | `job_timeout` | Integer or Duration | `60_000` | Job lock timeout (ms) |
 | `backoff` | Integer or Duration | `5_000` | Retry backoff delay (ms) |
-| `backpressure_delay` | Integer or Duration | `5_000` | Delay after backpressure error (ms) |
+| `backpressure_delay` | Integer or Duration | `2_000` | Delay after backpressure error (ms) |
 | `complete_job_on_success` | Boolean | `true` | Auto-complete on success |
 | `fail_job_on_error` | Boolean | `true` | Auto-fail on exception |
 | `shutdown_on` | Exception class(es) | `[]` | Exceptions that trigger shutdown |
@@ -664,7 +664,7 @@ However, there is an option that gives you a rate cap higher than this value wit
 
 #### Backpressure
 
-When the Zeebe cluster is under heavy load, it may respond to requests with a `ResourceExhausted` GRPC error. Both the polling and hybrid modes handle this automatically by sleeping for `backpressure_delay` milliseconds (default: 5,000) before retrying.
+When the Zeebe cluster is under heavy load, it may respond to requests with a `ResourceExhausted` GRPC error. Both the polling and hybrid modes handle this automatically by sleeping for `backpressure_delay` milliseconds (default: 2,000) before retrying.
 
 ```ruby
 backpressure_delay 10_000  # wait 10 seconds on backpressure

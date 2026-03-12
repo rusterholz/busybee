@@ -504,7 +504,7 @@ How long to wait after a backpressure error (`GRPC::ResourceExhausted`) before r
 | | |
 |--|--|
 | **Type** | Integer (milliseconds) or ActiveSupport::Duration |
-| **Default** | `5_000` (5 seconds) |
+| **Default** | `2_000` (2 seconds) |
 
 ```ruby
 Busybee.runner_backpressure_delay = 10_000
