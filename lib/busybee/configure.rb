@@ -52,14 +52,14 @@ module Busybee
       @default_output_required = value
     end
 
-    def default_queue_enabled=(value)
+    def default_buffer=(value)
       if value.nil?
-        @default_queue_enabled = nil
+        @default_buffer = nil
         return
       end
 
-      validate_boolean!(:default_queue_enabled, value)
-      @default_queue_enabled = value
+      validate_boolean!(:default_buffer, value)
+      @default_buffer = value
     end
 
     def grpc_retry_enabled=(value)
@@ -98,10 +98,10 @@ module Busybee
       @runner_backpressure_delay = value.nil? ? nil : validate_duration!(:runner_backpressure_delay, value)
     end
 
-    # --- Queue throttle (three-state: false/nil = off, true → 0, Numeric = ms) ---
+    # --- Buffer throttle (three-state: false/nil = off, true → 0, Numeric = ms) ---
 
-    def default_queue_throttle=(value)
-      @default_queue_throttle = value.nil? ? nil : validate_queue_throttle!(:default_queue_throttle, value)
+    def default_buffer_throttle=(value)
+      @default_buffer_throttle = value.nil? ? nil : validate_buffer_throttle!(:default_buffer_throttle, value)
     end
 
     # --- Worker mode ---
@@ -243,9 +243,9 @@ module Busybee
       raise ArgumentError, "#{name} accepts String or Symbol, got #{value.inspect} (#{value.class})"
     end
 
-    # Validates and coerces a queue throttle value.
+    # Validates and coerces a buffer throttle value.
     # Returns the (possibly coerced) value to assign.
-    def validate_queue_throttle!(name, value)
+    def validate_buffer_throttle!(name, value)
       return 0 if value == true
       return false if value == false
 

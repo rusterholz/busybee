@@ -353,8 +353,8 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_job_lock_timeout` | `Busybee.default_job_lock_timeout` |
 | `config.x.busybee.default_worker_mode` | `Busybee.default_worker_mode` |
 | `config.x.busybee.default_max_jobs` | `Busybee.default_max_jobs` |
-| `config.x.busybee.default_queue_enabled` | `Busybee.default_queue_enabled` |
-| `config.x.busybee.default_queue_throttle` | `Busybee.default_queue_throttle` |
+| `config.x.busybee.default_buffer` | `Busybee.default_buffer` |
+| `config.x.busybee.default_buffer_throttle` | `Busybee.default_buffer_throttle` |
 | `config.x.busybee.runner_backpressure_delay` | `Busybee.runner_backpressure_delay` |
 | `config.x.busybee.default_input_required` | `Busybee.default_input_required` |
 | `config.x.busybee.default_output_required` | `Busybee.default_output_required` |
@@ -467,9 +467,9 @@ Default maximum number of jobs to fetch per polling request.
 Busybee.default_max_jobs = 50
 ```
 
-#### `default_queue_enabled`
+#### `default_buffer`
 
-Whether the streaming runner uses a pump thread and queue by default.
+Whether the streaming runner uses a pump thread and buffer by default.
 
 | | |
 |--|--|
@@ -477,12 +477,12 @@ Whether the streaming runner uses a pump thread and queue by default.
 | **Default** | `true` |
 
 ```ruby
-Busybee.default_queue_enabled = false
+Busybee.default_buffer = false
 ```
 
-#### `default_queue_throttle`
+#### `default_buffer_throttle`
 
-Default pump thread delay for the streaming runner's queue.
+Default pump thread delay for the streaming runner's buffer.
 
 | | |
 |--|--|
@@ -492,10 +492,10 @@ Default pump thread delay for the streaming runner's queue.
 `false` disables throttling. `true` coerces to `0` (minimal throttle). A positive number sets the delay in milliseconds (sub-millisecond Floats accepted).
 
 ```ruby
-Busybee.default_queue_throttle = 5  # 5ms pump delay
+Busybee.default_buffer_throttle = 5  # 5ms pump delay
 ```
 
-See [Workers: Queue Throttle](workers.md#queue-throttle) for guidance on choosing a value.
+See [Workers: Buffer Throttle](workers.md#buffer-throttle) for guidance on choosing a value.
 
 #### `runner_backpressure_delay`
 

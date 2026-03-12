@@ -354,88 +354,88 @@ RSpec.describe Busybee do
     end
   end
 
-  describe ".default_queue_enabled" do
+  describe ".default_buffer" do
     around do |example|
-      original = described_class.instance_variable_get(:@default_queue_enabled)
+      original = described_class.instance_variable_get(:@default_buffer)
       example.run
-      described_class.default_queue_enabled = original
+      described_class.default_buffer = original
     end
 
     it "defaults to true" do
-      described_class.default_queue_enabled = nil
-      expect(described_class.default_queue_enabled).to be(true)
+      described_class.default_buffer = nil
+      expect(described_class.default_buffer).to be(true)
     end
 
     it "can be set to false" do
-      described_class.default_queue_enabled = false
-      expect(described_class.default_queue_enabled).to be(false)
+      described_class.default_buffer = false
+      expect(described_class.default_buffer).to be(false)
     end
 
     it "rejects non-boolean values" do
-      expect { described_class.default_queue_enabled = "true" }.to raise_error(ArgumentError, /default_queue_enabled/)
+      expect { described_class.default_buffer = "true" }.to raise_error(ArgumentError, /default_buffer/)
     end
   end
 
-  describe ".default_queue_throttle" do
+  describe ".default_buffer_throttle" do
     around do |example|
-      original = described_class.instance_variable_get(:@default_queue_throttle)
+      original = described_class.instance_variable_get(:@default_buffer_throttle)
       example.run
-      described_class.default_queue_throttle = original
+      described_class.default_buffer_throttle = original
     end
 
     it "defaults to false (no throttling)" do
-      described_class.default_queue_throttle = nil
-      expect(described_class.default_queue_throttle).to be(false)
+      described_class.default_buffer_throttle = nil
+      expect(described_class.default_buffer_throttle).to be(false)
     end
 
     it "can be set to an integer" do
-      described_class.default_queue_throttle = 5
-      expect(described_class.default_queue_throttle).to eq(5)
+      described_class.default_buffer_throttle = 5
+      expect(described_class.default_buffer_throttle).to eq(5)
     end
 
     it "can be set to a float for sub-millisecond precision" do
-      described_class.default_queue_throttle = 0.5
-      expect(described_class.default_queue_throttle).to eq(0.5)
+      described_class.default_buffer_throttle = 0.5
+      expect(described_class.default_buffer_throttle).to eq(0.5)
     end
 
     it "preserves 0 (minimal throttle via sleep(0))" do
-      described_class.default_queue_throttle = 0
-      expect(described_class.default_queue_throttle).to eq(0)
+      described_class.default_buffer_throttle = 0
+      expect(described_class.default_buffer_throttle).to eq(0)
     end
 
     it "coerces true to 0" do
-      described_class.default_queue_throttle = true
-      expect(described_class.default_queue_throttle).to eq(0)
+      described_class.default_buffer_throttle = true
+      expect(described_class.default_buffer_throttle).to eq(0)
     end
 
     it "coerces false to false" do
-      described_class.default_queue_throttle = false
+      described_class.default_buffer_throttle = false
       # false is falsy, so reader falls through to default (which is also false)
-      expect(described_class.default_queue_throttle).to be(false)
+      expect(described_class.default_buffer_throttle).to be(false)
     end
 
     it "coerces a numeric String to Float" do
-      described_class.default_queue_throttle = "5.5"
-      expect(described_class.default_queue_throttle).to eq(5.5)
+      described_class.default_buffer_throttle = "5.5"
+      expect(described_class.default_buffer_throttle).to eq(5.5)
     end
 
     it "rejects negative values" do
-      expect { described_class.default_queue_throttle = -1 }.to raise_error(ArgumentError, /non-negative/)
+      expect { described_class.default_buffer_throttle = -1 }.to raise_error(ArgumentError, /non-negative/)
     end
 
     it "rejects non-numeric Strings" do
-      expect { described_class.default_queue_throttle = "fast" }.to raise_error(ArgumentError, /default_queue_throttle/)
+      expect { described_class.default_buffer_throttle = "fast" }.to raise_error(ArgumentError, /default_buffer_throttle/)
     end
 
     it "rejects other types" do
-      expect { described_class.default_queue_throttle = Object.new }.
-        to raise_error(ArgumentError, /default_queue_throttle/)
+      expect { described_class.default_buffer_throttle = Object.new }.
+        to raise_error(ArgumentError, /default_buffer_throttle/)
     end
 
     it "resets to default when set to nil" do
-      described_class.default_queue_throttle = 5
-      described_class.default_queue_throttle = nil
-      expect(described_class.default_queue_throttle).to be(false)
+      described_class.default_buffer_throttle = 5
+      described_class.default_buffer_throttle = nil
+      expect(described_class.default_buffer_throttle).to be(false)
     end
   end
 

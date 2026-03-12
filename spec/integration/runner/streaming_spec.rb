@@ -91,12 +91,12 @@ RSpec.describe Busybee::Runner::Streaming, :integration do
     expect(performed_job_keys).to be_empty
   end
 
-  context "with inline mode (queue: false)" do
+  context "with inline mode (buffer: false)" do
     let(:worker_class) do
       keys = performed_job_keys
       Class.new(Busybee::Worker) do
         job_type "process-order"
-        streaming queue: false
+        streaming buffer: false
 
         define_method(:perform) do
           keys << job.key

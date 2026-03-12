@@ -23,7 +23,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
   # Simulate a long-lived gRPC stream: each blocks until close is called.
   # Without this, mock streams that return immediately trigger pump shutdown,
-  # racing with the main thread's drain/queue processing.
+  # racing with the main thread's drain/buffer processing.
   let(:stream_gate) { Concurrent::Event.new }
 
   before do
@@ -41,8 +41,8 @@ RSpec.describe Busybee::Runner::Hybrid do
       expect(runner.running?).to be false
     end
 
-    it "creates a thread-safe job queue" do
-      expect(runner.instance_variable_get(:@job_queue)).to be_a(Queue)
+    it "creates a thread-safe job buffer" do
+      expect(runner.instance_variable_get(:@job_buffer)).to be_a(Queue)
     end
 
     it "creates an AtomicReference for shutdown error" do
@@ -53,7 +53,7 @@ RSpec.describe Busybee::Runner::Hybrid do
   end
 
   # Helper: stub client for a Hybrid run! that immediately stops.
-  # Yields no backlog jobs (drain exits immediately) and pushes :stop to unblock queue.
+  # Yields no backlog jobs (drain exits immediately) and pushes :stop to unblock buffer.
   def stub_immediate_stop! # rubocop:disable Metrics/AbcSize
     allow(client).to receive(:open_job_stream).and_return(stream)
     allow(stream).to receive(:each) { stream_gate.wait }
@@ -102,10 +102,10 @@ RSpec.describe Busybee::Runner::Hybrid do
       expect(runner.running?).to be false
     end
 
-    it "starts a pump thread that pushes stream jobs into the queue" do
+    it "starts a pump thread that pushes stream jobs into the buffer" do
       streamed_job = instance_double(Busybee::Job, key: 42, retries: 1, ready?: true)
       allow(streamed_job).to receive(:fail!)
-      queue = runner.instance_variable_get(:@job_queue)
+      queue = runner.instance_variable_get(:@job_buffer)
 
       allow(client).to receive(:open_job_stream) do
         allow(stream).to receive(:each) do |&block|
@@ -114,7 +114,7 @@ RSpec.describe Busybee::Runner::Hybrid do
         end
         stream
       end
-      # During drain, check that the pump thread pushed the job into the queue
+      # During drain, check that the pump thread pushed the job into the buffer
       allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
         # Give pump thread time to push
         sleep 0.1
@@ -220,7 +220,7 @@ RSpec.describe Busybee::Runner::Hybrid do
           0 # fewer than max_jobs → caught up
         end
 
-        # After drain exits, runner enters blocking queue phase. Stop via background thread.
+        # After drain exits, runner enters blocking buffer phase. Stop via background thread.
         Thread.new do
           sleep 0.1
           runner.stop!
@@ -269,9 +269,9 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
           # Simulate a streamed job arriving while polling
-          runner.instance_variable_get(:@job_queue).push(streamed_job)
+          runner.instance_variable_get(:@job_buffer).push(streamed_job)
           block.call(polled_job)
-          # After polled_job, process_queued_jobs should have drained streamed_job
+          # After polled_job, process_buffered_jobs should have drained streamed_job
           runner.stop!
           1
         end
@@ -303,8 +303,8 @@ RSpec.describe Busybee::Runner::Hybrid do
       end
     end
 
-    context "with queue phase" do
-      it "processes streamed jobs from the queue after drain completes" do
+    context "with buffer phase" do
+      it "processes streamed jobs from the buffer after drain completes" do
         streamed_job = instance_double(Busybee::Job, key: 50, retries: 1, ready?: true)
         process_order = []
 
@@ -317,8 +317,8 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         # Drain exits immediately (no backlog)
         allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
-          # Push a job into the queue to simulate a stream arrival
-          runner.instance_variable_get(:@job_queue).push(streamed_job)
+          # Push a job into the buffer to simulate a stream arrival
+          runner.instance_variable_get(:@job_buffer).push(streamed_job)
           0
         end
 
@@ -327,7 +327,7 @@ RSpec.describe Busybee::Runner::Hybrid do
         expect(process_order).to eq([50])
       end
 
-      it "blocks until a job arrives on the queue" do
+      it "blocks until a job arrives in the buffer" do
         streamed_job = instance_double(Busybee::Job, key: 77, retries: 1, ready?: true)
 
         allow(client).to receive_messages(open_job_stream: stream, with_each_job: 0)
@@ -337,13 +337,13 @@ RSpec.describe Busybee::Runner::Hybrid do
         # Push a job after a short delay — run! must block until this arrives
         Thread.new do
           sleep 0.05
-          runner.instance_variable_get(:@job_queue).push(streamed_job)
+          runner.instance_variable_get(:@job_buffer).push(streamed_job)
         end
 
         runner.run!
 
-        # If process_queued_jobs didn't block, perform_job would never be called
-        # (the queue was empty when it entered blocking mode)
+        # If process_buffered_jobs didn't block, perform_job would never be called
+        # (the buffer was empty when it entered blocking mode)
         expect(worker_class).to have_received(:perform_job).with(streamed_job)
       end
     end
@@ -358,7 +358,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
           # Push a job, then stop — the job should be failed during shutdown
-          runner.instance_variable_get(:@job_queue).push(leftover)
+          runner.instance_variable_get(:@job_buffer).push(leftover)
           runner.stop!
           0
         end
@@ -381,7 +381,7 @@ RSpec.describe Busybee::Runner::Hybrid do
         allow(stream).to receive(:each)
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
-          runner.instance_variable_get(:@job_queue).push(leftover)
+          runner.instance_variable_get(:@job_buffer).push(leftover)
           runner.stop!
           0
         end
@@ -435,7 +435,7 @@ RSpec.describe Busybee::Runner::Hybrid do
         allow(stream).to receive(:each)
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
-          runner.instance_variable_get(:@job_queue).push(bad_job)
+          runner.instance_variable_get(:@job_buffer).push(bad_job)
           runner.stop!
           0
         end
@@ -464,14 +464,14 @@ RSpec.describe Busybee::Runner::Hybrid do
         expect(runner.running?).to be false
       end
 
-      it "stores the error, stops, and re-raises after clean exit during queue phase" do
+      it "stores the error, stops, and re-raises after clean exit during buffer phase" do
         allow(client).to receive(:open_job_stream).and_return(stream)
         allow(stream).to receive(:each)
         allow(worker_class).to receive(:perform_job).and_raise(shutdown_error)
 
-        # Drain exits immediately, Shutdown happens in queue phase
+        # Drain exits immediately, Shutdown happens in buffer phase
         allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
-          runner.instance_variable_get(:@job_queue).push(job)
+          runner.instance_variable_get(:@job_buffer).push(job)
           0
         end
 
@@ -510,7 +510,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       runner.stop!
 
       expect(stream).to have_received(:close)
-      expect(runner.instance_variable_get(:@job_queue).pop(true)).to eq(:stop)
+      expect(runner.instance_variable_get(:@job_buffer).pop(true)).to eq(:stop)
     end
 
     it "is safe to call before run!" do
@@ -528,7 +528,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       allow(stream).to receive(:each) { stream_gate.wait }
 
       allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
-        runner.instance_variable_get(:@job_queue).push(queued_job)
+        runner.instance_variable_get(:@job_buffer).push(queued_job)
         runner.kill!
         0
       end

@@ -13,7 +13,7 @@ RSpec.describe Busybee::RuntimeConfig do
   # Save/restore gem-level config that tests may modify
   around do |example|
     saved = %i[
-      @default_worker_mode @runner_backpressure_delay @default_queue_throttle
+      @default_worker_mode @runner_backpressure_delay @default_buffer_throttle
       @log_format @worker_name @cluster_address
     ].to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
     example.run
@@ -37,13 +37,13 @@ RSpec.describe Busybee::RuntimeConfig do
         backpressure_delay: 3000,
         max_jobs: 10,
         request_timeout: 30_000,
-        queue_throttle: 500
+        buffer_throttle: 500
       )
       expect(config).to have_attributes(
         backpressure_delay: 3000,
         max_jobs: 10,
         request_timeout: 30_000,
-        queue_throttle: 500
+        buffer_throttle: 500
       )
     end
 
@@ -67,8 +67,8 @@ RSpec.describe Busybee::RuntimeConfig do
         backpressure_delay: nil,
         max_jobs: nil,
         request_timeout: nil,
-        queue_enabled: nil,
-        queue_throttle: nil,
+        buffer: nil,
+        buffer_throttle: nil,
         job_timeout: nil,
         backoff: nil,
         log_format: nil,
@@ -264,24 +264,24 @@ RSpec.describe Busybee::RuntimeConfig do
       end
     end
 
-    context "with queue_throttle precedence" do
+    context "with buffer_throttle precedence" do
       it "uses per-worker override" do
         config = described_class.new(
-          queue_throttle: 200,
-          workers: { "TestWorker" => { queue_throttle: 50 } }
+          buffer_throttle: 200,
+          workers: { "TestWorker" => { buffer_throttle: 50 } }
         )
-        expect(config.resolve_for(worker_class).queue_throttle).to eq(50)
+        expect(config.resolve_for(worker_class).buffer_throttle).to eq(50)
       end
 
       it "falls back to worker DSL" do
-        worker_class.streaming queue_throttle: 100
+        worker_class.streaming buffer_throttle: 100
         config = described_class.new
-        expect(config.resolve_for(worker_class).queue_throttle).to eq(100)
+        expect(config.resolve_for(worker_class).buffer_throttle).to eq(100)
       end
 
       it "falls back to gem default (false)" do
         config = described_class.new
-        expect(config.resolve_for(worker_class).queue_throttle).to be(false)
+        expect(config.resolve_for(worker_class).buffer_throttle).to be(false)
       end
     end
 
@@ -332,23 +332,23 @@ RSpec.describe Busybee::RuntimeConfig do
       end
     end
 
-    context "with queue_enabled precedence" do
+    context "with buffer precedence" do
       it "uses per-worker override" do
         config = described_class.new(
-          workers: { "TestWorker" => { queue_enabled: false } }
+          workers: { "TestWorker" => { buffer: false } }
         )
-        expect(config.resolve_for(worker_class).queue_enabled).to be(false)
+        expect(config.resolve_for(worker_class).buffer).to be(false)
       end
 
       it "falls back to worker DSL" do
-        worker_class.streaming queue: false
+        worker_class.streaming buffer: false
         config = described_class.new
-        expect(config.resolve_for(worker_class).queue_enabled).to be(false)
+        expect(config.resolve_for(worker_class).buffer).to be(false)
       end
 
       it "falls back to gem default (true)" do
         config = described_class.new
-        expect(config.resolve_for(worker_class).queue_enabled).to be(true)
+        expect(config.resolve_for(worker_class).buffer).to be(true)
       end
     end
 
@@ -361,12 +361,12 @@ RSpec.describe Busybee::RuntimeConfig do
         expect(config.resolve_for(worker_class).backpressure_delay).to eq(0)
       end
 
-      it "treats false as an explicit value for queue_throttle" do
-        worker_class.streaming queue_throttle: 100
+      it "treats false as an explicit value for buffer_throttle" do
+        worker_class.streaming buffer_throttle: 100
         config = described_class.new(
-          workers: { "TestWorker" => { queue_throttle: false } }
+          workers: { "TestWorker" => { buffer_throttle: false } }
         )
-        expect(config.resolve_for(worker_class).queue_throttle).to be(false)
+        expect(config.resolve_for(worker_class).buffer_throttle).to be(false)
       end
     end
 
@@ -450,8 +450,8 @@ RSpec.describe Busybee::RuntimeConfig do
         backpressure_delay: 3000
         max_jobs: 10
         request_timeout: 30000
-        queue_enabled: true
-        queue_throttle: 500
+        buffer: true
+        buffer_throttle: 500
         job_timeout: 90000
         backoff: 15000
       YAML
@@ -461,8 +461,8 @@ RSpec.describe Busybee::RuntimeConfig do
         backpressure_delay: 3000,
         max_jobs: 10,
         request_timeout: 30_000,
-        queue_enabled: true,
-        queue_throttle: 500,
+        buffer: true,
+        buffer_throttle: 500,
         job_timeout: 90_000,
         backoff: 15_000
       )

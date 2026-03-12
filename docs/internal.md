@@ -116,7 +116,7 @@ Gem-level configuration (`Busybee.cluster_address`, `Busybee.default_message_ttl
 - **`busybee.rb`** — Readers, defaults, constants, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
 - **`configure.rb`** — `Busybee::Configure` module with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`).
 
-All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), queue throttle (Numeric/boolean/numeric String), worker mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
+All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), buffer throttle (Numeric/boolean/numeric String), worker mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
 
 The Railtie passes Rails config values through these setters. It pre-coerces booleans with `!!` (standard Rails practice) but otherwise relies on the setters for validation.
 
@@ -139,7 +139,7 @@ Worker                      # Base class: perform_job lifecycle, Shutdown error,
 └── Worker::Shutdown        # Error class signaling runner should shut down
 ```
 
-**Configuration** is lazily instantiated per worker class (`@_configuration ||= Configuration.new(self)`). The DSL module's class methods (e.g., `job_type`, `input`, `streaming`) delegate to Configuration, which validates and stores the values. Configuration also resolves runtime options by merging DSL-level settings with gem-level defaults (e.g., `queue_throttle` falls back to `Busybee.default_queue_throttle`).
+**Configuration** is lazily instantiated per worker class (`@_configuration ||= Configuration.new(self)`). The DSL module's class methods (e.g., `job_type`, `input`, `streaming`) delegate to Configuration, which validates and stores the values. Configuration also resolves runtime options by merging DSL-level settings with gem-level defaults (e.g., `buffer_throttle` falls back to `Busybee.default_buffer_throttle`).
 
 ### perform_job Lifecycle
 
@@ -175,8 +175,8 @@ RuntimeConfig fields are divided into two categories:
 - `backpressure_delay` — ms to sleep on `GRPC::ResourceExhausted`
 - `max_jobs` — max jobs per poll request
 - `request_timeout` — long-poll timeout in ms
-- `queue_enabled` — whether the streaming pump+queue is used (`true` by default)
-- `queue_throttle` — pump thread delay in ms (`false` = no throttle)
+- `buffer` — whether the streaming pump+buffer is used (`true` by default)
+- `buffer_throttle` — pump thread delay in ms (`false` = no throttle)
 - `job_timeout` — job lock timeout in ms
 - `backoff` — fail-job backoff in ms
 
@@ -207,13 +207,13 @@ Global RuntimeConfig value          (highest priority)
 Gem default (Busybee.*)             (lowest priority)
 ```
 
-Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit values (important for `queue_throttle: false` meaning "no throttle" and `backpressure_delay: 0` for testing).
+Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit values (important for `buffer_throttle: false` meaning "no throttle" and `backpressure_delay: 0` for testing).
 
 ### YAML Parsing
 
 `RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `worker_mode`).
 
-**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `queue_enabled`, `queue_throttle`, `job_timeout`, `backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
+**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `buffer`, `buffer_throttle`, `job_timeout`, `backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
 
 **Workers format:** The `workers` key is a YAML list. Each entry is either a bare string (worker class name, no overrides) or a mapping with the worker name as key and overrides nested beneath it:
 
@@ -248,7 +248,7 @@ Runners are long-lived processes that fetch jobs and dispatch them to Workers. A
 Runner                    # Base class: run!, stop!, stopping?, running?, kill!, factory
 ├── Runner::Polling       # Loop using client.with_each_job
 ├── Runner::Streaming     # Loop using client.open_job_stream (dual-mode: inline or pump+queue)
-│   └── Runner::Hybrid    # Subclass of Streaming, adds poll-drain phase before queue processing
+│   └── Runner::Hybrid    # Subclass of Streaming, adds poll-drain phase before buffer processing
 └── Runner::Multi         # Thread pool managing multiple single-worker runners
 ```
 
@@ -259,9 +259,9 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 **Sequential processing guarantee:** In v0.3, all `perform_job` calls happen on the main thread. Worker authors do not need to think about concurrency.
 
 - **Polling:** single-threaded. `with_each_job` yields jobs sequentially.
-- **Streaming (inline mode, `queue: false`):** single-threaded. `stream.each` calls `perform_job` directly.
-- **Streaming (queue mode, `queue: true`, default):** two threads. A **pump thread** reads from the gRPC stream into a `Queue`; the **main thread** pops and processes. The pump thread never calls `perform_job`.
-- **Hybrid:** two threads (inherited from Streaming queue mode). Main thread first polls to drain the backlog (interleaving stream jobs between poll batches), then transitions to queue-only processing.
+- **Streaming (inline mode, `buffer: false`):** single-threaded. `stream.each` calls `perform_job` directly.
+- **Streaming (buffered mode, `buffer: true`, default):** two threads. A **pump thread** reads from the gRPC stream into a `Queue`; the **main thread** pops and processes. The pump thread never calls `perform_job`.
+- **Hybrid:** two threads (inherited from Streaming buffered mode). Main thread first polls to drain the backlog (interleaving stream jobs between poll batches), then transitions to buffer-only processing.
 
 ### concurrent-ruby Primitives
 
@@ -287,9 +287,9 @@ At the runner level:
 
 **Forced (`kill!`):** Base calls `stop!`. Streaming also kills the pump thread and flushes the queue. Multi kills all child runners and the thread pool.
 
-### Queue Throttle
+### Buffer Throttle
 
-When `queue_throttle` is configured on a worker, the pump thread sleeps between stream reads. This controls the trade-off between queue growth (affecting memory) and job latency:
+When `buffer_throttle` is configured on a worker, the pump thread sleeps between stream reads. This controls the trade-off between buffer growth (affecting memory) and job latency:
 
 - `false` (default) — no sleep, pump reads as fast as possible
 - `0` — `sleep(0)`, minimal throttle (yields thread via nanosleep, ~1-5µs)
@@ -333,7 +333,7 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 
 ### CLI Flags
 
-The CLI exposes 5 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, queue_enabled, queue_throttle, job_timeout, backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
+The CLI exposes 5 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
 
 - `--config` / `-c` — YAML configuration file path
 - `--worker-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`

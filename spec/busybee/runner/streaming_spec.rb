@@ -13,7 +13,7 @@ RSpec.describe Busybee::Runner::Streaming do
   let(:worker_class) do
     Class.new(Busybee::Worker) do
       job_type "test_worker"
-      streaming queue: false
+      streaming buffer: false
 
       def perform
         # no-op
@@ -286,7 +286,7 @@ RSpec.describe Busybee::Runner::Streaming do
     end
   end
 
-  context "with queue mode (default)" do
+  context "with buffered mode (default)" do
     subject(:runner) { described_class.new(queue_worker_class, runtime_config: runtime_config, client: client) }
 
     let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(queue_worker_class) }
@@ -310,8 +310,8 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     describe "#initialize" do
-      it "creates a thread-safe job queue" do
-        expect(runner.instance_variable_get(:@job_queue)).to be_a(Queue)
+      it "creates a thread-safe job buffer" do
+        expect(runner.instance_variable_get(:@job_buffer)).to be_a(Queue)
       end
 
       it "creates an AtomicReference for shutdown error" do
@@ -322,7 +322,7 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     describe "#run!" do
-      it "processes jobs pumped from stream through the queue" do
+      it "processes jobs pumped from stream through the buffer" do
         streamed_job = instance_double(Busybee::Job, key: 42, retries: 1, ready?: true)
 
         allow(client).to receive(:open_job_stream) do
@@ -339,7 +339,7 @@ RSpec.describe Busybee::Runner::Streaming do
         expect(queue_worker_class).to have_received(:perform_job).with(streamed_job)
       end
 
-      it "blocks on queue until a job arrives" do
+      it "blocks on buffer until a job arrives" do
         allow(client).to receive(:open_job_stream) do
           allow(stream).to receive(:each) { stream_gate.wait }
           stream
@@ -349,7 +349,7 @@ RSpec.describe Busybee::Runner::Streaming do
         # Push a job after a short delay — run! must block until this arrives
         Thread.new do
           sleep 0.05
-          runner.instance_variable_get(:@job_queue).push(job)
+          runner.instance_variable_get(:@job_buffer).push(job)
         end
 
         runner.run!
@@ -370,7 +370,7 @@ RSpec.describe Busybee::Runner::Streaming do
         expect(runner.running?).to be false
       end
 
-      it "joins pump thread and drains remaining queue during shutdown" do # rubocop:disable RSpec/ExampleLength
+      it "joins pump thread and drains remaining buffer during shutdown" do # rubocop:disable RSpec/ExampleLength
         leftover = instance_double(Busybee::Job, key: 88, retries: 2, ready?: true)
         allow(leftover).to receive(:fail!)
 
@@ -382,7 +382,7 @@ RSpec.describe Busybee::Runner::Streaming do
         # Push a job then stop — the job should be failed during ensure cleanup
         Thread.new do
           sleep 0.05
-          runner.instance_variable_get(:@job_queue).push(leftover)
+          runner.instance_variable_get(:@job_buffer).push(leftover)
           runner.stop!
         end
 
@@ -438,19 +438,19 @@ RSpec.describe Busybee::Runner::Streaming do
         runner.stop!
 
         expect(stream).to have_received(:close)
-        expect(runner.instance_variable_get(:@job_queue).pop(true)).to eq(:stop)
+        expect(runner.instance_variable_get(:@job_buffer).pop(true)).to eq(:stop)
       end
     end
 
     describe "pump delay" do
-      context "when queue_throttle is set to a positive value" do
+      context "when buffer_throttle is set to a positive value" do
         subject(:runner) { described_class.new(throttled_worker_class, runtime_config: runtime_config, client: client) }
 
         let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(throttled_worker_class) }
         let(:throttled_worker_class) do
           Class.new(Busybee::Worker) do
             job_type "test_worker"
-            streaming queue_throttle: 5
+            streaming buffer_throttle: 5
             def perform; end
           end
         end
@@ -493,8 +493,8 @@ RSpec.describe Busybee::Runner::Streaming do
         end
       end
 
-      context "when queue_throttle is false (default, no throttling)" do
-        # Uses the default queue_worker_class which has no queue_throttle set
+      context "when buffer_throttle is false (default, no throttling)" do
+        # Uses the default queue_worker_class which has no buffer_throttle set
 
         it "does not sleep in the pump thread" do
           allow(client).to receive(:open_job_stream) do
@@ -507,7 +507,7 @@ RSpec.describe Busybee::Runner::Streaming do
           allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
 
           allow_any_instance_of(described_class).to receive(:sleep) do |_instance, _duration| # rubocop:disable RSpec/AnyInstance
-            raise "sleep should not be called when queue_throttle is false"
+            raise "sleep should not be called when buffer_throttle is false"
           end
 
           runner.run!
@@ -516,7 +516,7 @@ RSpec.describe Busybee::Runner::Streaming do
         end
       end
 
-      context "when queue_throttle is 0 (minimal throttle)" do
+      context "when buffer_throttle is 0 (minimal throttle)" do
         subject(:runner) do
           described_class.new(zero_delay_worker_class, runtime_config: runtime_config, client: client)
         end
@@ -525,7 +525,7 @@ RSpec.describe Busybee::Runner::Streaming do
         let(:zero_delay_worker_class) do
           Class.new(Busybee::Worker) do
             job_type "test_worker"
-            streaming queue_throttle: 0
+            streaming buffer_throttle: 0
             def perform; end
           end
         end
@@ -570,8 +570,8 @@ RSpec.describe Busybee::Runner::Streaming do
         expect(runner.stopping?).to be true
       end
 
-      it "flushes the queue, dropping all pending jobs" do
-        queue = runner.instance_variable_get(:@job_queue)
+      it "flushes the buffer, dropping all pending jobs" do
+        queue = runner.instance_variable_get(:@job_buffer)
         queue.push(instance_double(Busybee::Job, key: 1))
         queue.push(instance_double(Busybee::Job, key: 2))
 

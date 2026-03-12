@@ -80,12 +80,12 @@ module Busybee
       @default_output_required.nil? ? Defaults::DEFAULT_OUTPUT_REQUIRED : @default_output_required
     end
 
-    def default_queue_enabled
-      @default_queue_enabled.nil? ? Defaults::DEFAULT_STREAMING_QUEUE_ENABLED : @default_queue_enabled
+    def default_buffer
+      @default_buffer.nil? ? Defaults::DEFAULT_STREAMING_BUFFER : @default_buffer
     end
 
-    def default_queue_throttle
-      @default_queue_throttle || Defaults::DEFAULT_QUEUE_THROTTLE_MS
+    def default_buffer_throttle
+      @default_buffer_throttle || Defaults::DEFAULT_BUFFER_THROTTLE_MS
     end
 
     def default_worker_mode
