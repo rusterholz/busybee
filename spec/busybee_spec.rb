@@ -424,7 +424,9 @@ RSpec.describe Busybee do
     end
 
     it "rejects non-numeric Strings" do
-      expect { described_class.default_buffer_throttle = "fast" }.to raise_error(ArgumentError, /default_buffer_throttle/)
+      expect do
+        described_class.default_buffer_throttle = "fast"
+      end.to raise_error(ArgumentError, /default_buffer_throttle/)
     end
 
     it "rejects other types" do
