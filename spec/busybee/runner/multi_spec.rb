@@ -43,9 +43,9 @@ RSpec.describe Busybee::Runner::Multi do
       expect(multi.runners).to all(satisfy { |r| r.instance_variable_get(:@client).equal?(client) })
     end
 
-    it "resolves runner mode per worker class" do
-      polling_worker.runner_mode :polling
-      streaming_worker.runner_mode :streaming
+    it "resolves worker mode per worker class" do
+      polling_worker.worker_mode :polling
+      streaming_worker.worker_mode :streaming
 
       multi = described_class.new(worker_classes, client: client)
 
@@ -54,7 +54,7 @@ RSpec.describe Busybee::Runner::Multi do
     end
 
     it "applies runtime_config override to all child runners" do
-      rc = Busybee::RuntimeConfig.new(runner_mode: :polling)
+      rc = Busybee::RuntimeConfig.new(worker_mode: :polling)
       multi = described_class.new(worker_classes, runtime_config: rc, client: client)
 
       expect(multi.runners).to all(be_a(Busybee::Runner::Polling))
@@ -62,10 +62,10 @@ RSpec.describe Busybee::Runner::Multi do
 
     it "resolves per-worker overrides from runtime_config" do
       rc = Busybee::RuntimeConfig.new(
-        runner_mode: :hybrid,
+        worker_mode: :hybrid,
         workers: {
-          "TestMultiWorker1" => { runner_mode: :polling },
-          "TestMultiWorker2" => { runner_mode: :streaming }
+          "TestMultiWorker1" => { worker_mode: :polling },
+          "TestMultiWorker2" => { worker_mode: :streaming }
         }
       )
       multi = described_class.new(worker_classes, runtime_config: rc, client: client)

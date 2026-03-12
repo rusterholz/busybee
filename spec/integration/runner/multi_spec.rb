@@ -15,7 +15,7 @@ RSpec.describe Busybee::Runner::Multi, :integration do
     keys = performed_a_keys
     Class.new(Busybee::Worker) do
       job_type "job-type-a"
-      runner_mode :polling
+      worker_mode :polling
       polling request_timeout: 1_000
 
       define_method(:perform) do
@@ -29,7 +29,7 @@ RSpec.describe Busybee::Runner::Multi, :integration do
     keys = performed_b_keys
     Class.new(Busybee::Worker) do
       job_type "job-type-b"
-      runner_mode :streaming
+      worker_mode :streaming
 
       define_method(:perform) do
         keys << job.key

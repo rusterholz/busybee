@@ -13,7 +13,7 @@ RSpec.describe Busybee::RuntimeConfig do
   # Save/restore gem-level config that tests may modify
   around do |example|
     saved = %i[
-      @default_runner_mode @runner_backpressure_delay @default_queue_throttle
+      @default_worker_mode @runner_backpressure_delay @default_queue_throttle
       @log_format @worker_name @cluster_address
     ].to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
     example.run
@@ -22,17 +22,17 @@ RSpec.describe Busybee::RuntimeConfig do
   end
 
   describe "#initialize" do
-    it "accepts runner_mode" do
-      config = described_class.new(runner_mode: :polling)
-      expect(config.runner_mode).to eq(:polling)
+    it "accepts worker_mode" do
+      config = described_class.new(worker_mode: :polling)
+      expect(config.worker_mode).to eq(:polling)
     end
 
-    it "defaults runner_mode to nil" do
+    it "defaults worker_mode to nil" do
       config = described_class.new
-      expect(config.runner_mode).to be_nil
+      expect(config.worker_mode).to be_nil
     end
 
-    it "accepts runner-scoped fields" do
+    it "accepts per-worker fields" do
       config = described_class.new(
         backpressure_delay: 3000,
         max_jobs: 10,
@@ -63,7 +63,7 @@ RSpec.describe Busybee::RuntimeConfig do
     it "defaults all fields to nil" do
       config = described_class.new
       expect(config).to have_attributes(
-        runner_mode: nil,
+        worker_mode: nil,
         backpressure_delay: nil,
         max_jobs: nil,
         request_timeout: nil,
@@ -79,31 +79,31 @@ RSpec.describe Busybee::RuntimeConfig do
 
     it "accepts per-worker overrides" do
       config = described_class.new(
-        runner_mode: :hybrid,
-        workers: { "TestWorker" => { runner_mode: :polling, max_jobs: 5 } }
+        worker_mode: :hybrid,
+        workers: { "TestWorker" => { worker_mode: :polling, max_jobs: 5 } }
       )
-      expect(config.runner_mode).to eq(:hybrid)
+      expect(config.worker_mode).to eq(:hybrid)
     end
 
-    it "validates runner_mode" do
-      expect { described_class.new(runner_mode: :invalid) }.
-        to raise_error(ArgumentError, /Invalid runner mode.*:invalid/)
+    it "validates worker_mode" do
+      expect { described_class.new(worker_mode: :invalid) }.
+        to raise_error(ArgumentError, /Invalid worker mode.*:invalid/)
     end
 
-    it "validates per-worker runner_mode" do
-      expect { described_class.new(workers: { "TestWorker" => { runner_mode: :bogus } }) }.
-        to raise_error(ArgumentError, /Invalid runner mode.*:bogus/)
+    it "validates per-worker worker_mode" do
+      expect { described_class.new(workers: { "TestWorker" => { worker_mode: :bogus } }) }.
+        to raise_error(ArgumentError, /Invalid worker mode.*:bogus/)
     end
 
     context "with string inputs (YAML compatibility)" do
-      it "coerces string runner_mode to symbol" do
-        config = described_class.new(runner_mode: "polling")
-        expect(config.runner_mode).to eq(:polling)
+      it "coerces string worker_mode to symbol" do
+        config = described_class.new(worker_mode: "polling")
+        expect(config.worker_mode).to eq(:polling)
       end
 
-      it "rejects invalid string runner_mode" do
-        expect { described_class.new(runner_mode: "bogus") }.
-          to raise_error(ArgumentError, /Invalid runner mode/)
+      it "rejects invalid string worker_mode" do
+        expect { described_class.new(worker_mode: "bogus") }.
+          to raise_error(ArgumentError, /Invalid worker mode/)
       end
 
       it "coerces string log_format to symbol" do
@@ -116,17 +116,17 @@ RSpec.describe Busybee::RuntimeConfig do
           to raise_error(ArgumentError, /Invalid log format/)
       end
 
-      it "coerces per-worker string runner_mode to symbol" do
+      it "coerces per-worker string worker_mode to symbol" do
         config = described_class.new(
-          workers: { "TestWorker" => { runner_mode: "streaming" } }
+          workers: { "TestWorker" => { worker_mode: "streaming" } }
         )
         resolved = config.resolve_for(worker_class)
-        expect(resolved.runner_mode).to eq(:streaming)
+        expect(resolved.worker_mode).to eq(:streaming)
       end
 
-      it "still accepts symbol runner_mode" do
-        config = described_class.new(runner_mode: :hybrid)
-        expect(config.runner_mode).to eq(:hybrid)
+      it "still accepts symbol worker_mode" do
+        config = described_class.new(worker_mode: :hybrid)
+        expect(config.worker_mode).to eq(:hybrid)
       end
 
       it "still accepts symbol log_format" do
@@ -138,49 +138,49 @@ RSpec.describe Busybee::RuntimeConfig do
 
   describe "#resolve_for" do
     it "returns a RuntimeConfig" do
-      config = described_class.new(runner_mode: :polling)
+      config = described_class.new(worker_mode: :polling)
       resolved = config.resolve_for(worker_class)
       expect(resolved).to be_a(described_class)
     end
 
-    context "with runner_mode precedence" do
+    context "with worker_mode precedence" do
       it "uses per-worker override over global override" do
         config = described_class.new(
-          runner_mode: :hybrid,
-          workers: { "TestWorker" => { runner_mode: :polling } }
+          worker_mode: :hybrid,
+          workers: { "TestWorker" => { worker_mode: :polling } }
         )
-        expect(config.resolve_for(worker_class).runner_mode).to eq(:polling)
+        expect(config.resolve_for(worker_class).worker_mode).to eq(:polling)
       end
 
       it "uses global override when no per-worker override" do
-        config = described_class.new(runner_mode: :hybrid)
-        expect(config.resolve_for(worker_class).runner_mode).to eq(:hybrid)
+        config = described_class.new(worker_mode: :hybrid)
+        expect(config.resolve_for(worker_class).worker_mode).to eq(:hybrid)
       end
 
       it "falls back to worker DSL when no RuntimeConfig override" do
-        worker_class.runner_mode :streaming
+        worker_class.worker_mode :streaming
         config = described_class.new
-        expect(config.resolve_for(worker_class).runner_mode).to eq(:streaming)
+        expect(config.resolve_for(worker_class).worker_mode).to eq(:streaming)
       end
 
       it "falls back to gem default when no other source" do
-        Busybee.default_runner_mode = :polling
+        Busybee.default_worker_mode = :polling
         config = described_class.new
-        expect(config.resolve_for(worker_class).runner_mode).to eq(:polling)
+        expect(config.resolve_for(worker_class).worker_mode).to eq(:polling)
       end
 
       it "prefers per-worker RuntimeConfig over worker DSL" do
-        worker_class.runner_mode :streaming
+        worker_class.worker_mode :streaming
         config = described_class.new(
-          workers: { "TestWorker" => { runner_mode: :polling } }
+          workers: { "TestWorker" => { worker_mode: :polling } }
         )
-        expect(config.resolve_for(worker_class).runner_mode).to eq(:polling)
+        expect(config.resolve_for(worker_class).worker_mode).to eq(:polling)
       end
 
       it "prefers global RuntimeConfig over worker DSL" do
-        worker_class.runner_mode :streaming
-        config = described_class.new(runner_mode: :hybrid)
-        expect(config.resolve_for(worker_class).runner_mode).to eq(:hybrid)
+        worker_class.worker_mode :streaming
+        config = described_class.new(worker_mode: :hybrid)
+        expect(config.resolve_for(worker_class).worker_mode).to eq(:hybrid)
       end
     end
 
@@ -412,12 +412,12 @@ RSpec.describe Busybee::RuntimeConfig do
       stub_const("OtherWorker", other_worker)
 
       config = described_class.new(
-        runner_mode: :hybrid,
+        worker_mode: :hybrid,
         max_jobs: 50,
-        workers: { "TestWorker" => { runner_mode: :polling, max_jobs: 10 } }
+        workers: { "TestWorker" => { worker_mode: :polling, max_jobs: 10 } }
       )
       resolved = config.resolve_for(other_worker)
-      expect(resolved).to have_attributes(runner_mode: :hybrid, max_jobs: 50)
+      expect(resolved).to have_attributes(worker_mode: :hybrid, max_jobs: 50)
     end
   end
 
@@ -434,19 +434,19 @@ RSpec.describe Busybee::RuntimeConfig do
 
     after { FileUtils.rm_rf(yaml_dir) }
 
-    it "parses top-level runner-scoped keys into kwargs" do
+    it "parses top-level per-worker keys into kwargs" do
       path = write_yaml("basic.yml", <<~YAML)
-        runner_mode: hybrid
+        worker_mode: hybrid
         max_jobs: 20
         backpressure_delay: 5000
       YAML
       result = described_class.parse_yaml(path)
-      expect(result).to eq(runner_mode: "hybrid", max_jobs: 20, backpressure_delay: 5000)
+      expect(result).to eq(worker_mode: "hybrid", max_jobs: 20, backpressure_delay: 5000)
     end
 
-    it "parses all runner-scoped keys" do # rubocop:disable RSpec/ExampleLength
+    it "parses all per-worker keys" do # rubocop:disable RSpec/ExampleLength
       path = write_yaml("all_runner.yml", <<~YAML)
-        runner_mode: polling
+        worker_mode: polling
         backpressure_delay: 3000
         max_jobs: 10
         request_timeout: 30000
@@ -457,7 +457,7 @@ RSpec.describe Busybee::RuntimeConfig do
       YAML
       result = described_class.parse_yaml(path)
       expect(result).to include(
-        runner_mode: "polling",
+        worker_mode: "polling",
         backpressure_delay: 3000,
         max_jobs: 10,
         request_timeout: 30_000,
@@ -470,32 +470,32 @@ RSpec.describe Busybee::RuntimeConfig do
 
     it "parses workers list into per-worker overrides" do
       path = write_yaml("workers.yml", <<~YAML)
-        runner_mode: hybrid
+        worker_mode: hybrid
         workers:
           - OrderProcessor:
-              runner_mode: polling
+              worker_mode: polling
               max_jobs: 5
           - NotificationSender:
-              runner_mode: streaming
+              worker_mode: streaming
       YAML
       result = described_class.parse_yaml(path)
       expect(result[:workers]).to eq(
-        "OrderProcessor" => { runner_mode: "polling", max_jobs: 5 },
-        "NotificationSender" => { runner_mode: "streaming" }
+        "OrderProcessor" => { worker_mode: "polling", max_jobs: 5 },
+        "NotificationSender" => { worker_mode: "streaming" }
       )
     end
 
     it "returns kwargs usable by RuntimeConfig.new" do
       path = write_yaml("usable.yml", <<~YAML)
-        runner_mode: polling
+        worker_mode: polling
         max_jobs: 10
         workers:
           - TestWorker:
-              runner_mode: streaming
+              worker_mode: streaming
       YAML
       result = described_class.parse_yaml(path)
       config = described_class.new(**result)
-      expect(config.runner_mode).to eq(:polling)
+      expect(config.worker_mode).to eq(:polling)
       expect(config.max_jobs).to eq(10)
     end
 
@@ -533,12 +533,12 @@ RSpec.describe Busybee::RuntimeConfig do
       path = write_yaml("flat.yml", <<~YAML)
         workers:
           - OrderProcessor:
-            runner_mode: polling
+            worker_mode: polling
             max_jobs: 5
       YAML
       result = described_class.parse_yaml(path)
       expect(result[:workers]).to eq(
-        "OrderProcessor" => { runner_mode: "polling", max_jobs: 5 }
+        "OrderProcessor" => { worker_mode: "polling", max_jobs: 5 }
       )
     end
 
@@ -550,7 +550,7 @@ RSpec.describe Busybee::RuntimeConfig do
 
     it "symbolizes top-level keys" do
       path = write_yaml("string_keys.yml", <<~YAML)
-        runner_mode: hybrid
+        worker_mode: hybrid
       YAML
       result = described_class.parse_yaml(path)
       expect(result.keys).to all(be_a(Symbol))
@@ -570,7 +570,7 @@ RSpec.describe Busybee::RuntimeConfig do
     context "with invalid YAML content" do
       it "rejects unrecognized top-level keys" do
         path = write_yaml("bad_key.yml", <<~YAML)
-          runner_mode: polling
+          worker_mode: polling
           typo_key: 42
         YAML
         expect { described_class.parse_yaml(path) }.to raise_error(
@@ -583,13 +583,13 @@ RSpec.describe Busybee::RuntimeConfig do
           nope: true
         YAML
         expect { described_class.parse_yaml(path) }.to raise_error(
-          ArgumentError, /runner_mode.*workers/
+          ArgumentError, /worker_mode.*workers/
         )
       end
 
       it "rejects process-wide fields in YAML (log_format)" do
         path = write_yaml("log_format.yml", <<~YAML)
-          runner_mode: polling
+          worker_mode: polling
           log_format: json
         YAML
         expect { described_class.parse_yaml(path) }.to raise_error(
@@ -619,7 +619,7 @@ RSpec.describe Busybee::RuntimeConfig do
         path = write_yaml("bad_worker_key.yml", <<~YAML)
           workers:
             - MyWorker:
-                runner_mode: polling
+                worker_mode: polling
                 bogus_setting: true
         YAML
         expect { described_class.parse_yaml(path) }.to raise_error(

@@ -116,7 +116,7 @@ Gem-level configuration (`Busybee.cluster_address`, `Busybee.default_message_ttl
 - **`busybee.rb`** — Readers, defaults, constants, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
 - **`configure.rb`** — `Busybee::Configure` module with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`).
 
-All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), queue throttle (Numeric/boolean/numeric String), runner mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
+All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), queue throttle (Numeric/boolean/numeric String), worker mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
 
 The Railtie passes Rails config values through these setters. It pre-coerces booleans with `!!` (standard Rails practice) but otherwise relies on the setters for validation.
 
@@ -170,8 +170,8 @@ Runners hold the resolved config at runtime. The resolved config is a flat Runti
 
 RuntimeConfig fields are divided into two categories:
 
-**Runner-scoped** — participate in the full 4-level precedence chain (per-worker RC → global RC → worker DSL → gem default). Only `runner_mode` has a CLI flag (`-m`); the rest are YAML-only:
-- `runner_mode` — `:polling`, `:streaming`, or `:hybrid`
+**Worker-scoped** — participate in the full 4-level precedence chain (per-worker RC → global RC → worker DSL → gem default). Only `worker_mode` has a CLI flag (`-m`); the rest are YAML-only:
+- `worker_mode` — `:polling`, `:streaming`, or `:hybrid`
 - `backpressure_delay` — ms to sleep on `GRPC::ResourceExhausted`
 - `max_jobs` — max jobs per poll request
 - `request_timeout` — long-poll timeout in ms
@@ -187,7 +187,7 @@ RuntimeConfig fields are divided into two categories:
 
 ### Precedence Chains
 
-All runner-scoped fields use the same 4-level chain:
+All worker-scoped fields use the same 4-level chain:
 
 ```
 Per-worker RuntimeConfig override   (highest priority)
@@ -211,9 +211,9 @@ Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit va
 
 ### YAML Parsing
 
-`RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `runner_mode`).
+`RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `worker_mode`).
 
-**Valid YAML keys:** All runner-scoped fields (`runner_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `queue_enabled`, `queue_throttle`, `job_timeout`, `backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
+**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `queue_enabled`, `queue_throttle`, `job_timeout`, `backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
 
 **Workers format:** The `workers` key is a YAML list. Each entry is either a bare string (worker class name, no overrides) or a mapping with the worker name as key and overrides nested beneath it:
 
@@ -222,14 +222,14 @@ workers:
   - SimpleWorker
   - TunedWorker:
       max_jobs: 32
-      runner_mode: polling
+      worker_mode: polling
 ```
 
-`parse_workers` normalizes both forms into a hash keyed by worker name: `{ "SimpleWorker" => {}, "TunedWorker" => { max_jobs: 32, runner_mode: :polling } }`.
+`parse_workers` normalizes both forms into a hash keyed by worker name: `{ "SimpleWorker" => {}, "TunedWorker" => { max_jobs: 32, worker_mode: :polling } }`.
 
-**Validation:** `parse_yaml` validates top-level keys (rejects unrecognized keys and process-wide fields) and per-worker override keys (rejects anything not in the runner-scoped set). Errors include the invalid key name and list valid options.
+**Validation:** `parse_yaml` validates top-level keys (rejects unrecognized keys and process-wide fields) and per-worker override keys (rejects anything not in the worker-scoped set). Errors include the invalid key name and list valid options.
 
-**String-to-symbol coercion:** The constructor accepts strings for `runner_mode` and `log_format` (necessary since `YAML.safe_load` produces strings). Values are validated against the string allowlist before coercion to prevent symbol injection. Both strings and symbols are accepted (backwards-compatible).
+**String-to-symbol coercion:** The constructor accepts strings for `worker_mode` and `log_format` (necessary since `YAML.safe_load` produces strings). Values are validated against the string allowlist before coercion to prevent symbol injection. Both strings and symbols are accepted (backwards-compatible).
 
 ### Integration Points
 
@@ -333,15 +333,15 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 
 ### CLI Flags
 
-The CLI exposes 5 flags. Runner-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, queue_enabled, queue_throttle, job_timeout, backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
+The CLI exposes 5 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, queue_enabled, queue_throttle, job_timeout, backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
 
 - `--config` / `-c` — YAML configuration file path
-- `--runner-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`
+- `--worker-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`
 - `--log-format` / `-l` — `:text` or `:json`
 - `--worker-name` / `-n` — worker process identifier
 - `--cluster-address` / `-a` — Zeebe gateway address
 
-**Mutual exclusions:** `--config` is mutually exclusive with `--runner-mode` (set runner_mode in YAML instead) and with positional worker args (list workers in YAML instead). Process-wide flags (`-l`, `-n`, `-a`) are allowed alongside `--config`.
+**Mutual exclusions:** `--config` is mutually exclusive with `--worker-mode` (set worker_mode in YAML instead) and with positional worker args (list workers in YAML instead). Process-wide flags (`-l`, `-n`, `-a`) are allowed alongside `--config`.
 
 **YAML config flow:** When `--config` is provided, the CLI calls `RuntimeConfig.parse_yaml` to get YAML-sourced kwargs, extracts worker class names from the `workers:` keys, merges CLI process-wide flags into the kwargs, and constructs RuntimeConfig from the result.
 

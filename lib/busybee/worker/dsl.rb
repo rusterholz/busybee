@@ -78,8 +78,8 @@ module Busybee
         configuration.add_output(output_struct)
       end
 
-      def runner_mode(value)
-        configuration.runner_mode = value
+      def worker_mode(value)
+        configuration.worker_mode = value
       end
 
       def polling(**kwargs)

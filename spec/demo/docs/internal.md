@@ -100,7 +100,7 @@ Each file demonstrates a different aspect of YAML configuration:
 |------|---------------|
 | `oms.yml` | Basic worker listing — no per-worker overrides needed |
 | `logistics.yml` | Global `max_jobs` default + per-worker override for the bottleneck worker |
-| `delivery.yml` | Per-worker `runner_mode` selection (polling for pure computation) |
+| `delivery.yml` | Per-worker `worker_mode` selection (polling for pure computation) |
 | `sim.yml` | Global `job_timeout` override for long-running workers |
 
 Note that some worker settings remain in the DSL (e.g., Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning — settings that might vary by environment or deployment.

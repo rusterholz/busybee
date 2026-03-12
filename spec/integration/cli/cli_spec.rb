@@ -194,7 +194,7 @@ RSpec.describe "CLI", :integration do
 
     it "processes jobs using a YAML config file" do
       yaml_path = write_yaml("single.yml", <<~YAML)
-        runner_mode: polling
+        worker_mode: polling
         workers:
           - CLITestWorker
       YAML
@@ -218,9 +218,9 @@ RSpec.describe "CLI", :integration do
       yaml_path = write_yaml("multi.yml", <<~YAML)
         workers:
           - CLITestWorkerA:
-              runner_mode: polling
+              worker_mode: polling
           - CLITestWorkerB:
-              runner_mode: polling
+              worker_mode: polling
               request_timeout: 1000
       YAML
 
@@ -249,10 +249,10 @@ RSpec.describe "CLI", :integration do
 
     it "respects per-worker config overrides from YAML" do
       yaml_path = write_yaml("overrides.yml", <<~YAML)
-        runner_mode: streaming
+        worker_mode: streaming
         workers:
           - CLITestWorker:
-              runner_mode: polling
+              worker_mode: polling
       YAML
 
       handle = spawn_cli("--config", yaml_path)
@@ -338,8 +338,8 @@ RSpec.describe "CLI", :integration do
       expect(status.exitstatus).not_to eq(0)
     end
 
-    it "exits with error when --config and --runner-mode are both provided" do
-      handle = spawn_cli("--config", "dummy.yml", "--runner-mode", "polling")
+    it "exits with error when --config and --worker-mode are both provided" do
+      handle = spawn_cli("--config", "dummy.yml", "--worker-mode", "polling")
       status = wait_for_exit(handle, timeout: 10)
 
       output = drain_output(handle)

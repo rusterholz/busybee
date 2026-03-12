@@ -2,7 +2,7 @@
 
 Busybee provides a flexible configuration system that adapts to different environments — from local development with Docker to production deployments with Camunda Cloud. Configuration can be set through Ruby code, environment variables, or Rails configuration, with sensible defaults that work out of the box.
 
-This document covers gem-level settings: connection, credentials, logging, and operation defaults. For worker runtime configuration (CLI flags, YAML files, runner modes, and the config precedence chain), see [Workers: Running Workers](workers.md#running-workers).
+This document covers gem-level settings: connection, credentials, logging, and operation defaults. For worker runtime configuration (CLI flags, YAML files, worker modes, and the config precedence chain), see [Workers: Running Workers](workers.md#running-workers).
 
 ## Quick Start
 
@@ -351,7 +351,7 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_fail_job_backoff` | `Busybee.default_fail_job_backoff` |
 | `config.x.busybee.default_job_request_timeout` | `Busybee.default_job_request_timeout` |
 | `config.x.busybee.default_job_lock_timeout` | `Busybee.default_job_lock_timeout` |
-| `config.x.busybee.default_runner_mode` | `Busybee.default_runner_mode` |
+| `config.x.busybee.default_worker_mode` | `Busybee.default_worker_mode` |
 | `config.x.busybee.default_max_jobs` | `Busybee.default_max_jobs` |
 | `config.x.busybee.default_queue_enabled` | `Busybee.default_queue_enabled` |
 | `config.x.busybee.default_queue_throttle` | `Busybee.default_queue_throttle` |
@@ -438,9 +438,9 @@ This is primarily useful in tests to ensure clean state between examples.
 
 These settings control the default behavior of [workers](workers.md) and their runners. Each can be overridden per-worker via the [Worker DSL](workers.md#dsl-quick-reference) or at deploy time via [CLI/YAML configuration](workers.md#configuration-precedence).
 
-#### `default_runner_mode`
+#### `default_worker_mode`
 
-Default runner mode for workers.
+Default worker mode for workers.
 
 | | |
 |--|--|
@@ -449,10 +449,10 @@ Default runner mode for workers.
 | **Valid values** | `:polling`, `:streaming`, `:hybrid` |
 
 ```ruby
-Busybee.default_runner_mode = :polling
+Busybee.default_worker_mode = :polling
 ```
 
-See [Workers: Runner Modes](workers.md#runner-modes) for details on each mode.
+See [Workers: Worker Modes](workers.md#runner-modes) for details on each mode.
 
 #### `default_max_jobs`
 

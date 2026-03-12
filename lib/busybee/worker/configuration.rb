@@ -9,7 +9,7 @@ module Busybee
     class Configuration # rubocop:disable Metrics/ClassLength
       VALID_TYPES = %w[string integer decimal boolean datetime duration uuid null].freeze
       VALID_SOURCES = %i[variable header].freeze
-      VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
+      VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
       VALID_POLLING_KWARGS = %i[max_jobs request_timeout].freeze
       VALID_STREAMING_KWARGS = %i[queue queue_throttle].freeze
 
@@ -21,7 +21,7 @@ module Busybee
       Output = Struct.new(:name, :required, :type, :description, keyword_init: true)
 
       attr_accessor :description
-      attr_reader :inputs, :outputs, :runner_mode, :polling_config, :streaming_config,
+      attr_reader :inputs, :outputs, :worker_mode, :polling_config, :streaming_config,
                   :job_timeout, :backoff, :backpressure_delay,
                   :complete_job_on_success, :fail_job_on_error, :shutdown_on
 
@@ -31,7 +31,7 @@ module Busybee
         @description = nil
         @inputs = []
         @outputs = []
-        @runner_mode = nil
+        @worker_mode = nil
         @polling_config = {}
         @streaming_config = {}
         @job_timeout = nil
@@ -50,14 +50,14 @@ module Busybee
         @job_type = value.to_s
       end
 
-      def runner_mode=(value)
+      def worker_mode=(value)
         sym = value.to_sym
-        unless VALID_RUNNER_MODES.include?(sym)
+        unless VALID_WORKER_MODES.include?(sym)
           raise InvalidWorkerDefinition,
-                "Invalid runner mode #{value.inspect}. Valid: #{VALID_RUNNER_MODES.map(&:inspect).join(', ')}"
+                "Invalid worker mode #{value.inspect}. Valid: #{VALID_WORKER_MODES.map(&:inspect).join(', ')}"
         end
 
-        @runner_mode = sym
+        @worker_mode = sym
       end
 
       def polling_config=(kwargs)
@@ -179,7 +179,7 @@ module Busybee
           description: description,
           inputs: inputs.map(&:to_h),
           outputs: outputs.map(&:to_h),
-          runner_mode: runner_mode,
+          worker_mode: worker_mode,
           polling_config: polling_config,
           streaming_config: streaming_config,
           job_timeout: job_timeout,

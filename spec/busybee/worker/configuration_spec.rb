@@ -188,19 +188,19 @@ RSpec.describe Busybee::Worker::Configuration do
     end
   end
 
-  describe "#runner_mode=" do
+  describe "#worker_mode=" do
     let(:config) { configuration_for("TestWorker") }
 
     it "accepts valid modes" do
       %i[polling streaming hybrid].each do |mode|
-        config.runner_mode = mode
-        expect(config.runner_mode).to eq(mode)
+        config.worker_mode = mode
+        expect(config.worker_mode).to eq(mode)
       end
     end
 
     it "raises on invalid mode" do
-      expect { config.runner_mode = :batch }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /Invalid runner mode/
+      expect { config.worker_mode = :batch }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Invalid worker mode/
       )
     end
   end
@@ -493,7 +493,7 @@ RSpec.describe Busybee::Worker::Configuration do
     let(:config) do
       configuration_for("ProcessOrderWorker").tap do |c|
         c.description = "Processes orders"
-        c.runner_mode = :polling
+        c.worker_mode = :polling
         c.polling_config = { max_jobs: 10 }
         c.job_timeout = 300_000
         c.backoff = 30_000
@@ -511,7 +511,7 @@ RSpec.describe Busybee::Worker::Configuration do
 
     it "includes runner configuration" do
       result = config.to_h
-      expect(result[:runner_mode]).to eq(:polling)
+      expect(result[:worker_mode]).to eq(:polling)
       expect(result[:polling_config]).to eq(max_jobs: 10)
       expect(result[:streaming_config]).to eq({})
       expect(result[:job_timeout]).to eq(300_000)

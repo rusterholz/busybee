@@ -245,13 +245,13 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
-  describe ".runner_mode" do
-    it "sets runner mode on configuration" do
+  describe ".worker_mode" do
+    it "sets worker mode on configuration" do
       worker = stub_const("PollingWorker", Class.new(Busybee::Worker) do
-        runner_mode :polling
+        worker_mode :polling
       end)
 
-      expect(worker.configuration.runner_mode).to eq(:polling)
+      expect(worker.configuration.worker_mode).to eq(:polling)
     end
   end
 
@@ -503,12 +503,12 @@ RSpec.describe Busybee::Worker::DSL do
       end.to raise_error(Busybee::InvalidWorkerDefinition, /define_accessor: false.*accessor_name:.*mutually exclusive/)
     end
 
-    it "raises on invalid runner mode" do
+    it "raises on invalid worker mode" do
       expect do
         stub_const("BadModeWorker", Class.new(Busybee::Worker) do
-          runner_mode :batch
+          worker_mode :batch
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /Invalid runner mode/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /Invalid worker mode/)
     end
 
     it "raises on unknown polling kwargs" do

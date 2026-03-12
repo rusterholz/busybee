@@ -104,16 +104,16 @@ module Busybee
       @default_queue_throttle = value.nil? ? nil : validate_queue_throttle!(:default_queue_throttle, value)
     end
 
-    # --- Runner mode ---
+    # --- Worker mode ---
 
-    def default_runner_mode=(value)
+    def default_worker_mode=(value)
       if value.nil?
-        @default_runner_mode = nil
+        @default_worker_mode = nil
         return
       end
 
-      validate_runner_mode!(:default_runner_mode, value)
-      @default_runner_mode = value.to_sym
+      validate_worker_mode!(:default_worker_mode, value)
+      @default_worker_mode = value.to_sym
     end
 
     # --- Error class list ---
@@ -265,12 +265,12 @@ module Busybee
       raise ArgumentError, "#{name} accepts Numeric, boolean, or numeric String, got #{value.inspect} (#{value.class})"
     end
 
-    def validate_runner_mode!(name, value)
+    def validate_worker_mode!(name, value)
       sym = value.to_sym
-      return if VALID_RUNNER_MODES.include?(sym)
+      return if VALID_WORKER_MODES.include?(sym)
 
       raise ArgumentError,
-            "#{name} must be one of #{VALID_RUNNER_MODES.map(&:inspect).join(', ')}, got #{value.inspect}"
+            "#{name} must be one of #{VALID_WORKER_MODES.map(&:inspect).join(', ')}, got #{value.inspect}"
     rescue NoMethodError
       raise ArgumentError,
             "#{name} accepts Symbol or String, got #{value.inspect} (#{value.class})"

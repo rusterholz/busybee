@@ -42,12 +42,12 @@ module Busybee
     end
 
     class << self
-      # Factory method. Resolves runner mode via RuntimeConfig and returns
+      # Factory method. Resolves worker mode via RuntimeConfig and returns
       # the appropriate runner instance.
       #
       # Mode resolution (lowest to highest priority):
-      #   1. Gem default: Busybee.default_runner_mode
-      #   2. Worker DSL: worker_class.configuration.runner_mode
+      #   1. Gem default: Busybee.default_worker_mode
+      #   2. Worker DSL: worker_class.configuration.worker_mode
       #   3. RuntimeConfig override (global or per-worker)
       def for(*worker_classes, runtime_config: nil, client: nil)
         runtime_config ||= RuntimeConfig.new
@@ -64,13 +64,13 @@ module Busybee
       private
 
       def runner_class_for(resolved_config)
-        case resolved_config.runner_mode
+        case resolved_config.worker_mode
         when :polling then Polling
         when :streaming then Streaming
         when :hybrid then Hybrid
         else
           raise ArgumentError,
-                "Invalid runner mode: #{resolved_config.runner_mode.inspect}. Valid: :polling, :streaming, :hybrid"
+                "Invalid worker mode: #{resolved_config.worker_mode.inspect}. Valid: :polling, :streaming, :hybrid"
         end
       end
     end

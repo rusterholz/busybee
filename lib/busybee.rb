@@ -24,8 +24,8 @@ module Busybee
   # Valid log format identifiers.
   VALID_LOG_FORMATS = %w[text json].freeze
 
-  # Valid runner mode identifiers.
-  VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
+  # Valid worker mode identifiers.
+  VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
 
   class << self
     include Configure
@@ -88,8 +88,8 @@ module Busybee
       @default_queue_throttle || Defaults::DEFAULT_QUEUE_THROTTLE_MS
     end
 
-    def default_runner_mode
-      @default_runner_mode || Defaults::DEFAULT_RUNNER_MODE
+    def default_worker_mode
+      @default_worker_mode || Defaults::DEFAULT_WORKER_MODE
     end
 
     def grpc_retry_delay_ms

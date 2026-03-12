@@ -439,36 +439,36 @@ RSpec.describe Busybee do
     end
   end
 
-  describe ".default_runner_mode" do
+  describe ".default_worker_mode" do
     around do |example|
-      original = described_class.instance_variable_get(:@default_runner_mode)
+      original = described_class.instance_variable_get(:@default_worker_mode)
       example.run
-      described_class.default_runner_mode = original
+      described_class.default_worker_mode = original
     end
 
     it "defaults to :hybrid" do
-      described_class.default_runner_mode = nil
-      expect(described_class.default_runner_mode).to be(:hybrid)
+      described_class.default_worker_mode = nil
+      expect(described_class.default_worker_mode).to be(:hybrid)
     end
 
     it "accepts a valid Symbol" do
-      described_class.default_runner_mode = :polling
-      expect(described_class.default_runner_mode).to be(:polling)
+      described_class.default_worker_mode = :polling
+      expect(described_class.default_worker_mode).to be(:polling)
     end
 
     it "accepts a valid String and coerces to Symbol" do
-      described_class.default_runner_mode = "streaming"
-      expect(described_class.default_runner_mode).to be(:streaming)
+      described_class.default_worker_mode = "streaming"
+      expect(described_class.default_worker_mode).to be(:streaming)
     end
 
     it "rejects an invalid mode" do
-      expect { described_class.default_runner_mode = :turbo }.to raise_error(
-        ArgumentError, /default_runner_mode.*:polling.*:streaming.*:hybrid/
+      expect { described_class.default_worker_mode = :turbo }.to raise_error(
+        ArgumentError, /default_worker_mode.*:polling.*:streaming.*:hybrid/
       )
     end
 
     it "rejects non-String/Symbol types" do
-      expect { described_class.default_runner_mode = 42 }.to raise_error(ArgumentError, /default_runner_mode/)
+      expect { described_class.default_worker_mode = 42 }.to raise_error(ArgumentError, /default_worker_mode/)
     end
   end
 

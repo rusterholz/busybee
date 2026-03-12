@@ -456,11 +456,11 @@ Default: `5_000` ms (5 seconds), configurable via [`Busybee.default_fail_job_bac
 
 #### Runner Configuration in the DSL
 
-Workers can declare their preferred runner mode and any mode-specific options. These serve as defaults that can be overridden at deploy time via CLI flags or YAML configuration (see [Configuration Precedence](#configuration-precedence)):
+Workers can declare their preferred worker mode and any mode-specific options. These serve as defaults that can be overridden at deploy time via CLI flags or YAML configuration (see [Configuration Precedence](#configuration-precedence)):
 
 ```ruby
 class HighThroughputWorker < Busybee::Worker
-  runner_mode :streaming
+  worker_mode :streaming
   streaming queue: true, queue_throttle: 5  # 5ms delay between accepting jobs
 
   def perform
@@ -469,7 +469,7 @@ class HighThroughputWorker < Busybee::Worker
 end
 
 class BatchWorker < Busybee::Worker
-  runner_mode :polling
+  worker_mode :polling
   polling max_jobs: 50, request_timeout: 30_000
 
   def perform
@@ -490,7 +490,7 @@ See [Runner Modes](#runner-modes) for what these options mean and when to use ea
 | `header` | name, opts | | Declare a header input |
 | `input` | name, `source:`, opts | | Declare an input from any source |
 | `output` | name, opts | | Declare an output |
-| `runner_mode` | Symbol | `:hybrid` | `:polling`, `:streaming`, or `:hybrid` |
+| `worker_mode` | Symbol | `:hybrid` | `:polling`, `:streaming`, or `:hybrid` |
 | `polling` | `max_jobs:`, `request_timeout:` | `25`, `60_000` | Polling runner options |
 | `streaming` | `queue:`, `queue_throttle:` | `true`, `false` | Streaming runner options |
 | `job_timeout` | Integer or Duration | `60_000` | Job lock timeout (ms) |
@@ -532,7 +532,7 @@ Usage: busybee [options] WorkerClass [WorkerClass ...]
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--config FILE` | `-c` | String | Path to a [YAML configuration file](#yaml-configuration) |
-| `--runner-mode MODE` | `-m` | String | Runner mode: `polling`, `streaming`, or `hybrid` |
+| `--worker-mode MODE` | `-m` | String | Worker mode: `polling`, `streaming`, or `hybrid` |
 | `--log-format FORMAT` | `-l` | String | Log format: `text` or `json` |
 | `--worker-name NAME` | `-n` | String | Worker process identifier (default: hostname) |
 | `--cluster-address ADDR` | `-a` | String | Zeebe gateway address as `host:port` |
@@ -541,7 +541,7 @@ Usage: busybee [options] WorkerClass [WorkerClass ...]
 
 **Mutual Exclusions:**
 
-- `--config` and `--runner-mode` cannot be used together. Set `runner_mode` in YAML instead.
+- `--config` and `--worker-mode` cannot be used together. Set `worker_mode` in YAML instead.
 - `--config` and positional worker arguments cannot be used together. List workers in YAML instead.
 
 ### Rails Integration
@@ -577,7 +577,7 @@ Zeebe supports two different ways of fetching jobs for your worker: long-polling
 #### Polling
 
 ```ruby
-runner_mode :polling
+worker_mode :polling
 ```
 
 In polling mode, the busybee process for your worker repeatedly [long-polls](https://docs.camunda.io/docs/apis-tools/zeebe-api/gateway-service/#activatejobs-rpc) the Zeebe gateway: "give me up to N jobs of this type." If no jobs are available, the call blocks until at least one job is available. Your worker receives the available jobs, processes them sequentially, then polls again.
@@ -596,7 +596,7 @@ This is the simplest mode, built on the oldest API. It has two principal downsid
 #### Streaming
 
 ```ruby
-runner_mode :streaming
+worker_mode :streaming
 ```
 
 In streaming mode, the busybee process for your worker opens a persistent [gRPC stream](https://docs.camunda.io/docs/apis-tools/zeebe-api/gateway-service/#streamactivatedjobs-rpc) connection to the workflow engine. The engine pushes jobs to your worker as soon as they're created.
@@ -617,7 +617,7 @@ With default settings, a streaming worker accepts jobs from the workflow engine 
 #### Hybrid
 
 ```ruby
-runner_mode :hybrid
+worker_mode :hybrid
 ```
 
 In hybrid mode, busybee combines both approaches to avoid the downsides of either. It opens a stream to capture new jobs immediately, then also makes polling requests to drain any backlog in the buffer. Once the backlog is caught up, it stops polling and continues stream-only processing.
@@ -698,7 +698,7 @@ For repeatable deployments, define your worker configuration in a YAML file:
 
 ```yaml
 # config/busybee.yml
-runner_mode: hybrid
+worker_mode: hybrid
 job_timeout: 120000
 backoff: 10000
 
@@ -716,17 +716,17 @@ bundle exec busybee --config config/busybee.yml
 
 #### Per-Worker Overrides
 
-Different workers often have different performance characteristics, so YAML supports per-worker overrides for any runner-scoped setting:
+Different workers often have different performance characteristics, so YAML supports per-worker overrides for any per-worker setting:
 
 ```yaml
-runner_mode: hybrid
+worker_mode: hybrid
 workers:
   - ProcessOrderWorker:
-      runner_mode: polling
+      worker_mode: polling
       max_jobs: 50
       request_timeout: 10000
   - ShipOrderWorker:
-      runner_mode: streaming
+      worker_mode: streaming
       queue_throttle: 5
   - NotifyCustomerWorker  # uses top-level defaults
 ```
@@ -737,7 +737,7 @@ workers:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `runner_mode` | String | `polling`, `streaming`, or `hybrid` |
+| `worker_mode` | String | `polling`, `streaming`, or `hybrid` |
 | `max_jobs` | Integer | Max jobs per polling request |
 | `request_timeout` | Integer | Long-poll timeout (ms) |
 | `job_timeout` | Integer | Job lock timeout (ms) |
@@ -771,7 +771,7 @@ Gem Configuration & Defaults   (lowest priority)    `Busybee.default_max_jobs` (
 
 The first non-nil value wins. This means `0` and `false` are valid explicit values -- for example, `queue_throttle: false` explicitly disables throttling even if a lower level sets it.
 
-The [runner-scoped settings](#yaml-reference) this applies to are: `runner_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `backoff`, `backpressure_delay`, `queue_enabled`, and `queue_throttle`.
+The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `backoff`, `backpressure_delay`, `queue_enabled`, and `queue_throttle`.
 
 **Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process. Also, they often take env vars as their inputs, so they are less useful in YAML.
 

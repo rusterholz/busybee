@@ -47,25 +47,25 @@ RSpec.describe Busybee::CLI do
         end.to output(/Usage:/).to_stdout.and raise_error(SystemExit)
       end
 
-      it "parses --runner-mode into runtime config" do
-        cli = described_class.new(["--runner-mode", "polling", "TestCLIWorker"])
-        expect(cli.runtime_config.runner_mode).to eq(:polling)
+      it "parses --worker-mode into runtime config" do
+        cli = described_class.new(["--worker-mode", "polling", "TestCLIWorker"])
+        expect(cli.runtime_config.worker_mode).to eq(:polling)
       end
 
-      it "defaults runtime config runner_mode to nil when not specified" do
+      it "defaults runtime config worker_mode to nil when not specified" do
         cli = described_class.new(["TestCLIWorker"])
-        expect(cli.runtime_config.runner_mode).to be_nil
+        expect(cli.runtime_config.worker_mode).to be_nil
       end
 
-      it "accepts the short form -m for runner mode" do
+      it "accepts the short form -m for worker mode" do
         cli = described_class.new(["-m", "streaming", "TestCLIWorker"])
-        expect(cli.runtime_config.runner_mode).to eq(:streaming)
+        expect(cli.runtime_config.worker_mode).to eq(:streaming)
       end
 
-      it "raises on invalid runner mode" do
+      it "raises on invalid worker mode" do
         expect do
-          described_class.new(["--runner-mode", "bogus", "TestCLIWorker"])
-        end.to raise_error(ArgumentError, /Invalid runner mode/)
+          described_class.new(["--worker-mode", "bogus", "TestCLIWorker"])
+        end.to raise_error(ArgumentError, /Invalid worker mode/)
       end
 
       it "parses --log-format and its short form -l" do
@@ -122,10 +122,10 @@ RSpec.describe Busybee::CLI do
         expect(cli.instance_variable_get(:@parsed_options)[:config_file]).to eq("config/busybee.yml")
       end
 
-      it "raises when --config and --runner-mode are both provided" do
+      it "raises when --config and --worker-mode are both provided" do
         expect do
-          described_class.new(["--config", "config/busybee.yml", "--runner-mode", "polling"])
-        end.to raise_error(ArgumentError, /--config.*--runner-mode.*mutually exclusive/i)
+          described_class.new(["--config", "config/busybee.yml", "--worker-mode", "polling"])
+        end.to raise_error(ArgumentError, /--config.*--worker-mode.*mutually exclusive/i)
       end
 
       it "raises when --config and positional worker args are both provided" do
@@ -136,7 +136,7 @@ RSpec.describe Busybee::CLI do
 
       it "allows process-wide flags alongside --config without mutual exclusion error" do
         yaml_path = write_yaml("process_wide.yml", <<~YAML)
-          runner_mode: polling
+          worker_mode: polling
           workers:
             - TestCLIWorker
         YAML
@@ -159,41 +159,41 @@ RSpec.describe Busybee::CLI do
         path = write_yaml("multi.yml", <<~YAML)
           workers:
             - TestCLIWorker:
-                runner_mode: polling
+                worker_mode: polling
             - SecondCLIWorker:
-                runner_mode: streaming
+                worker_mode: streaming
         YAML
         cli = described_class.new(["-c", path])
         expect(cli.worker_classes).to contain_exactly(TestCLIWorker, SecondCLIWorker)
       end
 
-      it "builds RuntimeConfig from YAML runner-scoped fields" do
+      it "builds RuntimeConfig from YAML per-worker fields" do
         path = write_yaml("runner.yml", <<~YAML)
-          runner_mode: hybrid
+          worker_mode: hybrid
           max_jobs: 20
           workers:
             - TestCLIWorker
         YAML
         cli = described_class.new(["-c", path])
-        expect(cli.runtime_config).to have_attributes(runner_mode: :hybrid, max_jobs: 20)
+        expect(cli.runtime_config).to have_attributes(worker_mode: :hybrid, max_jobs: 20)
       end
 
       it "includes per-worker overrides from YAML in RuntimeConfig" do
         path = write_yaml("per_worker.yml", <<~YAML)
-          runner_mode: hybrid
+          worker_mode: hybrid
           workers:
             - TestCLIWorker:
-                runner_mode: polling
+                worker_mode: polling
                 max_jobs: 5
         YAML
         cli = described_class.new(["-c", path])
         resolved = cli.runtime_config.resolve_for(worker_class)
-        expect(resolved).to have_attributes(runner_mode: :polling, max_jobs: 5)
+        expect(resolved).to have_attributes(worker_mode: :polling, max_jobs: 5)
       end
 
       it "merges CLI process-wide flags into YAML config" do
         path = write_yaml("merge.yml", <<~YAML)
-          runner_mode: polling
+          worker_mode: polling
           workers:
             - TestCLIWorker
         YAML
@@ -226,7 +226,7 @@ RSpec.describe Busybee::CLI do
 
       it "raises when YAML has no workers key" do
         path = write_yaml("no_workers.yml", <<~YAML)
-          runner_mode: polling
+          worker_mode: polling
         YAML
         expect do
           described_class.new(["-c", path])
@@ -436,14 +436,14 @@ RSpec.describe Busybee::CLI do
         )
       end
 
-      it "passes runner mode from CLI flags through to RuntimeConfig" do
-        mode_cli = described_class.new(["--runner-mode", "polling", "TestCLIWorker"])
+      it "passes worker mode from CLI flags through to RuntimeConfig" do
+        mode_cli = described_class.new(["--worker-mode", "polling", "TestCLIWorker"])
         allow(mode_cli).to receive(:trap)
         mode_cli.run
 
         expect(Busybee::Runner).to have_received(:for).with(
           TestCLIWorker,
-          runtime_config: having_attributes(runner_mode: :polling),
+          runtime_config: having_attributes(worker_mode: :polling),
           client: an_instance_of(Busybee::Client)
         )
       end

@@ -79,7 +79,7 @@ module Busybee
       unless busybee_conf.default_queue_throttle.nil?
         config.default_queue_throttle = busybee_conf.default_queue_throttle
       end
-      config.default_runner_mode = busybee_conf.default_runner_mode if busybee_conf.default_runner_mode.presence
+      config.default_worker_mode = busybee_conf.default_worker_mode if busybee_conf.default_worker_mode.presence
       if busybee_conf.runner_backpressure_delay.presence
         config.runner_backpressure_delay = busybee_conf.runner_backpressure_delay
       end
