@@ -199,7 +199,7 @@ This means if you start a streaming worker after jobs have already been created,
 - Use `with_each_job` in a polling loop, or
 - Call `with_each_job` at startup to drain existing jobs, then switch to streaming
 
-> Coming in v0.3, the Worker pattern framework will make it easy to select between these behaviors automatically.
+> The [Worker pattern framework](workers.md) makes it easy to select between these behaviors automatically via [worker modes](workers.md#worker-modes).
 
 ### The Job Object
 

@@ -8,7 +8,7 @@ Most users should use one of Busybee's higher-level abstractions:
 
 - **Testing your workflows?** Busybee::Testing provides [RSpec matchers and helpers for BPMN files](./testing.md).
 - **Building apps which manage process instances?** Busybee::Client provides a [Ruby-idiomatic API for all those operations](./client.md).
-- **Processing jobs?** Busybee::Worker (coming in v0.3) will provide an out-of-the-box job worker framework, akin to Sidekiq or Racecar.
+- **Processing jobs?** Busybee::Worker provides an [out-of-the-box job worker framework](./workers.md), akin to Sidekiq or Racecar.
 
 This GRPC layer is an escape hatch for any edge cases you may encounter which need direct access to Zeebe APIs that the higher-level abstractions don't expose. Examples might include:
 

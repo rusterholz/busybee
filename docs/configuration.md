@@ -98,7 +98,7 @@ Busybee.cluster_address = "zeebe.example.com:443"
 
 #### `credential_type`
 
-Explicitly selects the credential type. When set, `Credentials.build` uses this type rather than auto-detecting from parameters.
+Explicitly selects the credential type. When set, Busybee uses this type to build Credentials rather than auto-detecting from the provided parameters.
 
 | | |
 |--|--|
@@ -436,7 +436,7 @@ This is primarily useful in tests to ensure clean state between examples.
 
 ## Worker Defaults
 
-These settings control the default behavior of [workers](workers.md) and their runners. Each can be overridden per-worker via the [Worker DSL](workers.md#dsl-quick-reference) or at deploy time via [CLI/YAML configuration](workers.md#configuration-precedence).
+These settings control the default behavior of [workers](workers.md) and how they get jobs from the workflow engine. Each can be overridden per-worker via the [Worker DSL](workers.md#dsl-quick-reference) or at deploy time via [CLI/YAML configuration](workers.md#configuration-precedence).
 
 #### `default_worker_mode`
 
@@ -469,7 +469,7 @@ Busybee.default_max_jobs = 50
 
 #### `default_buffer`
 
-Whether the streaming runner uses a pump thread and buffer by default.
+Whether streaming mode buffers jobs in memory by default.
 
 | | |
 |--|--|
@@ -482,7 +482,7 @@ Busybee.default_buffer = false
 
 #### `default_buffer_throttle`
 
-Default pump thread delay for the streaming runner's buffer.
+Default throttle delay for the job buffer in streaming or hybrid modes.
 
 | | |
 |--|--|
@@ -492,7 +492,7 @@ Default pump thread delay for the streaming runner's buffer.
 `false` disables throttling. `true` coerces to `0` (minimal throttle). A positive number sets the delay in milliseconds (sub-millisecond Floats accepted).
 
 ```ruby
-Busybee.default_buffer_throttle = 5  # 5ms pump delay
+Busybee.default_buffer_throttle = 5  # 5ms throttle delay
 ```
 
 See [Workers: Buffer Throttle](workers.md#buffer-throttle) for guidance on choosing a value.
