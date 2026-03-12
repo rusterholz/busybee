@@ -75,13 +75,13 @@ module Busybee
       unless busybee_conf.default_output_required.nil?
         config.default_output_required = !!busybee_conf.default_output_required
       end
-      config.default_queue_enabled = !!busybee_conf.default_queue_enabled unless busybee_conf.default_queue_enabled.nil?
-      unless busybee_conf.default_queue_throttle.nil?
-        config.default_queue_throttle = busybee_conf.default_queue_throttle
+      config.default_buffer = !!busybee_conf.default_buffer unless busybee_conf.default_buffer.nil?
+      unless busybee_conf.default_buffer_throttle.nil?
+        config.default_buffer_throttle = busybee_conf.default_buffer_throttle
       end
-      config.default_runner_mode = busybee_conf.default_runner_mode if busybee_conf.default_runner_mode.presence
-      if busybee_conf.runner_backpressure_delay.presence
-        config.runner_backpressure_delay = busybee_conf.runner_backpressure_delay
+      config.default_worker_mode = busybee_conf.default_worker_mode if busybee_conf.default_worker_mode.presence
+      if busybee_conf.default_backpressure_delay.presence
+        config.default_backpressure_delay = busybee_conf.default_backpressure_delay
       end
       config.shutdown_on_errors = busybee_conf.shutdown_on_errors if busybee_conf.shutdown_on_errors.presence
     end

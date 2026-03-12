@@ -33,7 +33,7 @@ end
 # Worker A for multi_job_process.bpmn's parallel "job-type-a" task.
 class CLITestWorkerA < Busybee::Worker
   job_type "job-type-a"
-  runner_mode :polling
+  worker_mode :polling
   polling request_timeout: 1_000
 
   def perform
@@ -50,7 +50,7 @@ end
 # Worker B for multi_job_process.bpmn's parallel "job-type-b" task.
 class CLITestWorkerB < Busybee::Worker
   job_type "job-type-b"
-  runner_mode :streaming
+  worker_mode :streaming
 
   def perform
     path = ENV.fetch("BUSYBEE_TEST_SIGNAL_FILE", nil)

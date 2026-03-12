@@ -102,9 +102,9 @@ module Busybee
     def validate_config_exclusions!
       return unless @parsed_options[:config_file]
 
-      if @parsed_options[:runner_mode]
-        raise ArgumentError, "--config and --runner-mode are mutually exclusive. " \
-                             "Set runner_mode in the YAML config file instead."
+      if @parsed_options[:worker_mode]
+        raise ArgumentError, "--config and --worker-mode are mutually exclusive. " \
+                             "Set worker_mode in the YAML config file instead."
       end
 
       return if @worker_class_names.empty?
@@ -131,8 +131,8 @@ module Busybee
           @parsed_options[:config_file] = file
         end
 
-        opts.on("-m", "--runner-mode MODE", "Runner mode (polling, streaming, hybrid)") do |mode|
-          @parsed_options[:runner_mode] = mode.to_sym
+        opts.on("-m", "--worker-mode MODE", "Worker mode (polling, streaming, hybrid)") do |mode|
+          @parsed_options[:worker_mode] = mode.to_sym
         end
 
         opts.on("-l", "--log-format FORMAT", "Log format (text, json)") do |format|

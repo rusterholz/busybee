@@ -9,9 +9,9 @@ module Busybee
     class Configuration # rubocop:disable Metrics/ClassLength
       VALID_TYPES = %w[string integer decimal boolean datetime duration uuid null].freeze
       VALID_SOURCES = %i[variable header].freeze
-      VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
+      VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
       VALID_POLLING_KWARGS = %i[max_jobs request_timeout].freeze
-      VALID_STREAMING_KWARGS = %i[queue queue_throttle].freeze
+      VALID_STREAMING_KWARGS = %i[buffer buffer_throttle].freeze
 
       # Represents a declared input (from variable, header, or both).
       Input = Struct.new(:name, :source, :required, :type, :description, :default,
@@ -21,7 +21,7 @@ module Busybee
       Output = Struct.new(:name, :required, :type, :description, keyword_init: true)
 
       attr_accessor :description
-      attr_reader :inputs, :outputs, :runner_mode, :polling_config, :streaming_config,
+      attr_reader :inputs, :outputs, :worker_mode, :polling_config, :streaming_config,
                   :job_timeout, :backoff, :backpressure_delay,
                   :complete_job_on_success, :fail_job_on_error, :shutdown_on
 
@@ -31,7 +31,7 @@ module Busybee
         @description = nil
         @inputs = []
         @outputs = []
-        @runner_mode = nil
+        @worker_mode = nil
         @polling_config = {}
         @streaming_config = {}
         @job_timeout = nil
@@ -50,14 +50,14 @@ module Busybee
         @job_type = value.to_s
       end
 
-      def runner_mode=(value)
+      def worker_mode=(value)
         sym = value.to_sym
-        unless VALID_RUNNER_MODES.include?(sym)
+        unless VALID_WORKER_MODES.include?(sym)
           raise InvalidWorkerDefinition,
-                "Invalid runner mode #{value.inspect}. Valid: #{VALID_RUNNER_MODES.map(&:inspect).join(', ')}"
+                "Invalid worker mode #{value.inspect}. Valid: #{VALID_WORKER_MODES.map(&:inspect).join(', ')}"
         end
 
-        @runner_mode = sym
+        @worker_mode = sym
       end
 
       def polling_config=(kwargs)
@@ -79,9 +79,9 @@ module Busybee
                 "Valid: #{VALID_STREAMING_KWARGS.map(&:inspect).join(', ')}"
         end
 
-        validate_queue_option!(kwargs) if kwargs.key?(:queue)
-        validate_no_throttle_without_queue!(kwargs)
-        validate_queue_throttle!(kwargs) if kwargs.key?(:queue_throttle)
+        validate_buffer_option!(kwargs) if kwargs.key?(:buffer)
+        validate_no_throttle_without_buffer!(kwargs)
+        validate_buffer_throttle!(kwargs) if kwargs.key?(:buffer_throttle)
 
         @streaming_config = kwargs
       end
@@ -146,16 +146,16 @@ module Busybee
         @outputs << output
       end
 
-      # Resolved queue throttle for the streaming pump thread.
+      # Resolved buffer throttle for the streaming pump thread.
       # Returns false (no throttling), 0 (minimal throttle), or a positive Numeric (ms).
-      def queue_throttle
-        streaming_config.fetch(:queue_throttle, Busybee.default_queue_throttle)
+      def buffer_throttle
+        streaming_config.fetch(:buffer_throttle, Busybee.default_buffer_throttle)
       end
 
-      # Whether this worker uses a pump thread + queue for streaming.
-      # Default: true. Set to false via `streaming queue: false` for inline stream processing.
-      def queue_enabled?
-        streaming_config.fetch(:queue, Busybee::Defaults::DEFAULT_STREAMING_QUEUE_ENABLED)
+      # Whether this worker uses a pump thread + buffer for streaming.
+      # Default: true. Set to false via `streaming buffer: false` for inline stream processing.
+      def buffer?
+        streaming_config.fetch(:buffer, Busybee::Defaults::DEFAULT_STREAMING_BUFFER)
       end
 
       # Returns resolved polling options for client.with_each_job, merging
@@ -179,7 +179,7 @@ module Busybee
           description: description,
           inputs: inputs.map(&:to_h),
           outputs: outputs.map(&:to_h),
-          runner_mode: runner_mode,
+          worker_mode: worker_mode,
           polling_config: polling_config,
           streaming_config: streaming_config,
           job_timeout: job_timeout,
@@ -249,30 +249,30 @@ module Busybee
         raise InvalidWorkerDefinition, "Output :#{name} is already declared"
       end
 
-      def validate_queue_option!(kwargs)
-        return if [true, false].include?(kwargs[:queue])
+      def validate_buffer_option!(kwargs)
+        return if [true, false].include?(kwargs[:buffer])
 
-        raise InvalidWorkerDefinition, "`queue:` requires a boolean, got #{kwargs[:queue].inspect}"
+        raise InvalidWorkerDefinition, "`buffer:` requires a boolean, got #{kwargs[:buffer].inspect}"
       end
 
-      def validate_no_throttle_without_queue!(kwargs)
-        return unless kwargs[:queue] == false && kwargs.key?(:queue_throttle)
+      def validate_no_throttle_without_buffer!(kwargs)
+        return unless kwargs[:buffer] == false && kwargs.key?(:buffer_throttle)
 
         raise InvalidWorkerDefinition,
-              "`queue_throttle:` cannot be set when `queue: false` — there is no queue to throttle"
+              "`buffer_throttle:` cannot be set when `buffer: false` — there is no buffer to throttle"
       end
 
-      def validate_queue_throttle!(kwargs)
+      def validate_buffer_throttle!(kwargs)
         # Coerce: true → 0 ("enable at minimal setting"), nil → false ("no throttling")
-        kwargs[:queue_throttle] = 0 if kwargs[:queue_throttle] == true
-        kwargs[:queue_throttle] = false if kwargs[:queue_throttle].nil?
+        kwargs[:buffer_throttle] = 0 if kwargs[:buffer_throttle] == true
+        kwargs[:buffer_throttle] = false if kwargs[:buffer_throttle].nil?
 
-        value = kwargs[:queue_throttle]
+        value = kwargs[:buffer_throttle]
         return if value == false
         return if value.is_a?(Numeric) && value >= 0
 
         raise InvalidWorkerDefinition,
-              "`queue_throttle:` must be a non-negative Numeric, got #{value.inspect}"
+              "`buffer_throttle:` must be a non-negative Numeric, got #{value.inspect}"
       end
 
       def validate_duration!(attr, value)

@@ -264,9 +264,9 @@ RSpec.describe Busybee do
                     :DEFAULT_JOB_LOCK_TIMEOUT_MS
   end
 
-  describe ".runner_backpressure_delay" do
-    it_behaves_like "a duration config setter", :runner_backpressure_delay, :runner_backpressure_delay,
-                    :DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
+  describe ".default_backpressure_delay" do
+    it_behaves_like "a duration config setter", :default_backpressure_delay, :default_backpressure_delay,
+                    :DEFAULT_BACKPRESSURE_DELAY_MS
   end
 
   describe ".default_max_jobs" do
@@ -354,121 +354,123 @@ RSpec.describe Busybee do
     end
   end
 
-  describe ".default_queue_enabled" do
+  describe ".default_buffer" do
     around do |example|
-      original = described_class.instance_variable_get(:@default_queue_enabled)
+      original = described_class.instance_variable_get(:@default_buffer)
       example.run
-      described_class.default_queue_enabled = original
+      described_class.default_buffer = original
     end
 
     it "defaults to true" do
-      described_class.default_queue_enabled = nil
-      expect(described_class.default_queue_enabled).to be(true)
+      described_class.default_buffer = nil
+      expect(described_class.default_buffer).to be(true)
     end
 
     it "can be set to false" do
-      described_class.default_queue_enabled = false
-      expect(described_class.default_queue_enabled).to be(false)
+      described_class.default_buffer = false
+      expect(described_class.default_buffer).to be(false)
     end
 
     it "rejects non-boolean values" do
-      expect { described_class.default_queue_enabled = "true" }.to raise_error(ArgumentError, /default_queue_enabled/)
+      expect { described_class.default_buffer = "true" }.to raise_error(ArgumentError, /default_buffer/)
     end
   end
 
-  describe ".default_queue_throttle" do
+  describe ".default_buffer_throttle" do
     around do |example|
-      original = described_class.instance_variable_get(:@default_queue_throttle)
+      original = described_class.instance_variable_get(:@default_buffer_throttle)
       example.run
-      described_class.default_queue_throttle = original
+      described_class.default_buffer_throttle = original
     end
 
     it "defaults to false (no throttling)" do
-      described_class.default_queue_throttle = nil
-      expect(described_class.default_queue_throttle).to be(false)
+      described_class.default_buffer_throttle = nil
+      expect(described_class.default_buffer_throttle).to be(false)
     end
 
     it "can be set to an integer" do
-      described_class.default_queue_throttle = 5
-      expect(described_class.default_queue_throttle).to eq(5)
+      described_class.default_buffer_throttle = 5
+      expect(described_class.default_buffer_throttle).to eq(5)
     end
 
     it "can be set to a float for sub-millisecond precision" do
-      described_class.default_queue_throttle = 0.5
-      expect(described_class.default_queue_throttle).to eq(0.5)
+      described_class.default_buffer_throttle = 0.5
+      expect(described_class.default_buffer_throttle).to eq(0.5)
     end
 
     it "preserves 0 (minimal throttle via sleep(0))" do
-      described_class.default_queue_throttle = 0
-      expect(described_class.default_queue_throttle).to eq(0)
+      described_class.default_buffer_throttle = 0
+      expect(described_class.default_buffer_throttle).to eq(0)
     end
 
     it "coerces true to 0" do
-      described_class.default_queue_throttle = true
-      expect(described_class.default_queue_throttle).to eq(0)
+      described_class.default_buffer_throttle = true
+      expect(described_class.default_buffer_throttle).to eq(0)
     end
 
     it "coerces false to false" do
-      described_class.default_queue_throttle = false
+      described_class.default_buffer_throttle = false
       # false is falsy, so reader falls through to default (which is also false)
-      expect(described_class.default_queue_throttle).to be(false)
+      expect(described_class.default_buffer_throttle).to be(false)
     end
 
     it "coerces a numeric String to Float" do
-      described_class.default_queue_throttle = "5.5"
-      expect(described_class.default_queue_throttle).to eq(5.5)
+      described_class.default_buffer_throttle = "5.5"
+      expect(described_class.default_buffer_throttle).to eq(5.5)
     end
 
     it "rejects negative values" do
-      expect { described_class.default_queue_throttle = -1 }.to raise_error(ArgumentError, /non-negative/)
+      expect { described_class.default_buffer_throttle = -1 }.to raise_error(ArgumentError, /non-negative/)
     end
 
     it "rejects non-numeric Strings" do
-      expect { described_class.default_queue_throttle = "fast" }.to raise_error(ArgumentError, /default_queue_throttle/)
+      expect do
+        described_class.default_buffer_throttle = "fast"
+      end.to raise_error(ArgumentError, /default_buffer_throttle/)
     end
 
     it "rejects other types" do
-      expect { described_class.default_queue_throttle = Object.new }.
-        to raise_error(ArgumentError, /default_queue_throttle/)
+      expect { described_class.default_buffer_throttle = Object.new }.
+        to raise_error(ArgumentError, /default_buffer_throttle/)
     end
 
     it "resets to default when set to nil" do
-      described_class.default_queue_throttle = 5
-      described_class.default_queue_throttle = nil
-      expect(described_class.default_queue_throttle).to be(false)
+      described_class.default_buffer_throttle = 5
+      described_class.default_buffer_throttle = nil
+      expect(described_class.default_buffer_throttle).to be(false)
     end
   end
 
-  describe ".default_runner_mode" do
+  describe ".default_worker_mode" do
     around do |example|
-      original = described_class.instance_variable_get(:@default_runner_mode)
+      original = described_class.instance_variable_get(:@default_worker_mode)
       example.run
-      described_class.default_runner_mode = original
+      described_class.default_worker_mode = original
     end
 
     it "defaults to :hybrid" do
-      described_class.default_runner_mode = nil
-      expect(described_class.default_runner_mode).to be(:hybrid)
+      described_class.default_worker_mode = nil
+      expect(described_class.default_worker_mode).to be(:hybrid)
     end
 
     it "accepts a valid Symbol" do
-      described_class.default_runner_mode = :polling
-      expect(described_class.default_runner_mode).to be(:polling)
+      described_class.default_worker_mode = :polling
+      expect(described_class.default_worker_mode).to be(:polling)
     end
 
     it "accepts a valid String and coerces to Symbol" do
-      described_class.default_runner_mode = "streaming"
-      expect(described_class.default_runner_mode).to be(:streaming)
+      described_class.default_worker_mode = "streaming"
+      expect(described_class.default_worker_mode).to be(:streaming)
     end
 
     it "rejects an invalid mode" do
-      expect { described_class.default_runner_mode = :turbo }.to raise_error(
-        ArgumentError, /default_runner_mode.*:polling.*:streaming.*:hybrid/
+      expect { described_class.default_worker_mode = :turbo }.to raise_error(
+        ArgumentError, /default_worker_mode.*:polling.*:streaming.*:hybrid/
       )
     end
 
     it "rejects non-String/Symbol types" do
-      expect { described_class.default_runner_mode = 42 }.to raise_error(ArgumentError, /default_runner_mode/)
+      expect { described_class.default_worker_mode = 42 }.to raise_error(ArgumentError, /default_worker_mode/)
     end
   end
 

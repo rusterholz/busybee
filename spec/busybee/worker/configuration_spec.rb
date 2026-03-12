@@ -188,19 +188,19 @@ RSpec.describe Busybee::Worker::Configuration do
     end
   end
 
-  describe "#runner_mode=" do
+  describe "#worker_mode=" do
     let(:config) { configuration_for("TestWorker") }
 
     it "accepts valid modes" do
       %i[polling streaming hybrid].each do |mode|
-        config.runner_mode = mode
-        expect(config.runner_mode).to eq(mode)
+        config.worker_mode = mode
+        expect(config.worker_mode).to eq(mode)
       end
     end
 
     it "raises on invalid mode" do
-      expect { config.runner_mode = :batch }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /Invalid runner mode/
+      expect { config.worker_mode = :batch }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /Invalid worker mode/
       )
     end
   end
@@ -223,14 +223,14 @@ RSpec.describe Busybee::Worker::Configuration do
   describe "#streaming_config=" do
     let(:config) { configuration_for("TestWorker") }
 
-    it "accepts queue: true" do
-      config.streaming_config = { queue: true }
-      expect(config.streaming_config).to eq(queue: true)
+    it "accepts buffer: true" do
+      config.streaming_config = { buffer: true }
+      expect(config.streaming_config).to eq(buffer: true)
     end
 
-    it "accepts queue: false" do
-      config.streaming_config = { queue: false }
-      expect(config.streaming_config).to eq(queue: false)
+    it "accepts buffer: false" do
+      config.streaming_config = { buffer: false }
+      expect(config.streaming_config).to eq(buffer: false)
     end
 
     it "raises on unknown kwargs" do
@@ -239,99 +239,99 @@ RSpec.describe Busybee::Worker::Configuration do
       )
     end
 
-    it "raises when queue: is non-boolean" do
-      expect { config.streaming_config = { queue: :yes } }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /`queue:` requires a boolean/
+    it "raises when buffer: is non-boolean" do
+      expect { config.streaming_config = { buffer: :yes } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /`buffer:` requires a boolean/
       )
     end
 
-    it "raises when queue_throttle: is set with queue: false" do
-      expect { config.streaming_config = { queue: false, queue_throttle: 5 } }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /`queue_throttle:` cannot be set when `queue: false`/
+    it "raises when buffer_throttle: is set with buffer: false" do
+      expect { config.streaming_config = { buffer: false, buffer_throttle: 5 } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /`buffer_throttle:` cannot be set when `buffer: false`/
       )
     end
 
-    it "accepts queue_throttle: with an integer" do
-      config.streaming_config = { queue_throttle: 5 }
-      expect(config.streaming_config).to eq(queue_throttle: 5)
+    it "accepts buffer_throttle: with an integer" do
+      config.streaming_config = { buffer_throttle: 5 }
+      expect(config.streaming_config).to eq(buffer_throttle: 5)
     end
 
-    it "accepts queue_throttle: 0 (minimal throttle)" do
-      config.streaming_config = { queue_throttle: 0 }
-      expect(config.streaming_config).to eq(queue_throttle: 0)
+    it "accepts buffer_throttle: 0 (minimal throttle)" do
+      config.streaming_config = { buffer_throttle: 0 }
+      expect(config.streaming_config).to eq(buffer_throttle: 0)
     end
 
-    it "accepts queue_throttle: with a float" do
-      config.streaming_config = { queue_throttle: 0.5 }
-      expect(config.streaming_config).to eq(queue_throttle: 0.5)
+    it "accepts buffer_throttle: with a float" do
+      config.streaming_config = { buffer_throttle: 0.5 }
+      expect(config.streaming_config).to eq(buffer_throttle: 0.5)
     end
 
-    it "accepts queue_throttle: with a Rational" do
-      config.streaming_config = { queue_throttle: Rational(87, 1000) }
-      expect(config.streaming_config).to eq(queue_throttle: Rational(87, 1000))
+    it "accepts buffer_throttle: with a Rational" do
+      config.streaming_config = { buffer_throttle: Rational(87, 1000) }
+      expect(config.streaming_config).to eq(buffer_throttle: Rational(87, 1000))
     end
 
-    it "coerces queue_throttle: true to 0 (minimal throttle)" do
-      config.streaming_config = { queue_throttle: true }
-      expect(config.streaming_config).to eq(queue_throttle: 0)
+    it "coerces buffer_throttle: true to 0 (minimal throttle)" do
+      config.streaming_config = { buffer_throttle: true }
+      expect(config.streaming_config).to eq(buffer_throttle: 0)
     end
 
-    it "coerces queue_throttle: nil to false (no throttling)" do
-      config.streaming_config = { queue_throttle: nil }
-      expect(config.streaming_config).to eq(queue_throttle: false)
+    it "coerces buffer_throttle: nil to false (no throttling)" do
+      config.streaming_config = { buffer_throttle: nil }
+      expect(config.streaming_config).to eq(buffer_throttle: false)
     end
 
-    it "raises when queue_throttle: is negative" do
-      expect { config.streaming_config = { queue_throttle: -1 } }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /`queue_throttle:` must be a non-negative Numeric/
+    it "raises when buffer_throttle: is negative" do
+      expect { config.streaming_config = { buffer_throttle: -1 } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /`buffer_throttle:` must be a non-negative Numeric/
       )
     end
 
-    it "raises when queue_throttle: is non-Numeric" do
-      expect { config.streaming_config = { queue_throttle: "5" } }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /`queue_throttle:` must be a non-negative Numeric/
+    it "raises when buffer_throttle: is non-Numeric" do
+      expect { config.streaming_config = { buffer_throttle: "5" } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /`buffer_throttle:` must be a non-negative Numeric/
       )
     end
   end
 
-  describe "#queue_throttle" do
+  describe "#buffer_throttle" do
     let(:config) { configuration_for("TestWorker") }
 
     it "defaults to false (no throttling) when neither DSL nor gem-level sets it" do
-      expect(config.queue_throttle).to be(false)
+      expect(config.buffer_throttle).to be(false)
     end
 
     it "returns the DSL value when set in streaming config" do
-      config.streaming_config = { queue_throttle: 0.5 }
-      expect(config.queue_throttle).to eq(0.5)
+      config.streaming_config = { buffer_throttle: 0.5 }
+      expect(config.buffer_throttle).to eq(0.5)
     end
 
     it "returns 0 when explicitly set (minimal throttle)" do
-      config.streaming_config = { queue_throttle: 0 }
-      expect(config.queue_throttle).to eq(0)
+      config.streaming_config = { buffer_throttle: 0 }
+      expect(config.buffer_throttle).to eq(0)
     end
 
-    it "falls back to gem-level default_queue_throttle" do
-      allow(Busybee).to receive(:default_queue_throttle).and_return(2)
-      expect(config.queue_throttle).to eq(2)
+    it "falls back to gem-level default_buffer_throttle" do
+      allow(Busybee).to receive(:default_buffer_throttle).and_return(2)
+      expect(config.buffer_throttle).to eq(2)
     end
   end
 
-  describe "#queue_enabled?" do
+  describe "#buffer?" do
     let(:config) { configuration_for("TestWorker") }
 
     it "defaults to true when no streaming config is set" do
-      expect(config.queue_enabled?).to be(true)
+      expect(config.buffer?).to be(true)
     end
 
-    it "returns true when streaming config has queue: true" do
-      config.streaming_config = { queue: true }
-      expect(config.queue_enabled?).to be(true)
+    it "returns true when streaming config has buffer: true" do
+      config.streaming_config = { buffer: true }
+      expect(config.buffer?).to be(true)
     end
 
-    it "returns false when streaming config has queue: false" do
-      config.streaming_config = { queue: false }
-      expect(config.queue_enabled?).to be(false)
+    it "returns false when streaming config has buffer: false" do
+      config.streaming_config = { buffer: false }
+      expect(config.buffer?).to be(false)
     end
   end
 
@@ -493,7 +493,7 @@ RSpec.describe Busybee::Worker::Configuration do
     let(:config) do
       configuration_for("ProcessOrderWorker").tap do |c|
         c.description = "Processes orders"
-        c.runner_mode = :polling
+        c.worker_mode = :polling
         c.polling_config = { max_jobs: 10 }
         c.job_timeout = 300_000
         c.backoff = 30_000
@@ -511,7 +511,7 @@ RSpec.describe Busybee::Worker::Configuration do
 
     it "includes runner configuration" do
       result = config.to_h
-      expect(result[:runner_mode]).to eq(:polling)
+      expect(result[:worker_mode]).to eq(:polling)
       expect(result[:polling_config]).to eq(max_jobs: 10)
       expect(result[:streaming_config]).to eq({})
       expect(result[:job_timeout]).to eq(300_000)

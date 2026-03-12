@@ -79,7 +79,7 @@ Capabilities:
 
 - Declarative input/output definitions with validation and accessor methods
 - Automatic job completion and failure reporting
-- Three runner modes (polling, streaming, hybrid) for different workload patterns
+- Three worker modes (polling, streaming, hybrid) for different workload patterns
 - Configurable timeouts, retry backoff, and backpressure handling
 - Graceful shutdown on SIGTERM/SIGINT
 - YAML configuration with per-worker overrides

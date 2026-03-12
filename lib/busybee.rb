@@ -24,8 +24,8 @@ module Busybee
   # Valid log format identifiers.
   VALID_LOG_FORMATS = %w[text json].freeze
 
-  # Valid runner mode identifiers.
-  VALID_RUNNER_MODES = %i[polling streaming hybrid].freeze
+  # Valid worker mode identifiers.
+  VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
 
   class << self
     include Configure
@@ -80,16 +80,16 @@ module Busybee
       @default_output_required.nil? ? Defaults::DEFAULT_OUTPUT_REQUIRED : @default_output_required
     end
 
-    def default_queue_enabled
-      @default_queue_enabled.nil? ? Defaults::DEFAULT_STREAMING_QUEUE_ENABLED : @default_queue_enabled
+    def default_buffer
+      @default_buffer.nil? ? Defaults::DEFAULT_STREAMING_BUFFER : @default_buffer
     end
 
-    def default_queue_throttle
-      @default_queue_throttle || Defaults::DEFAULT_QUEUE_THROTTLE_MS
+    def default_buffer_throttle
+      @default_buffer_throttle || Defaults::DEFAULT_BUFFER_THROTTLE_MS
     end
 
-    def default_runner_mode
-      @default_runner_mode || Defaults::DEFAULT_RUNNER_MODE
+    def default_worker_mode
+      @default_worker_mode || Defaults::DEFAULT_WORKER_MODE
     end
 
     def grpc_retry_delay_ms
@@ -110,8 +110,8 @@ module Busybee
       @log_format || :text
     end
 
-    def runner_backpressure_delay
-      @runner_backpressure_delay || Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS
+    def default_backpressure_delay
+      @default_backpressure_delay || Defaults::DEFAULT_BACKPRESSURE_DELAY_MS
     end
 
     def shutdown_on_errors

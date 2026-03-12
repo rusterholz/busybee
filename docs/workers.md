@@ -24,7 +24,7 @@ Busybee is built around a workflow engine named [Zeebe](https://docs.camunda.io/
   - [CLI Reference](#cli-reference)
   - [Rails Integration](#rails-integration)
   - [Signal Handling](#signal-handling)
-  - [Runner Modes](#runner-modes)
+  - [Worker Modes](#worker-modes)
   - [Multiple Workers in One Process](#multiple-workers-in-one-process)
   - [YAML Configuration](#yaml-configuration)
   - [Configuration Precedence](#configuration-precedence)
@@ -454,14 +454,14 @@ backoff 30.seconds # same, with ActiveSupport
 
 Default: `5_000` ms (5 seconds), configurable via [`Busybee.default_fail_job_backoff`](configuration.md).
 
-#### Runner Configuration in the DSL
+#### Mode Configuration in the DSL
 
-Workers can declare their preferred runner mode and any mode-specific options. These serve as defaults that can be overridden at deploy time via CLI flags or YAML configuration (see [Configuration Precedence](#configuration-precedence)):
+Workers can declare their preferred worker mode and any mode-specific options. These serve as defaults that can be overridden at deploy time via CLI flags or YAML configuration (see [Configuration Precedence](#configuration-precedence)):
 
 ```ruby
 class HighThroughputWorker < Busybee::Worker
-  runner_mode :streaming
-  streaming queue: true, queue_throttle: 5  # 5ms delay between accepting jobs
+  worker_mode :streaming
+  streaming buffer: true, buffer_throttle: 5  # 5ms delay between accepting jobs
 
   def perform
     # ...
@@ -469,7 +469,7 @@ class HighThroughputWorker < Busybee::Worker
 end
 
 class BatchWorker < Busybee::Worker
-  runner_mode :polling
+  worker_mode :polling
   polling max_jobs: 50, request_timeout: 30_000
 
   def perform
@@ -478,7 +478,7 @@ class BatchWorker < Busybee::Worker
 end
 ```
 
-See [Runner Modes](#runner-modes) for what these options mean and when to use each mode.
+See [Worker Modes](#worker-modes) for what these options mean and when to use each mode.
 
 #### DSL Quick Reference
 
@@ -490,9 +490,9 @@ See [Runner Modes](#runner-modes) for what these options mean and when to use ea
 | `header` | name, opts | | Declare a header input |
 | `input` | name, `source:`, opts | | Declare an input from any source |
 | `output` | name, opts | | Declare an output |
-| `runner_mode` | Symbol | `:hybrid` | `:polling`, `:streaming`, or `:hybrid` |
-| `polling` | `max_jobs:`, `request_timeout:` | `25`, `60_000` | Polling runner options |
-| `streaming` | `queue:`, `queue_throttle:` | `true`, `false` | Streaming runner options |
+| `worker_mode` | Symbol | `:hybrid` | `:polling`, `:streaming`, or `:hybrid` |
+| `polling` | `max_jobs:`, `request_timeout:` | `25`, `60_000` | Polling mode options |
+| `streaming` | `buffer:`, `buffer_throttle:` | `true`, `false` | Streaming mode options |
 | `job_timeout` | Integer or Duration | `60_000` | Job lock timeout (ms) |
 | `backoff` | Integer or Duration | `5_000` | Retry backoff delay (ms) |
 | `backpressure_delay` | Integer or Duration | `2_000` | Delay after backpressure error (ms) |
@@ -532,7 +532,7 @@ Usage: busybee [options] WorkerClass [WorkerClass ...]
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--config FILE` | `-c` | String | Path to a [YAML configuration file](#yaml-configuration) |
-| `--runner-mode MODE` | `-m` | String | Runner mode: `polling`, `streaming`, or `hybrid` |
+| `--worker-mode MODE` | `-m` | String | Worker mode: `polling`, `streaming`, or `hybrid` |
 | `--log-format FORMAT` | `-l` | String | Log format: `text` or `json` |
 | `--worker-name NAME` | `-n` | String | Worker process identifier (default: hostname) |
 | `--cluster-address ADDR` | `-a` | String | Zeebe gateway address as `host:port` |
@@ -541,7 +541,7 @@ Usage: busybee [options] WorkerClass [WorkerClass ...]
 
 **Mutual Exclusions:**
 
-- `--config` and `--runner-mode` cannot be used together. Set `runner_mode` in YAML instead.
+- `--config` and `--worker-mode` cannot be used together. Set `worker_mode` in YAML instead.
 - `--config` and positional worker arguments cannot be used together. List workers in YAML instead.
 
 ### Rails Integration
@@ -568,7 +568,7 @@ The worker process responds to standard Unix signals:
 
 During graceful shutdown, any jobs that were received from the workflow engine but not yet started are failed back to the workflow engine with their retry count preserved, so they'll be picked up by another worker.
 
-### Runner Modes
+### Worker Modes
 
 Zeebe supports two different ways of fetching jobs for your worker: long-polling or streaming. Both of them have advantages and disadvantages. Busybee supports both modes, as well as a third hybrid mode which eliminates the downsides of using either polling or streaming alone.
 
@@ -577,7 +577,7 @@ Zeebe supports two different ways of fetching jobs for your worker: long-polling
 #### Polling
 
 ```ruby
-runner_mode :polling
+worker_mode :polling
 ```
 
 In polling mode, the busybee process for your worker repeatedly [long-polls](https://docs.camunda.io/docs/apis-tools/zeebe-api/gateway-service/#activatejobs-rpc) the Zeebe gateway: "give me up to N jobs of this type." If no jobs are available, the call blocks until at least one job is available. Your worker receives the available jobs, processes them sequentially, then polls again.
@@ -596,31 +596,31 @@ This is the simplest mode, built on the oldest API. It has two principal downsid
 #### Streaming
 
 ```ruby
-runner_mode :streaming
+worker_mode :streaming
 ```
 
 In streaming mode, the busybee process for your worker opens a persistent [gRPC stream](https://docs.camunda.io/docs/apis-tools/zeebe-api/gateway-service/#streamactivatedjobs-rpc) connection to the workflow engine. The engine pushes jobs to your worker as soon as they're created.
 
 This is the more modern mode, giving you the lowest possible latency for new jobs, and the lowest amount of network overhead to get them. But it has a major downside: streams only ever deliver jobs *created after the stream opens.* If there were jobs of that type already backlogged in the workflow engine, a worker in streaming mode won't ever see them. For that, you need polling or [hybrid mode](#hybrid).
 
-With default settings, a streaming worker accepts jobs from the workflow engine immediately, buffering them in memory in ruby prior to actual execution by your worker code. This helps ensure the stream stays responsive and enables [queue throttling](#queue-throttle) for controllable backpressure if the size of the in-memory queue becomes too large. Jobs are still processed sequentially.
+With default settings, a streaming worker accepts jobs from the workflow engine immediately, buffering them in memory in ruby prior to actual execution by your worker code. This helps ensure the stream stays responsive and enables [buffer throttling](#buffer-throttle) for controllable backpressure if the size of the in-memory buffer becomes too large. Jobs are still processed sequentially.
 
 **Options:**
 
 | Option | DSL | YAML/CLI | Default | Description |
 |--------|-----|----------|---------|-------------|
-| Queue mode | `streaming queue: true/false` | `queue_enabled` | `true` | Use the buffer. Set to `false` for inline (unbuffered) processing. |
-| Queue throttle | `streaming queue_throttle: N` | `queue_throttle` | `false` | Delay between accepting jobs, in ms. See [Queue Throttle](#queue-throttle). |
+| Buffer mode | `streaming buffer: true/false` | `buffer` | `true` | Use the buffer. Set to `false` for inline (unbuffered) processing. |
+| Buffer throttle | `streaming buffer_throttle: N` | `buffer_throttle` | `false` | Delay between accepting jobs, in ms. See [Buffer Throttle](#buffer-throttle). |
 
 **When to Use:** Whenever you can guarantee that there will be no pre-existing backlog of available jobs. In practice, that guarantee can be difficult to meet, because it depends on human processes to ensure that workflows are never deployed or started before all of the workers they rely on are already running.
 
 #### Hybrid
 
 ```ruby
-runner_mode :hybrid
+worker_mode :hybrid
 ```
 
-In hybrid mode, busybee combines both approaches to avoid the downsides of either. It opens a stream to capture new jobs immediately, then also makes polling requests to drain any backlog in the buffer. Once the backlog is caught up, it stops polling and continues stream-only processing.
+In hybrid mode, busybee combines both approaches to avoid the downsides of either. It opens a stream to capture new jobs immediately, buffering them in memory, then also makes polling requests to drain any backlog. Once the backlog is caught up, it stops polling and continues stream-only processing.
 
 This is the default mode, and it should be set-and-forget in most cases.
 
@@ -634,33 +634,33 @@ All calls to your `perform` method happen on the main thread, maintaining the sa
 
 **When to use:** Nearly always. This is the default and the right choice for most workloads. You get low latency for new jobs, low network load, *and* reliable backlog processing after deploys or restarts.
 
-#### Queue Throttle
+#### Buffer Throttle
 
-When using hybrid mode, or streaming mode with the default `queue: true`, jobs are consumed from the gRPC stream as soon as they are available, and are buffered in memory while they wait for your worker to process them. This design avoids applying any [backpressure](https://docs.camunda.io/docs/components/concepts/job-workers/#backpressure) to the gRPC gateway, so that the stream does not get marked as `not-ready` and end up missing future jobs (see that link for details).
+When using hybrid mode, or streaming mode with the default `buffer: true`, jobs are consumed from the gRPC stream as soon as they are available, and are buffered in memory while they wait for your worker to process them. This design avoids applying any [backpressure](https://docs.camunda.io/docs/components/concepts/job-workers/#backpressure) to the gRPC gateway, so that the stream does not get marked as `not-ready` and end up missing future jobs (see that link for details).
 
-For most workloads, this arrangement should work smoothly. But if your worker processes jobs slowly while the workflow engine is pushing lots of jobs fast, then the queue (and ruby heap size) can start to grow without bound.
+For most workloads, this arrangement should work smoothly. But if your worker processes jobs slowly while the workflow engine is pushing lots of jobs fast, then the buffer (and ruby heap size) can start to grow without bound.
 
-The `queue_throttle` option lets you address this situation by adding a sleep between accepting each job. This limits the rate at which busybee accepts jobs from the gRPC gateway, which limits how fast the queue can grow.
+The `buffer_throttle` option lets you address this situation by adding a sleep between accepting each job. This limits the rate at which busybee accepts jobs from the gRPC gateway, which limits how fast the buffer can grow.
 
-For most users, the default (false, no throttle) should be correct most of the time. Only tune this if you observe concerning memory growth or OOM errors from your workers due to unbounded queue depth.
+For most users, the default (false, no throttle) should be correct most of the time. Only tune this if you observe concerning memory growth or OOM errors from your workers due to unbounded buffer depth.
 
 ```ruby
-streaming queue: true, queue_throttle: 5.0  # 5ms delay between accepting each job -- max 200 jobs/s
+streaming buffer: true, buffer_throttle: 5.0  # 5ms delay between accepting each job -- max 200 jobs/s
 ```
 
-| `queue_throttle` value | Behavior | Rate Cap (Appx.) |
-|------------------------|----------|------------------|
-| `false` (default) | No throttling (queue can grow without bound) | Not capped |
+| `buffer_throttle` value | Behavior | Rate Cap (Appx.) |
+|-------------------------|----------|------------------|
+| `false` (default) | No throttling (buffer can grow without bound) | Not capped |
 | `0` | Minimal possible throttling (see Sleep Granularity, below) | ~200k - ~1M jobs/sec |
 | `0.1` - `10` (ms) | Practical range for stable throttling | Up to 10,000 jobs/sec |
 
-Note that `queue_throttle` is not a panacea. If your system is generating jobs at a faster rate than your worker can process them, enabling throttling **alone** will only make the problem worse. If the stream for your worker is [marked `not-ready` by the gRPC gateway due to being too slow](https://docs.camunda.io/docs/components/concepts/job-workers/#backpressure), some future jobs will not be routed to it and will end up "hidden" in the workflow engine's buffer, where they will never be sent to a stream (and must be polled for). The _true_ solution to the problem of having too many jobs is to add additional capacity by scaling your worker either horizontally (adding more replicas) or vertically (adding more CPU or memory). In such a situation, using `queue_throttle` lets you ensure that any one replica never gets overloaded and runs out of memory.
+Note that `buffer_throttle` is not a panacea. If your system is generating jobs at a faster rate than your worker can process them, enabling throttling **alone** will only make the problem worse. If the stream for your worker is [marked `not-ready` by the gRPC gateway due to being too slow](https://docs.camunda.io/docs/components/concepts/job-workers/#backpressure), some future jobs will not be routed to it and will end up "hidden" in the workflow engine's buffer, where they will never be sent to a stream (and must be polled for). The _true_ solution to the problem of having too many jobs is to add additional capacity by scaling your worker either horizontally (adding more replicas) or vertically (adding more CPU or memory). In such a situation, using `buffer_throttle` lets you ensure that any one replica never gets overloaded and runs out of memory.
 
-> Instrumentation hooks for monitoring queue depth, and detecting the need for additional capacity, are planned for v0.4.
+> Instrumentation hooks for monitoring buffer depth, and detecting the need for additional capacity, are planned for v0.4.
 
-**Sleep Granularity:** Ruby's `Kernel#sleep` delegates to `nanosleep(2)` on POSIX systems. Values down to 0.1ms (100 microseconds) work reliably on modern Linux and macOS. Below that, OS scheduler and GVL overhead dominate, so sub-0.1ms values are unlikely to behave meaningfully. Therefore, the maximum *stable and reliable* rate cap you can get is close to 10k jobs/sec, which you get from `queue_throttle: 0.1`.
+**Sleep Granularity:** Ruby's `Kernel#sleep` delegates to `nanosleep(2)` on POSIX systems. Values down to 0.1ms (100 microseconds) work reliably on modern Linux and macOS. Below that, OS scheduler and GVL overhead dominate, so sub-0.1ms values are unlikely to behave meaningfully. Therefore, the maximum *stable and reliable* rate cap you can get is close to 10k jobs/sec, which you get from `buffer_throttle: 0.1`.
 
-However, there is an option that gives you a rate cap higher than this value without being totally unthrottled. If you set `queue_throttle` to 0, the thread does not actually sleep, but it does cause a context swap, which slows it down more than simply doing nothing (on the order of 1-5µs). Setting `queue_throttle: 0` should give you a rate cap somewhere between roughly 200k - 1M jobs/sec, but the exact value will depend on your infrastructure.
+However, there is an option that gives you a rate cap higher than this value without being totally unthrottled. If you set `buffer_throttle` to 0, the thread does not actually sleep, but it does cause a context swap, which slows it down more than simply doing nothing (on the order of 1-5µs). Setting `buffer_throttle: 0` should give you a rate cap somewhere between roughly 200k - 1M jobs/sec, but the exact value will depend on your infrastructure.
 
 #### Backpressure
 
@@ -698,7 +698,7 @@ For repeatable deployments, define your worker configuration in a YAML file:
 
 ```yaml
 # config/busybee.yml
-runner_mode: hybrid
+worker_mode: hybrid
 job_timeout: 120000
 backoff: 10000
 
@@ -716,18 +716,18 @@ bundle exec busybee --config config/busybee.yml
 
 #### Per-Worker Overrides
 
-Different workers often have different performance characteristics, so YAML supports per-worker overrides for any runner-scoped setting:
+Different workers often have different performance characteristics, so YAML supports per-worker overrides for any per-worker setting:
 
 ```yaml
-runner_mode: hybrid
+worker_mode: hybrid
 workers:
   - ProcessOrderWorker:
-      runner_mode: polling
+      worker_mode: polling
       max_jobs: 50
       request_timeout: 10000
   - ShipOrderWorker:
-      runner_mode: streaming
-      queue_throttle: 5
+      worker_mode: streaming
+      buffer_throttle: 5
   - NotifyCustomerWorker  # uses top-level defaults
 ```
 
@@ -737,14 +737,14 @@ workers:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `runner_mode` | String | `polling`, `streaming`, or `hybrid` |
+| `worker_mode` | String | `polling`, `streaming`, or `hybrid` |
 | `max_jobs` | Integer | Max jobs per polling request |
 | `request_timeout` | Integer | Long-poll timeout (ms) |
 | `job_timeout` | Integer | Job lock timeout (ms) |
 | `backoff` | Integer | Retry backoff (ms) |
 | `backpressure_delay` | Integer | Delay after backpressure error (ms) |
-| `queue_enabled` | Boolean | Enable job buffering in streaming mode |
-| `queue_throttle` | Integer/Boolean | Job buffer delay (ms). `false` to disable |
+| `buffer` | Boolean | Enable job buffering in streaming mode |
+| `buffer_throttle` | Integer/Boolean | Job buffer delay (ms). `false` to disable |
 | `workers` | Array | Worker class names, with optional per-worker overrides |
 
 **Process-wide settings** (`log_format`, `worker_name`, `cluster_address`) are CLI-only and cannot be set in YAML. Use the corresponding CLI flags alongside `--config`:
@@ -769,9 +769,9 @@ Worker DSL Declaration                 v            `polling max_jobs: 32` (in t
 Gem Configuration & Defaults   (lowest priority)    `Busybee.default_max_jobs` (25 by default, but can be set in config)
 ```
 
-The first non-nil value wins. This means `0` and `false` are valid explicit values -- for example, `queue_throttle: false` explicitly disables throttling even if a lower level sets it.
+The first non-nil value wins. This means `0` and `false` are valid explicit values -- for example, `buffer_throttle: false` explicitly disables throttling even if a lower level sets it.
 
-The [runner-scoped settings](#yaml-reference) this applies to are: `runner_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `backoff`, `backpressure_delay`, `queue_enabled`, and `queue_throttle`.
+The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
 **Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process. Also, they often take env vars as their inputs, so they are less useful in YAML.
 

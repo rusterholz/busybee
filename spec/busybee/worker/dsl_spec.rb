@@ -245,13 +245,13 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
-  describe ".runner_mode" do
-    it "sets runner mode on configuration" do
+  describe ".worker_mode" do
+    it "sets worker mode on configuration" do
       worker = stub_const("PollingWorker", Class.new(Busybee::Worker) do
-        runner_mode :polling
+        worker_mode :polling
       end)
 
-      expect(worker.configuration.runner_mode).to eq(:polling)
+      expect(worker.configuration.worker_mode).to eq(:polling)
     end
   end
 
@@ -274,22 +274,22 @@ RSpec.describe Busybee::Worker::DSL do
       expect(worker.configuration.streaming_config).to eq({})
     end
 
-    it "accepts queue: true" do
+    it "accepts buffer: true" do
       worker = stub_const("StreamQueueWorker", Class.new(Busybee::Worker) do
-        streaming queue: true
+        streaming buffer: true
       end)
 
-      expect(worker.configuration.streaming_config).to eq(queue: true)
-      expect(worker.configuration.queue_enabled?).to be(true)
+      expect(worker.configuration.streaming_config).to eq(buffer: true)
+      expect(worker.configuration.buffer?).to be(true)
     end
 
-    it "accepts queue: false" do
+    it "accepts buffer: false" do
       worker = stub_const("StreamInlineWorker", Class.new(Busybee::Worker) do
-        streaming queue: false
+        streaming buffer: false
       end)
 
-      expect(worker.configuration.streaming_config).to eq(queue: false)
-      expect(worker.configuration.queue_enabled?).to be(false)
+      expect(worker.configuration.streaming_config).to eq(buffer: false)
+      expect(worker.configuration.buffer?).to be(false)
     end
 
     it "raises on unknown kwargs" do
@@ -300,54 +300,54 @@ RSpec.describe Busybee::Worker::DSL do
       end.to raise_error(Busybee::InvalidWorkerDefinition, /Unknown streaming config.*:buffer_size/)
     end
 
-    it "accepts queue_throttle: with a numeric value" do
+    it "accepts buffer_throttle: with a numeric value" do
       worker = stub_const("PumpDelayWorker", Class.new(Busybee::Worker) do
-        streaming queue_throttle: 0.5
+        streaming buffer_throttle: 0.5
       end)
 
-      expect(worker.configuration.streaming_config).to eq(queue_throttle: 0.5)
-      expect(worker.configuration.queue_throttle).to eq(0.5)
+      expect(worker.configuration.streaming_config).to eq(buffer_throttle: 0.5)
+      expect(worker.configuration.buffer_throttle).to eq(0.5)
     end
 
-    it "accepts queue_throttle: 0 for minimal throttle" do
+    it "accepts buffer_throttle: 0 for minimal throttle" do
       worker = stub_const("MinThrottleWorker", Class.new(Busybee::Worker) do
-        streaming queue_throttle: 0
+        streaming buffer_throttle: 0
       end)
 
-      expect(worker.configuration.queue_throttle).to eq(0)
+      expect(worker.configuration.buffer_throttle).to eq(0)
     end
 
-    it "accepts queue_throttle: true as sugar for 0 (minimal throttle)" do
+    it "accepts buffer_throttle: true as sugar for 0 (minimal throttle)" do
       worker = stub_const("TrueThrottleWorker", Class.new(Busybee::Worker) do
-        streaming queue_throttle: true
+        streaming buffer_throttle: true
       end)
 
-      expect(worker.configuration.queue_throttle).to eq(0)
+      expect(worker.configuration.buffer_throttle).to eq(0)
     end
 
-    it "accepts queue_throttle: false to explicitly disable" do
+    it "accepts buffer_throttle: false to explicitly disable" do
       worker = stub_const("NoThrottleWorker", Class.new(Busybee::Worker) do
-        streaming queue_throttle: false
+        streaming buffer_throttle: false
       end)
 
-      expect(worker.configuration.queue_throttle).to be(false)
+      expect(worker.configuration.buffer_throttle).to be(false)
     end
 
-    it "accepts queue_throttle: combined with queue:" do
+    it "accepts buffer_throttle: combined with buffer:" do
       worker = stub_const("BothOptsWorker", Class.new(Busybee::Worker) do
-        streaming queue: true, queue_throttle: 2
+        streaming buffer: true, buffer_throttle: 2
       end)
 
-      expect(worker.configuration.queue_enabled?).to be(true)
-      expect(worker.configuration.queue_throttle).to eq(2)
+      expect(worker.configuration.buffer?).to be(true)
+      expect(worker.configuration.buffer_throttle).to eq(2)
     end
 
-    it "raises on non-Numeric queue_throttle at load time" do
+    it "raises on non-Numeric buffer_throttle at load time" do
       expect do
         stub_const("BadPumpDelayWorker", Class.new(Busybee::Worker) do
-          streaming queue_throttle: "5"
+          streaming buffer_throttle: "5"
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /queue_throttle:.*non-negative Numeric/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /buffer_throttle:.*non-negative Numeric/)
     end
   end
 
@@ -503,12 +503,12 @@ RSpec.describe Busybee::Worker::DSL do
       end.to raise_error(Busybee::InvalidWorkerDefinition, /define_accessor: false.*accessor_name:.*mutually exclusive/)
     end
 
-    it "raises on invalid runner mode" do
+    it "raises on invalid worker mode" do
       expect do
         stub_const("BadModeWorker", Class.new(Busybee::Worker) do
-          runner_mode :batch
+          worker_mode :batch
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /Invalid runner mode/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /Invalid worker mode/)
     end
 
     it "raises on unknown polling kwargs" do

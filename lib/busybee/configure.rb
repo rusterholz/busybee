@@ -52,14 +52,14 @@ module Busybee
       @default_output_required = value
     end
 
-    def default_queue_enabled=(value)
+    def default_buffer=(value)
       if value.nil?
-        @default_queue_enabled = nil
+        @default_buffer = nil
         return
       end
 
-      validate_boolean!(:default_queue_enabled, value)
-      @default_queue_enabled = value
+      validate_boolean!(:default_buffer, value)
+      @default_buffer = value
     end
 
     def grpc_retry_enabled=(value)
@@ -94,26 +94,26 @@ module Busybee
       @grpc_retry_delay_ms = value.nil? ? nil : validate_duration!(:grpc_retry_delay_ms, value)
     end
 
-    def runner_backpressure_delay=(value)
-      @runner_backpressure_delay = value.nil? ? nil : validate_duration!(:runner_backpressure_delay, value)
+    def default_backpressure_delay=(value)
+      @default_backpressure_delay = value.nil? ? nil : validate_duration!(:default_backpressure_delay, value)
     end
 
-    # --- Queue throttle (three-state: false/nil = off, true → 0, Numeric = ms) ---
+    # --- Buffer throttle (three-state: false/nil = off, true → 0, Numeric = ms) ---
 
-    def default_queue_throttle=(value)
-      @default_queue_throttle = value.nil? ? nil : validate_queue_throttle!(:default_queue_throttle, value)
+    def default_buffer_throttle=(value)
+      @default_buffer_throttle = value.nil? ? nil : validate_buffer_throttle!(:default_buffer_throttle, value)
     end
 
-    # --- Runner mode ---
+    # --- Worker mode ---
 
-    def default_runner_mode=(value)
+    def default_worker_mode=(value)
       if value.nil?
-        @default_runner_mode = nil
+        @default_worker_mode = nil
         return
       end
 
-      validate_runner_mode!(:default_runner_mode, value)
-      @default_runner_mode = value.to_sym
+      validate_worker_mode!(:default_worker_mode, value)
+      @default_worker_mode = value.to_sym
     end
 
     # --- Error class list ---
@@ -243,9 +243,9 @@ module Busybee
       raise ArgumentError, "#{name} accepts String or Symbol, got #{value.inspect} (#{value.class})"
     end
 
-    # Validates and coerces a queue throttle value.
+    # Validates and coerces a buffer throttle value.
     # Returns the (possibly coerced) value to assign.
-    def validate_queue_throttle!(name, value)
+    def validate_buffer_throttle!(name, value)
       return 0 if value == true
       return false if value == false
 
@@ -265,12 +265,12 @@ module Busybee
       raise ArgumentError, "#{name} accepts Numeric, boolean, or numeric String, got #{value.inspect} (#{value.class})"
     end
 
-    def validate_runner_mode!(name, value)
+    def validate_worker_mode!(name, value)
       sym = value.to_sym
-      return if VALID_RUNNER_MODES.include?(sym)
+      return if VALID_WORKER_MODES.include?(sym)
 
       raise ArgumentError,
-            "#{name} must be one of #{VALID_RUNNER_MODES.map(&:inspect).join(', ')}, got #{value.inspect}"
+            "#{name} must be one of #{VALID_WORKER_MODES.map(&:inspect).join(', ')}, got #{value.inspect}"
     rescue NoMethodError
       raise ArgumentError,
             "#{name} accepts Symbol or String, got #{value.inspect} (#{value.class})"

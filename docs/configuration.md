@@ -2,7 +2,7 @@
 
 Busybee provides a flexible configuration system that adapts to different environments — from local development with Docker to production deployments with Camunda Cloud. Configuration can be set through Ruby code, environment variables, or Rails configuration, with sensible defaults that work out of the box.
 
-This document covers gem-level settings: connection, credentials, logging, and operation defaults. For worker runtime configuration (CLI flags, YAML files, runner modes, and the config precedence chain), see [Workers: Running Workers](workers.md#running-workers).
+This document covers gem-level settings: connection, credentials, logging, and operation defaults. For worker runtime configuration (CLI flags, YAML files, worker modes, and the config precedence chain), see [Workers: Running Workers](workers.md#running-workers).
 
 ## Quick Start
 
@@ -98,7 +98,7 @@ Busybee.cluster_address = "zeebe.example.com:443"
 
 #### `credential_type`
 
-Explicitly selects the credential type. When set, `Credentials.build` uses this type rather than auto-detecting from parameters.
+Explicitly selects the credential type. When set, Busybee uses this type to build Credentials rather than auto-detecting from the provided parameters.
 
 | | |
 |--|--|
@@ -351,11 +351,11 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_fail_job_backoff` | `Busybee.default_fail_job_backoff` |
 | `config.x.busybee.default_job_request_timeout` | `Busybee.default_job_request_timeout` |
 | `config.x.busybee.default_job_lock_timeout` | `Busybee.default_job_lock_timeout` |
-| `config.x.busybee.default_runner_mode` | `Busybee.default_runner_mode` |
+| `config.x.busybee.default_worker_mode` | `Busybee.default_worker_mode` |
 | `config.x.busybee.default_max_jobs` | `Busybee.default_max_jobs` |
-| `config.x.busybee.default_queue_enabled` | `Busybee.default_queue_enabled` |
-| `config.x.busybee.default_queue_throttle` | `Busybee.default_queue_throttle` |
-| `config.x.busybee.runner_backpressure_delay` | `Busybee.runner_backpressure_delay` |
+| `config.x.busybee.default_buffer` | `Busybee.default_buffer` |
+| `config.x.busybee.default_buffer_throttle` | `Busybee.default_buffer_throttle` |
+| `config.x.busybee.default_backpressure_delay` | `Busybee.default_backpressure_delay` |
 | `config.x.busybee.default_input_required` | `Busybee.default_input_required` |
 | `config.x.busybee.default_output_required` | `Busybee.default_output_required` |
 | `config.x.busybee.shutdown_on_errors` | `Busybee.shutdown_on_errors` |
@@ -436,11 +436,11 @@ This is primarily useful in tests to ensure clean state between examples.
 
 ## Worker Defaults
 
-These settings control the default behavior of [workers](workers.md) and their runners. Each can be overridden per-worker via the [Worker DSL](workers.md#dsl-quick-reference) or at deploy time via [CLI/YAML configuration](workers.md#configuration-precedence).
+These settings control the default behavior of [workers](workers.md) and how they get jobs from the workflow engine. Each can be overridden per-worker via the [Worker DSL](workers.md#dsl-quick-reference) or at deploy time via [CLI/YAML configuration](workers.md#configuration-precedence).
 
-#### `default_runner_mode`
+#### `default_worker_mode`
 
-Default runner mode for workers.
+Default worker mode for workers.
 
 | | |
 |--|--|
@@ -449,10 +449,10 @@ Default runner mode for workers.
 | **Valid values** | `:polling`, `:streaming`, `:hybrid` |
 
 ```ruby
-Busybee.default_runner_mode = :polling
+Busybee.default_worker_mode = :polling
 ```
 
-See [Workers: Runner Modes](workers.md#runner-modes) for details on each mode.
+See [Workers: Worker Modes](workers.md#worker-modes) for details on each mode.
 
 #### `default_max_jobs`
 
@@ -467,9 +467,9 @@ Default maximum number of jobs to fetch per polling request.
 Busybee.default_max_jobs = 50
 ```
 
-#### `default_queue_enabled`
+#### `default_buffer`
 
-Whether the streaming runner uses a pump thread and queue by default.
+Whether streaming mode buffers jobs in memory by default.
 
 | | |
 |--|--|
@@ -477,12 +477,12 @@ Whether the streaming runner uses a pump thread and queue by default.
 | **Default** | `true` |
 
 ```ruby
-Busybee.default_queue_enabled = false
+Busybee.default_buffer = false
 ```
 
-#### `default_queue_throttle`
+#### `default_buffer_throttle`
 
-Default pump thread delay for the streaming runner's queue.
+Default throttle delay for the job buffer in streaming or hybrid modes.
 
 | | |
 |--|--|
@@ -492,12 +492,12 @@ Default pump thread delay for the streaming runner's queue.
 `false` disables throttling. `true` coerces to `0` (minimal throttle). A positive number sets the delay in milliseconds (sub-millisecond Floats accepted).
 
 ```ruby
-Busybee.default_queue_throttle = 5  # 5ms pump delay
+Busybee.default_buffer_throttle = 5  # 5ms throttle delay
 ```
 
-See [Workers: Queue Throttle](workers.md#queue-throttle) for guidance on choosing a value.
+See [Workers: Buffer Throttle](workers.md#buffer-throttle) for guidance on choosing a value.
 
-#### `runner_backpressure_delay`
+#### `default_backpressure_delay`
 
 How long to wait after a backpressure error (`GRPC::ResourceExhausted`) before retrying.
 
@@ -507,7 +507,7 @@ How long to wait after a backpressure error (`GRPC::ResourceExhausted`) before r
 | **Default** | `2_000` (2 seconds) |
 
 ```ruby
-Busybee.runner_backpressure_delay = 10_000
+Busybee.default_backpressure_delay = 10_000
 ```
 
 #### `default_input_required`

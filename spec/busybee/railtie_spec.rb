@@ -9,9 +9,9 @@ def busybee_config_ivars
   %i[
     @cluster_address @credential_type @credentials @default_fail_job_backoff
     @default_job_lock_timeout @default_job_request_timeout @default_max_jobs
-    @default_message_ttl @default_queue_enabled @default_queue_throttle
+    @default_message_ttl @default_buffer @default_buffer_throttle
     @grpc_retry_delay_ms @grpc_retry_enabled @grpc_retry_errors
-    @log_format @logger @runner_backpressure_delay
+    @log_format @logger @default_backpressure_delay
     @worker_name
   ]
 end
@@ -237,16 +237,16 @@ RSpec.describe "Busybee::Railtie", :rails do
       end
     end
 
-    describe "runner_backpressure_delay" do
-      it "sets runner_backpressure_delay when configured" do
-        configure_and_initialize(runner_backpressure_delay: 15_000)
-        expect(Busybee.instance_variable_get(:@runner_backpressure_delay)).to eq(15_000)
+    describe "default_backpressure_delay" do
+      it "sets default_backpressure_delay when configured" do
+        configure_and_initialize(default_backpressure_delay: 15_000)
+        expect(Busybee.instance_variable_get(:@default_backpressure_delay)).to eq(15_000)
       end
 
       it "leaves nil when not configured (uses default from Defaults)" do
         configure_and_initialize
-        expect(Busybee.instance_variable_get(:@runner_backpressure_delay)).to be_nil
-        expect(Busybee.runner_backpressure_delay).to eq(Busybee::Defaults::DEFAULT_RUNNER_BACKPRESSURE_DELAY_MS)
+        expect(Busybee.instance_variable_get(:@default_backpressure_delay)).to be_nil
+        expect(Busybee.default_backpressure_delay).to eq(Busybee::Defaults::DEFAULT_BACKPRESSURE_DELAY_MS)
       end
     end
 
@@ -263,29 +263,29 @@ RSpec.describe "Busybee::Railtie", :rails do
       end
     end
 
-    describe "default_queue_enabled" do
-      it "sets default_queue_enabled when configured" do
-        configure_and_initialize(default_queue_enabled: false)
-        expect(Busybee.instance_variable_get(:@default_queue_enabled)).to be(false)
+    describe "default_buffer" do
+      it "sets default_buffer when configured" do
+        configure_and_initialize(default_buffer: false)
+        expect(Busybee.instance_variable_get(:@default_buffer)).to be(false)
       end
 
       it "leaves nil when not configured (uses default from Defaults)" do
         configure_and_initialize
-        expect(Busybee.instance_variable_get(:@default_queue_enabled)).to be_nil
-        expect(Busybee.default_queue_enabled).to be(true)
+        expect(Busybee.instance_variable_get(:@default_buffer)).to be_nil
+        expect(Busybee.default_buffer).to be(true)
       end
     end
 
-    describe "default_queue_throttle" do
-      it "sets default_queue_throttle when configured" do
-        configure_and_initialize(default_queue_throttle: 0.5)
-        expect(Busybee.instance_variable_get(:@default_queue_throttle)).to eq(0.5)
+    describe "default_buffer_throttle" do
+      it "sets default_buffer_throttle when configured" do
+        configure_and_initialize(default_buffer_throttle: 0.5)
+        expect(Busybee.instance_variable_get(:@default_buffer_throttle)).to eq(0.5)
       end
 
       it "leaves nil when not configured (uses default from Defaults)" do
         configure_and_initialize
-        expect(Busybee.instance_variable_get(:@default_queue_throttle)).to be_nil
-        expect(Busybee.default_queue_throttle).to be(false)
+        expect(Busybee.instance_variable_get(:@default_buffer_throttle)).to be_nil
+        expect(Busybee.default_buffer_throttle).to be(false)
       end
     end
 

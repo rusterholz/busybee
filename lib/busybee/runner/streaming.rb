@@ -8,17 +8,17 @@ module Busybee
     # pre-existing jobs require polling to retrieve.
     #
     # Two modes:
-    # - queue: true (default) — A pump thread reads from the stream into a Queue;
+    # - buffer: true (default) — A pump thread reads from the stream into a Queue;
     #   the main thread pops and processes sequentially. Better shutdown responsiveness
     #   and enables pump delay configuration.
-    # - queue: false — stream.each calls perform_job inline on the main thread.
-    #   Simpler model for workers that don't need queue features.
+    # - buffer: false — stream.each calls perform_job inline on the main thread.
+    #   Simpler model for workers that don't need buffer features.
     class Streaming < Runner
       def initialize(worker_class, runtime_config: nil, client: nil)
         super
-        return unless queue_enabled?
+        return unless buffer?
 
-        @job_queue = Queue.new
+        @job_buffer = Queue.new
         @shutdown_error = Concurrent::AtomicReference.new(nil)
       end
 
@@ -30,17 +30,17 @@ module Busybee
 
         @stream = @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
 
-        if queue_enabled?
-          run_with_queue
+        if buffer?
+          run_with_buffer
         else
           run_inline
         end
       ensure
         # [hook: runner.stopping]
         @stream&.close
-        if queue_enabled?
+        if buffer?
           @pump_thread&.join(5)
-          handle_remaining_jobs_in_queue
+          handle_remaining_jobs_in_buffer
         end
         @running.make_false
       end
@@ -48,23 +48,23 @@ module Busybee
       def stop!
         super
         @stream&.close # unblocks stream.each via GRPC::Cancelled
-        @job_queue&.push(:stop) if queue_enabled?
+        @job_buffer&.push(:stop) if buffer?
       end
 
       def kill!
         super
         @pump_thread&.kill
-        return unless queue_enabled?
+        return unless buffer?
 
-        @job_queue.clear
-        @job_queue.push(:stop)
+        @job_buffer.clear
+        @job_buffer.push(:stop)
       end
 
       private
 
-      def run_with_queue
-        @pump_thread = Thread.new { pump_stream_into_queue }
-        process_queued_jobs(blocking: true)
+      def run_with_buffer
+        @pump_thread = Thread.new { pump_stream_into_buffer }
+        process_buffered_jobs(blocking: true)
 
         err = @shutdown_error.get
         raise err if err
@@ -90,13 +90,13 @@ module Busybee
         raise shutdown_error if shutdown_error
       end
 
-      def pump_stream_into_queue
-        delay = @runtime_config.queue_throttle
+      def pump_stream_into_buffer
+        delay = @runtime_config.buffer_throttle
 
         @stream.each do |job|
           break if stopping?
 
-          @job_queue.push(job)
+          @job_buffer.push(job)
           sleep(delay.to_f / 1000) if delay
         end
       rescue StandardError => e
@@ -107,19 +107,19 @@ module Busybee
       ensure
         # Stream ended — either naturally (external close, server-side close),
         # via error (handled above), or because stop! was already called.
-        # In all cases, stop! to unblock the main thread's queue pop.
+        # In all cases, stop! to unblock the main thread's buffer pop.
         # Idempotent when stop! was already called.
         stop!
       end
 
-      # Process jobs from the queue.
-      # blocking: false — drains all currently-queued jobs, returns if/when empty.
+      # Process jobs from the buffer.
+      # blocking: false — drains all currently-buffered jobs, returns if/when empty.
       # blocking: true  — blocks on pop until :stop sentinel or stopping?.
-      def process_queued_jobs(blocking:)
+      def process_buffered_jobs(blocking:)
         loop do
           break if stopping?
 
-          job = @job_queue.pop(!blocking)
+          job = @job_buffer.pop(!blocking)
           break if job == :stop
 
           if stopping?
@@ -128,27 +128,27 @@ module Busybee
             @worker_class.perform_job(job)
           end
         rescue ThreadError
-          break # queue empty (non-blocking only)
+          break # buffer empty (non-blocking only)
         rescue Busybee::Worker::Shutdown => e
           @shutdown_error.update { |prev| prev || e }
           stop!
         end
       end
 
-      # Drain remaining queue during shutdown, failing all jobs.
-      def handle_remaining_jobs_in_queue
+      # Drain remaining buffer during shutdown, failing all jobs.
+      def handle_remaining_jobs_in_buffer
         loop do
-          job = @job_queue.pop(true) # non-blocking
+          job = @job_buffer.pop(true) # non-blocking
           next if job == :stop
 
           handle_shutdown_job(job)
         rescue ThreadError
-          break # queue empty
+          break # buffer empty
         end
       end
 
-      def queue_enabled?
-        @runtime_config.queue_enabled
+      def buffer?
+        @runtime_config.buffer
       end
 
       def job_type
