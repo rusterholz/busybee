@@ -226,7 +226,7 @@ RSpec.describe "CLI", :integration do
 
       # Start CLI before creating instances (streaming workers need the stream open)
       handle = spawn_cli("--config", yaml_path)
-      sleep 1
+      sleep 3 # Must exceed bundle exec + gem load time (~1.2s) to ensure workers are streaming
 
       instance_key = create_job_instance("multi-job-process")
 
@@ -276,7 +276,7 @@ RSpec.describe "CLI", :integration do
 
     it "exits cleanly on TERM signal with no pending jobs" do
       handle = spawn_cli("CLITestWorker")
-      sleep 1 # Let it enter the poll loop
+      sleep 3 # Must exceed bundle exec + gem load time (~1.2s) to ensure signal handlers are installed
 
       status = stop_cli(handle)
 
@@ -286,7 +286,7 @@ RSpec.describe "CLI", :integration do
 
     it "exits cleanly on INT signal" do
       handle = spawn_cli("CLITestWorker")
-      sleep 1
+      sleep 3
 
       status = stop_cli(handle, signal: "INT")
 

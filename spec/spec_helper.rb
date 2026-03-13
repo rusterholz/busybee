@@ -3,6 +3,13 @@
 # Load Rails before busybee if testing Rails integration
 # This ensures busybee sees Rails::Railtie as defined and loads the railtie
 if ENV["TEST_RAILS_INTEGRATION"]
+  begin
+    require "rails"
+  rescue LoadError
+    warn "WARNING: TEST_RAILS_INTEGRATION is set but Rails is not available " \
+         "(probably a base appraisal without Rails). Skipping this test run."
+    exit 0
+  end
   ENV["RAILS_ENV"] = "test"
   require File.expand_path("demo/config/environment", __dir__)
 end

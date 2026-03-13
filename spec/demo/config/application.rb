@@ -4,15 +4,7 @@ require_relative "boot"
 require "rails"
 require "action_controller/railtie"
 require "action_view/railtie"
-
-# ActiveRecord is required for the demo app's models and database, but may not
-# be available when the Railtie integration tests boot this app from the busybee
-# project root (where sqlite3 isn't in the appraisal gemfiles).
-begin
-  require "active_record/railtie"
-rescue LoadError
-  # ActiveRecord not available — running in Railtie-test-only mode
-end
+require "active_record/railtie"
 
 # Require gems (including busybee) so Railties are loaded before Rails.application.initialize!
 Bundler.require(*Rails.groups)
