@@ -37,6 +37,7 @@ RAILS_COMPATIBLE_WITH_CR_1_0.each do |rails_name, rails_version|
     appraise "#{rails_name}-#{cr_name}" do
       gem "rails", rails_version
       gem "concurrent-ruby", cr_version
+      gem "sqlite3", "~> 1.4" # demo app boot (TEST_RAILS_INTEGRATION); 7.0 caps at < 2.0
     end
   end
 end
@@ -46,5 +47,6 @@ RAILS_REQUIRING_CR_1_3.each do |rails_name, rails_version|
   appraise "#{rails_name}-concurrent-1.3" do
     gem "rails", rails_version
     gem "concurrent-ruby", "~> 1.3.6"
+    gem "sqlite3", ">= 2.1" # demo app boot (TEST_RAILS_INTEGRATION); 8.x requires >= 2.1
   end
 end
