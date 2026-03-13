@@ -12,13 +12,13 @@ Usage: bin/test [MODE] [RSPEC_ARGS...]
 
 Modes:
   --unit              Unit tests (base gemfile, fast iteration)
-  --appraisal         Unit tests across full appraisal matrix
+  --appraisals        Unit tests across full appraisal matrix
   --zeebe             Zeebe integration tests (requires local Docker Zeebe)
   --rails             Rails integration tests (single appraisal: $RAILS_APPRAISAL)
   --rails-appraisals  Rails integration tests across all appraisals
   --camunda-cloud     Camunda Cloud integration tests (requires credentials)
   --all               Run every mode including camunda-cloud
-  (no mode)           Standard set: appraisal + zeebe + rails-appraisals
+  (no mode)           Standard set: appraisals + zeebe + rails-appraisals
 
 Extra arguments are passed through to rspec.
 
@@ -38,33 +38,33 @@ run_unit() {
   bundle exec rspec "$@"
 }
 
-run_appraisal() {
-  echo "=== Appraisal matrix ==="
-  bundle exec appraisal rspec "$@"
+run_appraisals() {
+  echo "=== Unit tests (full appraisal matrix) ==="
+  bundle exec appraisal rspec --tag ~rails "$@"
 }
 
 run_zeebe() {
   echo "=== Zeebe integration tests ==="
-  RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration "$@"
+  RUN_INTEGRATION_TESTS=1 bundle exec rspec spec/integration/ "$@"
 }
 
 run_rails() {
   echo "=== Rails integration tests (${RAILS_APPRAISAL}) ==="
-  TEST_RAILS_INTEGRATION=1 bundle exec appraisal "$RAILS_APPRAISAL" rspec spec/integration/rails/ "$@"
+  TEST_RAILS_INTEGRATION=1 bundle exec appraisal "$RAILS_APPRAISAL" rspec spec/integration/ --tag rails "$@"
 }
 
 run_rails_appraisals() {
-  echo "=== Rails integration tests (all appraisals) ==="
-  TEST_RAILS_INTEGRATION=1 bundle exec appraisal rspec spec/integration/rails/ "$@"
+  echo "=== Rails integration tests (full appraisal matrix) ==="
+  TEST_RAILS_INTEGRATION=1 bundle exec appraisal rspec spec/integration/ --tag rails "$@"
 }
 
 run_camunda_cloud() {
   echo "=== Camunda Cloud integration tests ==="
-  RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec --tag camunda_cloud "$@"
+  RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec spec/integration/ "$@"
 }
 
 run_standard() {
-  run_appraisal "$@"
+  run_appraisals "$@"
   run_zeebe "$@"
   run_rails_appraisals "$@"
 }
@@ -78,7 +78,7 @@ mode=""
 args=()
 for arg in "$@"; do
   case "$arg" in
-    --unit|--appraisal|--zeebe|--rails|--rails-appraisals|--camunda-cloud|--all)
+    --unit|--appraisals|--zeebe|--rails|--rails-appraisals|--camunda-cloud|--all)
       if [[ -n "$mode" ]]; then
         echo "Error: multiple modes specified ($mode and $arg)" >&2
         exit 1
@@ -97,7 +97,7 @@ done
 
 case "${mode:-standard}" in
   --unit)              run_unit "${args[@]+"${args[@]}"}" ;;
-  --appraisal)         run_appraisal "${args[@]+"${args[@]}"}" ;;
+  --appraisals)        run_appraisals "${args[@]+"${args[@]}"}" ;;
   --zeebe)             run_zeebe "${args[@]+"${args[@]}"}" ;;
   --rails)             run_rails "${args[@]+"${args[@]}"}" ;;
   --rails-appraisals)  run_rails_appraisals "${args[@]+"${args[@]}"}" ;;
