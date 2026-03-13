@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.0 (2026-03-06)
+## v0.3.0 (2026-03-13)
 
 Worker Pattern Framework and CLI, with testing helpers and YAML configuration support.
 
