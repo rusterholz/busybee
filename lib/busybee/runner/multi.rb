@@ -77,7 +77,7 @@ module Busybee
       end
 
       def check_connection_pool_size(worker_classes)
-        return unless defined?(ActiveRecord)
+        return unless defined?(ActiveRecord::Base)
 
         pool_size = ActiveRecord::Base.connection_pool.size
         worker_count = worker_classes.length
