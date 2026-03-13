@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Override with env var to select a different rails appraisal for --rails mode
+RAILS_APPRAISAL="${RAILS_APPRAISAL:-rails-8.1-concurrent-1.3}"
+
+usage() {
+  cat <<USAGE
+Usage: bin/test [MODE] [RSPEC_ARGS...]
+
+Modes:
+  --unit              Unit tests (base gemfile, fast iteration)
+  --appraisal         Unit tests across full appraisal matrix
+  --zeebe             Zeebe integration tests (requires local Docker Zeebe)
+  --rails             Rails integration tests (single appraisal: $RAILS_APPRAISAL)
+  --rails-appraisals  Rails integration tests across all appraisals
+  --camunda-cloud     Camunda Cloud integration tests (requires credentials)
+  --all               Run every mode including camunda-cloud
+  (no mode)           Standard set: appraisal + zeebe + rails-appraisals
+
+Extra arguments are passed through to rspec.
+
+Environment variables:
+  RAILS_APPRAISAL   Rails appraisal for --rails mode (default: $RAILS_APPRAISAL)
+
+Examples:
+  bin/test --unit
+  bin/test --zeebe spec/integration/cli/
+  bin/test --rails --format documentation
+  RAILS_APPRAISAL=rails-7.1-concurrent-1.3 bin/test --rails
+USAGE
+}
+
+run_unit() {
+  echo "=== Unit tests ==="
+  bundle exec rspec "$@"
+}
+
+run_appraisal() {
+  echo "=== Appraisal matrix ==="
+  bundle exec appraisal rspec "$@"
+}
+
+run_zeebe() {
+  echo "=== Zeebe integration tests ==="
+  RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration "$@"
+}
+
+run_rails() {
+  echo "=== Rails integration tests (${RAILS_APPRAISAL}) ==="
+  TEST_RAILS_INTEGRATION=1 bundle exec appraisal "$RAILS_APPRAISAL" rspec spec/integration/rails/ "$@"
+}
+
+run_rails_appraisals() {
+  echo "=== Rails integration tests (all appraisals) ==="
+  TEST_RAILS_INTEGRATION=1 bundle exec appraisal rspec spec/integration/rails/ "$@"
+}
+
+run_camunda_cloud() {
+  echo "=== Camunda Cloud integration tests ==="
+  RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec --tag camunda_cloud "$@"
+}
+
+run_standard() {
+  run_appraisal "$@"
+  run_zeebe "$@"
+  run_rails_appraisals "$@"
+}
+
+run_all() {
+  run_standard "$@"
+  run_camunda_cloud "$@"
+}
+
+mode=""
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --unit|--appraisal|--zeebe|--rails|--rails-appraisals|--camunda-cloud|--all)
+      if [[ -n "$mode" ]]; then
+        echo "Error: multiple modes specified ($mode and $arg)" >&2
+        exit 1
+      fi
+      mode="$arg"
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      args+=("$arg")
+      ;;
+  esac
+done
+
+case "${mode:-standard}" in
+  --unit)              run_unit "${args[@]+"${args[@]}"}" ;;
+  --appraisal)         run_appraisal "${args[@]+"${args[@]}"}" ;;
+  --zeebe)             run_zeebe "${args[@]+"${args[@]}"}" ;;
+  --rails)             run_rails "${args[@]+"${args[@]}"}" ;;
+  --rails-appraisals)  run_rails_appraisals "${args[@]+"${args[@]}"}" ;;
+  --camunda-cloud)     run_camunda_cloud "${args[@]+"${args[@]}"}" ;;
+  --all)               run_all "${args[@]+"${args[@]}"}" ;;
+  standard)            run_standard "${args[@]+"${args[@]}"}" ;;
+esac
