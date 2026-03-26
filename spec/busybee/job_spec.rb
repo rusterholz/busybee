@@ -44,6 +44,12 @@ RSpec.describe Busybee::Job do
     end
   end
 
+  describe "#client" do
+    it "returns the client instance" do
+      expect(job.client).to be(client)
+    end
+  end
+
   describe "delegation to raw job" do
     it "delegates #key to raw job" do
       expect(job.key).to eq(123456)

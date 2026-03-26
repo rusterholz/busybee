@@ -152,7 +152,7 @@ end
 
 2. **A "Message Correlation" guide in user docs**: Cover the pattern (worker publishes → catch event receives), show the BPMN setup (message definition, subscription, correlation key), show the Ruby side (client.publish_message), and explain TTL. This is one of the most powerful BPMN patterns and busybee already supports it — it just needs a spotlight.
 
-**For the demo app:** We use `job.instance_variable_get(:@client)` to reach the private client on the job, reusing the existing gRPC connection. This works but relies on a private API — busybee should expose this publicly so workers can publish messages without ceremony.
+**For the demo app:** We use `client.publish_message(...)` inside the worker's `perform` method. The `client` method is delegated through Worker → Job → the Client instance that fetched the job, reusing the existing gRPC connection.
 
 ---
 

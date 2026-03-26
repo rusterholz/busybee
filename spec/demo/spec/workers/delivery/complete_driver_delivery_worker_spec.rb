@@ -10,17 +10,12 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
   # don't cover. When your test needs to stub or assert on the underlying client,
   # use build_test_job + execute_worker directly.
   #
-  # The worker uses job.instance_variable_get(:@client) to publish messages.
   # build_test_job creates an instance_double(Busybee::Client) — we add
   # publish_message stubbing for tests that exercise request fulfillment.
   def build_job_with_message_support(variables:)
     job = build_test_job(variables: variables)
-    allow(mock_client_for(job)).to receive(:publish_message)
+    allow(job.client).to receive(:publish_message)
     job
-  end
-
-  def mock_client_for(job)
-    job.instance_variable_get(:@client)
   end
 
   def delivery_vars(driver, shipment_id: "ship-1", distance: 5.0)
@@ -50,7 +45,7 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
     expect(driver.current_shipment_id).to eq("ship-waiting-1")
     expect(older.reload.driver_id).to eq(driver.id)
 
-    expect(mock_client_for(job)).to have_received(:publish_message).with(
+    expect(job.client).to have_received(:publish_message).with(
       "driver_available",
       correlation_key: older.id,
       vars: { driver_id: driver.id, driver_name: "Alice" },
@@ -65,7 +60,7 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
     execute_worker(described_class, job: job)
     expect(job).not_to be_failed
 
-    expect(mock_client_for(job)).not_to have_received(:publish_message)
+    expect(job.client).not_to have_received(:publish_message)
     expect(driver.reload.current_shipment_id).to be_nil
   end
 
@@ -81,7 +76,7 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
       expect(driver.reload.total_mileage).to eq(62.5)
       expect(driver.current_shipment_id).to eq("ship-waiting")
       expect(request.reload.driver_id).to eq(driver.id)
-      expect(mock_client_for(job)).to have_received(:publish_message)
+      expect(job.client).to have_received(:publish_message)
     end
 
     it "re-publishes message when driver already reassigned to a claimed request" do
@@ -95,7 +90,7 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
       expect(job).not_to be_failed
 
       expect(driver.reload.total_mileage).to eq(62.5)
-      expect(mock_client_for(job)).to have_received(:publish_message).with(
+      expect(job.client).to have_received(:publish_message).with(
         "driver_available",
         correlation_key: request.id,
         vars: { driver_id: driver.id, driver_name: "Alice" },

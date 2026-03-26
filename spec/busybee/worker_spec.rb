@@ -449,6 +449,12 @@ RSpec.describe Busybee::Worker do
   describe "delegations to job" do
     let(:instance) { performing_worker.new(job) }
 
+    describe "#client" do
+      it "delegates to job" do
+        expect(instance.client).to be(client)
+      end
+    end
+
     describe "#variables" do
       it "delegates to job" do
         expect(instance.variables).to eq(job.variables)

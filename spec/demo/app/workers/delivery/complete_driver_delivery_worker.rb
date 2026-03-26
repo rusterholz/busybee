@@ -57,9 +57,7 @@ module Delivery
     end
 
     def publish_driver_available!(request, driver)
-      # TODO: busybee v0.4 — expose client publicly so workers can publish messages
-      zeebe_client = job.instance_variable_get(:@client)
-      zeebe_client.publish_message(
+      client.publish_message(
         "driver_available",
         correlation_key: request.id,
         vars: { driver_id: driver.id, driver_name: driver.name },
