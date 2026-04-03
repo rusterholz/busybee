@@ -80,6 +80,10 @@ module Busybee
       @default_output_required.nil? ? Defaults::DEFAULT_OUTPUT_REQUIRED : @default_output_required
     end
 
+    def default_strict_outputs
+      @default_strict_outputs.nil? ? Defaults::DEFAULT_STRICT_OUTPUTS : @default_strict_outputs
+    end
+
     def default_buffer
       @default_buffer.nil? ? Defaults::DEFAULT_STREAMING_BUFFER : @default_buffer
     end

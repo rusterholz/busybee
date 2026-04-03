@@ -23,7 +23,7 @@ module Busybee
       attr_accessor :description
       attr_reader :inputs, :outputs, :worker_mode, :polling_config, :streaming_config,
                   :job_timeout, :backoff, :backpressure_delay,
-                  :complete_job_on_success, :fail_job_on_error, :shutdown_on
+                  :complete_job_on_success, :fail_job_on_error, :strict_outputs, :shutdown_on
 
       def initialize(worker_class)
         @worker_class = worker_class
@@ -39,6 +39,7 @@ module Busybee
         @backpressure_delay = nil
         @complete_job_on_success = true
         @fail_job_on_error = true
+        @strict_outputs = nil
         @shutdown_on = []
       end
 
@@ -117,6 +118,19 @@ module Busybee
         @fail_job_on_error = value
       end
 
+      def strict_outputs=(value)
+        unless [true, false].include?(value)
+          raise InvalidWorkerDefinition, "`strict_outputs` requires a boolean, got #{value.inspect}"
+        end
+
+        @strict_outputs = value
+      end
+
+      # Resolved strict_outputs: per-worker setting falls back to gem-level default.
+      def strict_outputs?
+        @strict_outputs.nil? ? Busybee.default_strict_outputs : @strict_outputs
+      end
+
       def add_shutdown_on(*exception_classes)
         exception_classes.each do |klass|
           unless klass.is_a?(Class) && klass <= Exception
@@ -187,6 +201,7 @@ module Busybee
           backpressure_delay: backpressure_delay,
           complete_job_on_success: complete_job_on_success,
           fail_job_on_error: fail_job_on_error,
+          strict_outputs: strict_outputs?,
           shutdown_on: shutdown_on
         }
       end

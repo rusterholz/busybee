@@ -52,6 +52,16 @@ module Busybee
       @default_output_required = value
     end
 
+    def default_strict_outputs=(value)
+      if value.nil?
+        @default_strict_outputs = nil
+        return
+      end
+
+      validate_boolean!(:default_strict_outputs, value)
+      @default_strict_outputs = value
+    end
+
     def default_buffer=(value)
       if value.nil?
         @default_buffer = nil

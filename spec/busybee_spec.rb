@@ -354,6 +354,34 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".default_strict_outputs" do
+    around do |example|
+      original = described_class.instance_variable_get(:@default_strict_outputs)
+      example.run
+      described_class.default_strict_outputs = original
+    end
+
+    it "defaults to true" do
+      described_class.default_strict_outputs = nil
+      expect(described_class.default_strict_outputs).to be(true)
+    end
+
+    it "can be set to false" do
+      described_class.default_strict_outputs = false
+      expect(described_class.default_strict_outputs).to be(false)
+    end
+
+    it "rejects non-boolean values" do
+      expect { described_class.default_strict_outputs = "true" }.to raise_error(ArgumentError, /default_strict_outputs/)
+    end
+
+    it "allows setting to nil explicitly" do
+      described_class.default_strict_outputs = false
+      described_class.default_strict_outputs = nil
+      expect(described_class.default_strict_outputs).to be(true)
+    end
+  end
+
   describe ".default_buffer" do
     around do |example|
       original = described_class.instance_variable_get(:@default_buffer)

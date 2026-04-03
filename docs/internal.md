@@ -147,6 +147,8 @@ Worker                      # Base class: perform_job lifecycle, Shutdown error,
 
 **Configuration** is lazily instantiated per worker class (`@_configuration ||= Configuration.new(self)`). The DSL module's class methods (e.g., `job_type`, `input`, `streaming`) delegate to Configuration, which validates and stores the values. Configuration also resolves runtime options by merging DSL-level settings with gem-level defaults (e.g., `buffer_throttle` falls back to `Busybee.default_buffer_throttle`).
 
+**Strict outputs** (`strict_outputs` DSL, `Busybee.default_strict_outputs` gem-level) rejects undeclared output keys when auto-completing. Default: `true`. Per-worker `strict_outputs false` disables the check for that worker. `Busybee.default_strict_outputs = false` disables gem-wide. The resolved value uses a three-state pattern: `nil` (DSL default) falls back to the gem-level setting via `Configuration#strict_outputs?`.
+
 ### perform_job Lifecycle
 
 `Worker.perform_job(job)` is the entry point called by Runners. Its contract:
@@ -158,10 +160,12 @@ Steps:
 1. Instantiate worker with job
 2. Validate required inputs (raises `MissingInput` listing all missing names)
 3. Call `instance.perform`
-4. **On success:** if `complete_job_on_success` and `job.ready?`, validate required outputs, call `job.complete!`. GRPC errors logged and swallowed.
+4. **On success:** if `complete_job_on_success` and `job.ready?`, validate required outputs (`MissingOutput`), validate no undeclared outputs when `strict_outputs` is enabled (`UndeclaredOutput`), then call `job.complete!`. GRPC errors logged and swallowed.
 5. **On error:** if `fail_job_on_error` and `job.ready?`, call `job.fail!`. Then check `shutdown_on` — if matched, wrap as `Shutdown` and re-raise.
 
 The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform`.
+
+**Note:** Output validation (both required and undeclared) currently only applies on the auto-complete path. Manual `complete!` calls inside `perform` bypass these checks — this is a known gap tracked for a future mission.
 
 ## Runtime Configuration
 

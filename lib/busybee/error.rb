@@ -45,6 +45,9 @@ module Busybee
   # Raised when attempting to iterate a stream that has been closed
   StreamAlreadyClosed = Class.new(Error)
 
+  # Raised when perform returns output keys not declared in the worker's output DSL
+  UndeclaredOutput = Class.new(Error)
+
   # Raised when a worker class name cannot be resolved to a constant
   WorkerNotFound = Class.new(Error)
 end

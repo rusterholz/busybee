@@ -6,6 +6,7 @@ RSpec.describe "complete_job matcher" do
   let(:happy_worker) do
     Class.new(Busybee::Worker) do
       job_type "happy-worker"
+      strict_outputs false
 
       def perform
         { status: "done", count: 42 }
