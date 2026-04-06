@@ -75,6 +75,9 @@ module Busybee
       unless busybee_conf.default_output_required.nil?
         config.default_output_required = !!busybee_conf.default_output_required
       end
+      unless busybee_conf.default_strict_outputs.nil?
+        config.default_strict_outputs = !!busybee_conf.default_strict_outputs
+      end
       config.default_buffer = !!busybee_conf.default_buffer unless busybee_conf.default_buffer.nil?
       unless busybee_conf.default_buffer_throttle.nil?
         config.default_buffer_throttle = busybee_conf.default_buffer_throttle

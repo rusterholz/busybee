@@ -27,7 +27,7 @@ module Busybee
 
     attr_reader :job
 
-    delegate :variables, :headers, :complete!, :fail!, :throw_bpmn_error!,
+    delegate :variables, :headers, :client, :complete!, :fail!, :throw_bpmn_error!,
              :update_retries, :update_timeout, to: :job
 
     def initialize(job)
@@ -88,7 +88,8 @@ module Busybee
         return unless config.complete_job_on_success && job.ready?
 
         new_vars = result.is_a?(Hash) ? result : {}
-        validate_outputs!(new_vars, config)
+        validate_required_outputs!(new_vars, config)
+        validate_undeclared_outputs!(new_vars, config)
         begin
           job.complete!(new_vars)
         rescue StandardError => e
@@ -96,12 +97,25 @@ module Busybee
         end
       end
 
-      def validate_outputs!(result, config)
+      def validate_required_outputs!(result, config)
         missing = config.outputs.select(&:required).reject { |o| result.key?(o.name) || result.key?(o.name.to_s) }
         return if missing.empty?
 
         names = missing.map { |o| ":#{o.name}" }.join(", ")
         raise Busybee::MissingOutput, "Missing required outputs for #{configuration.job_type} worker: #{names}"
+      end
+
+      def validate_undeclared_outputs!(result, config)
+        return unless config.strict_outputs?
+
+        declared = config.outputs.flat_map { |o| [o.name, o.name.to_s] }
+        undeclared = result.keys.reject { |k| declared.include?(k) }
+        return if undeclared.empty?
+
+        names = undeclared.map { |k| ":#{k}" }.join(", ")
+        raise Busybee::UndeclaredOutput,
+              "Undeclared outputs for #{configuration.job_type} worker: #{names}. " \
+              "Declare with `output :name` or set `strict_outputs false`"
       end
 
       def handle_failure(job, error, config)

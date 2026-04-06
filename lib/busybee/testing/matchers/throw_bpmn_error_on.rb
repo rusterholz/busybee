@@ -19,8 +19,7 @@ require "rspec/expectations"
 #
 RSpec::Matchers.define :throw_bpmn_error_on do |job|
   match do |worker_class|
-    client = job.instance_variable_get(:@client)
-    allow(client).to receive(:throw_bpmn_error) do |_key, code, message:|
+    allow(job.client).to receive(:throw_bpmn_error) do |_key, code, message:|
       @actual_code = code
       @actual_message = message
     end

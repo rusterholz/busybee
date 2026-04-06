@@ -122,6 +122,14 @@ module Busybee
         end
       end
 
+      def strict_outputs(value = nil)
+        if value.nil?
+          configuration.strict_outputs?
+        else
+          configuration.strict_outputs = value
+        end
+      end
+
       def shutdown_on(*exception_classes)
         if exception_classes.empty?
           configuration.shutdown_on

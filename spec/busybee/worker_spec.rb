@@ -27,6 +27,7 @@ RSpec.describe Busybee::Worker do
 
   let(:performing_worker) do
     stub_const("PerformingWorker", Class.new(described_class) do
+      strict_outputs false
       define_method(:perform) do
         { processed: true }
       end
@@ -304,6 +305,7 @@ RSpec.describe Busybee::Worker do
       it "passes when required inputs are present" do
         worker = stub_const("PresentInputWorker", Class.new(described_class) do
           variable :order_id, required: true
+          strict_outputs false
           define_method(:perform) { { ok: true } }
         end)
 
@@ -313,6 +315,7 @@ RSpec.describe Busybee::Worker do
       it "skips validation for inputs with defaults" do
         worker = stub_const("DefaultInputWorker", Class.new(described_class) do
           variable :nonexistent, default: "fallback"
+          strict_outputs false
           define_method(:perform) { { ok: true } }
         end)
 
@@ -390,6 +393,104 @@ RSpec.describe Busybee::Worker do
         expect(client).to have_received(:complete_job).with(123456, vars: {})
       end
     end
+
+    context "with strict output validation" do
+      before { allow(client).to receive(:complete_job) }
+
+      it "raises UndeclaredOutput for keys not in the output DSL" do
+        allow(client).to receive(:fail_job)
+
+        worker = stub_const("UndeclaredWorker", Class.new(described_class) do
+          output :status
+          define_method(:perform) { { status: "ok", extra: "surprise" } }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:complete_job)
+        expect(client).to have_received(:fail_job).
+          with(123456, /UndeclaredOutput.*:extra/, retries: nil, backoff: nil)
+      end
+
+      it "passes when all returned keys are declared" do
+        worker = stub_const("DeclaredWorker", Class.new(described_class) do
+          output :status
+          output :count
+          define_method(:perform) { { status: "ok", count: 5 } }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job)
+      end
+
+      it "matches string keys against symbol output names" do
+        worker = stub_const("StringKeyWorker", Class.new(described_class) do
+          output :status
+          define_method(:perform) { { "status" => "ok" } }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job)
+      end
+
+      it "allows any keys when strict_outputs is false per-worker" do
+        worker = stub_const("LenientWorker", Class.new(described_class) do
+          strict_outputs false
+          output :status
+          define_method(:perform) { { status: "ok", extra: "allowed" } }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job).with(123456, vars: { status: "ok", extra: "allowed" })
+      end
+
+      it "allows any keys when strict_outputs is false gem-wide" do
+        original = Busybee.instance_variable_get(:@default_strict_outputs)
+        Busybee.default_strict_outputs = false
+
+        worker = stub_const("GemLenientWorker", Class.new(described_class) do
+          output :status
+          define_method(:perform) { { status: "ok", bonus: true } }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job)
+      ensure
+        Busybee.default_strict_outputs = original
+      end
+
+      it "skips validation when complete_job_on_success is false (manual completion)" do
+        worker = stub_const("ManualCompleteWorker", Class.new(described_class) do
+          complete_job_on_success false
+          output :status
+          define_method(:perform) { { status: "ok", extra: "ignored" } }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:complete_job)
+      end
+
+      it "passes when worker has no declared outputs and returns empty hash" do
+        worker = stub_const("NoOutputWorker", Class.new(described_class) do
+          define_method(:perform) { {} }
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job)
+      end
+
+      it "raises when worker has no declared outputs but returns keys" do
+        allow(client).to receive(:fail_job)
+
+        worker = stub_const("SurpriseOutputWorker", Class.new(described_class) do
+          define_method(:perform) { { unexpected: true } }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:complete_job)
+        expect(client).to have_received(:fail_job).
+          with(123456, /UndeclaredOutput.*:unexpected/, retries: nil, backoff: nil)
+      end
+    end
   end
 
   describe Busybee::Worker::Shutdown do
@@ -448,6 +549,12 @@ RSpec.describe Busybee::Worker do
 
   describe "delegations to job" do
     let(:instance) { performing_worker.new(job) }
+
+    describe "#client" do
+      it "delegates to job" do
+        expect(instance.client).to be(client)
+      end
+    end
 
     describe "#variables" do
       it "delegates to job" do

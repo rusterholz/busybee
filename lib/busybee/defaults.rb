@@ -16,5 +16,6 @@ module Busybee
     DEFAULT_BACKPRESSURE_DELAY_MS = 2_000
     DEFAULT_WORKER_MODE = :hybrid
     DEFAULT_STREAMING_BUFFER = true
+    DEFAULT_STRICT_OUTPUTS = true
   end
 end

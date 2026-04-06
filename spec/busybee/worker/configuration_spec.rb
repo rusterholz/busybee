@@ -523,6 +523,7 @@ RSpec.describe Busybee::Worker::Configuration do
       result = config.to_h
       expect(result[:complete_job_on_success]).to be(true)
       expect(result[:fail_job_on_error]).to be(true)
+      expect(result[:strict_outputs]).to be(true)
       expect(result[:shutdown_on]).to eq([])
     end
 
@@ -582,6 +583,34 @@ RSpec.describe Busybee::Worker::Configuration do
     it "raises on non-boolean" do
       expect { config.fail_job_on_error = "true" }.to raise_error(
         Busybee::InvalidWorkerDefinition, /fail_job_on_error.*boolean/
+      )
+    end
+  end
+
+  describe "#strict_outputs" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "defaults to nil (falls back to gem-level)" do
+      expect(config.strict_outputs).to be_nil
+    end
+
+    it "resolves to gem default via strict_outputs?" do
+      expect(config.strict_outputs?).to be(true)
+    end
+
+    it "accepts true" do
+      config.strict_outputs = true
+      expect(config.strict_outputs?).to be(true)
+    end
+
+    it "accepts false and overrides gem-level default" do
+      config.strict_outputs = false
+      expect(config.strict_outputs?).to be(false)
+    end
+
+    it "raises on non-boolean" do
+      expect { config.strict_outputs = "true" }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /strict_outputs.*boolean/
       )
     end
   end

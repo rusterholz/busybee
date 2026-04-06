@@ -32,7 +32,7 @@ lib/busybee/
 │   ├── error.rb             # GRPC::Error wrapper
 │   ├── gateway_pb.rb        # Message definitions (generated)
 │   └── gateway_services_pb.rb # Service stubs (generated)
-├── job.rb                   # Job wrapper for activated jobs
+├── job.rb                   # Job wrapper for activated jobs (exposes client for direct API access)
 ├── job_stream.rb            # JobStream for streaming job activation
 ├── logging.rb               # Logging module (text/JSON, thread-safe)
 ├── railtie.rb               # Rails integration
@@ -128,6 +128,12 @@ The Railtie passes Rails config values through these setters. It pre-coerces boo
 
 `Busybee::Worker` is the base class for user-defined job workers. A Worker subclass declares its metadata via a class-level DSL and implements `perform` to handle jobs.
 
+### Job and Client Access
+
+Worker delegates `variables`, `headers`, `client`, `complete!`, `fail!`, `throw_bpmn_error!`, `update_retries`, and `update_timeout` to `job`. The `job` reader is also public.
+
+`Job#client` exposes the `Busybee::Client` instance that fetched the job. Workers can use `client` inside `perform` for direct API access — e.g., `client.publish_message(...)` for message correlation. The client reuses the existing gRPC connection, so there's no additional connection overhead.
+
 ### Structure
 
 ```
@@ -141,6 +147,8 @@ Worker                      # Base class: perform_job lifecycle, Shutdown error,
 
 **Configuration** is lazily instantiated per worker class (`@_configuration ||= Configuration.new(self)`). The DSL module's class methods (e.g., `job_type`, `input`, `streaming`) delegate to Configuration, which validates and stores the values. Configuration also resolves runtime options by merging DSL-level settings with gem-level defaults (e.g., `buffer_throttle` falls back to `Busybee.default_buffer_throttle`).
 
+**Strict outputs** (`strict_outputs` DSL, `Busybee.default_strict_outputs` gem-level) rejects undeclared output keys when auto-completing. Default: `true`. Per-worker `strict_outputs false` disables the check for that worker. `Busybee.default_strict_outputs = false` disables gem-wide. The resolved value uses a three-state pattern: `nil` (DSL default) falls back to the gem-level setting via `Configuration#strict_outputs?`.
+
 ### perform_job Lifecycle
 
 `Worker.perform_job(job)` is the entry point called by Runners. Its contract:
@@ -152,10 +160,12 @@ Steps:
 1. Instantiate worker with job
 2. Validate required inputs (raises `MissingInput` listing all missing names)
 3. Call `instance.perform`
-4. **On success:** if `complete_job_on_success` and `job.ready?`, validate required outputs, call `job.complete!`. GRPC errors logged and swallowed.
+4. **On success:** if `complete_job_on_success` and `job.ready?`, validate required outputs (`MissingOutput`), validate no undeclared outputs when `strict_outputs` is enabled (`UndeclaredOutput`), then call `job.complete!`. GRPC errors logged and swallowed.
 5. **On error:** if `fail_job_on_error` and `job.ready?`, call `job.fail!`. Then check `shutdown_on` — if matched, wrap as `Shutdown` and re-raise.
 
 The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform`.
+
+**Note:** Output validation (both required and undeclared) currently only applies on the auto-complete path. Manual `complete!` calls inside `perform` bypass these checks — this is a known gap tracked for a future mission.
 
 ## Runtime Configuration
 
@@ -423,11 +433,11 @@ All Client operation modules, Job, and Testing helpers route through this module
 The matchers (`fail_job`, `complete_job`, `throw_bpmn_error_on`) cover the common case: assert job status and optionally verify error/vars/code. Use them when that's all you need.
 
 Use `build_test_job` + `execute_worker` directly when you need to:
-- Stub additional client methods (e.g., `publish_message`) and verify them with `have_received`
+- Stub additional client methods (e.g., `publish_message`) via `job.client` and verify them with `have_received`
 - Inspect side effects between execution and assertion
 - Test retry/idempotency scenarios that call `perform_job` directly
 
-See `spec/demo/spec/workers/delivery/complete_driver_delivery_worker_spec.rb` for an example of the "long" form with client interaction testing.
+See `spec/demo/spec/workers/delivery/complete_driver_delivery_worker_spec.rb` for an example of the "long" form with client interaction testing (stubbing `job.client` for `publish_message` verification).
 
 ### Matchers
 

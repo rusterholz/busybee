@@ -618,6 +618,29 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
+  describe ".strict_outputs" do
+    it "defaults to gem-level setting (true)" do
+      worker = stub_const("DefaultStrictWorker", Class.new(Busybee::Worker))
+      expect(worker.strict_outputs).to be(true)
+    end
+
+    it "can be set to false" do
+      worker = stub_const("LenientWorker", Class.new(Busybee::Worker) do
+        strict_outputs false
+      end)
+
+      expect(worker.configuration.strict_outputs?).to be(false)
+    end
+
+    it "raises on non-boolean" do
+      expect do
+        stub_const("BadStrictWorker", Class.new(Busybee::Worker) do
+          strict_outputs :yes
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /strict_outputs.*boolean/)
+    end
+  end
+
   describe ".shutdown_on" do
     it "registers an exception class" do
       worker = stub_const("ShutdownWorker", Class.new(Busybee::Worker) do

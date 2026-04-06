@@ -7,6 +7,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
   let(:worker_class) do
     Class.new(Busybee::Worker) do
       job_type "test-worker"
+      strict_outputs false
 
       def perform
         { status: "done" }
@@ -193,6 +194,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
         Class.new(Busybee::Worker) do
           job_type "validated-worker"
           variable :order_id, required: true
+          strict_outputs false
 
           def perform
             { order_id: order_id }

@@ -19,7 +19,7 @@ module Busybee
   #   job.throw_bpmn_error!(:order_not_found, "Order #{order_id} not found")
   #
   class Job
-    attr_reader :status
+    attr_reader :client, :status
 
     # Create a new Job wrapper.
     #
