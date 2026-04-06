@@ -228,15 +228,15 @@ end
 
 ### Message Publishing
 
-#### `publish_message(name, correlation_key:, variables: {}, ttl_ms: 5000)`
+#### `publish_message(name, correlation_key:, vars: {}, ttl: 5000)`
 
 Publishes a message to Zeebe to trigger message intermediate catch events or message start events.
 
 **Parameters:**
 - `name` (String) - Message name matching BPMN definition
 - `correlation_key` (String) - Key to correlate message with process instance
-- `variables` (Hash) - Message payload variables (optional, default: `{}`)
-- `ttl_ms` (Integer) - Message time-to-live in milliseconds (optional, default: `5000`)
+- `vars` (Hash) - Message payload variables (optional, default: `{}`)
+- `ttl` (Integer, ActiveSupport::Duration) - Message time-to-live in milliseconds or as a Duration (optional, default: `5000`)
 
 **Example:**
 
@@ -246,7 +246,7 @@ with_process_instance("approval-workflow", request_id: "req-123") do
   publish_message(
     "approval-granted",
     correlation_key: "req-123",
-    variables: { approved_by: "manager", approved_at: Time.now.iso8601 }
+    vars: { approved_by: "manager", approved_at: Time.now.iso8601 }
   )
 
   assert_process_completed!

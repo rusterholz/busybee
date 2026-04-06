@@ -173,7 +173,7 @@ end
 - `deploy_process(path, uniquify:)` - Deploy BPMN files with optional unique IDs for test isolation
 - `with_process_instance(process_id, variables)` - Create instances with automatic cleanup
 - `activate_job(type)` / `activate_jobs(type, max_jobs:)` - Activate jobs for assertions
-- `publish_message(name, correlation_key:, variables:)` - Trigger message catch events
+- `publish_message(name, correlation_key:, vars:)` - Trigger message catch events
 - `set_variables(scope_key, variables)` - Update process variables
 - `assert_process_completed!` - Verify workflow reached an end event
 - `have_activated`, `have_received_variables`, `have_received_headers` - RSpec matchers

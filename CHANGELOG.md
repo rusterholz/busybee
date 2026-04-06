@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### New Features:
+
+- **Expose Client on Job + Worker Delegation** – `job.client` returns the `Busybee::Client` instance; `client` in workers delegates to `job.client` for direct API access (e.g., message correlation)
+- **Strict Output Validation** – Workers validate outputs against declared `output` definitions by default. Undeclared output keys raise `Busybee::UndeclaredOutput`. Opt out per-worker with `strict_outputs false` or gem-wide via `Busybee.default_strict_outputs = false`
+  - Manual `complete!` calls also validate outputs
+
+### Breaking Changes:
+
+- **Testing helper `publish_message` parameter renames** – `variables:` is now `vars:` and `ttl_ms:` is now `ttl:` to match `Client#publish_message` naming. `ttl:` now accepts both Integer (milliseconds) and `ActiveSupport::Duration`
+- **Strict output validation enabled by default** – Workers with `complete_job_on_success` or manual `complete!` calls will raise `Busybee::UndeclaredOutput` if `perform` returns keys not declared as `output`. Add `strict_outputs false` to workers that intentionally return ad-hoc keys
+
 ## v0.3.0 (2026-03-13)
 
 Worker Pattern Framework and CLI, with testing helpers and YAML configuration support.
