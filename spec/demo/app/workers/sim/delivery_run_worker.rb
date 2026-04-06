@@ -40,7 +40,6 @@ module Sim
 
     def perform
       delay = calculate_delay
-      current_job = job
       semaphore = self.class.drivers_semaphore
 
       Rails.logger.info("Queued delivery run, #{distance} units " \
@@ -48,9 +47,9 @@ module Sim
                         "#{Delivery::Driver.count} drivers free)")
 
       Concurrent::Promises.
-        future { run_delivery(current_job, semaphore, delay) }.
-        then { on_delivery_done(current_job, delay) }.
-        rescue { |err| on_delivery_error(current_job, err) }
+        future { run_delivery(semaphore, delay) }.
+        then { on_delivery_done(delay) }.
+        rescue { |err| on_delivery_error(err) }
     end
 
     private
@@ -61,23 +60,23 @@ module Sim
       distance.to_f * BASE_DELAY * jitter / speed
     end
 
-    def run_delivery(current_job, semaphore, delay)
+    def run_delivery(semaphore, delay)
       semaphore.acquire
-      current_job.update_timeout((delay.ceil + 2).seconds)
+      update_timeout((delay.ceil + 2).seconds)
       Rails.logger.info("Driver en route, #{distance} units (#{delay.round(1)}s)...")
       sleep(delay)
     ensure
       semaphore.release
     end
 
-    def on_delivery_done(current_job, delay)
+    def on_delivery_done(delay)
       Rails.logger.info("Driver arrived after #{delay.round(1)}s")
-      current_job.complete!
+      complete!
     end
 
-    def on_delivery_error(current_job, error)
+    def on_delivery_error(error)
       Rails.logger.error("Delivery run failed: #{error.message}")
-      current_job.fail!(error.message)
+      fail!(error.message)
     end
   end
 end

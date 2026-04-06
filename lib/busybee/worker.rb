@@ -27,8 +27,14 @@ module Busybee
 
     attr_reader :job
 
-    delegate :variables, :headers, :client, :complete!, :fail!, :throw_bpmn_error!,
+    delegate :variables, :headers, :client, :fail!, :throw_bpmn_error!,
              :update_retries, :update_timeout, to: :job
+
+    def complete!(vars = {})
+      self.class.send(:validate_required_outputs!, vars, self.class.configuration)
+      self.class.send(:validate_undeclared_outputs!, vars, self.class.configuration)
+      job.complete!(vars)
+    end
 
     def initialize(job)
       @job = job

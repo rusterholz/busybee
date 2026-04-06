@@ -405,11 +405,10 @@ class PickAndPackWorker < Busybee::Worker
 
   def perform
     delay = calculate_delay
-    current_job = job
 
-    Concurrent::Promises.future { simulate_packing(current_job, delay) }
-      .then { current_job.complete! }
-      .rescue { |err| current_job.fail!(err) }
+    Concurrent::Promises.future { simulate_packing(job, delay) }
+      .then { complete! }
+      .rescue { |err| fail!(err) }
   end
 end
 ```

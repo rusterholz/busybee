@@ -21,15 +21,14 @@ module Sim
 
     def perform
       delay = calculate_delay
-      current_job = job
 
       Rails.logger.info("Queued pick-and-pack for #{item_count} items " \
                         "(#{delay.round(1)}s delay, #{PICKERS.available_permits}/3 pickers free)")
 
       Concurrent::Promises.
-        future { run_pick_and_pack(current_job, delay) }.
-        then { on_pick_and_pack_done(current_job) }.
-        rescue { |err| on_pick_and_pack_error(current_job, err) }
+        future { run_pick_and_pack(delay) }.
+        then { on_pick_and_pack_done }.
+        rescue { |err| on_pick_and_pack_error(err) }
     end
 
     private
@@ -40,23 +39,23 @@ module Sim
       item_count.to_f * BASE_DELAY * jitter / speed
     end
 
-    def run_pick_and_pack(current_job, delay)
+    def run_pick_and_pack(delay)
       PICKERS.acquire
-      current_job.update_timeout((delay.ceil + 2).seconds)
+      update_timeout((delay.ceil + 2).seconds)
       Rails.logger.info("Picker started on #{item_count} items (#{delay.round(1)}s)...")
       sleep(delay)
     ensure
       PICKERS.release
     end
 
-    def on_pick_and_pack_done(current_job)
+    def on_pick_and_pack_done
       Rails.logger.info("Pick and pack complete for #{item_count} items")
-      current_job.complete!
+      complete!
     end
 
-    def on_pick_and_pack_error(current_job, error)
+    def on_pick_and_pack_error(error)
       Rails.logger.error("Pick and pack failed: #{error.message}")
-      current_job.fail!(error.message)
+      fail!(error.message)
     end
   end
 end

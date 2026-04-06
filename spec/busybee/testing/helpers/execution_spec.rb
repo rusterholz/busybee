@@ -219,6 +219,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
         Class.new(Busybee::Worker) do
           job_type "manual-complete"
           complete_job_on_success false
+          strict_outputs false
 
           def perform
             complete!(tracking: "ABC123")
