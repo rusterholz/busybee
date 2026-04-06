@@ -73,6 +73,7 @@ RSpec.describe Busybee::Worker do
 
       it "skips completion when job is already handled" do
         worker = stub_const("ManualCompleteWorker", Class.new(described_class) do
+          strict_outputs false
           define_method(:perform) do
             complete!(manual: true)
             { extra: "data" }
@@ -491,6 +492,89 @@ RSpec.describe Busybee::Worker do
           with(123456, /UndeclaredOutput.*:unexpected/, retries: nil, backoff: nil)
       end
     end
+
+    context "with manual complete! output validation" do
+      before do
+        allow(client).to receive(:complete_job)
+        allow(client).to receive(:fail_job)
+      end
+
+      it "validates undeclared outputs on manual complete!" do
+        worker = stub_const("ManualUndeclaredWorker", Class.new(described_class) do
+          complete_job_on_success false
+          output :status
+          define_method(:perform) do
+            complete!(status: "ok", extra: "surprise")
+          end
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:complete_job)
+        expect(client).to have_received(:fail_job).
+          with(123456, /UndeclaredOutput.*:extra/, retries: nil, backoff: nil)
+      end
+
+      it "validates required outputs on manual complete!" do
+        worker = stub_const("ManualMissingWorker", Class.new(described_class) do
+          complete_job_on_success false
+          output :notification_id, required: true
+          define_method(:perform) do
+            complete!({})
+          end
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:complete_job)
+        expect(client).to have_received(:fail_job).
+          with(123456, /MissingOutput.*:notification_id/, retries: nil, backoff: nil)
+      end
+
+      it "re-raises validation error when fail_job_on_error is false" do
+        worker = stub_const("ManualNoFailWorker", Class.new(described_class) do
+          complete_job_on_success false
+          fail_job_on_error false
+          output :status, required: false
+          define_method(:perform) do
+            complete!(extra: "surprise")
+          end
+        end)
+
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+        expect(client).not_to have_received(:complete_job)
+        expect(client).not_to have_received(:fail_job)
+        expect(logger).to have_received(:warn).with(/fail_job_on_error is off.*UndeclaredOutput/)
+      end
+
+      it "passes through when outputs are valid" do
+        worker = stub_const("ManualValidWorker", Class.new(described_class) do
+          complete_job_on_success false
+          output :status
+          define_method(:perform) do
+            complete!(status: "ok")
+          end
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job).with(123456, vars: { status: "ok" })
+      end
+
+      it "skips strict validation when strict_outputs is false" do
+        worker = stub_const("ManualLenientWorker", Class.new(described_class) do
+          complete_job_on_success false
+          strict_outputs false
+          output :status
+          define_method(:perform) do
+            complete!(status: "ok", extra: "allowed")
+          end
+        end)
+
+        worker.perform_job(job)
+        expect(client).to have_received(:complete_job).with(123456, vars: { status: "ok", extra: "allowed" })
+      end
+    end
   end
 
   describe Busybee::Worker::Shutdown do
@@ -569,7 +653,7 @@ RSpec.describe Busybee::Worker do
     end
 
     describe "#complete!" do
-      it "delegates to job" do
+      it "validates outputs then delegates to job" do
         allow(client).to receive(:complete_job)
         instance.complete!(result: "done")
         expect(client).to have_received(:complete_job).with(123456, vars: { result: "done" })
