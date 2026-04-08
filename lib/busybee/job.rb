@@ -21,6 +21,15 @@ module Busybee
   class Job
     attr_reader :client, :status
 
+    TIMESTAMP_NAMES = %i[
+      activated_at execution_started_at perform_started_at
+      perform_finished_at resolved_at executed_at
+    ].freeze
+
+    TIMESTAMP_NAMES.each do |name|
+      attr_reader name, :"#{name}_utc"
+    end
+
     # Create a new Job wrapper.
     #
     # @param raw_job [Busybee::GRPC::ActivatedJob] The raw GRPC job protobuf
@@ -29,6 +38,20 @@ module Busybee
       @raw_job = raw_job
       @client = client
       @status = :ready
+    end
+
+    # Stamp a lifecycle timestamp (monotonic + UTC pair).
+    #
+    # @param name [Symbol] one of TIMESTAMP_NAMES
+    # @return [self]
+    def stamp!(name)
+      unless TIMESTAMP_NAMES.include?(name)
+        raise ArgumentError, "Unknown timestamp: #{name}. Expected one of: #{TIMESTAMP_NAMES.join(', ')}"
+      end
+
+      instance_variable_set(:"@#{name}", Process.clock_gettime(Process::CLOCK_MONOTONIC))
+      instance_variable_set(:"@#{name}_utc", Time.now.utc)
+      self
     end
 
     # Job key (unique identifier)

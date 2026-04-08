@@ -811,4 +811,59 @@ RSpec.describe Busybee::Job do
       expect { job.update_timeout(30_000) }.not_to change(job, :status)
     end
   end
+
+  describe "timestamps" do
+    describe "#stamp!" do
+      it "sets both monotonic and UTC timestamps" do
+        job.stamp!(:activated_at)
+
+        expect(job.activated_at).to be_a(Float)
+        expect(job.activated_at_utc).to be_a(Time)
+        expect(job.activated_at_utc).to be_utc
+      end
+
+      it "returns self for chaining" do
+        expect(job.stamp!(:activated_at)).to be(job)
+      end
+
+      it "uses monotonic clock for the base timestamp" do
+        before = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        job.stamp!(:activated_at)
+        after = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        expect(job.activated_at).to be_between(before, after)
+      end
+
+      it "captures UTC wall clock for the _utc timestamp" do
+        before = Time.now.utc
+        job.stamp!(:activated_at)
+        after = Time.now.utc
+
+        expect(job.activated_at_utc).to be_between(before, after)
+      end
+
+      it "raises for unknown timestamp names" do
+        expect { job.stamp!(:bogus_at) }.to raise_error(ArgumentError, /bogus_at/)
+      end
+    end
+
+    describe "timestamp accessors" do
+      it "returns nil before stamping" do
+        %i[activated_at execution_started_at perform_started_at
+           perform_finished_at resolved_at executed_at].each do |name|
+          expect(job.public_send(name)).to be_nil, "expected #{name} to be nil"
+          expect(job.public_send(:"#{name}_utc")).to be_nil, "expected #{name}_utc to be nil"
+        end
+      end
+
+      it "supports all six timestamp pairs" do
+        %i[activated_at execution_started_at perform_started_at
+           perform_finished_at resolved_at executed_at].each do |name|
+          job.stamp!(name)
+          expect(job.public_send(name)).to be_a(Float), "expected #{name} to be Float"
+          expect(job.public_send(:"#{name}_utc")).to be_a(Time), "expected #{name}_utc to be Time"
+        end
+      end
+    end
+  end
 end
