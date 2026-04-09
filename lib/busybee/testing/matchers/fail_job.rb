@@ -45,7 +45,7 @@ RSpec::Matchers.define :fail_job do |job|
   def error_matches?(error)
     return true unless @expected_error
 
-    class_matches = @expected_error === error # rubocop:disable Style/CaseEquality
+    class_matches = @expected_error === error
     return false unless class_matches
     return true unless @expected_message
 

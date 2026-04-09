@@ -14,6 +14,7 @@ require "busybee/worker"
 require "busybee/runtime_config"
 require "busybee/runner"
 require "busybee/cli"
+require "busybee/hooks"
 
 # Top-level gem module. Configuration readers and defaults live here;
 # validated setters live in Busybee::Configure.
@@ -32,6 +33,13 @@ module Busybee
 
     attr_accessor :logger
     attr_reader :credentials
+
+    # Delegate hook registration methods to Busybee::Hooks
+    Hooks::HOOK_TYPES.each do |type|
+      define_method(type) do |**filters, &callback|
+        Hooks.register(type, callback, **filters)
+      end
+    end
 
     def configure
       yield self

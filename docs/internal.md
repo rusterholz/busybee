@@ -32,7 +32,14 @@ lib/busybee/
 │   ├── error.rb             # GRPC::Error wrapper
 │   ├── gateway_pb.rb        # Message definitions (generated)
 │   └── gateway_services_pb.rb # Service stubs (generated)
-├── job.rb                   # Job wrapper for activated jobs (exposes client for direct API access)
+├── hooks.rb                 # Hooks module entry point (event construction, registration, invocation)
+├── hooks/                   # Hook system internals
+│   ├── event_access.rb      # Base event mixin (error_message, compute_ms helper)
+│   ├── job_event_access.rb  # Job event mixin (predicates, 7 duration methods, tags)
+│   ├── worker_event_access.rb # Worker event mixin (stub — implemented in Mission 7a)
+│   ├── call_event_access.rb # Call event mixin (stub — implemented in Mission 7b)
+│   └── restricted_access.rb # Restricts modification of framework keys on events
+├── job.rb                   # Job wrapper for activated jobs (exposes client for direct API access, lifecycle timestamps)
 ├── job_stream.rb            # JobStream for streaming job activation
 ├── logging.rb               # Logging module (text/JSON, thread-safe)
 ├── railtie.rb               # Rails integration
@@ -411,6 +418,80 @@ The `Busybee::Serialization::HashAccess` module provides method-style access wit
 - Only responds to methods that correspond to existing keys (no silent `nil` returns)
 
 All Client operation modules, Job, and Testing helpers route through this module. Grep for `Serialization.to_json` and `Serialization.from_json` to find call sites.
+
+## Hooks Module
+
+`Busybee::Hooks` is the instrumentation system. It provides lifecycle hooks for jobs, workers, and gRPC calls — enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting).
+
+### Event Objects
+
+Hook events are `ActiveSupport::HashWithIndifferentAccess` instances extended with three mixins:
+
+1. **`Busybee::Serialization::HashAccess`** (existing) — method-style access with snake_case↔camelCase conversion. Reused from Job variables/headers so events feel identical.
+2. **`Busybee::Hooks::RestrictedAccess`** (new) — framework keys are locked at extend-time; hooks can annotate with new keys but can't overwrite framework data (raises `FrozenError`). Guards `[]=`, `store`, `merge!`, and `update`.
+3. **Noun-specific EventAccess** — one of `JobEventAccess`, `WorkerEventAccess`, or `CallEventAccess`. Each includes the base `EventAccess` (shared `error_message`, private `compute_ms` helper) and adds noun-specific predicates, computed durations, and `tags`.
+
+Construction via `Busybee::Hooks.build_event(noun, data)`:
+
+```ruby
+event = Busybee::Hooks.build_event(:job, { job_type: "process_order", status: :complete, ... })
+event.job_type          # => "process_order" (HashAccess)
+event[:status] = :x     # => FrozenError (RestrictedAccess)
+event[:trace_id] = "a"  # => OK (annotation)
+event.completed?        # => true (JobEventAccess predicate)
+event.perform_duration_ms # => Float or nil (JobEventAccess computed duration)
+event.tags              # => { "job_type" => ..., "status" => ... } (low-cardinality subset)
+```
+
+### Job Lifecycle Timestamps
+
+`Busybee::Job` captures six monotonic + UTC timestamp pairs via `job.stamp!(name)`:
+
+| Name | Set when |
+|------|----------|
+| `activated_at` | Job received from Zeebe |
+| `execution_started_at` | `perform_job` begins |
+| `perform_started_at` | Right before `instance.perform` |
+| `perform_finished_at` | Right after `instance.perform` returns |
+| `resolved_at` | Top of `complete!`/`fail!`/`throw_bpmn_error!` |
+| `executed_at` | `perform_job` exits (ensure block) |
+
+Monotonic values (`Process::CLOCK_MONOTONIC`) are used by `EventAccess` computed duration methods. UTC values appear in structured log output and event hashes. Accessors return `nil` before stamping.
+
+### Hook Registration
+
+Hooks are registered via `Busybee.configure`, which delegates to `Busybee::Hooks`:
+
+```ruby
+Busybee.configure do |c|
+  c.before_job { |event| ... }
+  c.after_job(status: :failed) { |event| Sentry.capture_exception(event.error) }
+  c.around_call { |event, perform| Datadog::Tracing.trace("grpc") { perform.call } }
+end
+```
+
+Storage is plain arrays (one per hook type, 12 total). Each entry is `{ callback:, filters: }`. FIFO ordering. No locking or concurrent data structures — hooks are registered at configure time and never modified after workers start. There is no supported use case for mutating hooks at runtime.
+
+`Busybee::Hooks.reset!` clears all arrays (for test isolation).
+
+### Prefiltering
+
+Filter kwargs are validated per-noun at registration time:
+- **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `error:`
+- **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `error:`
+- **Call hooks:** `method:`, `result:`, `error:`
+
+Matching uses case equality (`===`), supporting Symbol/String (exact), Regexp (pattern), Class (`is_a?`), Proc (custom). Class values additionally match against their `.name` string, allowing `worker_class: "OrderWorker"` or `worker_class: /Order/` to work even with load-order challenges.
+
+`Busybee::Hooks.matches?(hook, event)` checks all filters. Empty filters match everything (vacuous truth).
+
+### Module Status
+
+- **Event objects:** Complete (Mission 5a). RestrictedAccess, EventAccess base, JobEventAccess with 7 duration methods and tags.
+- **Registration & storage:** Complete (Mission 5b). 12 hook types, prefilter validation, FIFO storage.
+- **Invocation machinery:** Pending (Mission 5c). Will add around-chain building, propagating/swallowing invocation.
+- **Job hook wiring:** Pending (Mission 6). Will wire hooks into Worker/Runner.
+- **Worker + call hooks:** Pending (Mission 7). WorkerEventAccess and CallEventAccess stubs will be implemented.
 
 ## Testing Module
 
