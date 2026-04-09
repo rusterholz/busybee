@@ -73,4 +73,179 @@ RSpec.describe Busybee::Hooks do
       expect(event.error_message).to be_nil
     end
   end
+
+  describe "hook storage" do
+    after { described_class.reset! }
+
+    described_class::HOOK_TYPES.each do |hook_type|
+      it "stores #{hook_type} hooks in an array" do
+        expect(described_class.hooks_for(hook_type)).to eq([])
+      end
+    end
+
+    it "raises for unknown hook type" do
+      expect { described_class.hooks_for(:bogus) }.to raise_error(ArgumentError, /bogus/)
+    end
+
+    describe ".reset!" do
+      it "clears all hook arrays" do
+        described_class.hooks_for(:before_job) << { callback: -> {}, filters: {} }
+        described_class.reset!
+        expect(described_class.hooks_for(:before_job)).to eq([])
+      end
+    end
+  end
+
+  describe "registration" do
+    after { described_class.reset! }
+
+    it "registers a before_job hook via Busybee.configure" do
+      callback = proc { |_event| }
+      Busybee.configure { |c| c.before_job(&callback) }
+
+      hooks = described_class.hooks_for(:before_job)
+      expect(hooks.length).to eq(1)
+      expect(hooks.first[:callback]).to be(callback)
+      expect(hooks.first[:filters]).to eq({})
+    end
+
+    it "registers with filter kwargs" do
+      Busybee.configure { |c| c.after_job(status: :failed) { |_| } } # rubocop:disable Lint/EmptyBlock
+
+      hook = described_class.hooks_for(:after_job).first
+      expect(hook[:filters]).to eq(status: :failed)
+    end
+
+    it "preserves FIFO ordering" do
+      results = []
+      Busybee.configure do |c|
+        c.before_job { results << :first }
+        c.before_job { results << :second }
+        c.before_job { results << :third }
+      end
+
+      hooks = described_class.hooks_for(:before_job)
+      expect(hooks.length).to eq(3)
+      hooks.each { |h| h[:callback].call(nil) }
+      expect(results).to eq(%i[first second third])
+    end
+
+    it "supports all 12 hook types" do
+      described_class::HOOK_TYPES.each do |type|
+        Busybee.configure { |c| c.public_send(type) { |_| } } # rubocop:disable Lint/EmptyBlock
+        expect(described_class.hooks_for(type).length).to eq(1), "expected #{type} to have 1 hook"
+      end
+    end
+
+    it "requires a block" do
+      expect { Busybee.before_job }.to raise_error(ArgumentError, /block/)
+    end
+  end
+
+  describe ".match?" do
+    it "matches exact symbol" do
+      expect(described_class.match?(:failed, :failed)).to be true
+      expect(described_class.match?(:failed, :complete)).to be false
+    end
+
+    it "matches exact string" do
+      expect(described_class.match?("process_order", "process_order")).to be true
+      expect(described_class.match?("process_order", "other")).to be false
+    end
+
+    it "matches regex" do
+      expect(described_class.match?(/order/, "process_order")).to be true
+      expect(described_class.match?(/order/, "send_email")).to be false
+    end
+
+    it "matches Class via is_a? (case equality)" do
+      expect(described_class.match?(RuntimeError, RuntimeError.new("boom"))).to be true
+      expect(described_class.match?(RuntimeError, StandardError.new("boom"))).to be false
+    end
+
+    it "matches Proc/Lambda" do
+      filter = ->(v) { v.start_with?("order") }
+      expect(described_class.match?(filter, "order_123")).to be true
+      expect(described_class.match?(filter, "shipment_456")).to be false
+    end
+
+    it "falls back to Class name when value is a Class" do
+      expect(described_class.match?(/Order/, Class.new { def self.name = "OrderWorker" })).to be true
+      expect(described_class.match?(/Order/, Class.new { def self.name = "ShipmentWorker" })).to be false
+    end
+
+    it "matches Class by exact name string (useful for load-order issues)" do
+      klass = Class.new { def self.name = "OrderWorker" }
+      expect(described_class.match?("OrderWorker", klass)).to be true
+      expect(described_class.match?("ShipmentWorker", klass)).to be false
+    end
+
+    it "does not use name fallback for non-Class values" do
+      expect(described_class.match?(/boom/, RuntimeError.new("boom"))).to be false
+    end
+  end
+
+  describe ".matches?" do
+    it "returns true when all filters match" do
+      hook = { filters: { status: :failed, job_type: /order/ } }
+      event = { "status" => :failed, "job_type" => "process_order" }
+      expect(described_class.matches?(hook, event)).to be true
+    end
+
+    it "returns false when any filter does not match" do
+      hook = { filters: { status: :failed, job_type: /order/ } }
+      event = { "status" => :complete, "job_type" => "process_order" }
+      expect(described_class.matches?(hook, event)).to be false
+    end
+
+    it "returns true (vacuous truth) when filters are empty" do
+      hook = { filters: {} }
+      event = { "status" => :ready }
+      expect(described_class.matches?(hook, event)).to be true
+    end
+  end
+
+  describe "filter kwargs validation" do
+    after { described_class.reset! }
+
+    let(:noop) { proc { |_| "registered" } }
+
+    it "accepts valid job filter kwargs" do
+      expect do
+        Busybee.before_job(job_type: "test", worker_class: /Order/, status: :failed,
+                           bpmn_process_id: "flow", error: RuntimeError, &noop)
+      end.not_to raise_error
+    end
+
+    it "rejects unknown job filter kwargs" do
+      expect do
+        Busybee.before_job(method: :complete_job, &noop)
+      end.to raise_error(ArgumentError, /method/)
+    end
+
+    it "accepts valid worker filter kwargs" do
+      expect do
+        Busybee.on_worker_started(worker_class: /Order/, job_type: "test",
+                                  worker_mode: :polling, error: RuntimeError, &noop)
+      end.not_to raise_error
+    end
+
+    it "rejects unknown worker filter kwargs" do
+      expect do
+        Busybee.on_worker_started(status: :failed, &noop)
+      end.to raise_error(ArgumentError, /status/)
+    end
+
+    it "accepts valid call filter kwargs" do
+      expect do
+        Busybee.before_call(method: :complete_job, result: :completed, error: RuntimeError, &noop)
+      end.not_to raise_error
+    end
+
+    it "rejects unknown call filter kwargs" do
+      expect do
+        Busybee.before_call(job_type: "test", &noop)
+      end.to raise_error(ArgumentError, /job_type/)
+    end
+  end
 end

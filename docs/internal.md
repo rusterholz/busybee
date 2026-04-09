@@ -458,10 +458,37 @@ event.tags              # => { "job_type" => ..., "status" => ... } (low-cardina
 
 Monotonic values (`Process::CLOCK_MONOTONIC`) are used by `EventAccess` computed duration methods. UTC values appear in structured log output and event hashes. Accessors return `nil` before stamping.
 
+### Hook Registration
+
+Hooks are registered via `Busybee.configure`, which delegates to `Busybee::Hooks`:
+
+```ruby
+Busybee.configure do |c|
+  c.before_job { |event| ... }
+  c.after_job(status: :failed) { |event| Sentry.capture_exception(event.error) }
+  c.around_call { |event, perform| Datadog::Tracing.trace("grpc") { perform.call } }
+end
+```
+
+Storage is plain arrays (one per hook type, 12 total). Each entry is `{ callback:, filters: }`. FIFO ordering. No locking or concurrent data structures — hooks are registered at configure time and never modified after workers start. There is no supported use case for mutating hooks at runtime.
+
+`Busybee::Hooks.reset!` clears all arrays (for test isolation).
+
+### Prefiltering
+
+Filter kwargs are validated per-noun at registration time:
+- **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `error:`
+- **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `error:`
+- **Call hooks:** `method:`, `result:`, `error:`
+
+Matching uses case equality (`===`), supporting Symbol/String (exact), Regexp (pattern), Class (`is_a?`), Proc (custom). Class values additionally match against their `.name` string, allowing `worker_class: "OrderWorker"` or `worker_class: /Order/` to work even with load-order challenges.
+
+`Busybee::Hooks.matches?(hook, event)` checks all filters. Empty filters match everything (vacuous truth).
+
 ### Module Status
 
 - **Event objects:** Complete (Mission 5a). RestrictedAccess, EventAccess base, JobEventAccess with 7 duration methods and tags.
-- **Registration & storage:** Pending (Mission 5b). Will add hook registration DSL to `Busybee.configure`.
+- **Registration & storage:** Complete (Mission 5b). 12 hook types, prefilter validation, FIFO storage.
 - **Invocation machinery:** Pending (Mission 5c). Will add around-chain building, propagating/swallowing invocation.
 - **Job hook wiring:** Pending (Mission 6). Will wire hooks into Worker/Runner.
 - **Worker + call hooks:** Pending (Mission 7). WorkerEventAccess and CallEventAccess stubs will be implemented.

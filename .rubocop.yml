@@ -75,6 +75,9 @@ RSpec/SpecFilePathFormat:
   Exclude:
     - "spec/integration/**/*"
 
+Style/CaseEquality:
+  Enabled: false
+
 Style/Documentation:
   Enabled: false
 
