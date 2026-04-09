@@ -181,13 +181,14 @@ module Busybee
       #
       # @param name [String] message name
       # @param correlation_key [String] correlation key
-      # @param variables [Hash] message variables
-      # @param ttl_ms [Integer] time-to-live in milliseconds
-      def publish_message(name, correlation_key:, variables: {}, ttl_ms: 5000)
+      # @param vars [Hash] message variables
+      # @param ttl [Integer, ActiveSupport::Duration] time-to-live (integer ms or Duration)
+      def publish_message(name, correlation_key:, vars: {}, ttl: 5000)
+        ttl_ms = ttl.is_a?(ActiveSupport::Duration) ? ttl.in_milliseconds.to_i : ttl.to_i
         request = Busybee::GRPC::PublishMessageRequest.new(
           name: name,
           correlationKey: correlation_key,
-          variables: Busybee::Serialization.to_json(variables),
+          variables: Busybee::Serialization.to_json(vars),
           timeToLive: ttl_ms
         )
         grpc_client.publish_message(request)

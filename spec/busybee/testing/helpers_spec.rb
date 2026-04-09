@@ -235,15 +235,23 @@ RSpec.describe Busybee::Testing::Helpers do
         expect(request.timeToLive).to eq(5000)
       end
 
-      helper.publish_message("order-received", correlation_key: "order-123", variables: { status: "received" })
+      helper.publish_message("order-received", correlation_key: "order-123", vars: { status: "received" })
     end
 
-    it "allows custom TTL" do
+    it "allows custom TTL in milliseconds" do
       expect(mock_client).to receive(:publish_message) do |request| # rubocop:disable RSpec/MessageSpies
         expect(request.timeToLive).to eq(10_000)
       end
 
-      helper.publish_message("msg", correlation_key: "key", ttl_ms: 10_000)
+      helper.publish_message("msg", correlation_key: "key", ttl: 10_000)
+    end
+
+    it "accepts ActiveSupport::Duration for TTL" do
+      expect(mock_client).to receive(:publish_message) do |request| # rubocop:disable RSpec/MessageSpies
+        expect(request.timeToLive).to eq(30_000)
+      end
+
+      helper.publish_message("msg", correlation_key: "key", ttl: 30.seconds)
     end
   end
 

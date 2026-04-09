@@ -176,7 +176,7 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
         # A driver becomes available — publish the correlation message
         publish_message("driver_available",
                         correlation_key: request_id,
-                        variables: { driver_id: "drv-late", driver_name: "Late Driver" })
+                        vars: { driver_id: "drv-late", driver_name: "Late Driver" })
         sleep(0.5)
 
         # Parallel join fires — process continues with the late driver's info
