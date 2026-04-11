@@ -485,11 +485,44 @@ Matching uses case equality (`===`), supporting Symbol/String (exact), Regexp (p
 
 `Busybee::Hooks.matches?(hook, event)` checks all filters. Empty filters match everything (vacuous truth).
 
+### Hook Context
+
+Thread-local context allows outer scopes to propagate identity information to inner events. Managed via `Busybee::Hooks.with_context(**attrs) { ... }`.
+
+Context keys are promoted to event top-level only if they're in the noun's `CONTEXT_KEYS` allowlist (stable identity keys like `worker_class`, `job_key`, `bpmn_process_id`). Per-moment keys (timestamps, status, error) are never promoted — they stay explicit at each `build_event` call. Non-promoted context keys are still visible via `event[:context]`.
+
+```ruby
+Busybee::Hooks.with_context(worker_class: MyWorker, job_key: 123) do
+  event = Busybee::Hooks.build_event(:job, status: :ready)
+  event[:worker_class]           # => MyWorker (promoted)
+  event[:context][:worker_class] # => MyWorker (full snapshot)
+  event[:context][:trace_id]     # => visible if pushed, even though not promoted
+end
+```
+
+Context nests (`with_context` inside `with_context`), is thread-isolated, and restores on block exit even if the block raises. Explicit data in `build_event` always wins over context.
+
+### Hook Invocation
+
+**`Busybee::Hooks.run_hooks(type, event, swallow_errors: false)`** — runs all matching hooks for a type.
+
+- `swallow_errors: false` (default): errors propagate naturally. Used for wrapping hooks (`before_job`, `before_call`, `around_call`).
+- `swallow_errors: true`: errors are logged and iteration continues to the next hook. Used for observing hooks (`after_job`, `after_call`, all `on_*`, `around_job_execution`).
+- `Busybee::Worker::Shutdown` errors always propagate regardless of `swallow_errors`.
+- Errors matching `shutdown_on` classes (from `event[:worker_class]` config + gem-level) are wrapped in `Shutdown` and propagated.
+
+**`Busybee::Hooks.run_around_chain(type, event, &core)`** — builds a nested chain from matching around hooks and wraps the core block.
+
+- Chain built via `reverse.inject` with nested lambdas. First-registered hook is outermost.
+- Option B2 semantics: core block's return value is merged into `event[:result]` (a mutable Hash, sealed as a key but contents are writable). Chain return value is ignored — result is always extracted from the event, preventing the "forgetful middleware" bug.
+- Zero-subscriber fast path: calls core directly when no matching hooks exist.
+- Prefiltering: non-matching hooks excluded before chain-building.
+
 ### Module Status
 
 - **Event objects:** Complete (Mission 5a). RestrictedAccess, EventAccess base, JobEventAccess with 7 duration methods and tags.
 - **Registration & storage:** Complete (Mission 5b). 12 hook types, prefilter validation, FIFO storage.
-- **Invocation machinery:** Pending (Mission 5c). Will add around-chain building, propagating/swallowing invocation.
+- **Invocation machinery:** Complete (Mission 5c). Unified run_hooks (propagating/swallowing), run_around_chain (Option B2), thread-local context.
 - **Job hook wiring:** Pending (Mission 6). Will wire hooks into Worker/Runner.
 - **Worker + call hooks:** Pending (Mission 7). WorkerEventAccess and CallEventAccess stubs will be implemented.
 

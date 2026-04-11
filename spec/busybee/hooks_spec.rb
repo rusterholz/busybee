@@ -248,4 +248,337 @@ RSpec.describe Busybee::Hooks do
       end.to raise_error(ArgumentError, /job_type/)
     end
   end
+
+  describe "hook context" do
+    describe ".context" do
+      it "returns an empty hash by default" do
+        expect(described_class.context).to eq({})
+      end
+    end
+
+    describe ".with_context" do
+      it "makes context available inside the block" do
+        described_class.with_context(worker_class: String, job_key: 123) do
+          expect(described_class.context).to eq(worker_class: String, job_key: 123)
+        end
+      end
+
+      it "restores previous context after the block" do
+        described_class.with_context(worker_class: String) do
+          # inside
+        end
+        expect(described_class.context).to eq({})
+      end
+
+      it "restores context even if block raises" do
+        described_class.with_context(worker_class: String) { raise "boom" } rescue nil # rubocop:disable Style/RescueModifier
+        expect(described_class.context).to eq({})
+      end
+
+      it "nests — inner context merges with outer" do
+        described_class.with_context(worker_class: String) do
+          described_class.with_context(job_key: 456) do
+            expect(described_class.context).to eq(worker_class: String, job_key: 456)
+          end
+          # outer still intact
+          expect(described_class.context).to eq(worker_class: String)
+        end
+      end
+
+      it "inner context can override outer keys" do
+        described_class.with_context(worker_class: String) do
+          described_class.with_context(worker_class: Integer) do
+            expect(described_class.context[:worker_class]).to eq(Integer)
+          end
+          expect(described_class.context[:worker_class]).to eq(String)
+        end
+      end
+
+      it "is thread-isolated" do
+        described_class.with_context(worker_class: String) do
+          result = Thread.new { described_class.context }.value
+          expect(result).to eq({})
+        end
+      end
+    end
+
+    describe "context integration with build_event" do
+      it "promotes allowed context keys to event top level" do
+        described_class.with_context(worker_class: String, job_key: 789) do
+          event = described_class.build_event(:job, status: :ready)
+          expect(event[:worker_class]).to eq(String)
+          expect(event[:job_key]).to eq(789)
+        end
+      end
+
+      it "explicit data wins over context" do
+        described_class.with_context(worker_class: String) do
+          event = described_class.build_event(:job, worker_class: Integer, status: :ready)
+          expect(event[:worker_class]).to eq(Integer)
+        end
+      end
+
+      it "does not promote context keys outside the noun's allowlist" do
+        described_class.with_context(worker_class: String, custom_thing: "hello") do
+          event = described_class.build_event(:job, status: :ready)
+          expect(event[:worker_class]).to eq(String)
+          expect(event).not_to have_key("custom_thing")
+        end
+      end
+
+      it "stashes full context (including non-promoted keys) in event[:context]" do
+        described_class.with_context(worker_class: String, trace_id: "abc") do
+          event = described_class.build_event(:job, status: :ready)
+          expect(event[:context]).to eq("worker_class" => String, "trace_id" => "abc")
+        end
+      end
+
+      it "freezes the context snapshot on the event" do
+        described_class.with_context(worker_class: String) do
+          event = described_class.build_event(:job, status: :ready)
+          expect(event[:context]).to be_frozen
+        end
+      end
+
+      it "event[:context] is restricted (cannot be replaced)" do
+        described_class.with_context(worker_class: String) do
+          event = described_class.build_event(:job, status: :ready)
+          expect { event[:context] = {} }.to raise_error(FrozenError)
+        end
+      end
+
+      it "provides empty frozen context when none is pushed" do
+        event = described_class.build_event(:job, status: :ready)
+        expect(event[:context]).to eq({})
+        expect(event[:context]).to be_frozen
+      end
+
+      it "does not promote call-disallowed keys even when in context" do
+        described_class.with_context(worker_class: String, job_key: 789) do
+          event = described_class.build_event(:call, method: :complete_job)
+          expect(event).not_to have_key("worker_class")
+          expect(event).not_to have_key("job_key")
+          expect(event[:context][:worker_class]).to eq(String)
+        end
+      end
+    end
+  end
+
+  describe ".run_hooks" do
+    after { described_class.reset! }
+
+    let(:event) { described_class.build_event(:job, status: :ready, job_type: "test") }
+
+    it "calls matching hooks in FIFO order" do
+      results = []
+      Busybee.before_job { results << :first }
+      Busybee.before_job { results << :second }
+
+      described_class.run_hooks(:before_job, event)
+      expect(results).to eq(%i[first second])
+    end
+
+    it "passes the event to each hook" do
+      received = nil
+      Busybee.before_job { |e| received = e }
+
+      described_class.run_hooks(:before_job, event)
+      expect(received).to be(event)
+    end
+
+    it "does nothing when no hooks are registered" do
+      expect { described_class.run_hooks(:before_job, event) }.not_to raise_error
+    end
+
+    context "with swallow_errors: false (default, propagating)" do
+      it "lets errors propagate" do
+        Busybee.before_job { raise "boom" }
+
+        expect { described_class.run_hooks(:before_job, event) }.to raise_error(RuntimeError, "boom")
+      end
+
+      it "stops at the first error" do
+        results = []
+        Busybee.before_job { raise "boom" }
+        Busybee.before_job { results << :second }
+
+        described_class.run_hooks(:before_job, event) rescue nil # rubocop:disable Style/RescueModifier
+        expect(results).to eq([])
+      end
+    end
+
+    context "with swallow_errors: true (swallowing)" do
+      it "swallows errors and continues to the next hook" do
+        results = []
+        Busybee.after_job { raise "boom" }
+        Busybee.after_job { results << :second }
+
+        described_class.run_hooks(:after_job, event, swallow_errors: true)
+        expect(results).to eq([:second])
+      end
+
+      it "logs swallowed errors" do
+        logger = instance_double(Logger, error: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        Busybee.after_job { raise "boom" }
+
+        described_class.run_hooks(:after_job, event, swallow_errors: true)
+        expect(logger).to have_received(:error).with(/Hook error.*swallowed.*RuntimeError.*boom/)
+      end
+
+      it "always propagates Busybee::Worker::Shutdown" do
+        Busybee.after_job { raise Busybee::Worker::Shutdown.new(worker: nil) }
+
+        expect do
+          described_class.run_hooks(:after_job, event, swallow_errors: true)
+        end.to raise_error(Busybee::Worker::Shutdown)
+      end
+
+      it "propagates shutdown_on errors from worker class config" do
+        worker_class = Class.new(Busybee::Worker) do
+          shutdown_on RuntimeError
+        end
+        event = described_class.build_event(:job, status: :ready, worker_class: worker_class)
+        Busybee.after_job { raise "db gone" }
+
+        expect do
+          described_class.run_hooks(:after_job, event, swallow_errors: true)
+        end.to raise_error(Busybee::Worker::Shutdown)
+      end
+
+      it "propagates shutdown_on errors from gem-level config" do
+        original = Busybee.shutdown_on_errors
+        begin
+          Busybee.shutdown_on_errors = [RuntimeError]
+          Busybee.after_job { raise "db gone" }
+
+          expect do
+            described_class.run_hooks(:after_job, event, swallow_errors: true)
+          end.to raise_error(Busybee::Worker::Shutdown)
+        ensure
+          Busybee.shutdown_on_errors = original
+        end
+      end
+    end
+
+    context "with prefiltering" do
+      it "skips hooks whose filters do not match" do
+        results = []
+        Busybee.before_job(status: :failed) { results << :filtered }
+        Busybee.before_job { results << :unfiltered }
+
+        described_class.run_hooks(:before_job, event) # event has status: :ready
+        expect(results).to eq([:unfiltered])
+      end
+    end
+  end
+
+  describe ".run_around_chain" do
+    after { described_class.reset! }
+
+    let(:event) { described_class.build_event(:job, status: :ready, job_type: "test", result: {}) }
+
+    it "calls the core block when no around hooks are registered" do
+      called = false
+      described_class.run_around_chain(:around_job, event) { called = true }
+      expect(called).to be true
+    end
+
+    it "wraps the core block with a single around hook" do
+      results = []
+      Busybee.around_job do |_event, perform|
+        results << :before
+        perform.call
+        results << :after
+      end
+
+      described_class.run_around_chain(:around_job, event) { results << :core }
+      expect(results).to eq(%i[before core after])
+    end
+
+    it "nests 3 hooks in FIFO order (outermost registered first)" do
+      results = []
+      %i[outer middle inner].each do |label|
+        Busybee.around_job do |_event, perform|
+          results << :"#{label}_before"
+          perform.call
+          results << :"#{label}_after"
+        end
+      end
+
+      described_class.run_around_chain(:around_job, event) { results << :core }
+      expect(results).to eq(%i[
+                              outer_before middle_before inner_before
+                              core
+                              inner_after middle_after outer_after
+                            ])
+    end
+
+    it "passes the event to each hook" do
+      received = []
+      Busybee.around_job do |e, perform|
+        received << e
+        perform.call
+      end
+
+      described_class.run_around_chain(:around_job, event) {} # rubocop:disable Lint/EmptyBlock
+      expect(received).to eq([event])
+    end
+
+    it "stores the core block return value in event[:result] (Option B2)" do
+      described_class.run_around_chain(:around_job, event) { { order_id: 123 } }
+      expect(event[:result]).to eq("order_id" => 123)
+    end
+
+    it "extracts result from event even when middleware forgets to return it" do
+      Busybee.around_job do |_event, perform|
+        perform.call
+        "middleware forgot to return result"
+      end
+
+      described_class.run_around_chain(:around_job, event) { { order_id: 123 } }
+      expect(event[:result]).to eq("order_id" => 123)
+    end
+
+    it "lets errors from around hooks propagate" do
+      Busybee.around_job { |_event, _perform| raise "middleware boom" }
+
+      expect do
+        described_class.run_around_chain(:around_job, event) { "core" }
+      end.to raise_error(RuntimeError, "middleware boom")
+    end
+
+    it "lets errors from the core block propagate through middleware" do
+      results = []
+      Busybee.around_job do |_event, perform|
+        results << :before
+        perform.call
+      rescue RuntimeError
+        results << :rescued
+        raise
+      end
+
+      expect do
+        described_class.run_around_chain(:around_job, event) { raise "core boom" }
+      end.to raise_error(RuntimeError, "core boom")
+      expect(results).to eq(%i[before rescued])
+    end
+
+    context "with prefiltering" do
+      it "excludes non-matching hooks from the chain" do
+        results = []
+        Busybee.around_job(status: :failed) do |_event, perform|
+          results << :filtered
+          perform.call
+        end
+        Busybee.around_job do |_event, perform|
+          results << :unfiltered
+          perform.call
+        end
+
+        described_class.run_around_chain(:around_job, event) { results << :core }
+        expect(results).to eq(%i[unfiltered core])
+      end
+    end
+  end
 end
