@@ -9,8 +9,8 @@ require "busybee/hooks/call_event_access"
 
 module Busybee
   # Central module for the hook/instrumentation system.
-  # Provides event construction, and will gain hook registration,
-  # storage, and invocation in subsequent missions.
+  # Provides event construction, hook registration and storage,
+  # prefilter matching, and invocation (propagating and swallowing).
   module Hooks
     HOOK_TYPES = %i[
       before_job around_job after_job
@@ -151,15 +151,19 @@ module Busybee
     # @param type [Symbol] hook type
     # @param event [Hash] the event hash
     # @param swallow_errors [Boolean] whether to swallow non-shutdown errors
-    def self.run_hooks(type, event, swallow_errors: false)
-      hooks_for(type).each do |hook|
-        next unless matches?(hook, event)
+    # Returns hooks for the given type that match the event's current state.
+    def self.matching_hooks(type, event)
+      hooks_for(type).select { |h| matches?(h, event) }
+    end
+    private_class_method :matching_hooks
 
+    def self.run_hooks(type, event, swallow_errors: false)
+      matching_hooks(type, event).each do |hook|
         hook[:callback].call(event)
       rescue Busybee::Worker::Shutdown
         raise
       rescue StandardError => e
-        raise Busybee::Worker::Shutdown.new(worker: nil) if shutdown_error?(e, event)
+        raise Busybee::Worker::Shutdown.new(worker: event[:worker]) if shutdown_error?(e, event)
         raise unless swallow_errors
 
         Busybee.logger&.error("[busybee] Hook error (swallowed): #{e.class}: #{e.message}")
@@ -185,7 +189,7 @@ module Busybee
     # @param event [Hash] the event hash (must have :result key)
     # @yield the core block to wrap
     def self.run_around_chain(type, event, &block)
-      matching = hooks_for(type).select { |h| matches?(h, event) }
+      matching = matching_hooks(type, event)
 
       core = lambda do
         result = block.call
