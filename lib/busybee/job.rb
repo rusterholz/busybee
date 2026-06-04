@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/module/delegation"
 require "busybee/serialization"
+require "busybee/job/activation"
+require "busybee/job/context"
+require "busybee/job/payload"
+require "busybee/job/resolution"
+require "busybee/job/timestamps"
 
 module Busybee
   # Represents a job activated from Zeebe for processing by a worker.
@@ -19,15 +25,25 @@ module Busybee
   #   job.throw_bpmn_error!(:order_not_found, "Order #{order_id} not found")
   #
   class Job
-    attr_reader :client, :status
+    attr_reader :client, :payload, :timestamps, :context
 
-    TIMESTAMP_NAMES = %i[
-      activated_at execution_started_at perform_started_at
-      perform_finished_at resolved_at executed_at
-    ].freeze
+    delegate :key, :type, :process_instance_key, :bpmn_process_id, :element_id,
+             :variables, :headers,
+             to: :payload
+    delegate :source, :buffer_size, :worker, :worker_class, to: :activation
+    delegate :status, :result, :error, :error_message, :error_code,
+             :ready?, :complete?, :completed?, :failed?, :error?, :errored?, :resolved?,
+             to: :resolution
+    delegate :perform_duration_ms, :resolution_duration_ms, :execution_duration_ms,
+             :buffer_latency_ms, :total_duration_ms, :post_resolution_ms, :setup_duration_ms,
+             to: :timestamps
 
-    TIMESTAMP_NAMES.each do |name|
-      attr_reader name, :"#{name}_utc"
+    # Per-moment timestamp readers (job.activated_at, job.executed_at, etc.)
+    # forward to the Timestamps PORO with the kind arg (default :utc, same as
+    # the PORO). job.timestamps.stamp! remains the write surface — there is
+    # no Job-level stamp! delegate; timestamp mutation stays on the PORO.
+    Timestamps::NAMES.each do |name|
+      define_method(name) { |type = :utc| @timestamps.public_send(name, type) }
     end
 
     # Create a new Job wrapper.
@@ -35,76 +51,78 @@ module Busybee
     # @param raw_job [Busybee::GRPC::ActivatedJob] The raw GRPC job protobuf
     # @param client [Busybee::Client] The client instance for completing/failing jobs
     def initialize(raw_job, client:)
-      @raw_job = raw_job
+      @payload = Payload.new(raw_job)
       @client = client
-      @status = :ready
+      @activation = Activation.new
+      @resolution = Resolution.new
+      @context = Context.new
+      @timestamps = Timestamps.new
+      @status_changes_prevented = false
     end
 
-    # Stamp a lifecycle timestamp (monotonic + UTC pair).
-    #
-    # @param name [Symbol] one of TIMESTAMP_NAMES
-    # @return [self]
-    def stamp!(name)
-      unless TIMESTAMP_NAMES.include?(name)
-        raise ArgumentError, "Unknown timestamp: #{name}. Expected one of: #{TIMESTAMP_NAMES.join(', ')}"
-      end
-
-      instance_variable_set(:"@#{name}", Process.clock_gettime(Process::CLOCK_MONOTONIC))
-      instance_variable_set(:"@#{name}_utc", Time.now.utc)
+    # Route a kwargs hash through the Job's typed POROs (Activation, then
+    # Resolution data), with the remainder absorbed by Context as arbitrary
+    # scratch. Callers don't need to know which key belongs to which PORO;
+    # framework call sites and hook authors both use the same surface.
+    # Status transitions go through Job#resolve! (or Resolution#resolve_to
+    # directly) — `:status` is not in either typed PORO's harvest scope,
+    # so passing it here silently lands it in Context as scratch.
+    def set_context(**kwargs)
+      activation.harvest!(kwargs)
+      resolution.harvest!(kwargs)
+      context.absorb(kwargs)
       self
     end
 
-    # Job key (unique identifier)
-    # @return [Integer]
-    def key
-      @raw_job.key
+    # Low-cardinality projection of the job's state. Each component contributes
+    # only what it knows is low-card (suitable for metric labels or other
+    # bounded-dimension contexts). Aggregated by merging contributions; later
+    # entries override earlier on key collision (raw payload < activation <
+    # resolution < timestamps < context).
+    def context_tags
+      raw_payload_tags.
+        merge(activation.context_tags).
+        merge(resolution.context_tags).
+        merge(@timestamps.context_tags).
+        merge(@context.context_tags)
     end
 
-    # Job type (task definition type from BPMN)
-    # @return [String]
-    def type
-      @raw_job.type
+    # High-cardinality projection of the job's state. Strict superset of
+    # context_tags per component: each component's logging_context contains
+    # everything its context_tags does plus additional unbounded-dimension
+    # values (job_key, process_instance_key, result, timestamps, scratch).
+    def logging_context
+      raw_payload_logging.
+        merge(activation.logging_context).
+        merge(resolution.logging_context).
+        merge(@timestamps.logging_context).
+        merge(@context.logging_context)
     end
 
-    # Process instance key
-    # @return [Integer]
-    def process_instance_key
-      @raw_job.processInstanceKey
+    # Prevent status changes during hook execution.
+    # @api private
+    def _prevent_status_changes!
+      @status_changes_prevented = true
     end
 
-    # BPMN process ID
-    # @return [String]
-    def bpmn_process_id
-      @raw_job.bpmnProcessId
+    # Re-enable status changes (before perform, on rescue entry).
+    # @api private
+    def _allow_status_changes!
+      @status_changes_prevented = false
     end
 
-    # Number of retries remaining
+    # Number of retries remaining. Layers an override from update_retries on
+    # top of the protobuf value.
     # @return [Integer]
     def retries
-      @retries_override || @raw_job.retries
+      @retries_override || payload.retries
     end
 
-    # Job deadline as a frozen Time object
+    # Job deadline as a frozen Time. Layers an override from update_timeout on
+    # top of the protobuf value.
     # @return [Time]
     def deadline
-      @deadline ||= Time.at(@raw_job.deadline / 1000.0).utc.freeze
-    end
-
-    # Job variables with indifferent access and method-style access.
-    # Returns a frozen hash that supports both hash[:key] and hash.key access.
-    # Nested hashes also support method access.
-    #
-    # @return [ActiveSupport::HashWithIndifferentAccess] frozen hash with method access
-    def variables
-      @variables ||= parse_and_freeze_hash(@raw_job.variables, "variables")
-    end
-
-    # Job custom headers with indifferent access and method-style access.
-    # Returns a frozen hash that supports both hash[:key] and hash.key access.
-    #
-    # @return [ActiveSupport::HashWithIndifferentAccess] frozen hash with method access
-    def headers
-      @headers ||= parse_and_freeze_hash(@raw_job.customHeaders, "headers")
+      @deadline_override || payload.deadline
     end
 
     # Complete the job with optional output variables.
@@ -113,29 +131,35 @@ module Busybee
     # @return [Object] Response from complete_job operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def complete!(vars = {})
+      check_status_change_allowed!(:complete)
       raise Busybee::JobAlreadyHandled, "Cannot complete job #{key} because it is already #{status}" unless ready?
 
-      @client.complete_job(key, vars: vars).tap do
-        @status = :complete
-        # [hook: job.completed]
+      resolution.set_result(vars)
+      @client.complete_job(key, vars: resolution.result || {}).tap do
+        resolve!(:complete)
       end
     end
 
     # Fail the job with an error message.
     #
-    # @param error_message_or_exception [String, Exception] Error message or exception
+    # @param message_or_exception [String, Exception] Error message or exception
     # @param retries [Integer, nil] Override retry count
     # @param backoff [Integer, ActiveSupport::Duration, nil] Backoff before retry
     # @return [Object] Response from fail_job operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
-    def fail!(error_message_or_exception, retries: nil, backoff: nil)
+    def fail!(message_or_exception, retries: nil, backoff: nil)
+      check_status_change_allowed!(:fail)
       raise Busybee::JobAlreadyHandled, "Cannot fail job #{key} because it is already #{status}" unless ready?
 
-      message = format_error_message(error_message_or_exception)
+      message = format_error_message(message_or_exception)
 
       @client.fail_job(key, message, retries: retries, backoff: backoff).tap do
-        @status = :failed
-        # [hook: job.failed]
+        error_data = if message_or_exception.is_a?(Exception)
+                       { error: message_or_exception }
+                     else
+                       { error_message: message }
+                     end
+        resolve!(:failed, **error_data)
       end
     end
 
@@ -146,6 +170,7 @@ module Busybee
     # @return [Object] Response from throw_bpmn_error operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def throw_bpmn_error!(code_or_exception, message = "")
+      check_status_change_allowed!(:throw_bpmn_error)
       unless ready?
         raise Busybee::JobAlreadyHandled,
               "Cannot throw BPMN error on job #{key} because it is already #{status}"
@@ -155,8 +180,9 @@ module Busybee
       message = code_or_exception.message if code_or_exception.is_a?(Exception) && message.empty?
 
       @client.throw_bpmn_error(key, code, message: message).tap do
-        @status = :error
-        # [hook: job.error]
+        error_data = { error_code: code, error_message: message }
+        error_data[:error] = code_or_exception if code_or_exception.is_a?(Exception)
+        resolve!(:error, **error_data)
       end
     end
 
@@ -179,49 +205,54 @@ module Busybee
     def update_timeout(duration)
       duration_seconds = duration.is_a?(ActiveSupport::Duration) ? duration.in_seconds : duration / 1000.0
       @client.update_job_timeout(key, duration).tap do
-        @deadline = (Time.now.utc + duration_seconds).freeze
+        @deadline_override = (Time.now.utc + duration_seconds).freeze
       end
-    end
-
-    # Is the job ready for processing?
-    # @return [Boolean]
-    def ready?
-      status == :ready
-    end
-
-    # Has the job been completed?
-    # @return [Boolean]
-    def complete?
-      status == :complete
-    end
-
-    # Has the job failed?
-    # @return [Boolean]
-    def failed?
-      status == :failed
-    end
-
-    # Has the job thrown a BPMN error?
-    # @return [Boolean]
-    def error?
-      status == :error
     end
 
     private
 
-    def parse_and_freeze_hash(json_string, attribute_name)
-      Busybee::Serialization.from_json(json_string)
-    rescue Busybee::InvalidJobJson => e
-      # Re-raise with attribute context for better error messages
-      message = "Failed to parse job #{attribute_name}: #{e.cause.message}"
-      raise Busybee::InvalidJobJson, message, e.backtrace, cause: e.cause
+    attr_reader :activation, :resolution
+
+    def raw_payload_tags
+      {
+        job_type: type,
+        bpmn_process_id: bpmn_process_id,
+        element_id: element_id,
+        retries: retries
+      }.compact
     end
 
-    def format_error_message(error_message_or_exception)
-      return error_message_or_exception unless error_message_or_exception.is_a?(Exception)
+    def raw_payload_logging
+      raw_payload_tags.merge(
+        job_key: key,
+        process_instance_key: process_instance_key,
+        deadline: deadline
+      ).compact
+    end
 
-      message = "[#{error_message_or_exception.class.name}] #{error_message_or_exception.message}"
-      if (cause = error_message_or_exception.cause)
+    # Mark the job resolved: stamp resolved_at, advance the Resolution PORO
+    # to the terminal status (fire-once enforced), capture resolution data.
+    # after_job firing happens uniformly post-perform in Worker.perform_job's
+    # ensure, not here.
+    def resolve!(status, **data)
+      @timestamps.stamp!(:resolved_at)
+      resolution.resolve_to(status)
+      set_context(**data)
+    end
+
+    def check_status_change_allowed!(operation)
+      return unless @status_changes_prevented
+
+      raise Busybee::StatusChangeOutsidePerform,
+            "Cannot #{operation} job #{key} outside perform — " \
+            "status changes are not allowed during hook execution"
+    end
+
+    def format_error_message(message_or_exception)
+      return message_or_exception unless message_or_exception.is_a?(Exception)
+
+      message = "[#{message_or_exception.class.name}] #{message_or_exception.message}"
+      if (cause = message_or_exception.cause)
         message += " (caused by: [#{cause.class.name}] #{cause.message})"
       end
       message

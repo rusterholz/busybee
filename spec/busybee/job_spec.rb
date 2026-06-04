@@ -67,6 +67,10 @@ RSpec.describe Busybee::Job do
       expect(job.bpmn_process_id).to eq("assign_delivery_driver")
     end
 
+    it "delegates #element_id to raw job" do
+      expect(job.element_id).to eq("task-find-driver")
+    end
+
     it "delegates #retries to raw job" do
       expect(job.retries).to eq(3)
     end
@@ -335,17 +339,17 @@ RSpec.describe Busybee::Job do
       end
 
       it "returns false when status is :complete" do
-        allow(job).to receive(:status).and_return(:complete)
+        job.send(:resolution).resolve_to(:complete)
         expect(job).not_to be_ready
       end
 
       it "returns false when status is :failed" do
-        allow(job).to receive(:status).and_return(:failed)
+        job.send(:resolution).resolve_to(:failed)
         expect(job).not_to be_ready
       end
 
       it "returns false when status is :error" do
-        allow(job).to receive(:status).and_return(:error)
+        job.send(:resolution).resolve_to(:error)
         expect(job).not_to be_ready
       end
     end
@@ -356,7 +360,7 @@ RSpec.describe Busybee::Job do
       end
 
       it "returns true when status is :complete" do
-        allow(job).to receive(:status).and_return(:complete)
+        job.send(:resolution).resolve_to(:complete)
         expect(job).to be_complete
       end
     end
@@ -367,7 +371,7 @@ RSpec.describe Busybee::Job do
       end
 
       it "returns true when status is :failed" do
-        allow(job).to receive(:status).and_return(:failed)
+        job.send(:resolution).resolve_to(:failed)
         expect(job).to be_failed
       end
     end
@@ -378,7 +382,7 @@ RSpec.describe Busybee::Job do
       end
 
       it "returns true when status is :error" do
-        allow(job).to receive(:status).and_return(:error)
+        job.send(:resolution).resolve_to(:error)
         expect(job).to be_error
       end
     end
@@ -743,6 +747,97 @@ RSpec.describe Busybee::Job do
     end
   end
 
+  describe "status-change prevention" do
+    describe "#_prevent_status_changes!" do
+      it "causes #complete! to raise StatusChangeOutsidePerform" do
+        allow(client).to receive(:complete_job)
+        job._prevent_status_changes!
+
+        expect { job.complete! }.to raise_error(
+          Busybee::StatusChangeOutsidePerform,
+          /outside perform/i
+        )
+      end
+
+      it "causes #fail! to raise StatusChangeOutsidePerform" do
+        allow(client).to receive(:fail_job)
+        job._prevent_status_changes!
+
+        expect { job.fail!("boom") }.to raise_error(
+          Busybee::StatusChangeOutsidePerform,
+          /outside perform/i
+        )
+      end
+
+      it "causes #throw_bpmn_error! to raise StatusChangeOutsidePerform" do
+        allow(client).to receive(:throw_bpmn_error)
+        job._prevent_status_changes!
+
+        expect { job.throw_bpmn_error!(:some_code) }.to raise_error(
+          Busybee::StatusChangeOutsidePerform,
+          /outside perform/i
+        )
+      end
+
+      it "does not change status when raising" do
+        allow(client).to receive(:complete_job)
+        job._prevent_status_changes!
+
+        expect { job.complete! rescue nil }.not_to change(job, :status) # rubocop:disable Style/RescueModifier
+      end
+    end
+
+    describe "#_allow_status_changes!" do
+      it "re-enables status changes after prevention" do
+        allow(client).to receive(:complete_job)
+        job._prevent_status_changes!
+        job._allow_status_changes!
+
+        expect { job.complete! }.not_to raise_error
+      end
+    end
+  end
+
+  describe "does not fire job lifecycle hooks" do
+    # complete!/fail!/throw_bpmn_error! perform the gRPC call and update
+    # the Resolution PORO. Hook firing (including after_job) is a
+    # Worker.perform_job concern — one ensure block, post-perform. These
+    # methods invoke no hook callbacks themselves, so they also cannot
+    # raise Busybee::Worker::Shutdown even with a shutdown_on-classed
+    # after_job hook registered.
+    after { Busybee::Hooks.reset! }
+
+    it "#complete! does not fire after_job" do
+      allow(client).to receive(:complete_job)
+      invocations = 0
+      Busybee.after_job { invocations += 1 }
+
+      job.complete!
+
+      expect(invocations).to eq(0)
+    end
+
+    it "#fail! does not fire after_job" do
+      allow(client).to receive(:fail_job)
+      invocations = 0
+      Busybee.after_job { invocations += 1 }
+
+      job.fail!("boom")
+
+      expect(invocations).to eq(0)
+    end
+
+    it "#throw_bpmn_error! does not fire after_job" do
+      allow(client).to receive(:throw_bpmn_error)
+      invocations = 0
+      Busybee.after_job { invocations += 1 }
+
+      job.throw_bpmn_error!(:some_code)
+
+      expect(invocations).to eq(0)
+    end
+  end
+
   describe "#update_retries" do
     it "calls client.update_job_retries with job key and count" do
       allow(client).to receive(:update_job_retries)
@@ -815,35 +910,35 @@ RSpec.describe Busybee::Job do
   describe "timestamps" do
     describe "#stamp!" do
       it "sets both monotonic and UTC timestamps" do
-        job.stamp!(:activated_at)
+        job.timestamps.stamp!(:activated_at)
 
-        expect(job.activated_at).to be_a(Float)
-        expect(job.activated_at_utc).to be_a(Time)
-        expect(job.activated_at_utc).to be_utc
+        expect(job.activated_at(:monotonic)).to be_a(Float)
+        expect(job.activated_at).to be_a(Time)
+        expect(job.activated_at).to be_utc
       end
 
       it "returns self for chaining" do
-        expect(job.stamp!(:activated_at)).to be(job)
+        expect(job.timestamps.stamp!(:activated_at)).to be(job.timestamps)
       end
 
       it "uses monotonic clock for the base timestamp" do
         before = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        job.stamp!(:activated_at)
+        job.timestamps.stamp!(:activated_at)
         after = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        expect(job.activated_at(:monotonic)).to be_between(before, after)
+      end
+
+      it "captures UTC wall clock for the utc timestamp" do
+        before = Time.now.utc
+        job.timestamps.stamp!(:activated_at)
+        after = Time.now.utc
 
         expect(job.activated_at).to be_between(before, after)
       end
 
-      it "captures UTC wall clock for the _utc timestamp" do
-        before = Time.now.utc
-        job.stamp!(:activated_at)
-        after = Time.now.utc
-
-        expect(job.activated_at_utc).to be_between(before, after)
-      end
-
       it "raises for unknown timestamp names" do
-        expect { job.stamp!(:bogus_at) }.to raise_error(ArgumentError, /bogus_at/)
+        expect { job.timestamps.stamp!(:bogus_at) }.to raise_error(ArgumentError, /bogus_at/)
       end
     end
 
@@ -852,18 +947,119 @@ RSpec.describe Busybee::Job do
         %i[activated_at execution_started_at perform_started_at
            perform_finished_at resolved_at executed_at].each do |name|
           expect(job.public_send(name)).to be_nil, "expected #{name} to be nil"
-          expect(job.public_send(:"#{name}_utc")).to be_nil, "expected #{name}_utc to be nil"
+          expect(job.public_send(name, :monotonic)).to be_nil, "expected #{name}(:monotonic) to be nil"
         end
       end
 
       it "supports all six timestamp pairs" do
         %i[activated_at execution_started_at perform_started_at
            perform_finished_at resolved_at executed_at].each do |name|
-          job.stamp!(name)
-          expect(job.public_send(name)).to be_a(Float), "expected #{name} to be Float"
-          expect(job.public_send(:"#{name}_utc")).to be_a(Time), "expected #{name}_utc to be Time"
+          job.timestamps.stamp!(name)
+          expect(job.public_send(name, :monotonic)).to be_a(Float), "expected #{name}(:monotonic) to be Float"
+          expect(job.public_send(name)).to be_a(Time), "expected #{name} to be Time"
         end
       end
+    end
+  end
+
+  describe "predicate aliases (Phase 2 hook surface)" do
+    it "exposes completed? as an alias for complete?" do
+      job.send(:resolution).resolve_to(:complete)
+      expect(job).to be_completed
+    end
+
+    it "exposes errored? as an alias for error?" do
+      job.send(:resolution).resolve_to(:error)
+      expect(job).to be_errored
+    end
+  end
+
+  describe "#error_message" do
+    it "returns the explicit error_message when set" do
+      job.send(:resolution).resolve_to(:failed)
+      job.send(:resolution).harvest!(error_message: "explicit")
+      expect(job.error_message).to eq("explicit")
+    end
+
+    it "falls back to error.message when error_message is unset" do
+      job.send(:resolution).resolve_to(:failed)
+      job.send(:resolution).harvest!(error: RuntimeError.new("from-error"))
+      expect(job.error_message).to eq("from-error")
+    end
+
+    it "is nil when both are unset" do
+      expect(job.error_message).to be_nil
+    end
+  end
+
+  describe "computed durations" do
+    {
+      perform_duration_ms: %i[perform_started_at perform_finished_at],
+      resolution_duration_ms: %i[execution_started_at resolved_at],
+      execution_duration_ms: %i[execution_started_at executed_at],
+      buffer_latency_ms: %i[activated_at execution_started_at],
+      total_duration_ms: %i[activated_at resolved_at],
+      post_resolution_ms: %i[resolved_at executed_at],
+      setup_duration_ms: %i[execution_started_at perform_started_at]
+    }.each do |duration_method, (from, to)|
+      describe "##{duration_method}" do
+        it "is a positive Float when both #{from} and #{to} are stamped" do
+          job.timestamps.stamp!(from)
+          sleep 0.001
+          job.timestamps.stamp!(to)
+
+          expect(job.public_send(duration_method)).to be_a(Float)
+          expect(job.public_send(duration_method)).to be > 0
+        end
+
+        it "is nil when #{from} is missing" do
+          job.timestamps.stamp!(to)
+          expect(job.public_send(duration_method)).to be_nil
+        end
+
+        it "is nil when #{to} is missing" do
+          job.timestamps.stamp!(from)
+          expect(job.public_send(duration_method)).to be_nil
+        end
+      end
+    end
+  end
+
+  describe "#context_tags" do
+    it "merges raw payload + activation + resolution + timestamps + context tags" do
+      worker_class = stub_const("AggWorker", Class.new)
+      job.set_context(source: :poll, worker: worker_class.allocate)
+      job.send(:resolution).resolve_to(:complete)
+      job.context[:user_tier] = "premium" # context_tags drops this
+
+      expect(job.context_tags).to include(
+        job_type: job.type,
+        bpmn_process_id: job.bpmn_process_id,
+        source: :poll,
+        worker_class: "AggWorker",
+        status: :complete
+      )
+      expect(job.context_tags).not_to have_key(:user_tier)
+    end
+  end
+
+  describe "#logging_context" do
+    it "is a strict superset of context_tags" do
+      job.set_context(source: :stream, buffer_size: 3)
+      job.send(:resolution).resolve_to(:complete)
+      job.context[:correlation_id] = "abc-123"
+      job.context[:span] = Object.new # logging_context drops this
+
+      tags = job.context_tags
+      logging = job.logging_context
+
+      tags.each do |key, value|
+        expect(logging[key]).to eq(value), "expected logging_context[#{key.inspect}] to mirror context_tags"
+      end
+      expect(logging[:job_key]).to eq(job.key) # high-card, logging-only
+      expect(logging[:buffer_size]).to eq(3)
+      expect(logging[:correlation_id]).to eq("abc-123") # primitive scratch
+      expect(logging).not_to have_key(:span) # complex object dropped
     end
   end
 end
