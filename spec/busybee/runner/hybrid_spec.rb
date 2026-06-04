@@ -7,7 +7,7 @@ RSpec.describe Busybee::Runner::Hybrid do
   subject(:runner) { described_class.new(worker_class, runtime_config: runtime_config, client: client) }
 
   let(:client) { instance_double(Busybee::Client) }
-  let(:job) { instance_double(Busybee::Job, key: 1, retries: 3, ready?: true) }
+  let(:job) { build_test_job(key: 1, retries: 3) }
   let(:stream) { instance_double(Busybee::JobStream) }
   let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
 
@@ -103,7 +103,7 @@ RSpec.describe Busybee::Runner::Hybrid do
     end
 
     it "starts a pump thread that pushes stream jobs into the buffer" do
-      streamed_job = instance_double(Busybee::Job, key: 42, retries: 1, ready?: true)
+      streamed_job = build_test_job(key: 42, retries: 1)
       allow(streamed_job).to receive(:fail!)
       queue = runner.instance_variable_get(:@job_buffer)
 
@@ -196,7 +196,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       end
 
       it "processes polled jobs via worker_class.perform_job" do
-        polled_job = instance_double(Busybee::Job, key: 10, retries: 1, ready?: true)
+        polled_job = build_test_job(key: 10, retries: 1)
 
         stub_stream_and_drain! do |_type, **_opts, &block|
           block.call(polled_job)
@@ -257,8 +257,8 @@ RSpec.describe Busybee::Runner::Hybrid do
       end
 
       it "drains queued stream jobs after each polled job" do
-        polled_job = instance_double(Busybee::Job, key: 10, retries: 1, ready?: true)
-        streamed_job = instance_double(Busybee::Job, key: 20, retries: 1, ready?: true)
+        polled_job = build_test_job(key: 10, retries: 1)
+        streamed_job = build_test_job(key: 20, retries: 1)
         process_order = []
 
         allow(client).to receive(:open_job_stream).and_return(stream)
@@ -305,7 +305,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
     context "with buffer phase" do
       it "processes streamed jobs from the buffer after drain completes" do
-        streamed_job = instance_double(Busybee::Job, key: 50, retries: 1, ready?: true)
+        streamed_job = build_test_job(key: 50, retries: 1)
         process_order = []
 
         allow(client).to receive(:open_job_stream).and_return(stream)
@@ -328,7 +328,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       end
 
       it "blocks until a job arrives in the buffer" do
-        streamed_job = instance_double(Busybee::Job, key: 77, retries: 1, ready?: true)
+        streamed_job = build_test_job(key: 77, retries: 1)
 
         allow(client).to receive_messages(open_job_stream: stream, with_each_job: 0)
         allow(stream).to receive(:each) { stream_gate.wait }
@@ -350,7 +350,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
     context "with graceful shutdown" do
       it "fails remaining queued jobs during shutdown" do
-        leftover = instance_double(Busybee::Job, key: 88, retries: 2, ready?: true)
+        leftover = build_test_job(key: 88, retries: 2)
         allow(leftover).to receive(:fail!)
 
         allow(client).to receive(:open_job_stream).and_return(stream)
@@ -374,7 +374,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
       it "uses the worker's configured backoff during shutdown" do
         worker_class.backoff 30_000
-        leftover = instance_double(Busybee::Job, key: 1, retries: 3, ready?: true)
+        leftover = build_test_job(key: 1, retries: 3)
         allow(leftover).to receive(:fail!)
 
         allow(client).to receive(:open_job_stream).and_return(stream)
@@ -397,8 +397,8 @@ RSpec.describe Busybee::Runner::Hybrid do
 
       it "fails polled jobs yielded after stop! during drain" do
         jobs = [
-          instance_double(Busybee::Job, key: 1, retries: 3, ready?: true),
-          instance_double(Busybee::Job, key: 2, retries: 5, ready?: true)
+          build_test_job(key: 1, retries: 3),
+          build_test_job(key: 2, retries: 5)
         ]
         allow(jobs[1]).to receive(:fail!)
 
@@ -428,7 +428,7 @@ RSpec.describe Busybee::Runner::Hybrid do
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
-        bad_job = instance_double(Busybee::Job, key: 99, retries: 1, ready?: true)
+        bad_job = build_test_job(key: 99, retries: 1)
         allow(bad_job).to receive(:fail!).and_raise(StandardError, "grpc gone")
 
         allow(client).to receive(:open_job_stream).and_return(stream)
@@ -520,7 +520,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
   describe "#kill!" do
     it "flushes queued stream jobs without failing them" do
-      queued_job = instance_double(Busybee::Job, key: 99, retries: 3, ready?: true)
+      queued_job = build_test_job(key: 99, retries: 3)
       allow(queued_job).to receive(:fail!)
       allow(worker_class).to receive(:perform_job)
 
@@ -540,8 +540,8 @@ RSpec.describe Busybee::Runner::Hybrid do
     end
 
     it "still completes the in-flight polled job but fails subsequently-yielded ones" do
-      inflight = instance_double(Busybee::Job, key: 1, retries: 3, ready?: true)
-      yielded_after = instance_double(Busybee::Job, key: 2, retries: 5, ready?: true)
+      inflight = build_test_job(key: 1, retries: 3)
+      yielded_after = build_test_job(key: 2, retries: 5)
       allow(yielded_after).to receive(:fail!)
 
       allow(client).to receive(:open_job_stream).and_return(stream)
@@ -559,6 +559,30 @@ RSpec.describe Busybee::Runner::Hybrid do
       expect(worker_class).to have_received(:perform_job).with(inflight)
       expect(worker_class).not_to have_received(:perform_job).with(yielded_after)
       expect(yielded_after).to have_received(:fail!)
+    end
+  end
+
+  describe "on_job_activated wiring (drain phase)" do
+    after { Busybee::Hooks.reset! }
+
+    it "fires on_job_activated with source: :poll during backlog drain" do
+      polled_job = build_test_job(key: 10, retries: 1)
+      captured = nil
+      Busybee.on_job_activated { |job| captured = job }
+
+      allow(client).to receive(:open_job_stream).and_return(stream)
+      allow(stream).to receive(:each) { stream_gate.wait }
+      allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
+        block.call(polled_job)
+        runner.stop!
+        1
+      end
+      allow(worker_class).to receive(:perform_job)
+
+      runner.run!
+
+      expect(captured.source).to eq(:poll)
+      expect(captured.buffer_size).to be_nil
     end
   end
 end

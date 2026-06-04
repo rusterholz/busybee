@@ -62,6 +62,14 @@ module Busybee
 
       private
 
+      def current_buffer_size
+        return nil if @job_buffer.nil?
+
+        # Discount the :stop sentinel that stop! pushes into the buffer so
+        # the depth reported during shutdown reflects only real jobs.
+        @job_buffer.size - (stopping? ? 1 : 0)
+      end
+
       def run_with_buffer
         @pump_thread = Thread.new { pump_stream_into_buffer }
         process_buffered_jobs(blocking: true)
@@ -74,12 +82,13 @@ module Busybee
         shutdown_error = nil
 
         @stream.each do |job|
+          activate_job(job, source: :stream)
           if stopping?
             handle_shutdown_job(job)
             break
           end
 
-          @worker_class.perform_job(job)
+          execute_job(job)
         rescue Busybee::Worker::Shutdown => e
           # [hook: runner.shutdown]
           shutdown_error = e
@@ -96,6 +105,7 @@ module Busybee
         @stream.each do |job|
           break if stopping?
 
+          activate_job(job, source: :stream, buffer_size: @job_buffer.size)
           @job_buffer.push(job)
           sleep(delay.to_f / 1000) if delay
         end
@@ -125,7 +135,7 @@ module Busybee
           if stopping?
             handle_shutdown_job(job)
           else
-            @worker_class.perform_job(job)
+            execute_job(job)
           end
         rescue ThreadError
           break # buffer empty (non-blocking only)

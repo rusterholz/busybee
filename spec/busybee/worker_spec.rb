@@ -11,6 +11,7 @@ RSpec.describe Busybee::Worker do
       type: "process_order",
       processInstanceKey: 789012,
       bpmnProcessId: "order-workflow",
+      elementId: "service_task_1",
       retries: 3,
       deadline: 1640000000000,
       variables: '{"order_id":"abc-123"}',
@@ -37,9 +38,8 @@ RSpec.describe Busybee::Worker do
   describe ".perform_job" do
     before { allow(client).to receive(:complete_job) }
 
-    it "calls perform on a new instance and returns the result" do
-      result = performing_worker.perform_job(job)
-      expect(result).to eq(processed: true)
+    it "calls perform on a new instance and returns the result hash" do
+      expect(performing_worker.perform_job(job)).to eq("processed" => true)
     end
 
     it "raises NotImplementedError when perform is not overridden" do
@@ -187,7 +187,11 @@ RSpec.describe Busybee::Worker do
 
         expect { worker.perform_job(job) }.not_to raise_error
         expect(job).to be_ready
-        expect(logger).to have_received(:warn).with(/Unhandled error.*fail_job_on_error is off.*will timeout/)
+        expect(logger).to have_received(:warn).with(
+          Regexp.new("Unhandled error.*fail_job_on_error is off.*" \
+                     "\\[RuntimeError\\] unhandled \\(at .+/worker_spec\\.rb:\\d+.+" \
+                     "\\. Job will timeout and retry\\.")
+        )
       end
     end
 
