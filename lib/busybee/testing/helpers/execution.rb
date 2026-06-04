@@ -38,11 +38,16 @@ module Busybee
         # @param headers [Hash] custom headers
         # @param bpmn_process_id [String] BPMN process ID
         # @param retries [Integer] retry count
+        # @param key [Integer] job key; defaults to a random value. Pass
+        #   explicitly when a test correlates the same job by key across
+        #   multiple assertions or wants a stable identifier in failure output.
         # @return [Busybee::Job]
-        def build_test_job(type: "test", variables: {}, headers: {},
-                           bpmn_process_id: "test-process", retries: 3)
+        def build_test_job(type: "test", variables: {}, headers: {}, # rubocop:disable Metrics/ParameterLists
+                           bpmn_process_id: "test-process", retries: 3,
+                           key: rand(100_000..999_999))
           client = stub_client
           raw_job = stub_raw_job(
+            key: key,
             type: type,
             variables: variables,
             headers: headers,
@@ -118,15 +123,16 @@ module Busybee
           )
         end
 
-        def stub_raw_job(type:, variables:, headers:, bpmn_process_id:, retries:)
+        def stub_raw_job(type:, variables:, headers:, bpmn_process_id:, retries:, key:) # rubocop:disable Metrics/ParameterLists
           # Plain double because protobuf generates field accessors dynamically
           # via descriptors, which instance_double can't verify against.
           double(
             "Busybee::GRPC::ActivatedJob",
-            key: rand(100_000..999_999),
+            key: key,
             type: type,
             processInstanceKey: rand(100_000..999_999),
             bpmnProcessId: bpmn_process_id,
+            elementId: "test-element",
             retries: retries,
             deadline: (Time.now.to_i + 300) * 1000,
             variables: Busybee::Serialization.to_json(variables),

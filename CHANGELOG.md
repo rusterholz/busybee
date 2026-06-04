@@ -7,6 +7,7 @@
 - **Expose Client on Job + Worker Delegation** – `job.client` returns the `Busybee::Client` instance; `client` in workers delegates to `job.client` for direct API access (e.g., message correlation)
 - **Strict Output Validation** – Workers validate outputs against declared `output` definitions by default. Undeclared output keys raise `Busybee::UndeclaredOutput`. Opt out per-worker with `strict_outputs false` or gem-wide via `Busybee.default_strict_outputs = false`
   - Manual `complete!` calls also validate outputs
+- **`build_test_job` accepts `key:`** – `Busybee::Testing::Helpers#build_test_job` gains an optional `key:` keyword argument for tests that need a stable, known job key (e.g., correlating the same job across multiple assertions). Defaults to a random integer when omitted
 
 ### Breaking Changes:
 

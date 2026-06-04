@@ -53,6 +53,16 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
       expect(job.retries).to eq(5)
     end
 
+    it "uses the provided key" do
+      job = build_test_job(key: 9876)
+      expect(job.key).to eq(9876)
+    end
+
+    it "defaults to a random key when none is given" do
+      keys = Array.new(5) { build_test_job.key }
+      expect(keys.uniq.size).to be > 1
+    end
+
     describe "stub client operations" do
       it "accepts complete!" do
         job = build_test_job
@@ -88,7 +98,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
     context "with keyword arguments" do
       it "returns the perform result" do
         result = execute_worker(worker_class, variables: { order_id: 1 })
-        expect(result).to eq(status: "done")
+        expect(result).to eq("status" => "done")
       end
 
       it "auto-completes the job by default" do
@@ -102,7 +112,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
       it "uses the provided job" do
         job = build_test_job(variables: { order_id: 1 })
         result = execute_worker(worker_class, job: job)
-        expect(result).to eq(status: "done")
+        expect(result).to eq("status" => "done")
         expect(job).to be_complete
       end
     end
@@ -184,7 +194,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
       it "returns the result but leaves job as ready" do
         job = build_test_job
         result = execute_worker(no_autocomplete_worker, job: job)
-        expect(result).to eq(status: "pending_review")
+        expect(result).to eq("status" => "pending_review")
         expect(job).to be_ready
       end
     end
@@ -210,7 +220,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
 
       it "succeeds when required variables are present" do
         result = execute_worker(validated_worker, variables: { order_id: 42 })
-        expect(result).to eq(order_id: 42)
+        expect(result).to eq("order_id" => 42)
       end
     end
 
