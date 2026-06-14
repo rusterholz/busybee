@@ -71,6 +71,12 @@ RSpec/NamedSubject:
 RSpec/NestedGroups:
   Max: 5
 
+RSpec/Output:
+  # The demo app lives under spec/demo, so its app code (seeds, rake tasks)
+  # writes to stdout legitimately and is not a spec suite.
+  Exclude:
+    - "spec/demo/**/*"
+
 RSpec/SpecFilePathFormat:
   Exclude:
     - "spec/integration/**/*"
@@ -82,6 +88,11 @@ Style/Documentation:
   Enabled: false
 
 Style/DoubleNegation:
+  Enabled: false
+
+Style/EmptyClassDefinition:
+  # The error hierarchy is deliberately defined with the compact
+  # `Foo = Class.new(Error)` form (see lib/busybee/error.rb).
   Enabled: false
 
 Style/ModuleFunction:

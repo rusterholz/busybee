@@ -82,7 +82,7 @@ module Busybee
 
     # Clear all registered hooks. Intended for test isolation.
     def self.reset!
-      @hooks = HOOK_TYPES.each_with_object({}) { |type, h| h[type] = [] }
+      @hooks = HOOK_TYPES.to_h { |type| [type, []] }
     end
 
     reset!
