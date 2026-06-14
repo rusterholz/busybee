@@ -76,7 +76,7 @@ GEM
       drb (~> 2.0)
       prism (~> 1.5)
     openssl (4.0.2)
-    parallel (2.1.0)
+    parallel (1.28.0)
     parser (3.3.11.1)
       ast (~> 2.4.1)
       racc
@@ -160,6 +160,7 @@ DEPENDENCIES
   busybee!
   grpc-tools (~> 1.76)
   openssl (>= 3.2.2)
+  parallel (< 2.0)
   pry-byebug
   rake (~> 13.0)
   rspec (~> 3.13)

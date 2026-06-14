@@ -9,6 +9,7 @@ gem "bundler", "~> 2.7"
 gem "concurrent-ruby", "~> 1.3.6"
 gem "grpc-tools", "~> 1.76"
 gem "openssl", ">= 3.2.2"
+gem "parallel", "< 2.0"
 gem "pry-byebug", platforms: :mri
 gem "rake", "~> 13.0"
 gem "rspec", "~> 3.13"
