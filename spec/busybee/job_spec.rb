@@ -1163,6 +1163,13 @@ RSpec.describe Busybee::Job do
       )
       expect(job.context_tags).not_to have_key(:user_tier)
     end
+
+    it "reflects the update_retries override, not the activation-time value" do
+      allow(client).to receive(:update_job_retries)
+      job.update_retries(5)
+
+      expect(job.context_tags[:retries]).to eq(5)
+    end
   end
 
   describe "#logging_context" do
@@ -1182,6 +1189,15 @@ RSpec.describe Busybee::Job do
       expect(logging[:buffer_size]).to eq(3)
       expect(logging[:correlation_id]).to eq("abc-123") # primitive scratch
       expect(logging).not_to have_key(:span) # complex object dropped
+    end
+
+    it "reflects the update_timeout override in deadline" do
+      allow(client).to receive(:update_job_timeout)
+      original = job.logging_context[:deadline]
+      job.update_timeout(60_000)
+
+      expect(job.logging_context[:deadline]).to eq(job.deadline)
+      expect(job.logging_context[:deadline]).not_to eq(original)
     end
   end
 end

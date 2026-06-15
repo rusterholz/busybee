@@ -55,6 +55,26 @@ module Busybee
         @headers ||= parse_and_freeze_hash(@raw_job.customHeaders, "headers")
       end
 
+      # Low-cardinality projection of the immutable payload fields (suitable for
+      # metric labels). Omits retries/deadline: those carry Job-level overrides
+      # (update_retries / update_timeout), so Job contributes their effective
+      # values to the aggregate projection.
+      def context_tags
+        {
+          job_type: type,
+          bpmn_process_id: bpmn_process_id,
+          element_id: element_id
+        }.compact
+      end
+
+      # High-cardinality projection: context_tags plus the job identifiers.
+      def logging_context
+        context_tags.merge(
+          job_key: key,
+          process_instance_key: process_instance_key
+        ).compact
+      end
+
       private
 
       def parse_and_freeze_hash(json_string, attribute_name)

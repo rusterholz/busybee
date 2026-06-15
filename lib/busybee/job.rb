@@ -77,13 +77,13 @@ module Busybee
       self
     end
 
-    # Low-cardinality projection of the job's state. Each component contributes
-    # only what it knows is low-card (suitable for metric labels or other
-    # bounded-dimension contexts). Aggregated by merging contributions; later
-    # entries override earlier on key collision (raw payload < activation <
-    # resolution < timestamps < context).
+    # Low-cardinality projection of the job's state (suitable for metric
+    # labels). Job prepends the override-aware retries it owns, then merges
+    # each PORO's contribution. Later entries override earlier on key collision
+    # (retries < payload < activation < resolution < timestamps < context).
     def context_tags
-      raw_payload_tags.
+      { retries: retries }.compact.
+        merge(payload.context_tags).
         merge(activation.context_tags).
         merge(resolution.context_tags).
         merge(@timestamps.context_tags).
@@ -91,11 +91,12 @@ module Busybee
     end
 
     # High-cardinality projection of the job's state. Strict superset of
-    # context_tags per component: each component's logging_context contains
-    # everything its context_tags does plus additional unbounded-dimension
-    # values (job_key, process_instance_key, result, timestamps, scratch).
+    # context_tags: each component's logging_context contains everything its
+    # context_tags does plus additional unbounded-dimension values. Job prepends
+    # the override-aware retries and deadline it owns.
     def logging_context
-      raw_payload_logging.
+      { retries: retries, deadline: deadline }.compact.
+        merge(payload.logging_context).
         merge(activation.logging_context).
         merge(resolution.logging_context).
         merge(@timestamps.logging_context).
@@ -215,23 +216,6 @@ module Busybee
     private
 
     attr_reader :activation, :resolution
-
-    def raw_payload_tags
-      {
-        job_type: type,
-        bpmn_process_id: bpmn_process_id,
-        element_id: element_id,
-        retries: retries
-      }.compact
-    end
-
-    def raw_payload_logging
-      raw_payload_tags.merge(
-        job_key: key,
-        process_instance_key: process_instance_key,
-        deadline: deadline
-      ).compact
-    end
 
     # Mark the job resolved: stamp resolved_at, advance the Resolution PORO
     # to the terminal status (fire-once enforced). Outcome data (result /

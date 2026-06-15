@@ -80,4 +80,35 @@ RSpec.describe Busybee::Job::Payload do
         to raise_error(Busybee::InvalidJobJson, /Failed to parse job headers/)
     end
   end
+
+  describe "#context_tags" do
+    it "projects the low-cardinality immutable payload fields" do
+      expect(payload.context_tags).to eq(
+        job_type: "process_order",
+        bpmn_process_id: "order-flow",
+        element_id: "Activity_HandleOrder"
+      )
+    end
+
+    it "omits retries and deadline (Job overlays those override-aware values)" do
+      expect(payload.context_tags).not_to have_key(:retries)
+      expect(payload.context_tags).not_to have_key(:deadline)
+    end
+  end
+
+  describe "#logging_context" do
+    it "extends context_tags with the high-cardinality identifiers" do
+      expect(payload.logging_context).to eq(
+        job_type: "process_order",
+        bpmn_process_id: "order-flow",
+        element_id: "Activity_HandleOrder",
+        job_key: 12_345,
+        process_instance_key: 67_890
+      )
+    end
+
+    it "omits deadline (Job overlays the override-aware value)" do
+      expect(payload.logging_context).not_to have_key(:deadline)
+    end
+  end
 end
