@@ -6,7 +6,7 @@ Maintainer-facing reference tracing every salient moment in a job's execution fr
 
 Short forms in this document use compact line-per-moment notation. Each line is either a labeled flag (`GRPC`, `TIMESTAMP`, `HOOK`, `MIDDLEWARE`, `VALIDATION`, `STATUS CHANGE`) marking a category of user-facing salience, or a `-- text --` item marking an uncategorized point of interest. Error-semantic annotations on safe/unsafe hooks and middleware:
 
-- `(safe)` — errors are logged and swallowed (`run_hooks` safe-mode).
+- `(safe)` — errors are logged and swallowed (`run` safe-mode).
 - `(safe*)` — post-resolution period; errors propagate but the resolution stands and the lifecycle continues to ensure-block hooks.
 - `(unsafe)` — errors propagate; uncaught errors in Variants A/B trigger autofail (Variant C).
 
@@ -47,7 +47,7 @@ TIMESTAMP: perform_started_at
    - HOOKS: `on_job_activated` (safe — errors are logged and swallowed).
 3. If the receive point is `Streaming#pump_stream_into_buffer`, the pump thread pushes the job onto `@job_buffer` and a consumer thread pops it. The Job carries all its state (POROs, timestamps, status) across the thread boundary.
 4. `Runner#execute_job(job)`:
-   - HOOKS: `around_job_execution` middleware, portions before yield (safe — errors are logged and swallowed; downstream still runs via the called-flag pattern in `AroundChain.build_safe`).
+   - HOOKS: `around_job_execution` middleware, portions before yield (safe — errors are logged and swallowed; downstream still runs via the called-flag pattern in `Chain.build_safe`).
 5. `Worker.perform_job(job)` (inside the core of the `around_job_execution` chain):
    - TIMESTAMP: `execution_started_at`.
    - `job.set_context(worker: instance)` — captures the worker instance on `Activation` so hooks can see it.
@@ -113,14 +113,14 @@ A11. `job.complete!(result)`:
 
 A12. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
-    - HOOKS: `after_job` via `Hooks.run_after_job(job)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true.
+    - HOOKS: `after_job` via `Hooks.run(:after_job, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true.
 
 A13. Continuing `Runner#execute_job(job)`:
   - HOOKS: Continuing `around_job_execution` middleware, portions after yield (safe — errors are logged and swallowed).
   - execute_job's ensure block:
     - `refresh_buffer_size!(job)` — updates `buffer_size` on `Activation` to the runner's current queue depth. No-op for unbuffered jobs (polling, `Streaming#run_inline`) and for runners without a buffer.
     - TIMESTAMP: `executed_at`.
-    - HOOKS: `on_job_executed` via `Hooks.run_on_job_executed(job)` (safe).
+    - HOOKS: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe).
 
 Runner continues to the next job.
 
@@ -180,14 +180,14 @@ B12. Continuing `run_hooked_perform`:
 
 B13. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
-    - HOOKS: `after_job` via `Hooks.run_after_job(job)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true.
+    - HOOKS: `after_job` via `Hooks.run(:after_job, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true.
 
 B14. Continuing `Runner#execute_job(job)`:
   - HOOKS: Continuing `around_job_execution` middleware, portions after yield (safe — errors are logged and swallowed).
   - execute_job's ensure block:
     - `refresh_buffer_size!(job)` — updates `buffer_size` on `Activation` to the runner's current queue depth. No-op for unbuffered jobs (polling, `Streaming#run_inline`) and for runners without a buffer.
     - TIMESTAMP: `executed_at`.
-    - HOOKS: `on_job_executed` via `Hooks.run_on_job_executed(job)` (safe).
+    - HOOKS: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe).
 
 Runner continues to the next job.
 
@@ -255,15 +255,15 @@ C13. Continuing `handle_perform_exception`:
 C14. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
     - FLAG CLEARED: `Job#_allow_status_changes!` (defensive, in case a non-StandardError exception escaped past `rescue StandardError`).
-    - HOOKS: `after_job` via `Hooks.run_after_job(job)` (safe — errors are logged and swallowed). Fires when `job.resolved?` — true if `attempt_auto_fail` succeeded, false if autofail was skipped (C11) or its GRPC also failed (C12). When `:ready`, the Job still carries the error captured in C10; per-attempt observability for the unresolved case is `on_job_executed` at C15 (runner-level, unconditional). after_job's contract is "the lifecycle reached a settled outcome the engine has on file."
+    - HOOKS: `after_job` via `Hooks.run(:after_job, job, safe: true)` (safe — errors are logged and swallowed). Fires when `job.resolved?` — true if `attempt_auto_fail` succeeded, false if autofail was skipped (C11) or its GRPC also failed (C12). When `:ready`, the Job still carries the error captured in C10; per-attempt observability for the unresolved case is `on_job_executed` at C15 (runner-level, unconditional). after_job's contract is "the lifecycle reached a settled outcome the engine has on file."
 
 C15. Continuing `Runner#execute_job(job)`:
-  - If `perform_job` re-raised (or wrapped) a `Shutdown` in C13, it propagates through the `around_job_execution` chain. The chain is `safe: true`, but `AroundChain.build_safe` re-raises `Shutdown` specifically (per around_chain.rb:45–46), so the Shutdown bubbles out of `Runner#execute_job` after the ensure block completes.
+  - If `perform_job` re-raised (or wrapped) a `Shutdown` in C13, it propagates through the `around_job_execution` chain. The chain is `safe: true`, but `Chain.build_safe` re-raises `Shutdown` specifically (per chain.rb:45–46), so the Shutdown bubbles out of `Runner#execute_job` after the ensure block completes.
   - Otherwise: HOOKS: Continuing `around_job_execution` middleware, portions after yield (safe — errors are logged and swallowed).
   - execute_job's ensure block (runs regardless of whether Shutdown bubbled):
     - `refresh_buffer_size!(job)` — updates `buffer_size` on `Activation` to the runner's current queue depth. No-op for unbuffered jobs (polling, `Streaming#run_inline`) and for runners without a buffer.
     - TIMESTAMP: `executed_at`.
-    - HOOKS: `on_job_executed` via `Hooks.run_on_job_executed(job)` (safe).
+    - HOOKS: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe).
 
 If a Shutdown was raised in C13 (re-raised or wrapped), it bubbles up to the Runner after C15's ensure and begins terminating the runner. Otherwise, Runner continues to the next job.
 
@@ -322,14 +322,14 @@ D11. Continuing `run_hooked_perform`:
 D12. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
     - FLAG CLEARED: `Job#_allow_status_changes!` (defensive).
-    - HOOKS: `after_job` via `Hooks.run_after_job(job)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true (the manual setter resolved the lifecycle in D8 before the partial-payload return at D10).
+    - HOOKS: `after_job` via `Hooks.run(:after_job, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true (the manual setter resolved the lifecycle in D8 before the partial-payload return at D10).
 
 D13. Continuing `Runner#execute_job(job)`:
   - HOOKS: Continuing `around_job_execution` middleware, portions after yield (safe — errors are logged and swallowed).
   - execute_job's ensure block:
     - `refresh_buffer_size!(job)` — updates `buffer_size` on `Activation` to the runner's current queue depth. No-op for unbuffered jobs (polling, `Streaming#run_inline`) and for runners without a buffer.
     - TIMESTAMP: `executed_at`.
-    - HOOKS: `on_job_executed` via `Hooks.run_on_job_executed(job)` (safe).
+    - HOOKS: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe).
 
 Runner continues to the next job.
 
@@ -339,7 +339,7 @@ The categories below trace what happens at the boundaries of the four typical-li
 
 ### E. `Busybee::Worker::Shutdown` propagation
 
-`Busybee::Worker::Shutdown` (a `Busybee::Error` < `StandardError`) signals that the worker process is unhealthy and must terminate. It propagates past every safe layer — both `Hooks.run_hooks(safe:)` and `AroundChain.build_safe` rescue Shutdown specifically and re-raise it (`hooks/around_chain.rb:45–46`; the explicit `rescue Busybee::Worker::Shutdown; raise` in `Hooks.run_hooks`). Once Shutdown leaves `Runner#execute_job`, it bubbles to the Runner's run loop and terminates the runner thread.
+`Busybee::Worker::Shutdown` (a `Busybee::Error` < `StandardError`) signals that the worker process is unhealthy and must terminate. It propagates past every safe layer — both `Hooks.run(safe:)` and `Chain.build_safe` rescue Shutdown specifically and re-raise it (`hooks/chain.rb:45–46`; the explicit `rescue Busybee::Worker::Shutdown; raise` in `Hooks.run`). Once Shutdown leaves `Runner#execute_job`, it bubbles to the Runner's run loop and terminates the runner thread.
 
 **E1. Raised directly from `instance.perform`.**
 
@@ -380,20 +380,20 @@ HOOK: on_job_executed (safe)
     - Explicit `raise if exception.is_a?(Shutdown)` re-raises past `perform_job`.
   - `perform_job`'s ensure block:
     - FLAG CLEARED: `Job#_allow_status_changes!` (defensive).
-    - HOOK: `after_job` via `Hooks.run_after_job(job)` (safe — fires only when `job.resolved?`, i.e. autofail succeeded). The Job carries the early-captured error either way.
-  - MIDDLEWARE: `around_job_execution` finish (safe — `AroundChain.build_safe` re-raises Shutdown at `hooks/around_chain.rb:45–46`, so middleware post-yield does NOT run).
+    - HOOK: `after_job` via `Hooks.run(:after_job, job, safe: true)` (safe — fires only when `job.resolved?`, i.e. autofail succeeded). The Job carries the early-captured error either way.
+  - MIDDLEWARE: `around_job_execution` finish (safe — `Chain.build_safe` re-raises Shutdown at `hooks/chain.rb:45–46`, so middleware post-yield does NOT run).
   - `execute_job`'s ensure block:
     - `refresh_buffer_size!(job)`.
     - TIMESTAMP: `executed_at`.
-    - HOOK: `on_job_executed` via `Hooks.run_on_job_executed(job)` (safe).
+    - HOOK: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe).
   - Shutdown bubbles out of `Runner#execute_job` to the Runner's run loop, which begins terminating.
 
 **E2. Raised from an unsafe hook (`before_job`, `around_job` pre-yield, `around_job` post-yield).**
 
 The three origin sites converge on E1's "rescued by `perform_job`'s `rescue StandardError`" — from there, **the trace continues as E1**. The pre-rescue prefix differs per site:
 
-  - From `before_job` (flag set in Common 6): `Hooks.run_hooks(:before_job, ..., safe: false)` re-raises via its explicit Shutdown clause. The around chain never starts; `perform_started_at` and `perform_finished_at` are NOT stamped.
-  - From `around_job` pre-yield (flag set in Common 6): `AroundChain.build_propagating` has no rescues at the middleware layer — Shutdown propagates straight out. The around chain's core block was never entered, so the core ensure (which re-sets the flag) does NOT fire. `perform_started_at` and `perform_finished_at` are NOT stamped.
+  - From `before_job` (flag set in Common 6): `Hooks.run(:before_job, ..., safe: false)` re-raises via its explicit Shutdown clause. The around chain never starts; `perform_started_at` and `perform_finished_at` are NOT stamped.
+  - From `around_job` pre-yield (flag set in Common 6): `Chain.build_propagating` has no rescues at the middleware layer — Shutdown propagates straight out. The around chain's core block was never entered, so the core ensure (which re-sets the flag) does NOT fire. `perform_started_at` and `perform_finished_at` are NOT stamped.
   - From `around_job` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `capture_chain_result` ran in the core block before the ensure unwound into the offending middleware.
 
 **E3. Triggered by `shutdown_on` match — a non-Shutdown `StandardError` matches the worker's `shutdown_on` configuration.**
@@ -401,18 +401,18 @@ The three origin sites converge on E1's "rescued by `perform_job`'s `rescue Stan
 Wrap site depends on origin:
 
   - **From perform or any unsafe hook surface** that propagates to `perform_job`'s rescue: `handle_perform_exception` runs as in C10–C13. After `handle_failure` runs autofail (the original error is not yet Shutdown — regular StandardError path), `shutdown_error?(exception, configuration)` matches, and `raise Shutdown.new(worker: self)` fires (Ruby sets `cause` to the original). From here, **the trace continues as E1** from "MIDDLEWARE: `around_job_execution` finish".
-  - **From a safe hook** (`on_job_activated`, `after_job`, `on_job_executed`, `around_job_execution`): `Hooks.run_hooks`'s rescue checks `shutdown_error?` inline and raises `Shutdown.new(worker: nil)` directly. Hook iteration short-circuits. From here, **cross-link to E4** — propagation depends on hook site.
+  - **From a safe hook** (`on_job_activated`, `after_job`, `on_job_executed`, `around_job_execution`): `Hooks.run`'s rescue checks `shutdown_error?` inline and raises `Shutdown.new(worker: nil)` directly. Hook iteration short-circuits. From here, **cross-link to E4** — propagation depends on hook site.
 
 Important asymmetry: in the perform-side path, **autofail runs before the Shutdown wrap**, so the engine sees the underlying error via `fail_job` in addition to learning the worker is shutting down via the abandoned activation. In the safe-hook path, autofail does not run (it's only reachable from `perform_job`'s rescue).
 
 **E4. Raised from a safe hook (`on_job_activated`, `after_job`, `on_job_executed`, `around_job_execution`).**
 
-`Hooks.run_hooks(safe: true)` and `AroundChain.build_safe` both have explicit `rescue Busybee::Worker::Shutdown; raise` clauses — Shutdown bypasses the swallow-errors logic at every layer. Surface point depends on origin site:
+`Hooks.run(safe: true)` and `Chain.build_safe` both have explicit `rescue Busybee::Worker::Shutdown; raise` clauses — Shutdown bypasses the swallow-errors logic at every layer. Surface point depends on origin site:
 
   - `on_job_activated`: raised inside `Runner#activate_job`. Propagates past the activate step, past whichever receive path activated this job (`Polling`, `Streaming`, `Hybrid`), into the Runner's run loop. The receive path's `executed_at` and `on_job_executed` for this job do NOT fire.
-  - `after_job`: raised inside `perform_job`'s ensure block. The `Hooks.run_after_job` rescue re-raises rather than logging. Shutdown emerges from `perform_job`. **The trace continues as E1** from "MIDDLEWARE: `around_job_execution` finish".
+  - `after_job`: raised inside `perform_job`'s ensure block. The `Hooks.run(:after_job, safe: true)` rescue re-raises rather than logging. Shutdown emerges from `perform_job`. **The trace continues as E1** from "MIDDLEWARE: `around_job_execution` finish".
   - `on_job_executed`: raised inside `Runner#execute_job`'s ensure, after the runner-level safe around chain already completed. `executed_at` and `refresh_buffer_size!` both happened before this point. Shutdown propagates past the receive path into the Runner's run loop.
-  - `around_job_execution`: raised inside the runner-level safe around chain. `AroundChain.build_safe` re-raises Shutdown. Same downstream as E1's tail (Shutdown exits `Runner#execute_job` after the ensure runs).
+  - `around_job_execution`: raised inside the runner-level safe around chain. `Chain.build_safe` re-raises Shutdown. Same downstream as E1's tail (Shutdown exits `Runner#execute_job` after the ensure runs).
 
 **E5 (callout on C12).** `underlying_error`'s Shutdown unwrap.
 
@@ -420,7 +420,7 @@ Important asymmetry: in the perform-side path, **autofail runs before the Shutdo
 
 ### F. `Busybee::StatusChangeOutsidePerform` flag-catch
 
-`Busybee::StatusChangeOutsidePerform` (a `Busybee::Error` < `StandardError`) is raised by `Job#check_status_change_allowed!` when `complete!` / `fail!` / `throw_bpmn_error!` is called while `Job#_status_changes_prevented` is set — i.e., from a hook surface that shouldn't be resolving the job. Like Shutdown, it's caught by `perform_job`'s `rescue StandardError` and explicitly re-raised past `handle_perform_exception` (C13's `raise if exception.is_a?(Busybee::StatusChangeOutsidePerform)`). Unlike Shutdown, the runner-level `AroundChain.build_safe` does NOT specifically re-raise it — `StatusChangeOutsidePerform` falls into the generic `rescue StandardError` branch and is logged-and-swallowed there. The runner continues to the next job; the worker process is not terminated.
+`Busybee::StatusChangeOutsidePerform` (a `Busybee::Error` < `StandardError`) is raised by `Job#check_status_change_allowed!` when `complete!` / `fail!` / `throw_bpmn_error!` is called while `Job#_status_changes_prevented` is set — i.e., from a hook surface that shouldn't be resolving the job. Like Shutdown, it's caught by `perform_job`'s `rescue StandardError` and explicitly re-raised past `handle_perform_exception` (C13's `raise if exception.is_a?(Busybee::StatusChangeOutsidePerform)`). Unlike Shutdown, the runner-level `Chain.build_safe` does NOT specifically re-raise it — `StatusChangeOutsidePerform` falls into the generic `rescue StandardError` branch and is logged-and-swallowed there. The runner continues to the next job; the worker process is not terminated.
 
 The flag's state across the lifecycle:
 
@@ -454,7 +454,7 @@ HOOK: on_job_executed (safe)
 **Walkthrough:**
 
   - The flag is set in Common 6 just before `before_job` runs. A hook calling `complete!`/`fail!`/`throw_bpmn_error!` triggers `check_status_change_allowed!`, which raises `StatusChangeOutsidePerform`.
-  - HOOKS: `before_job` (unsafe — `Hooks.run_hooks(safe: false)`'s rescue checks `shutdown_error?` first, no match, then re-raises since `safe: false`).
+  - HOOKS: `before_job` (unsafe — `Hooks.run(safe: false)`'s rescue checks `shutdown_error?` first, no match, then re-raises since `safe: false`).
   - The error escapes `run_hooked_perform` past the around chain (which never started).
   - The error is rescued by `perform_job`'s `rescue StandardError`.
   - `handle_perform_exception(job, scop)`:
@@ -467,17 +467,17 @@ HOOK: on_job_executed (safe)
     - Explicit `raise if exception.is_a?(Busybee::StatusChangeOutsidePerform)` re-raises past `perform_job`.
   - `perform_job`'s ensure block:
     - FLAG CLEARED: `Job#_allow_status_changes!` (defensive).
-    - HOOK: `after_job` via `Hooks.run_after_job(job)` (safe — fires since `job.resolved?` is true from autofail).
-  - MIDDLEWARE: `around_job_execution` finish (safe — `AroundChain.build_safe`'s `rescue StandardError` matches, `log_swallowed_error` logs the misuse, `next_link.call unless called` is a no-op since `perform_job` already ran).
+    - HOOK: `after_job` via `Hooks.run(:after_job, job, safe: true)` (safe — fires since `job.resolved?` is true from autofail).
+  - MIDDLEWARE: `around_job_execution` finish (safe — `Chain.build_safe`'s `rescue StandardError` matches, `log_swallowed_error` logs the misuse, `next_link.call unless called` is a no-op since `perform_job` already ran).
   - `execute_job`'s ensure block:
     - `refresh_buffer_size!(job)`.
     - TIMESTAMP: `executed_at`.
-    - HOOK: `on_job_executed` via `Hooks.run_on_job_executed(job)` (safe).
+    - HOOK: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe).
   - Runner continues to the next job.
 
 **F2. Raised from `around_job` middleware pre-yield.**
 
-Same flag state as F1 (set in Common 6). Pre-yield middleware runs after `before_job` but before the core block's `_allow_status_changes!`. `AroundChain.build_propagating` has no rescues at the middleware layer — `StatusChangeOutsidePerform` propagates straight out. The around chain raises before entering its core block, so the core ensure (which re-sets the flag) does NOT fire — the block was never entered. From here, **the trace continues as F1** from "the error escapes `run_hooked_perform`".
+Same flag state as F1 (set in Common 6). Pre-yield middleware runs after `before_job` but before the core block's `_allow_status_changes!`. `Chain.build_propagating` has no rescues at the middleware layer — `StatusChangeOutsidePerform` propagates straight out. The around chain raises before entering its core block, so the core ensure (which re-sets the flag) does NOT fire — the block was never entered. From here, **the trace continues as F1** from "the error escapes `run_hooked_perform`".
 
 Distinguishing detail: `perform_started_at` and `perform_finished_at` are NOT stamped (perform never ran). The result and error axes on Resolution are untouched until the early-capture in `handle_perform_exception`.
 
@@ -563,7 +563,7 @@ Follows Variant A unchanged through A10. G1 deviates at A11, inside `handle_succ
   - `execute_job`'s ensure block:
     - `refresh_buffer_size!(job)`.
     - TIMESTAMP: `executed_at`.
-    - HOOK: `on_job_executed` via `Hooks.run_on_job_executed(job)` (safe) — the per-attempt signal; observes `:ready` with the result axis set.
+    - HOOK: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe) — the per-attempt signal; observes `:ready` with the result axis set.
   - Runner continues to the next job. The activation times out engine-side and the job is re-yielded.
 
 **G2. `complete_job` fails during manual `complete!` (Variant B).**
@@ -650,7 +650,7 @@ Same shape as G4; the deltas:
 Two consequences shape every trace below:
 
 1. **Worker.perform_job's `rescue StandardError` does NOT catch.** `handle_perform_exception` does not run; no early error capture, no autofail, no `shutdown_error?` check (and therefore no `Shutdown` wrap — Category E's perform-side path is unreachable from H). The error simply propagates out.
-2. **Every `ensure` block still fires.** `timed_perform`'s ensure stamps `perform_finished_at`, the core block's ensure re-sets the status-change flag, `perform_job`'s ensure clears it defensively and checks `Hooks.run_after_job(job) if job.resolved?` (false on H paths, so no fire), and `execute_job`'s ensure refreshes the buffer, stamps `executed_at`, and fires `on_job_executed`. Observability of the abandoned activation survives.
+2. **Every `ensure` block still fires.** `timed_perform`'s ensure stamps `perform_finished_at`, the core block's ensure re-sets the status-change flag, `perform_job`'s ensure clears it defensively and checks `Hooks.run(:after_job, job, safe: true) if job.resolved?` (false on H paths, so no fire), and `execute_job`'s ensure refreshes the buffer, stamps `executed_at`, and fires `on_job_executed`. Observability of the abandoned activation survives.
 
 Once a non-`StandardError` exits `Runner#execute_job`, it propagates past the runner's run-loop `rescue Busybee::Worker::Shutdown` (which matches Shutdown only) and into whatever process supervises the runner. That's outside per-job-lifecycle scope; H traces end at the `Runner#execute_job` exit.
 
@@ -679,16 +679,16 @@ HOOK: on_job_executed (safe — its own StandardError errors swallowed; the orig
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits, same as A8/B8/C8/D8 — every variant stamps this).
   - FLAG SET: `Job#_prevent_status_changes!` — re-engaged in the core block's ensure.
-  - MIDDLEWARE: `around_job` finish — does NOT run. `AroundChain.build_propagating` (used for `:around_job`) has no rescues at the middleware layer; non-`StandardError` propagates through the chain and after-yield code is skipped.
+  - MIDDLEWARE: `around_job` finish — does NOT run. `Chain.build_propagating` (used for `:around_job`) has no rescues at the middleware layer; non-`StandardError` propagates through the chain and after-yield code is skipped.
   - The error reaches `perform_job`'s `rescue StandardError` and **does NOT match**. EARLY ERROR CAPTURE does not run; `handle_failure` does not run; `attempt_auto_fail` does not run; the `shutdown_error?` check at C13 is unreachable. The Job's error axis stays unset; the result axis stays unset (perform raised before capture_chain_result ran).
   - `perform_job`'s ensure block:
     - FLAG CLEARED: `Job#_allow_status_changes!` (defensive — exactly the case this clear was added for).
     - HOOK: `after_job` NOT fired — `job.resolved?` is false.
-  - MIDDLEWARE: `around_job_execution` finish (safe) — does NOT run. `AroundChain.build_safe`'s `rescue StandardError` does NOT match; non-`StandardError` propagates through.
+  - MIDDLEWARE: `around_job_execution` finish (safe) — does NOT run. `Chain.build_safe`'s `rescue StandardError` does NOT match; non-`StandardError` propagates through.
   - `execute_job`'s ensure block (always runs):
     - `refresh_buffer_size!(job)`.
     - TIMESTAMP: `executed_at`.
-    - HOOK: `on_job_executed` via `Hooks.run_on_job_executed(job)` (safe). If the hook itself raises a `StandardError`, that's swallowed by `Hooks.run_hooks`'s safe-mode rescue; the original non-`StandardError` from perform keeps propagating once the hook returns.
+    - HOOK: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe). If the hook itself raises a `StandardError`, that's swallowed by `Hooks.run`'s safe-mode rescue; the original non-`StandardError` from perform keeps propagating once the hook returns.
   - The non-`StandardError` exits `Runner#execute_job` and propagates past the runner's run-loop `rescue Busybee::Worker::Shutdown` — which matches Shutdown only, not arbitrary `Exception` descendants. The supervising process (typically `bin/busybee` or whatever embeds the runner) is the next catch site.
   - Engine-side, the activation lock was never released; the job remains ACTIVATED until the activation times out, then is re-yielded as a fresh Job. Retries count is intact (no `fail_job` call landed). If the supervising process restarts the runner cleanly, the next attempt at this same job picks up from the engine's untouched count.
 
@@ -696,20 +696,20 @@ HOOK: on_job_executed (safe — its own StandardError errors swallowed; the orig
 
 The three origin sites converge on H1's "reaches `perform_job`'s `rescue StandardError` and does NOT match" — from there, **the trace continues as H1**. The pre-rescue prefix differs per site:
 
-  - From `before_job` (flag set in Common 6): `Hooks.run_hooks(:before_job, ..., safe: false)`'s `rescue StandardError` does NOT match; non-`StandardError` propagates straight out. The around chain never starts; `perform_started_at` and `perform_finished_at` are NOT stamped.
-  - From `around_job` pre-yield (flag set in Common 6): `AroundChain.build_propagating` has no rescues at the middleware layer — non-`StandardError` propagates straight out. The around chain's core block was never entered, so the core ensure (which re-sets the flag) does NOT fire. `perform_started_at` and `perform_finished_at` are NOT stamped.
+  - From `before_job` (flag set in Common 6): `Hooks.run(:before_job, ..., safe: false)`'s `rescue StandardError` does NOT match; non-`StandardError` propagates straight out. The around chain never starts; `perform_started_at` and `perform_finished_at` are NOT stamped.
+  - From `around_job` pre-yield (flag set in Common 6): `Chain.build_propagating` has no rescues at the middleware layer — non-`StandardError` propagates straight out. The around chain's core block was never entered, so the core ensure (which re-sets the flag) does NOT fire. `perform_started_at` and `perform_finished_at` are NOT stamped.
   - From `around_job` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `capture_chain_result` ran in the core block before the ensure unwound into the offending middleware.
 
 Identical site list and rationale as E2; the divergence is at the catch sites further down — Shutdown gets explicitly re-raised at safe layers (Category E), while non-`StandardError` bypasses them implicitly.
 
 **H3. Raised from a safe hook (`on_job_activated`, `after_job`, `on_job_executed`, `around_job_execution`).**
 
-The "safe" label is misleading for non-`StandardError`: `Hooks.run_hooks(safe: true)` and `AroundChain.build_safe` both rescue `StandardError` only. Non-`StandardError` propagates through every safe layer. Surface point depends on origin site:
+The "safe" label is misleading for non-`StandardError`: `Hooks.run(safe: true)` and `Chain.build_safe` both rescue `StandardError` only. Non-`StandardError` propagates through every safe layer. Surface point depends on origin site:
 
   - `on_job_activated`: raised inside `Runner#activate_job`. Propagates past the activate step, past whichever receive path activated this job (`Polling`, `Streaming`, `Hybrid`), into the supervising process. The receive path's `executed_at` and `on_job_executed` for this job do NOT fire (`execute_job` was never reached).
-  - `after_job`: raised inside `perform_job`'s ensure block during `Hooks.run_after_job(job)`. The ensure already ran `Job#_allow_status_changes!` before this hook fired. Non-`StandardError` emerges from `perform_job`; **the trace continues as H1** from "MIDDLEWARE: `around_job_execution` finish".
+  - `after_job`: raised inside `perform_job`'s ensure block during `Hooks.run(:after_job, job, safe: true)`. The ensure already ran `Job#_allow_status_changes!` before this hook fired. Non-`StandardError` emerges from `perform_job`; **the trace continues as H1** from "MIDDLEWARE: `around_job_execution` finish".
   - `on_job_executed`: raised inside `Runner#execute_job`'s ensure, after `refresh_buffer_size!` and `executed_at` already ran. Non-`StandardError` exits `Runner#execute_job` directly and propagates as in H1's tail.
-  - `around_job_execution`: raised inside the runner-level safe around chain. `AroundChain.build_safe`'s `StandardError`-only rescue doesn't catch. Same downstream as H1's tail.
+  - `around_job_execution`: raised inside the runner-level safe around chain. `Chain.build_safe`'s `StandardError`-only rescue doesn't catch. Same downstream as H1's tail.
 
 **H4. `shutdown_on` with a non-`StandardError` class is rejected at configure-time (sanity check, non-trace).**
 

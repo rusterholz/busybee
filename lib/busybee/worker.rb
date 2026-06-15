@@ -75,7 +75,7 @@ module Busybee
         # didn't learn (autofail disabled, any GRPC fail mid-resolution), the
         # job will be re-yielded; per-attempt observability belongs to
         # on_job_executed (runner-level, unconditional).
-        Hooks.run_after_job(job) if job.resolved?
+        Hooks.run(:after_job, job, safe: true) if job.resolved?
       end
 
       # Validate that `result` includes every output declared `required: true`.
@@ -128,14 +128,14 @@ module Busybee
         job = instance.job
         validate_inputs!(instance, configuration)
         job._prevent_status_changes!
-        Hooks.run_hooks(:before_job, job)
-        result = Hooks.run_around_chain(:around_job, job) do
+        Hooks.run(:before_job, job)
+        result = Hooks.run_chain(:around_job, job) do
           job._allow_status_changes!
           timed_perform(instance)
         ensure
           # Re-engage the flag so around_job middleware's after-yield region
           # can't resolve the job. The core block here is parsed as part of
-          # run_around_chain's block argument, so this ensure runs as the
+          # run_chain's block argument, so this ensure runs as the
           # block exits — before middleware unwinds. Cleared again below
           # for handle_success.
           job._prevent_status_changes!

@@ -115,7 +115,7 @@ module Busybee
       # With safe: true, errors are logged and iteration continues (for
       # observing hooks like after_job, on_job_executed). Shutdown errors
       # always propagate regardless of the safe: flag.
-      def run_hooks(type, target, safe: false)
+      def run(type, target, safe: false)
         matching_hooks(type, target).each do |hook|
           hook[:callback].call(target)
         rescue Busybee::Worker::Shutdown
@@ -140,34 +140,16 @@ module Busybee
       # Run an around-hook chain wrapping a core block. Middleware callbacks
       # receive (target, perform). The chain return value is the captured
       # result (HWIA-coerced for job-noun chains via Resolution#set_result).
-      def run_around_chain(type, target, safe: false, &block)
+      def run_chain(type, target, safe: false, &block)
         matching = matching_hooks(type, target)
         core = -> { capture_chain_result(target, block.call) }
         Chain.build(matching, target, core, safe: safe).call
         target.is_a?(Busybee::Job) ? target.result : nil
       end
 
-      # ====== Per-moment job hook wrappers ======
-      #
-      # Thin wrappers around run_hooks for the three observe-only job-noun
-      # moments. Each encapsulates the safe: true knowledge so call sites
-      # stay focused on invoking the right moment with the Job as target.
-
-      def run_on_job_activated(job)
-        run_hooks(:on_job_activated, job, safe: true)
-      end
-
-      def run_after_job(job)
-        run_hooks(:after_job, job, safe: true)
-      end
-
-      def run_on_job_executed(job)
-        run_hooks(:on_job_executed, job, safe: true)
-      end
-
       private
 
-      # Innermost step of run_around_chain. For job-noun chains, captures the
+      # Innermost step of run_chain. For job-noun chains, captures the
       # perform-returned result onto Job's Resolution (set-once + HWIA + freeze)
       # if it isn't already set; the manual-complete flow may have captured it
       # earlier from inside perform.

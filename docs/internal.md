@@ -498,9 +498,10 @@ At fire time, `Busybee::Hooks.matches?(hook, target)` reads each filter key off 
 
 ### Hook Invocation
 
-- **`Busybee::Hooks.run_hooks(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_job`); `safe: true` logs and continues to the next hook (observing hooks like `after_job` and the `on_*` family). `Busybee::Worker::Shutdown` always propagates regardless, and errors matching the target's `shutdown_on` classes (worker config + gem-level) are wrapped in `Shutdown` and propagated.
-- **`Busybee::Hooks.run_around_chain(type, target, safe:, &core)`** — builds a nested lambda chain from matching around hooks (via `Busybee::Hooks::Chain`) and wraps the core block. First-registered hook is outermost. The core's return value is harvested into the Job's `Resolution`, so middleware can't "forget" the result — it's always read back from the Job, never from the chain's return value. Zero matching hooks calls the core directly.
-- **Per-moment wrappers** — `run_on_job_activated`, `run_after_job`, `run_on_job_executed` — bundle the right hook type and safe-mode for each lifecycle point. Worker and Runner call these rather than `run_hooks` / `run_around_chain` directly.
+- **`Busybee::Hooks.run(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_job`); `safe: true` logs and continues to the next hook (observing hooks like `after_job` and the `on_*` family). `Busybee::Worker::Shutdown` always propagates regardless, and errors matching the target's `shutdown_on` classes (worker config + gem-level) are wrapped in `Shutdown` and propagated.
+- **`Busybee::Hooks.run_chain(type, target, safe:, &core)`** — builds a nested lambda chain from matching around hooks (via `Busybee::Hooks::Chain`) and wraps the core block. First-registered hook is outermost. The core's return value is harvested into the Job's `Resolution`, so middleware can't "forget" the result — it's always read back from the Job, never from the chain's return value. Zero matching hooks calls the core directly.
+
+Worker and Runner call these directly at each job lifecycle moment (e.g. `Hooks.run(:after_job, job, safe: true)`); see the flows doc below for which hook fires where.
 
 ### Job execution flows
 

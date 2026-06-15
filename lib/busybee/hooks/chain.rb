@@ -2,7 +2,7 @@
 
 module Busybee
   module Hooks
-    # Builds the nested lambda chain used by Hooks.run_around_chain.
+    # Builds the nested lambda chain used by Hooks.run_chain.
     # Each hook receives (target, perform); calling perform descends one
     # step. The core block sits at the chain's center.
     #

@@ -100,7 +100,7 @@ module Busybee
     def activate_job(job, source:, buffer_size: nil)
       job.timestamps.stamp!(:activated_at)
       job.set_context(source: source, buffer_size: buffer_size, worker_class: @worker_class)
-      Hooks.run_on_job_activated(job)
+      Hooks.run(:on_job_activated, job, safe: true)
     end
 
     # Run @worker_class.perform_job(job) inside the around_job_execution chain,
@@ -109,17 +109,17 @@ module Busybee
     #
     # @param job [Busybee::Job]
     def execute_job(job)
-      Hooks.run_around_chain(:around_job_execution, job, safe: true) do
+      Hooks.run_chain(:around_job_execution, job, safe: true) do
         @worker_class.perform_job(job)
       end
     ensure
-      # Even with safe: true above, run_around_chain re-raises Shutdown so the
+      # Even with safe: true above, run_chain re-raises Shutdown so the
       # runner can tear down. This ensure runs executed_at + on_job_executed
       # even when the worker is shutting down, keeping observability of the
       # final activation intact.
       refresh_buffer_size!(job)
       job.timestamps.stamp!(:executed_at)
-      Hooks.run_on_job_executed(job)
+      Hooks.run(:on_job_executed, job, safe: true)
     end
 
     # Current depth of this runner's job buffer, or nil if the runner has
