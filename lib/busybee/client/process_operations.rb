@@ -22,7 +22,7 @@ module Busybee
       #   client.deploy_process("order.bpmn", "payment.bpmn")
       #   # => { "order-fulfillment" => 123, "payment-process" => 456 }
       #
-      def deploy_process(*paths, tenant_id: nil) # rubocop:disable Metrics/AbcSize
+      def deploy_process(*paths, tenant_id: nil)
         resources = paths.map do |path|
           Busybee::GRPC::Resource.new(
             name: File.basename(path),
@@ -37,8 +37,8 @@ module Busybee
 
         with_retry do
           response = stub.deploy_resource(request)
-          response.deployments.each_with_object({}) do |deployment, result|
-            result[deployment.process.bpmnProcessId] = deployment.process.processDefinitionKey
+          response.deployments.to_h do |deployment|
+            [deployment.process.bpmnProcessId, deployment.process.processDefinitionKey]
           end
         end
       end

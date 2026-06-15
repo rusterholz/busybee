@@ -12,7 +12,7 @@ RSpec.describe Busybee::Client, "concurrent operations" do # rubocop:disable RSp
   let(:multi_job_bpmn_path) { File.expand_path("../../fixtures/multi_job_process.bpmn", __dir__) }
 
   shared_examples "concurrent operations" do
-    # rubocop:disable RSpec/MultipleExpectations, RSpec/ExampleLength
+    # rubocop:disable RSpec/MultipleExpectations
     it "handles multiple streams and unary operations concurrently on a single client" do
       # Deploy a process with multiple job types
       deploy_result = client.deploy_process(multi_job_bpmn_path)
@@ -100,7 +100,7 @@ RSpec.describe Busybee::Client, "concurrent operations" do # rubocop:disable RSp
         # Already completed
       end
     end
-    # rubocop:enable RSpec/MultipleExpectations, RSpec/ExampleLength
+    # rubocop:enable RSpec/MultipleExpectations
   end
 
   context "with local Zeebe", :integration do

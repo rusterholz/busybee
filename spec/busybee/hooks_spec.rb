@@ -170,8 +170,11 @@ RSpec.describe Busybee::Hooks do
     end
 
     it "falls back to Class name when value is a Class" do
+      # Two distinct anonymous classes; DuplicateMethods misreads both as ::Object.name.
+      # rubocop:disable Lint/DuplicateMethods
       expect(described_class.match?(/Order/, Class.new { def self.name = "OrderWorker" })).to be true
       expect(described_class.match?(/Order/, Class.new { def self.name = "ShipmentWorker" })).to be false
+      # rubocop:enable Lint/DuplicateMethods
     end
 
     it "matches Class by exact name string (useful for load-order issues)" do
