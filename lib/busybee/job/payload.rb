@@ -26,6 +26,7 @@ module Busybee
       def type
         @raw_job.type
       end
+      alias job_type type
 
       def process_instance_key
         @raw_job.processInstanceKey

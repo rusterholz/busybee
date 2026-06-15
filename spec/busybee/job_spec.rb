@@ -59,6 +59,10 @@ RSpec.describe Busybee::Job do
       expect(job.type).to eq("find_available_driver")
     end
 
+    it "delegates #job_type to raw job so hook filters resolve by domain name" do
+      expect(job.job_type).to eq("find_available_driver")
+    end
+
     it "delegates #process_instance_key to raw job" do
       expect(job.process_instance_key).to eq(789012)
     end

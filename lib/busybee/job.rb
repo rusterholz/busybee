@@ -30,7 +30,7 @@ module Busybee
 
     attr_reader :client, :payload, :timestamps, :context
 
-    delegate :key, :type, :process_instance_key, :bpmn_process_id, :element_id,
+    delegate :key, :type, :job_type, :process_instance_key, :bpmn_process_id, :element_id,
              :variables, :headers,
              to: :payload
     delegate :source, :buffer_size, :worker, :worker_class, to: :activation

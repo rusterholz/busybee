@@ -496,6 +496,8 @@ Filter kwargs are validated per-noun at registration time (`FILTER_KEYS`):
 
 At fire time, `Busybee::Hooks.matches?(hook, target)` reads each filter key off the target (`target.public_send(key)`, nil-safe) and applies `match?` — case equality (`===`) supporting Symbol/String (exact), Regexp (pattern), Class (`is_a?`), Proc (custom). Class values additionally match against their `.name` string, so `worker_class: "OrderWorker"` or `worker_class: /Order/` work regardless of load order. Empty filters match everything (vacuous truth).
 
+Because filters resolve by sending the key name to the target, every filter key must name a real accessor on `Job`. Most line up directly; the exception is `job_type`, whose underlying protobuf field is `type` — `Job::Payload` aliases `job_type` to `type` (and `Job` delegates it) so `job_type:` filters resolve. A filter key that the target does not respond to reads as `nil` and silently never matches.
+
 ### Hook Invocation
 
 - **`Busybee::Hooks.run(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_job`); `safe: true` logs and continues to the next hook (observing hooks like `after_job` and the `on_*` family). `Busybee::Worker::Shutdown` always propagates regardless, and errors matching the target's `shutdown_on` classes (worker config + gem-level) are wrapped in `Shutdown` and propagated.
