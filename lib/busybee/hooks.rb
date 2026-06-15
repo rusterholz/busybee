@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "busybee/hooks/around_chain"
+require "busybee/hooks/chain"
 
 module Busybee
   # Central module for the hook/instrumentation system.
@@ -143,7 +143,7 @@ module Busybee
       def run_around_chain(type, target, safe: false, &block)
         matching = matching_hooks(type, target)
         core = -> { capture_chain_result(target, block.call) }
-        AroundChain.build(matching, target, core, safe: safe).call
+        Chain.build(matching, target, core, safe: safe).call
         target.is_a?(Busybee::Job) ? target.result : nil
       end
 

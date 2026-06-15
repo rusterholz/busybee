@@ -10,7 +10,7 @@ module Busybee
     # contexts), an outer hook raising must not prevent inner hooks and the
     # core from running. Errors are logged and downstream execution continues
     # via the called-flag pattern. Shutdown errors always propagate.
-    module AroundChain
+    module Chain
       class << self
         # @param hooks [Array<Hash>] matching hooks, each with :callback
         # @param target [Object] the hook noun (Busybee::Job for job hooks)
