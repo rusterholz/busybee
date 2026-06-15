@@ -542,9 +542,11 @@ Exception classes that trigger a graceful worker shutdown when raised during `pe
 
 | | |
 |--|--|
-| **Type** | Array of Exception classes (or a single class, which is coerced to an Array) |
+| **Type** | Array of `StandardError` subclasses (or a single class, which is coerced to an Array) |
 | **Default** | `[]` |
 
 ```ruby
 Busybee.shutdown_on_errors = [PG::ConnectionBad, Redis::ConnectionError]
 ```
+
+Entries must be `StandardError` subclasses. Classes that descend from `Exception` without going through `StandardError` (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise `ArgumentError` at assignment because the gem's per-job rescue is `StandardError`-scoped — a non-`StandardError` would never reach the `shutdown_on_errors` check at runtime, so configuring one is meaningless. Signal-class errors (`Interrupt`, `SIGTERM`) are handled separately by the CLI's signal traps, which route through the runner's graceful-shutdown path; there's nothing to configure.

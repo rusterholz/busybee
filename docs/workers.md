@@ -214,6 +214,8 @@ end
 
 You can also configure shutdown errors globally for all workers in your application via [`Busybee.shutdown_on_errors`](configuration.md).
 
+`shutdown_on` accepts only `StandardError` subclasses. Classes outside that hierarchy (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise an error at class-definition time, because the per-job rescue that consults `shutdown_on` is `StandardError`-scoped — a non-`StandardError` would never reach the check at runtime. Signal-class errors are handled separately via the CLI's signal traps; there's nothing to configure here.
+
 When a shutdown is triggered, the worker process stops requesting new jobs, fails any in-flight jobs (preserving their retry count so they'll be picked up by another worker), and exits.
 
 #### Direct Job Access

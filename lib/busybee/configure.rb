@@ -138,14 +138,14 @@ module Busybee
       @grpc_retry_errors = value
     end
 
-    # --- Shutdown errors (Array coercion, validates each is Exception subclass) ---
+    # --- Shutdown errors (Array coercion, validates each is StandardError subclass) ---
 
     def shutdown_on_errors=(value)
       coerced = Array(value)
       coerced.each do |klass|
-        unless klass.is_a?(Class) && klass <= Exception
+        unless klass.is_a?(Class) && klass <= StandardError
           raise ArgumentError,
-                "shutdown_on_errors expects exception classes, got #{klass.inspect} (#{klass.class})"
+                "shutdown_on_errors expects StandardError subclasses, got #{klass.inspect} (#{klass.class})"
         end
       end
       @shutdown_on_errors = coerced
