@@ -4,6 +4,16 @@
 
 ### New Features:
 
+- **Lifecycle Hooks / Instrumentation** – Register callbacks at job lifecycle moments via `Busybee.configure`, for middleware (transactions, retries) and observation (metrics, tracing, error reporting):
+  - Job hooks `before_job`, `around_job`, and `after_job`, plus runner-level `on_job_activated`, `on_job_executed`, and `around_job_execution`. Each callback receives the `Busybee::Job`.
+  - Prefilter registrations by `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `source:`, or `error:` (matched with `===`, with a Class-name fallback so `worker_class: /Order/` matches by name).
+  - Wrapping hooks (`before_job`, `around_job`) let errors propagate; observing hooks (`after_job`, the `on_*` family, `around_job_execution`) log and swallow errors so instrumentation can't break job processing. Errors matching a worker's `shutdown_on` always propagate as a graceful shutdown.
+  - `job.context` – a scratch bag for passing data between hooks (e.g. a tracing span opened in `before_job` and finished in `after_job`).
+  - `job.context_tags` (low-cardinality, for metric labels) and `job.logging_context` (high-cardinality superset, for log fields) project the job's state for instrumentation.
+  - Lifecycle timestamps and computed durations on the Job (`perform_duration_ms`, `execution_duration_ms`, `total_duration_ms`, and more).
+  - Hooks observe but cannot resolve a job: calling `complete!` / `fail!` / `throw_bpmn_error!` from inside a hook raises `Busybee::StatusChangeOutsidePerform`.
+  - `after_job` fires once after `perform` for a settled job; `on_job_executed` fires unconditionally per attempt at the runner level.
+  - Worker-level (`on_worker_*`) and call-level (`before_call` / `around_call` / `after_call`) hook types are reserved — they accept registration and filter validation but do not fire yet.
 - **Expose Client on Job + Worker Delegation** – `job.client` returns the `Busybee::Client` instance; `client` in workers delegates to `job.client` for direct API access (e.g., message correlation)
 - **Strict Output Validation** – Workers validate outputs against declared `output` definitions by default. Undeclared output keys raise `Busybee::UndeclaredOutput`. Opt out per-worker with `strict_outputs false` or gem-wide via `Busybee.default_strict_outputs = false`
   - Manual `complete!` calls also validate outputs
