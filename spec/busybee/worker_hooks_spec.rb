@@ -419,6 +419,56 @@ RSpec.describe Busybee::Worker do
         expect(received_job.error_code).to eq("NOT_FOUND")
         expect(received_job.error_message).to eq("missing")
       end
+
+      it "does not fire when the job remains :ready (fail_job_on_error: false)" do
+        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+        received = []
+        Busybee.after_job { |j| received << j }
+        worker = stub_const("AfterUnresolvedWorker", Class.new(Busybee::Worker) do
+          fail_job_on_error false
+          define_method(:perform) { raise "boom" }
+        end)
+
+        worker.perform_job(job)
+
+        expect(received).to be_empty
+        expect(job).to be_ready
+        expect(job.error).to be_a(RuntimeError)
+      end
+
+      it "does not fire when autofail's GRPC also failed" do
+        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+        allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
+        received = []
+        Busybee.after_job { |j| received << j }
+        worker = stub_const("AfterFailingGrpcWorker", Class.new(Busybee::Worker) do
+          define_method(:perform) { raise "boom" }
+        end)
+
+        worker.perform_job(job)
+
+        expect(received).to be_empty
+        expect(job).to be_ready
+        expect(job.error).to be_a(RuntimeError)
+      end
+
+      it "sees both result and error in Variant D (manual fail then return a partial-payload hash)" do
+        received_job = nil
+        Busybee.after_job { |j| received_job = j }
+        worker = stub_const("FailThenReturnWorker", Class.new(Busybee::Worker) do
+          strict_outputs false
+          define_method(:perform) do
+            fail!("validation failed")
+            { partial: true, attempted_at: "2026-06-08" }
+          end
+        end)
+
+        worker.perform_job(job)
+
+        expect(received_job).to be_failed
+        expect(received_job.error_message).to eq("validation failed")
+        expect(received_job.result).to eq("partial" => true, "attempted_at" => "2026-06-08")
+      end
     end
 
     describe "handle_failure logging" do

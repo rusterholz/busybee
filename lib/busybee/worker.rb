@@ -67,6 +67,14 @@ module Busybee
       rescue StandardError => e
         handle_perform_exception(job, e)
       ensure
+        # Defensive: ensure the status-change flag is cleared on every exit
+        # path, including non-StandardError exceptions that escape the rescue.
+        job._allow_status_changes!
+        # Conditional on resolved?: after_job marks the moment the lifecycle
+        # reached a settled outcome the engine has on file. When the engine
+        # didn't learn (autofail disabled, any GRPC fail mid-resolution), the
+        # job will be re-yielded; per-attempt observability belongs to
+        # on_job_executed (runner-level, unconditional).
         Hooks.run_after_job(job) if job.resolved?
       end
 
@@ -105,6 +113,10 @@ module Busybee
 
       def handle_perform_exception(job, exception)
         job._allow_status_changes!
+        # Capture early so after_job hooks see the error attached to Job even
+        # when autofail is disabled (fail_job_on_error: false) or autofail's
+        # GRPC fails. fail!'s own set_error during autofail no-ops harmlessly.
+        job.send(:resolution).set_error(underlying_error(exception))
         handle_failure(job, exception, configuration)
         raise if exception.is_a?(Shutdown) || exception.is_a?(Busybee::StatusChangeOutsidePerform)
         raise Shutdown.new(worker: self) if shutdown_error?(exception, configuration)
@@ -163,6 +175,11 @@ module Busybee
         begin
           job.complete!(new_vars)
         rescue StandardError => e
+          # Capture the failure on Resolution's error axis so after_job and
+          # on_job_executed hooks see why complete! failed, even though the
+          # error is logged-and-swallowed here. Symmetry with G2's early
+          # capture in handle_perform_exception.
+          job.send(:resolution).set_error(e)
           Busybee.logger&.warn("Failed to complete job #{job.key}: #{e.message}. Job will timeout and retry.")
         end
       end
@@ -188,12 +205,16 @@ module Busybee
       end
 
       def attempt_auto_fail(job, error, config)
-        fail_with = error.is_a?(Shutdown) ? (error.cause || error) : error
-        begin
-          job.fail!(fail_with, backoff: config.backoff)
-        rescue StandardError => e
-          Busybee.logger&.warn("Failed to fail job #{job.key}: #{e.message}. Job will timeout and retry.")
-        end
+        job.fail!(underlying_error(error), backoff: config.backoff)
+      rescue StandardError => e
+        Busybee.logger&.warn("Failed to fail job #{job.key}: #{e.message}. Job will timeout and retry.")
+      end
+
+      # When perform raises a Shutdown wrapping a triggering error, the
+      # triggering error — not the wrapper — is what the engine and
+      # Resolution should record. Returns the exception itself otherwise.
+      def underlying_error(exception)
+        exception.is_a?(Shutdown) ? (exception.cause || exception) : exception
       end
 
       def shutdown_error?(error, config)

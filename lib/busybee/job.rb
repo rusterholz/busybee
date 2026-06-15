@@ -4,6 +4,7 @@ require "active_support/core_ext/module/delegation"
 require "busybee/serialization"
 require "busybee/job/activation"
 require "busybee/job/context"
+require "busybee/job/error_formatting"
 require "busybee/job/payload"
 require "busybee/job/resolution"
 require "busybee/job/timestamps"
@@ -25,6 +26,8 @@ module Busybee
   #   job.throw_bpmn_error!(:order_not_found, "Order #{order_id} not found")
   #
   class Job
+    include ErrorFormatting
+
     attr_reader :client, :payload, :timestamps, :context
 
     delegate :key, :type, :process_instance_key, :bpmn_process_id, :element_id,
@@ -60,16 +63,16 @@ module Busybee
       @status_changes_prevented = false
     end
 
-    # Route a kwargs hash through the Job's typed POROs (Activation, then
-    # Resolution data), with the remainder absorbed by Context as arbitrary
-    # scratch. Callers don't need to know which key belongs to which PORO;
-    # framework call sites and hook authors both use the same surface.
-    # Status transitions go through Job#resolve! (or Resolution#resolve_to
-    # directly) — `:status` is not in either typed PORO's harvest scope,
-    # so passing it here silently lands it in Context as scratch.
+    # Route a kwargs hash through the Job's typed POROs. Activation-owned
+    # keys (source, buffer_size, worker, worker_class) land in Activation;
+    # Resolution-owned keys (Resolution::OWNED_KEYS) are intentionally NOT
+    # routed here — they have dedicated lifecycle methods (#complete!,
+    # #fail!, #throw_bpmn_error!) and a warning fires if they show up.
+    # Everything else is absorbed by Context as arbitrary scratch.
     def set_context(**kwargs)
+      warn_about_reserved_keys(kwargs)
+      kwargs = kwargs.except(*Resolution::OWNED_KEYS)
       activation.harvest!(kwargs)
-      resolution.harvest!(kwargs)
       context.absorb(kwargs)
       self
     end
@@ -152,14 +155,15 @@ module Busybee
       raise Busybee::JobAlreadyHandled, "Cannot fail job #{key} because it is already #{status}" unless ready?
 
       message = format_error_message(message_or_exception)
+      error_data = if message_or_exception.is_a?(Exception)
+                     { error: message_or_exception }
+                   else
+                     { error_message: message }
+                   end
+      resolution.set_error(error_data)
 
       @client.fail_job(key, message, retries: retries, backoff: backoff).tap do
-        error_data = if message_or_exception.is_a?(Exception)
-                       { error: message_or_exception }
-                     else
-                       { error_message: message }
-                     end
-        resolve!(:failed, **error_data)
+        resolve!(:failed)
       end
     end
 
@@ -178,11 +182,10 @@ module Busybee
 
       code = format_error_code(code_or_exception)
       message = code_or_exception.message if code_or_exception.is_a?(Exception) && message.empty?
+      resolution.set_error(bpmn_error_data(code_or_exception, code, message))
 
       @client.throw_bpmn_error(key, code, message: message).tap do
-        error_data = { error_code: code, error_message: message }
-        error_data[:error] = code_or_exception if code_or_exception.is_a?(Exception)
-        resolve!(:error, **error_data)
+        resolve!(:error)
       end
     end
 
@@ -231,13 +234,24 @@ module Busybee
     end
 
     # Mark the job resolved: stamp resolved_at, advance the Resolution PORO
-    # to the terminal status (fire-once enforced), capture resolution data.
-    # after_job firing happens uniformly post-perform in Worker.perform_job's
-    # ensure, not here.
-    def resolve!(status, **data)
+    # to the terminal status (fire-once enforced). Outcome data (result /
+    # error trio) is captured separately by the calling lifecycle method
+    # (#complete!, #fail!, #throw_bpmn_error!) before its GRPC. after_job
+    # firing happens uniformly post-perform in Worker.perform_job's ensure,
+    # not here.
+    def resolve!(status)
       @timestamps.stamp!(:resolved_at)
       resolution.resolve_to(status)
-      set_context(**data)
+    end
+
+    def warn_about_reserved_keys(kwargs)
+      reserved = kwargs.keys & Resolution::OWNED_KEYS
+      reserved.each do |key|
+        Busybee.logger&.warn(
+          "[busybee] :#{key} passed to Job#set_context will be dropped — " \
+          "use Job#complete!, #fail!, or #throw_bpmn_error! to capture outcome data."
+        )
+      end
     end
 
     def check_status_change_allowed!(operation)
@@ -246,28 +260,6 @@ module Busybee
       raise Busybee::StatusChangeOutsidePerform,
             "Cannot #{operation} job #{key} outside perform — " \
             "status changes are not allowed during hook execution"
-    end
-
-    def format_error_message(message_or_exception)
-      return message_or_exception unless message_or_exception.is_a?(Exception)
-
-      message = "[#{message_or_exception.class.name}] #{message_or_exception.message}"
-      if (cause = message_or_exception.cause)
-        message += " (caused by: [#{cause.class.name}] #{cause.message})"
-      end
-      message
-    end
-
-    def format_error_code(code_or_exception)
-      case code_or_exception
-      when Symbol
-        code_or_exception.to_s.upcase
-      when Exception
-        # Convert MyApp::Domain::OrderNotFoundError to MY_APP_DOMAIN_ORDER_NOT_FOUND_ERROR
-        code_or_exception.class.name.gsub("::", "_").underscore.upcase
-      else
-        code_or_exception.to_s
-      end
     end
   end
 end

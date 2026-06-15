@@ -25,14 +25,6 @@ module Busybee
         Time, Date
       ].freeze
 
-      # Keys with dedicated setters elsewhere (Resolution#resolve_to for :status,
-      # Resolution#set_result for :result). If these percolate through to
-      # Context — meaning a caller passed them to Job#set_context — they got
-      # there by mistake. Drop them and log a warning rather than silently
-      # accept "result" or "status" as scratch keys that would shadow the
-      # authoritative values.
-      RESERVED_KEYS = %i[status result].freeze
-
       def initialize
         @data = {}
       end
@@ -50,8 +42,7 @@ module Busybee
       end
 
       def absorb(kwargs)
-        warn_about_reserved_keys(kwargs)
-        @data.merge!(kwargs.except(*RESERVED_KEYS))
+        @data.merge!(kwargs)
       end
 
       def context_tags
@@ -66,16 +57,6 @@ module Busybee
 
       def loggable_primitive?(value)
         LOGGABLE_PRIMITIVES.any? { |type| value.is_a?(type) }
-      end
-
-      def warn_about_reserved_keys(kwargs)
-        reserved = kwargs.keys & RESERVED_KEYS
-        reserved.each do |key|
-          Busybee.logger&.warn(
-            "[busybee] :#{key} passed to Job#set_context will be dropped — " \
-            "use the dedicated setter (resolution.resolve_to / set_result)."
-          )
-        end
       end
     end
   end

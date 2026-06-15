@@ -251,6 +251,8 @@ def perform
 end
 ```
 
+Worth knowing about how `status` relates to `result` and `error`: `result` and `error` are worker-side records of what came out of executing the job — captured the moment your `perform` decides them. `status` is the engine's ledger as reflected on this worker, and advances only after the relevant GRPC call (`complete_job`, `fail_job`, or `throw_bpmn_error`) succeeds. In normal operation the two views agree, but transient GRPC failures can produce divergence (e.g., a `:failed` worker-side status while the engine has the job in an incident); the worker doesn't observe engine state directly. A naming bridge that helps when cross-referencing Zeebe docs or Operate: Busybee's `:ready` is the worker-side name for what Zeebe calls the **ACTIVATED** state.
+
 Variables and headers support both hash-style and method-style access, including nested values:
 
 ```ruby

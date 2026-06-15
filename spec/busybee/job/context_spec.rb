@@ -46,33 +46,6 @@ RSpec.describe Busybee::Job::Context do
       expect(context[:span]).to eq("second")
       expect(context[:foo]).to eq(1)
     end
-
-    context "with reserved keys (status, result)" do
-      let(:logger) { instance_double(Logger, warn: nil) }
-
-      before { allow(Busybee).to receive(:logger).and_return(logger) }
-
-      it "drops :status from the bag (it belongs to Resolution#resolve_to)" do
-        context.absorb(status: :complete, foo: 1)
-
-        expect(context[:status]).to be_nil
-        expect(context[:foo]).to eq(1)
-      end
-
-      it "drops :result from the bag (it belongs to Resolution#set_result)" do
-        context.absorb(result: { x: 1 }, foo: 1)
-
-        expect(context[:result]).to be_nil
-        expect(context[:foo]).to eq(1)
-      end
-
-      it "logs a warning naming each reserved key encountered" do
-        context.absorb(status: :complete, result: { x: 1 }, foo: 1)
-
-        expect(logger).to have_received(:warn).with(/:status/)
-        expect(logger).to have_received(:warn).with(/:result/)
-      end
-    end
   end
 
   describe "#context_tags" do

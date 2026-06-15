@@ -46,6 +46,18 @@ RSpec.describe Busybee::Worker do
       expect { minimal_worker.perform_job(job) }.to raise_error(NotImplementedError, /perform/)
     end
 
+    it "clears the status-change-prevention flag even when a non-StandardError escapes" do
+      worker = stub_const("NonStdErrorWorker", Class.new(described_class) do
+        define_method(:perform) { raise Exception, "weird" } # rubocop:disable Lint/RaiseException
+      end)
+
+      expect { worker.perform_job(job) }.to raise_error(Exception, "weird")
+
+      # If the defensive _allow_status_changes! in perform_job's ensure didn't
+      # fire, this would raise Busybee::StatusChangeOutsidePerform.
+      expect { job.complete!(processed: true) }.not_to raise_error
+    end
+
     context "with complete_job_on_success (default: true)" do
       it "auto-completes the job with the result hash" do
         performing_worker.perform_job(job)
@@ -91,6 +103,19 @@ RSpec.describe Busybee::Worker do
 
         expect { performing_worker.perform_job(job) }.not_to raise_error
         expect(logger).to have_received(:warn).with(/Failed to complete job.*connection lost/)
+      end
+
+      it "captures the GRPC error on the Job when auto-complete fails" do
+        allow(client).to receive(:complete_job).and_raise(GRPC::Unavailable, "connection lost")
+        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+
+        performing_worker.perform_job(job)
+
+        aggregate_failures do
+          expect(job.ready?).to be true                  # status didn't advance — GRPC failed before resolve!
+          expect(job.result).to eq("processed" => true)  # result axis set before GRPC failure
+          expect(job.error).to be_a(GRPC::Unavailable)   # error axis captured for telemetry
+        end
       end
     end
 
@@ -174,6 +199,35 @@ RSpec.describe Busybee::Worker do
         end)
 
         expect { worker.perform_job(job) }.not_to raise_error
+      end
+
+      it "captures the perform exception to Resolution even when fail_job_on_error is false" do
+        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+
+        worker = stub_const("CaptureWithoutAutofailWorker", Class.new(described_class) do
+          fail_job_on_error false
+          define_method(:perform) { raise "boom" }
+        end)
+
+        worker.perform_job(job)
+
+        expect(job.error).to be_a(RuntimeError)
+        expect(job.error.message).to eq("boom")
+      end
+
+      it "captures the perform exception to Resolution even when the auto-fail GRPC fails" do
+        allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
+        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+
+        worker = stub_const("CaptureWithFailingGrpcWorker", Class.new(described_class) do
+          define_method(:perform) { raise "boom" }
+        end)
+
+        worker.perform_job(job)
+
+        expect(job.error).to be_a(RuntimeError)
+        expect(job.error.message).to eq("boom")
+        expect(job).to be_ready
       end
 
       it "swallows errors when fail_job_on_error is false and logs a warning" do
@@ -264,6 +318,20 @@ RSpec.describe Busybee::Worker do
 
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
         expect(client).to have_received(:fail_job).with(123456, /RuntimeError.*root cause/, retries: nil, backoff: nil)
+      end
+
+      it "captures the underlying cause (not the Shutdown wrapper) to Resolution" do
+        worker = stub_const("ShutdownCaptureWorker", Class.new(described_class) do
+          define_method(:perform) do
+            raise "root cause"
+          rescue StandardError
+            raise Busybee::Worker::Shutdown.new(worker: self.class)
+          end
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+        expect(job.error).to be_a(RuntimeError)
+        expect(job.error.message).to eq("root cause")
       end
 
       it "merges gem-level shutdown_on_errors" do

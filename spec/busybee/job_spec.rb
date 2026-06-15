@@ -529,6 +529,23 @@ RSpec.describe Busybee::Job do
         expect(job.fail!("Error")).to be_truthy
       end
 
+      it "captures the formatted error message to Resolution" do
+        allow(client).to receive(:fail_job)
+
+        job.fail!("Something went wrong")
+
+        expect(job.send(:resolution).error_message).to eq("Something went wrong")
+      end
+
+      it "captures the exception to Resolution when passed an exception" do
+        allow(client).to receive(:fail_job)
+        err = StandardError.new("boom")
+
+        job.fail!(err)
+
+        expect(job.error).to be(err)
+      end
+
       context "when passed an exception" do
         let(:error) { StandardError.new("Something broke") }
 
@@ -597,6 +614,19 @@ RSpec.describe Busybee::Job do
           Busybee::JobAlreadyHandled,
           /cannot fail job.*already failed/i
         )
+      end
+    end
+
+    context "when client.fail_job raises mid-call" do
+      before { allow(client).to receive(:fail_job).and_raise(StandardError.new("grpc down")) }
+
+      it "leaves the error captured on Resolution with status still :ready" do
+        err = StandardError.new("original")
+
+        expect { job.fail!(err) }.to raise_error(StandardError, "grpc down")
+
+        expect(job.error).to be(err)
+        expect(job.status).to eq(:ready)
       end
     end
   end
@@ -702,6 +732,27 @@ RSpec.describe Busybee::Job do
 
         expect(job.throw_bpmn_error!("ERROR_CODE")).to be_truthy
       end
+
+      it "captures error_code and error_message to Resolution" do
+        allow(client).to receive(:throw_bpmn_error)
+
+        job.throw_bpmn_error!(:order_not_found, "Order 550e8400 not found")
+
+        expect(job.error_code).to eq("ORDER_NOT_FOUND")
+        expect(job.send(:resolution).error_message).to eq("Order 550e8400 not found")
+      end
+
+      it "captures the exception to Resolution when given one" do
+        stub_const("OrderNotFoundError", Class.new(StandardError))
+        err = OrderNotFoundError.new("Order 550e8400 not found")
+        allow(client).to receive(:throw_bpmn_error)
+
+        job.throw_bpmn_error!(err)
+
+        expect(job.error).to be(err)
+        expect(job.error_code).to eq("ORDER_NOT_FOUND_ERROR")
+        expect(job.send(:resolution).error_message).to eq("Order 550e8400 not found")
+      end
     end
 
     context "when job is already complete" do
@@ -743,6 +794,18 @@ RSpec.describe Busybee::Job do
           Busybee::JobAlreadyHandled,
           /cannot throw bpmn error.*already error/i
         )
+      end
+    end
+
+    context "when client.throw_bpmn_error raises mid-call" do
+      before { allow(client).to receive(:throw_bpmn_error).and_raise(StandardError.new("grpc down")) }
+
+      it "leaves the error data captured on Resolution with status still :ready" do
+        expect { job.throw_bpmn_error!(:order_not_found, "missing") }.to raise_error(StandardError, "grpc down")
+
+        expect(job.error_code).to eq("ORDER_NOT_FOUND")
+        expect(job.send(:resolution).error_message).to eq("missing")
+        expect(job.status).to eq(:ready)
       end
     end
   end
@@ -977,13 +1040,13 @@ RSpec.describe Busybee::Job do
   describe "#error_message" do
     it "returns the explicit error_message when set" do
       job.send(:resolution).resolve_to(:failed)
-      job.send(:resolution).harvest!(error_message: "explicit")
+      job.send(:resolution).set_error(error_message: "explicit")
       expect(job.error_message).to eq("explicit")
     end
 
     it "falls back to error.message when error_message is unset" do
       job.send(:resolution).resolve_to(:failed)
-      job.send(:resolution).harvest!(error: RuntimeError.new("from-error"))
+      job.send(:resolution).set_error(RuntimeError.new("from-error"))
       expect(job.error_message).to eq("from-error")
     end
 
@@ -1021,6 +1084,65 @@ RSpec.describe Busybee::Job do
           job.timestamps.stamp!(from)
           expect(job.public_send(duration_method)).to be_nil
         end
+      end
+    end
+  end
+
+  describe "#set_context" do
+    it "routes activation-owned keys into Activation" do
+      worker_class = stub_const("RouteWorker", Class.new)
+      job.set_context(source: :poll, worker: worker_class.allocate)
+
+      expect(job.source).to eq(:poll)
+      expect(job.worker_class).to eq(worker_class)
+    end
+
+    it "lands non-owned keys in Context as scratch" do
+      job.set_context(span: "trace-span", correlation_id: "abc")
+
+      expect(job.context[:span]).to eq("trace-span")
+      expect(job.context[:correlation_id]).to eq("abc")
+    end
+
+    it "returns self for chaining" do
+      expect(job.set_context(foo: 1)).to be(job)
+    end
+
+    context "with Resolution-owned keys (the reservation list)" do
+      let(:logger) { instance_double(Logger, warn: nil) }
+
+      before { allow(Busybee).to receive(:logger).and_return(logger) }
+
+      Busybee::Job::Resolution::OWNED_KEYS.each do |key|
+        it "drops :#{key} from Context and Resolution (it has a dedicated lifecycle method)" do
+          job.set_context(key => :sentinel, foo: 1)
+
+          aggregate_failures do
+            expect(job.context[key]).to be_nil
+            expect(job.context[:foo]).to eq(1)
+            expect(job.status).to eq(:ready)
+            expect(job.result).to be_nil
+            expect(job.error).to be_nil
+            expect(job.send(:resolution).error_code).to be_nil
+            expect(job.send(:resolution).error_message).to be_nil
+          end
+        end
+
+        it "logs a warning naming :#{key} and pointing at the lifecycle methods" do
+          job.set_context(key => :sentinel)
+
+          expect(logger).to have_received(:warn).with(/:#{key}/)
+          expect(logger).to have_received(:warn).with(/complete!.*fail!.*throw_bpmn_error!/)
+        end
+      end
+
+      it "warns once per reserved key passed in a single call" do
+        job.set_context(status: :complete, result: { x: 1 }, error_code: "X", foo: 1)
+
+        expect(logger).to have_received(:warn).with(/:status/).once
+        expect(logger).to have_received(:warn).with(/:result/).once
+        expect(logger).to have_received(:warn).with(/:error_code/).once
+        expect(job.context[:foo]).to eq(1)
       end
     end
   end
