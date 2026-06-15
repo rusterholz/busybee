@@ -174,6 +174,10 @@ The `job.ready?` guard on both auto-complete and auto-fail respects manual `comp
 
 **Output validation on manual `complete!`:** Worker defines its own `complete!(vars = {})` (not delegated to Job) that runs `validate_required_outputs!` and `validate_undeclared_outputs!` before delegating to `job.complete!`. Validation errors raised inside `perform` flow through `perform_job`'s normal rescue path — auto-fail when `fail_job_on_error` is true, logged when false. Code that calls `job.complete!` directly bypasses output validation (this is intentional for edge cases but not the recommended pattern).
 
+### Job Execution Flows
+
+Job execution flows — receive-to-runner-return walkthroughs for typical and edge-case lifecycle paths — are documented in [`internal/job_execution_flows.md`](internal/job_execution_flows.md).
+
 ## Runtime Configuration
 
 `Busybee::RuntimeConfig` holds operator-specified overrides, typically from CLI flags or YAML config. It has a two-phase lifecycle:
