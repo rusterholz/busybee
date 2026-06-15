@@ -32,14 +32,17 @@ lib/busybee/
 │   ├── error.rb             # GRPC::Error wrapper
 │   ├── gateway_pb.rb        # Message definitions (generated)
 │   └── gateway_services_pb.rb # Service stubs (generated)
-├── hooks.rb                 # Hooks module entry point (event construction, registration, invocation)
+├── hooks.rb                 # Hooks module: registration, prefilter matching, invocation
 ├── hooks/                   # Hook system internals
-│   ├── event_access.rb      # Base event mixin (error_message, compute_ms helper)
-│   ├── job_event_access.rb  # Job event mixin (predicates, 7 duration methods, tags)
-│   ├── worker_event_access.rb # Worker event mixin (stub — implemented in Mission 7a)
-│   ├── call_event_access.rb # Call event mixin (stub — implemented in Mission 7b)
-│   └── restricted_access.rb # Restricts modification of framework keys on events
-├── job.rb                   # Job wrapper for activated jobs (exposes client for direct API access, lifecycle timestamps)
+│   └── chain.rb             # Builds the nested around-hook lambda chain (propagating + safe forms)
+├── job.rb                   # Job: the authoritative lifecycle object (wraps the protobuf, owns the POROs below)
+├── job/                     # Job's typed helper POROs
+│   ├── activation.rb        # Receive-time facts: source, buffer_size, worker, worker_class
+│   ├── context.rb           # Arbitrary cross-hook scratch + cardinality-aware projections
+│   ├── error_formatting.rb  # Error message/code formatting (mixed into Job)
+│   ├── payload.rb           # Wraps the GRPC ActivatedJob: key, type, variables, headers, retries, deadline
+│   ├── resolution.rb        # Outcome: status, result, error trio; resolve_to / set_result / set_error
+│   └── timestamps.rb        # Monotonic + UTC lifecycle stamps and duration projections
 ├── job_stream.rb            # JobStream for streaming job activation
 ├── logging.rb               # Logging module (text/JSON, thread-safe)
 ├── railtie.rb               # Rails integration
@@ -173,6 +176,10 @@ Steps:
 The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform`.
 
 **Output validation on manual `complete!`:** Worker defines its own `complete!(vars = {})` (not delegated to Job) that runs `validate_required_outputs!` and `validate_undeclared_outputs!` before delegating to `job.complete!`. Validation errors raised inside `perform` flow through `perform_job`'s normal rescue path — auto-fail when `fail_job_on_error` is true, logged when false. Code that calls `job.complete!` directly bypasses output validation (this is intentional for edge cases but not the recommended pattern).
+
+### Job Execution Flows
+
+Job execution flows — receive-to-runner-return walkthroughs for typical and edge-case lifecycle paths — are documented in [`internal/job_execution_flows.md`](internal/job_execution_flows.md).
 
 ## Runtime Configuration
 
@@ -421,110 +428,88 @@ All Client operation modules, Job, and Testing helpers route through this module
 
 ## Hooks Module
 
-`Busybee::Hooks` is the instrumentation system. It provides lifecycle hooks for jobs, workers, and gRPC calls — enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting).
+`Busybee::Hooks` is the instrumentation system. It provides lifecycle hooks for jobs — enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting). Worker- and call-level hook types are declared but not yet wired (see "Not yet wired" below).
 
-### Event Objects
+### Job as the hook target
 
-Hook events are `ActiveSupport::HashWithIndifferentAccess` instances extended with three mixins:
-
-1. **`Busybee::Serialization::HashAccess`** (existing) — method-style access with snake_case↔camelCase conversion. Reused from Job variables/headers so events feel identical.
-2. **`Busybee::Hooks::RestrictedAccess`** (new) — framework keys are locked at extend-time; hooks can annotate with new keys but can't overwrite framework data (raises `FrozenError`). Guards `[]=`, `store`, `merge!`, and `update`.
-3. **Noun-specific EventAccess** — one of `JobEventAccess`, `WorkerEventAccess`, or `CallEventAccess`. Each includes the base `EventAccess` (shared `error_message`, private `compute_ms` helper) and adds noun-specific predicates, computed durations, and `tags`.
-
-Construction via `Busybee::Hooks.build_event(noun, data)`:
-
-```ruby
-event = Busybee::Hooks.build_event(:job, { job_type: "process_order", status: :complete, ... })
-event.job_type          # => "process_order" (HashAccess)
-event[:status] = :x     # => FrozenError (RestrictedAccess)
-event[:trace_id] = "a"  # => OK (annotation)
-event.completed?        # => true (JobEventAccess predicate)
-event.perform_duration_ms # => Float or nil (JobEventAccess computed duration)
-event.tags              # => { "job_type" => ..., "status" => ... } (low-cardinality subset)
-```
-
-### Job Lifecycle Timestamps
-
-`Busybee::Job` captures six monotonic + UTC timestamp pairs via `job.stamp!(name)`:
-
-| Name | Set when |
-|------|----------|
-| `activated_at` | Job received from Zeebe |
-| `execution_started_at` | `perform_job` begins |
-| `perform_started_at` | Right before `instance.perform` |
-| `perform_finished_at` | Right after `instance.perform` returns |
-| `resolved_at` | Top of `complete!`/`fail!`/`throw_bpmn_error!` |
-| `executed_at` | `perform_job` exits (ensure block) |
-
-Monotonic values (`Process::CLOCK_MONOTONIC`) are used by `EventAccess` computed duration methods. UTC values appear in structured log output and event hashes. Accessors return `nil` before stamping.
-
-### Hook Registration
-
-Hooks are registered via `Busybee.configure`, which delegates to `Busybee::Hooks`:
+Job hooks receive the `Busybee::Job` itself:
 
 ```ruby
 Busybee.configure do |c|
-  c.before_job { |event| ... }
-  c.after_job(status: :failed) { |event| Sentry.capture_exception(event.error) }
-  c.around_call { |event, perform| Datadog::Tracing.trace("grpc") { perform.call } }
+  c.before_job { |job| job.context[:span] = tracer.start_span(job.type) }
+  c.after_job(status: :failed) { |job| Sentry.capture_exception(job.error) }
 end
 ```
 
-Storage is plain arrays (one per hook type, 12 total). Each entry is `{ callback:, filters: }`. FIFO ordering. No locking or concurrent data structures — hooks are registered at configure time and never modified after workers start. There is no supported use case for mutating hooks at runtime.
+Job is the authoritative lifecycle object — there is no separate "event" mirror. The concerns a hook reads or annotates live on the Job through typed helper POROs, with readers delegated onto Job and writers kept internal to the POROs:
+
+- **`Job::Payload`** — immutable facts from the activation protobuf: `key`, `type`, `variables`, `headers`, `retries`, `deadline`.
+- **`Job::Activation`** — receive-time context: `source`, `buffer_size`, `worker`, `worker_class`. Populated by the Runner and Worker as the job is dispatched.
+- **`Job::Resolution`** — the outcome: `status` (starts `:ready`), `result`, and the error trio (`error`, `error_message`, `error_code`), plus predicates (`ready?`, `completed?`, `failed?`, `errored?`, `resolved?`). Advanced exactly once, by the Job lifecycle methods (`complete!` / `fail!` / `throw_bpmn_error!`).
+- **`Job::Timestamps`** — monotonic + UTC stamp pairs and the duration projections derived from them (see below).
+- **`Job::Context`** — an opaque key/value bag for cross-hook scratch (the tracing-span use case above).
+
+Hooks cannot mutate framework state through the Job: there are no public writers for status/result, and status changes are gated during hook execution — a `complete!`/`fail!` issued from inside a hook raises `Busybee::StatusChangeOutsidePerform`.
+
+Two cardinality-aware projections aggregate state across the POROs for instrumentation:
+
+- `job.context_tags` — low-cardinality, safe for metric labels
+- `job.logging_context` — high-cardinality superset, for structured log fields
+
+### Job Lifecycle Timestamps
+
+`Job::Timestamps` captures six monotonic + UTC timestamp pairs, written via `job.timestamps.stamp!(name)`:
+
+| Name | Stamped |
+|------|---------|
+| `activated_at` | Runner receives the job |
+| `execution_started_at` | `perform_job` begins |
+| `perform_started_at` | right before `instance.perform` |
+| `perform_finished_at` | right after `instance.perform` returns or raises (stamped in an `ensure`) |
+| `resolved_at` | top of `resolve!` (complete / fail / throw) |
+| `executed_at` | Runner finishes the job (`execute_job`) |
+
+Per-moment readers are forwarded on Job (`job.activated_at`, `job.executed_at`, …) — default `:utc`, pass `:monotonic` for the raw clock. Monotonic values back the seven duration projections (`perform_duration_ms`, `execution_duration_ms`, `total_duration_ms`, etc.); UTC values appear in structured log output. Accessors return `nil` before stamping.
+
+### Hook Registration
+
+Hooks are registered via `Busybee.configure`, which delegates to `Busybee::Hooks` (one registration method per `HOOK_TYPES` entry):
+
+```ruby
+Busybee.configure do |c|
+  c.before_job { |job| ... }
+  c.after_job(status: :failed) { |job| Sentry.capture_exception(job.error) }
+  c.around_job { |job, perform| Datadog::Tracing.trace(job.type) { perform.call } }
+end
+```
+
+Storage is plain arrays (one per hook type). Each entry is `{ callback:, filters: }`. FIFO ordering. No locking or concurrent data structures — hooks are registered at configure time and never modified after workers start. There is no supported use case for mutating hooks at runtime.
 
 `Busybee::Hooks.reset!` clears all arrays (for test isolation).
 
 ### Prefiltering
 
-Filter kwargs are validated per-noun at registration time:
-- **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `error:`
+Filter kwargs are validated per-noun at registration time (`FILTER_KEYS`):
+- **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `source:`, `error:`
 - **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `error:`
 - **Call hooks:** `method:`, `result:`, `error:`
 
-Matching uses case equality (`===`), supporting Symbol/String (exact), Regexp (pattern), Class (`is_a?`), Proc (custom). Class values additionally match against their `.name` string, allowing `worker_class: "OrderWorker"` or `worker_class: /Order/` to work even with load-order challenges.
-
-`Busybee::Hooks.matches?(hook, event)` checks all filters. Empty filters match everything (vacuous truth).
-
-### Hook Context
-
-Thread-local context allows outer scopes to propagate identity information to inner events. Managed via `Busybee::Hooks.with_context(**attrs) { ... }`.
-
-Context keys are promoted to event top-level only if they're in the noun's `CONTEXT_KEYS` allowlist (stable identity keys like `worker_class`, `job_key`, `bpmn_process_id`). Per-moment keys (timestamps, status, error) are never promoted — they stay explicit at each `build_event` call. Non-promoted context keys are still visible via `event[:context]`.
-
-```ruby
-Busybee::Hooks.with_context(worker_class: MyWorker, job_key: 123) do
-  event = Busybee::Hooks.build_event(:job, status: :ready)
-  event[:worker_class]           # => MyWorker (promoted)
-  event[:context][:worker_class] # => MyWorker (full snapshot)
-  event[:context][:trace_id]     # => visible if pushed, even though not promoted
-end
-```
-
-Context nests (`with_context` inside `with_context`), is thread-isolated, and restores on block exit even if the block raises. Explicit data in `build_event` always wins over context.
+At fire time, `Busybee::Hooks.matches?(hook, target)` reads each filter key off the target (`target.public_send(key)`, nil-safe) and applies `match?` — case equality (`===`) supporting Symbol/String (exact), Regexp (pattern), Class (`is_a?`), Proc (custom). Class values additionally match against their `.name` string, so `worker_class: "OrderWorker"` or `worker_class: /Order/` work regardless of load order. Empty filters match everything (vacuous truth).
 
 ### Hook Invocation
 
-**`Busybee::Hooks.run_hooks(type, event, swallow_errors: false)`** — runs all matching hooks for a type.
+- **`Busybee::Hooks.run(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_job`); `safe: true` logs and continues to the next hook (observing hooks like `after_job` and the `on_*` family). `Busybee::Worker::Shutdown` always propagates regardless, and errors matching the target's `shutdown_on` classes (worker config + gem-level) are wrapped in `Shutdown` and propagated.
+- **`Busybee::Hooks.run_chain(type, target, safe:, &core)`** — builds a nested lambda chain from matching around hooks (via `Busybee::Hooks::Chain`) and wraps the core block. First-registered hook is outermost. The core's return value is harvested into the Job's `Resolution`, so middleware can't "forget" the result — it's always read back from the Job, never from the chain's return value. Zero matching hooks calls the core directly.
 
-- `swallow_errors: false` (default): errors propagate naturally. Used for wrapping hooks (`before_job`, `before_call`, `around_call`).
-- `swallow_errors: true`: errors are logged and iteration continues to the next hook. Used for observing hooks (`after_job`, `after_call`, all `on_*`, `around_job_execution`).
-- `Busybee::Worker::Shutdown` errors always propagate regardless of `swallow_errors`.
-- Errors matching `shutdown_on` classes (from `event[:worker_class]` config + gem-level) are wrapped in `Shutdown` and propagated.
+Worker and Runner call these directly at each job lifecycle moment (e.g. `Hooks.run(:after_job, job, safe: true)`); see the flows doc below for which hook fires where.
 
-**`Busybee::Hooks.run_around_chain(type, event, &core)`** — builds a nested chain from matching around hooks and wraps the core block.
+### Job execution flows
 
-- Chain built via `reverse.inject` with nested lambdas. First-registered hook is outermost.
-- Option B2 semantics: core block's return value is merged into `event[:result]` (a mutable Hash, sealed as a key but contents are writable). Chain return value is ignored — result is always extracted from the event, preventing the "forgetful middleware" bug.
-- Zero-subscriber fast path: calls core directly when no matching hooks exist.
-- Prefiltering: non-matching hooks excluded before chain-building.
+For receive-to-runner-return walkthroughs of the typical and edge-case lifecycle paths — including where each hook fires — see [`internal/job_execution_flows.md`](internal/job_execution_flows.md).
 
-### Module Status
+### Not yet wired
 
-- **Event objects:** Complete (Mission 5a). RestrictedAccess, EventAccess base, JobEventAccess with 7 duration methods and tags.
-- **Registration & storage:** Complete (Mission 5b). 12 hook types, prefilter validation, FIFO storage.
-- **Invocation machinery:** Complete (Mission 5c). Unified run_hooks (propagating/swallowing), run_around_chain (Option B2), thread-local context.
-- **Job hook wiring:** Pending (Mission 6). Will wire hooks into Worker/Runner.
-- **Worker + call hooks:** Pending (Mission 7). WorkerEventAccess and CallEventAccess stubs will be implemented.
+Worker-level (`on_worker_started`, `on_worker_stopping`, `on_worker_shutdown`) and call-level (`before_call`, `around_call`, `after_call`) hook types are declared in `HOOK_TYPES` and accept registration and filter validation, but do not fire yet. They're reserved for a future iteration that may give Workers and Calls their own lifecycle-object analogs to what Job does for jobs.
 
 ## Testing Module
 

@@ -646,13 +646,19 @@ RSpec.describe Busybee::Worker::Configuration do
 
     it "raises on non-class argument" do
       expect { config.add_shutdown_on("RuntimeError") }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /shutdown_on.*exception classes/
+        Busybee::InvalidWorkerDefinition, /shutdown_on.*StandardError/
       )
     end
 
     it "raises on class that is not an Exception subclass" do
       expect { config.add_shutdown_on(String) }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /shutdown_on.*exception classes/
+        Busybee::InvalidWorkerDefinition, /shutdown_on.*StandardError/
+      )
+    end
+
+    it "raises on non-StandardError exception class (e.g., Interrupt)" do
+      expect { config.add_shutdown_on(Interrupt) }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /shutdown_on.*StandardError/
       )
     end
   end

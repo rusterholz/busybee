@@ -6,7 +6,7 @@ RSpec.describe Busybee::Runner::Polling do
   subject(:runner) { described_class.new(worker_class, runtime_config: runtime_config, client: client) }
 
   let(:client) { instance_double(Busybee::Client) }
-  let(:job) { instance_double(Busybee::Job, key: 1, retries: 3, ready?: true) }
+  let(:job) { build_test_job(key: 1, retries: 3) }
   let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
 
   let(:worker_class) do
@@ -200,8 +200,8 @@ RSpec.describe Busybee::Runner::Polling do
     context "when graceful shutdown is triggered" do
       it "fails remaining yielded jobs with preserved retries" do # rubocop:disable RSpec/ExampleLength
         jobs = [
-          instance_double(Busybee::Job, key: 1, retries: 3, ready?: true),
-          instance_double(Busybee::Job, key: 2, retries: 5, ready?: true)
+          build_test_job(key: 1, retries: 3),
+          build_test_job(key: 2, retries: 5)
         ]
         allow(jobs[0]).to receive(:fail!)
         allow(jobs[1]).to receive(:fail!)
@@ -227,7 +227,7 @@ RSpec.describe Busybee::Runner::Polling do
 
       it "uses the worker's configured backoff during shutdown" do
         worker_class.backoff 30_000
-        job_to_fail = instance_double(Busybee::Job, key: 1, retries: 3, ready?: true)
+        job_to_fail = build_test_job(key: 1, retries: 3)
         allow(job_to_fail).to receive(:fail!)
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
@@ -249,7 +249,7 @@ RSpec.describe Busybee::Runner::Polling do
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
-        bad_job = instance_double(Busybee::Job, key: 99, retries: 1, ready?: true)
+        bad_job = build_test_job(key: 99, retries: 1)
         allow(bad_job).to receive(:fail!).and_raise(StandardError, "grpc gone")
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
@@ -262,6 +262,55 @@ RSpec.describe Busybee::Runner::Polling do
 
         expect(logger).to have_received(:warn).with(/Failed to fail job 99 during shutdown.*grpc gone/)
       end
+    end
+  end
+
+  describe "on_job_activated wiring" do
+    after { Busybee::Hooks.reset! }
+
+    it "fires on_job_activated with source: :poll and no buffer_size" do
+      captured = nil
+      Busybee.on_job_activated { |job| captured = job }
+
+      call_count = 0
+      allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
+        if call_count.zero?
+          call_count += 1
+          block.call(job)
+        end
+        runner.stop!
+        0
+      end
+      allow(worker_class).to receive(:perform_job)
+
+      runner.run!
+
+      expect(captured.source).to eq(:poll)
+      expect(captured.buffer_size).to be_nil
+    end
+  end
+
+  describe "around_job_execution wiring" do
+    after { Busybee::Hooks.reset! }
+
+    it "fires around_job_execution around perform_job during run!" do
+      fired = false
+      Busybee.around_job_execution { |_e, process| process.call.tap { fired = true } }
+
+      call_count = 0
+      allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
+        if call_count.zero?
+          call_count += 1
+          block.call(job)
+        end
+        runner.stop!
+        0
+      end
+      allow(worker_class).to receive(:perform_job)
+
+      runner.run!
+      expect(fired).to be(true)
+      expect(worker_class).to have_received(:perform_job).with(job)
     end
   end
 end

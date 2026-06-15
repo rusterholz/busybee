@@ -34,10 +34,11 @@ module Busybee
 
       def process_all_available_jobs
         @client.with_each_job(job_type, **@runtime_config.polling_options) do |job|
+          activate_job(job, source: :poll)
           if stopping?
             handle_shutdown_job(job)
           else
-            @worker_class.perform_job(job)
+            execute_job(job)
           end
         rescue Busybee::Worker::Shutdown => e
           # [hook: runner.shutdown]

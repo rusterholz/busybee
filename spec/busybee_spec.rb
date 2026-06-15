@@ -526,7 +526,13 @@ RSpec.describe Busybee do
 
     it "rejects non-exception classes in the Array" do
       expect { described_class.shutdown_on_errors = [String] }.to raise_error(
-        ArgumentError, /shutdown_on_errors.*exception classes/
+        ArgumentError, /shutdown_on_errors.*StandardError/
+      )
+    end
+
+    it "rejects non-StandardError exception classes (e.g., Interrupt)" do
+      expect { described_class.shutdown_on_errors = [Interrupt] }.to raise_error(
+        ArgumentError, /shutdown_on_errors.*StandardError/
       )
     end
   end

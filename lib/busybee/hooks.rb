@@ -1,17 +1,17 @@
 # frozen_string_literal: true
 
-require "active_support/core_ext/hash/indifferent_access"
-require "busybee/serialization"
-require "busybee/hooks/restricted_access"
-require "busybee/hooks/job_event_access"
-require "busybee/hooks/worker_event_access"
-require "busybee/hooks/call_event_access"
+require "busybee/hooks/chain"
 
 module Busybee
   # Central module for the hook/instrumentation system.
-  # Provides event construction, hook registration and storage,
-  # prefilter matching, and invocation (propagating and swallowing).
+  # Provides hook registration and storage, prefilter matching, and
+  # invocation (propagating and swallowing).
   module Hooks
+    # Hook types are declared per noun. The :job hooks (first six) are wired
+    # end-to-end. The :worker and :call entries are reserved for Mission 7
+    # and don't currently fire — registration succeeds but callbacks never
+    # run. Mission 7 will decide the right callback shape for each (likely
+    # Worker-/Call-as-lifecycle-object analogs to what Job did for jobs).
     HOOK_TYPES = %i[
       before_job around_job after_job
       on_job_activated on_job_executed around_job_execution
@@ -21,7 +21,7 @@ module Busybee
 
     # Allowed filter kwargs per noun
     FILTER_KEYS = {
-      job: %i[job_type worker_class status bpmn_process_id error].freeze,
+      job: %i[job_type worker_class status bpmn_process_id source error].freeze,
       worker: %i[worker_class job_type worker_mode error].freeze,
       call: %i[method result error].freeze
     }.freeze
@@ -36,194 +36,162 @@ module Busybee
       h[type] = noun
     end.freeze
 
-    # Context keys that can be promoted from thread-local context to event
-    # top level per noun. Only stable-across-scope identity keys belong here;
-    # per-moment keys (timestamps, status, result, error) stay explicit.
-    # Non-promoted context keys are still visible via event[:context].
-    CONTEXT_KEYS = {
-      job: %i[worker_class worker job job_type job_key bpmn_process_id
-              process_instance_key element_id].freeze,
-      worker: %i[worker_class job_type worker_mode].freeze,
-      call: %i[].freeze
-    }.freeze
+    class << self
+      # ====== Hook storage ======
 
-    CONTEXT_THREAD_KEY = :_busybee_hooks_context
+      # @return [Array] the hooks array for the given type
+      def hooks_for(type)
+        unless HOOK_TYPES.include?(type)
+          raise ArgumentError, "Unknown hook type: #{type.inspect}. Expected one of: #{HOOK_TYPES.join(', ')}"
+        end
 
-    NOUN_EVENT_ACCESS = {
-      job: JobEventAccess,
-      worker: WorkerEventAccess,
-      call: CallEventAccess
-    }.freeze
-
-    # Returns the current thread-local hook context.
-    # @return [Hash]
-    def self.context
-      Thread.current[CONTEXT_THREAD_KEY] || {}
-    end
-
-    # Push context for the duration of a block. Merges with any existing
-    # context (inner values win). Restores previous context on block exit.
-    def self.with_context(**attrs)
-      previous = Thread.current[CONTEXT_THREAD_KEY]
-      Thread.current[CONTEXT_THREAD_KEY] = (previous || {}).merge(attrs)
-      yield
-    ensure
-      Thread.current[CONTEXT_THREAD_KEY] = previous
-    end
-
-    # @return [Array] the hooks array for the given type
-    def self.hooks_for(type)
-      unless HOOK_TYPES.include?(type)
-        raise ArgumentError, "Unknown hook type: #{type.inspect}. Expected one of: #{HOOK_TYPES.join(', ')}"
+        @hooks[type]
       end
 
-      @hooks[type]
-    end
+      # Clear all registered hooks. Intended for test isolation.
+      def reset!
+        @hooks = HOOK_TYPES.to_h { |type| [type, []] }
+      end
 
-    # Clear all registered hooks. Intended for test isolation.
-    def self.reset!
-      @hooks = HOOK_TYPES.to_h { |type| [type, []] }
+      # ====== Registration ======
+
+      # Register a hook. Called by delegation methods on the Busybee singleton.
+      #
+      # @param type [Symbol] one of HOOK_TYPES
+      # @param filters [Hash] optional prefilter kwargs
+      # @param callback [Proc] the hook block
+      def register(type, callback, **filters)
+        raise ArgumentError, "#{type} requires a block" unless callback
+
+        validate_filters!(type, filters)
+        hooks_for(type) << { callback: callback, filters: filters }
+      end
+
+      # Define one registration method per hook type.
+      # Each accepts optional filter kwargs and a required block.
+      HOOK_TYPES.each do |type|
+        define_method(type) do |**filters, &callback|
+          register(type, callback, **filters)
+        end
+      end
+
+      # ====== Filter matching ======
+
+      # Test whether a single filter matches a value, in three layers:
+      #   1. Case equality (===) — Symbol/String exact match, Regexp pattern,
+      #      Class is_a?, Proc/Lambda custom logic.
+      #   2. Equality (==) — catches direct identity, notably Class === Class
+      #      (where === would check is_a? on the class object, not identity).
+      #      So `worker_class: OrderWorker` matches as expected.
+      #   3. Class name fallback — when value is a Class, also match the filter
+      #      against value.name. Lets `worker_class: /Order/` match class names.
+      #
+      # @param filter [Object] the filter (Symbol, String, Regexp, Class, Proc, etc.)
+      # @param value [Object] the value from the event
+      # @return [Boolean]
+      def match?(filter, value)
+        filter === value ||
+          filter == value ||
+          (value.is_a?(Class) && filter === value.name)
+      end
+
+      # Test whether all of a hook's filters match the given target. The target
+      # is a Job for job-noun hooks; filter keys are looked up as job attributes
+      # (via public_send). Returns true (vacuous truth) when filters are empty.
+      #
+      # @param hook [Hash] { callback:, filters: }
+      # @param target [Object] the noun (Busybee::Job for job hooks)
+      # @return [Boolean]
+      def matches?(hook, target)
+        hook[:filters].all? { |key, filter| match?(filter, attribute(target, key)) }
+      end
+
+      # ====== Invocation ======
+
+      # Run all matching hooks for the given type. Callbacks receive the target
+      # (e.g. Busybee::Job for job-noun hooks).
+      #
+      # By default, errors propagate (for wrapping hooks like before_job).
+      # With safe: true, errors are logged and iteration continues (for
+      # observing hooks like after_job, on_job_executed). Shutdown errors
+      # always propagate regardless of the safe: flag.
+      def run(type, target, safe: false)
+        matching_hooks(type, target).each do |hook|
+          hook[:callback].call(target)
+        rescue Busybee::Worker::Shutdown
+          raise
+        rescue StandardError => e
+          raise Busybee::Worker::Shutdown.new(worker: nil) if shutdown_error?(e, target)
+          raise unless safe
+
+          log_swallowed_error(e)
+        end
+      end
+
+      # Log a hook error that was swallowed (in safe-mode iteration or safe
+      # around-chain). Includes class, message, and the first backtrace frame
+      # so the operator can locate the offending hook from a single log line.
+      def log_swallowed_error(error)
+        location = error.backtrace&.first
+        suffix = location ? " (at #{location})" : ""
+        Busybee.logger&.error("[busybee] Error in hooks (ignored): [#{error.class}] #{error.message}#{suffix}")
+      end
+
+      # Run an around-hook chain wrapping a core block. Middleware callbacks
+      # receive (target, perform). The chain return value is the captured
+      # result (HWIA-coerced for job-noun chains via Resolution#set_result).
+      def run_chain(type, target, safe: false, &block)
+        matching = matching_hooks(type, target)
+        core = -> { capture_chain_result(target, block.call) }
+        Chain.build(matching, target, core, safe: safe).call
+        target.is_a?(Busybee::Job) ? target.result : nil
+      end
+
+      private
+
+      # Innermost step of run_chain. For job-noun chains, captures the
+      # perform-returned result onto Job's Resolution (set-once + HWIA + freeze)
+      # if it isn't already set; the manual-complete flow may have captured it
+      # earlier from inside perform.
+      def capture_chain_result(target, raw_result)
+        return unless target.is_a?(Busybee::Job)
+
+        resolution = target.send(:resolution)
+        resolution.set_result(raw_result) unless resolution.result_set?
+      end
+
+      def validate_filters!(type, filters)
+        return if filters.empty?
+
+        allowed = FILTER_KEYS[HOOK_NOUN[type]]
+        unknown = filters.keys - allowed
+        return if unknown.empty?
+
+        raise ArgumentError,
+              "Unknown filter(s) for #{type}: #{unknown.join(', ')}. " \
+              "Allowed: #{allowed.join(', ')}"
+      end
+
+      def matching_hooks(type, target)
+        hooks_for(type).select { |h| matches?(h, target) }
+      end
+
+      # Look up a filter key against the target. For job-noun hooks the target
+      # is a Busybee::Job; attribute names map to public methods. Missing keys
+      # return nil so a hook can express "filter only fires when this attribute
+      # is non-nil" without needing a separate predicate.
+      def attribute(target, key)
+        target.respond_to?(key) ? target.public_send(key) : nil
+      end
+
+      # Check if an error matches shutdown_on classes from the worker or gem config.
+      def shutdown_error?(error, target)
+        worker_class = attribute(target, :worker_class)
+        per_worker = worker_class.respond_to?(:configuration) ? worker_class.configuration.shutdown_on : []
+        (per_worker + Busybee.shutdown_on_errors).any? { |klass| error.is_a?(klass) }
+      end
     end
 
     reset!
-
-    # Register a hook. Called by delegation methods on the Busybee singleton.
-    #
-    # @param type [Symbol] one of HOOK_TYPES
-    # @param filters [Hash] optional prefilter kwargs
-    # @param callback [Proc] the hook block
-    def self.register(type, callback, **filters)
-      raise ArgumentError, "#{type} requires a block" unless callback
-
-      validate_filters!(type, filters)
-      hooks_for(type) << { callback: callback, filters: filters }
-    end
-
-    def self.validate_filters!(type, filters)
-      return if filters.empty?
-
-      allowed = FILTER_KEYS[HOOK_NOUN[type]]
-      unknown = filters.keys - allowed
-      return if unknown.empty?
-
-      raise ArgumentError,
-            "Unknown filter(s) for #{type}: #{unknown.join(', ')}. " \
-            "Allowed: #{allowed.join(', ')}"
-    end
-    private_class_method :validate_filters!
-
-    # Define registration methods for all hook types.
-    # Each method accepts optional filter kwargs and a required block.
-    HOOK_TYPES.each do |type|
-      define_singleton_method(type) do |**filters, &callback|
-        register(type, callback, **filters)
-      end
-    end
-
-    # Test whether a single filter matches a value using case equality (===).
-    # Falls back to matching against value.name when value is a Class,
-    # allowing e.g. `worker_class: /Order/` to match class name strings.
-    #
-    # @param filter [Object] the filter (Symbol, String, Regexp, Class, Proc, etc.)
-    # @param value [Object] the value from the event
-    # @return [Boolean]
-    def self.match?(filter, value)
-      filter === value || (value.is_a?(Class) && filter === value.name)
-    end
-
-    # Test whether all of a hook's filters match the given event.
-    # Returns true (vacuous truth) when filters are empty.
-    #
-    # @param hook [Hash] { callback:, filters: }
-    # @param event [Hash] the event hash
-    # @return [Boolean]
-    def self.matches?(hook, event)
-      hook[:filters].all? { |key, filter| match?(filter, event[key.to_s]) }
-    end
-
-    # Run all matching hooks for the given type.
-    #
-    # By default, errors propagate (for wrapping hooks like before_job, around_call).
-    # With swallow_errors: true, errors are logged and iteration continues
-    # (for observing hooks like after_job, on_worker_started). Shutdown errors
-    # always propagate regardless of swallow_errors.
-    #
-    # @param type [Symbol] hook type
-    # @param event [Hash] the event hash
-    # @param swallow_errors [Boolean] whether to swallow non-shutdown errors
-    # Returns hooks for the given type that match the event's current state.
-    def self.matching_hooks(type, event)
-      hooks_for(type).select { |h| matches?(h, event) }
-    end
-    private_class_method :matching_hooks
-
-    def self.run_hooks(type, event, swallow_errors: false)
-      matching_hooks(type, event).each do |hook|
-        hook[:callback].call(event)
-      rescue Busybee::Worker::Shutdown
-        raise
-      rescue StandardError => e
-        raise Busybee::Worker::Shutdown.new(worker: event[:worker]) if shutdown_error?(e, event)
-        raise unless swallow_errors
-
-        Busybee.logger&.error("[busybee] Hook error (swallowed): #{e.class}: #{e.message}")
-      end
-    end
-
-    # Check if an error matches shutdown_on classes from the worker or gem config.
-    def self.shutdown_error?(error, event)
-      worker_class = event[:worker_class]
-      per_worker = worker_class.respond_to?(:configuration) ? worker_class.configuration.shutdown_on : []
-      (per_worker + Busybee.shutdown_on_errors).any? { |klass| error.is_a?(klass) }
-    end
-    private_class_method :shutdown_error?
-
-    # Run an around-hook chain wrapping a core block (Option B2).
-    #
-    # Builds a nested chain from matching around hooks via reverse.inject.
-    # The core block's return value is stored in event[:result] (a sealed key
-    # present from event construction). The chain's own return value is ignored,
-    # preventing the "forgetful middleware" bug.
-    #
-    # @param type [Symbol] hook type (e.g. :around_job)
-    # @param event [Hash] the event hash (must have :result key)
-    # @yield the core block to wrap
-    def self.run_around_chain(type, event, &block)
-      matching = matching_hooks(type, event)
-
-      core = lambda do
-        result = block.call
-        event[:result].merge!(result) if result.is_a?(Hash)
-      end
-
-      chain = matching.reverse.inject(core) do |next_link, hook|
-        -> { hook[:callback].call(event, next_link) }
-      end
-
-      chain.call
-    end
-
-    # Build a hook event object for the given noun.
-    #
-    # Merges thread-local context into the event, filtered by CONTEXT_KEYS
-    # for the noun (only allowed identity keys are promoted). Explicit data
-    # always wins over context. Full context is stashed as a frozen hash
-    # under the :context key for inspection.
-    #
-    # @param noun [Symbol] :job, :worker, or :call
-    # @param data [Hash] framework keys for the event
-    # @return [ActiveSupport::HashWithIndifferentAccess]
-    def self.build_event(noun, data) # rubocop:disable Metrics/AbcSize
-      event_access = NOUN_EVENT_ACCESS.fetch(noun) do
-        raise ArgumentError, "Unknown hook noun: #{noun.inspect}. Expected one of: #{NOUN_EVENT_ACCESS.keys.join(', ')}"
-      end
-
-      ActiveSupport::HashWithIndifferentAccess.new(
-        context.slice(*CONTEXT_KEYS[noun]).merge(data)
-      ).tap { |e| e[:context] = context.dup.with_indifferent_access.freeze }.
-        extend(Busybee::Serialization::HashAccess).
-        extend(RestrictedAccess).
-        extend(event_access)
-    end
   end
 end

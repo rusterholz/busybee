@@ -6,7 +6,7 @@ RSpec.describe Busybee::Runner::Streaming do
   subject(:runner) { described_class.new(worker_class, runtime_config: runtime_config, client: client) }
 
   let(:client) { instance_double(Busybee::Client) }
-  let(:job) { instance_double(Busybee::Job, key: 1, retries: 3, ready?: true) }
+  let(:job) { build_test_job(key: 1, retries: 3) }
   let(:stream) { instance_double(Busybee::JobStream) }
   let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
 
@@ -164,8 +164,8 @@ RSpec.describe Busybee::Runner::Streaming do
 
       it "does not process more jobs after Shutdown" do
         jobs = [
-          instance_double(Busybee::Job, key: 1, retries: 3, ready?: true),
-          instance_double(Busybee::Job, key: 2, retries: 5, ready?: true)
+          build_test_job(key: 1, retries: 3),
+          build_test_job(key: 2, retries: 5)
         ]
         allow(jobs[1]).to receive(:fail!)
 
@@ -196,8 +196,8 @@ RSpec.describe Busybee::Runner::Streaming do
     context "when graceful shutdown is triggered" do
       it "fails remaining yielded jobs with preserved retries" do # rubocop:disable RSpec/ExampleLength
         jobs = [
-          instance_double(Busybee::Job, key: 1, retries: 3, ready?: true),
-          instance_double(Busybee::Job, key: 2, retries: 5, ready?: true)
+          build_test_job(key: 1, retries: 3),
+          build_test_job(key: 2, retries: 5)
         ]
         allow(jobs[1]).to receive(:fail!)
 
@@ -224,7 +224,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
       it "uses the worker's configured backoff during shutdown" do # rubocop:disable RSpec/ExampleLength
         worker_class.backoff 30_000
-        job_to_fail = instance_double(Busybee::Job, key: 1, retries: 3, ready?: true)
+        job_to_fail = build_test_job(key: 1, retries: 3)
         allow(job_to_fail).to receive(:fail!)
 
         allow(client).to receive(:open_job_stream) do
@@ -248,7 +248,7 @@ RSpec.describe Busybee::Runner::Streaming do
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
-        bad_job = instance_double(Busybee::Job, key: 99, retries: 1, ready?: true)
+        bad_job = build_test_job(key: 99, retries: 1)
         allow(bad_job).to receive(:fail!).and_raise(StandardError, "grpc gone")
 
         allow(client).to receive(:open_job_stream) do
@@ -323,7 +323,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
     describe "#run!" do
       it "processes jobs pumped from stream through the buffer" do
-        streamed_job = instance_double(Busybee::Job, key: 42, retries: 1, ready?: true)
+        streamed_job = build_test_job(key: 42, retries: 1)
 
         allow(client).to receive(:open_job_stream) do
           allow(stream).to receive(:each) do |&block|
@@ -371,7 +371,7 @@ RSpec.describe Busybee::Runner::Streaming do
       end
 
       it "joins pump thread and drains remaining buffer during shutdown" do # rubocop:disable RSpec/ExampleLength
-        leftover = instance_double(Busybee::Job, key: 88, retries: 2, ready?: true)
+        leftover = build_test_job(key: 88, retries: 2)
         allow(leftover).to receive(:fail!)
 
         allow(client).to receive(:open_job_stream) do
@@ -462,8 +462,8 @@ RSpec.describe Busybee::Runner::Streaming do
 
         it "sleeps between stream reads" do # rubocop:disable RSpec/ExampleLength
           jobs = [
-            instance_double(Busybee::Job, key: 1, retries: 1, ready?: true),
-            instance_double(Busybee::Job, key: 2, retries: 1, ready?: true)
+            build_test_job(key: 1, retries: 1),
+            build_test_job(key: 2, retries: 1)
           ]
 
           allow(client).to receive(:open_job_stream) do
@@ -572,8 +572,8 @@ RSpec.describe Busybee::Runner::Streaming do
 
       it "flushes the buffer, dropping all pending jobs" do
         queue = runner.instance_variable_get(:@job_buffer)
-        queue.push(instance_double(Busybee::Job, key: 1))
-        queue.push(instance_double(Busybee::Job, key: 2))
+        queue.push(build_test_job(key: 1))
+        queue.push(build_test_job(key: 2))
 
         runner.kill!
 
@@ -581,6 +581,94 @@ RSpec.describe Busybee::Runner::Streaming do
         expect(queue.pop(true)).to eq(:stop)
         expect { queue.pop(true) }.to raise_error(ThreadError) # empty
       end
+    end
+  end
+
+  describe "on_job_activated wiring (inline mode)" do
+    after { Busybee::Hooks.reset! }
+
+    it "fires on_job_activated with source: :stream and no buffer_size" do
+      captured = nil
+      Busybee.on_job_activated { |job| captured = job }
+
+      allow(client).to receive(:open_job_stream) do
+        allow(stream).to receive(:each).and_yield(job)
+        stream
+      end
+      allow(worker_class).to receive(:perform_job) { runner.stop! }
+
+      runner.run!
+
+      expect(captured.source).to eq(:stream)
+      expect(captured.buffer_size).to be_nil
+    end
+  end
+
+  describe "on_job_activated wiring (buffered mode)" do
+    subject(:runner) { described_class.new(queue_worker_class, runtime_config: runtime_config, client: client) }
+
+    let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(queue_worker_class) }
+    let(:queue_worker_class) do
+      Class.new(Busybee::Worker) do
+        job_type "test_worker"
+
+        def perform; end
+      end
+    end
+    let(:stream_gate) { Concurrent::Event.new }
+
+    before { allow(stream).to receive(:close) { stream_gate.set } }
+    after { Busybee::Hooks.reset! }
+
+    it "fires on_job_activated with source: :stream and the buffer depth at receive time" do
+      streamed_job = build_test_job(key: 42, retries: 1)
+      captured = nil
+      Busybee.on_job_activated { |job| captured = job }
+
+      allow(client).to receive(:open_job_stream) do
+        allow(stream).to receive(:each) do |&block|
+          block.call(streamed_job)
+          stream_gate.wait
+        end
+        stream
+      end
+      allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
+
+      runner.run!
+
+      expect(captured.source).to eq(:stream)
+      expect(captured.buffer_size).to eq(0) # captured BEFORE push, queue was empty
+    end
+  end
+
+  describe "buffer_size refresh on on_job_executed (buffered mode)" do
+    subject(:runner) { described_class.new(queue_worker_class, runtime_config: runtime_config, client: client) }
+
+    let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(queue_worker_class) }
+    let(:queue_worker_class) do
+      Class.new(Busybee::Worker) do
+        job_type "test_worker"
+        strict_outputs false
+        define_method(:perform) { { done: true } }
+      end
+    end
+
+    after { Busybee::Hooks.reset! }
+
+    it "reports execution-time buffer depth on on_job_executed, not receive-time" do
+      job = build_test_job(type: "test_worker", key: 1)
+      captured = nil
+      Busybee.on_job_executed { |job| captured = job }
+
+      runner.send(:activate_job, job, source: :stream, buffer_size: 0)
+      # Simulate two new jobs arriving in the buffer between activation and execution.
+      buffer = runner.instance_variable_get(:@job_buffer)
+      buffer.push(build_test_job(type: "test_worker", key: 2))
+      buffer.push(build_test_job(type: "test_worker", key: 3))
+
+      runner.send(:execute_job, job)
+
+      expect(captured.buffer_size).to eq(2)
     end
   end
 end

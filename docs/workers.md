@@ -214,6 +214,8 @@ end
 
 You can also configure shutdown errors globally for all workers in your application via [`Busybee.shutdown_on_errors`](configuration.md).
 
+`shutdown_on` accepts only `StandardError` subclasses. Classes outside that hierarchy (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise an error at class-definition time, because the per-job rescue that consults `shutdown_on` is `StandardError`-scoped — a non-`StandardError` would never reach the check at runtime. Signal-class errors are handled separately via the CLI's signal traps; there's nothing to configure here.
+
 When a shutdown is triggered, the worker process stops requesting new jobs, fails any in-flight jobs (preserving their retry count so they'll be picked up by another worker), and exits.
 
 #### Direct Job Access
@@ -248,6 +250,8 @@ def perform
   job.error?                  # true if BPMN error was thrown
 end
 ```
+
+Worth knowing about how `status` relates to `result` and `error`: `result` and `error` are worker-side records of what came out of executing the job — captured the moment your `perform` decides them. `status` is the engine's ledger as reflected on this worker, and advances only after the relevant GRPC call (`complete_job`, `fail_job`, or `throw_bpmn_error`) succeeds. In normal operation the two views agree, but transient GRPC failures can produce divergence (e.g., a `:failed` worker-side status while the engine has the job in an incident); the worker doesn't observe engine state directly. A naming bridge that helps when cross-referencing Zeebe docs or Operate: Busybee's `:ready` is the worker-side name for what Zeebe calls the **ACTIVATED** state.
 
 Variables and headers support both hash-style and method-style access, including nested values:
 

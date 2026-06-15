@@ -133,9 +133,9 @@ module Busybee
 
       def add_shutdown_on(*exception_classes)
         exception_classes.each do |klass|
-          unless klass.is_a?(Class) && klass <= Exception
+          unless klass.is_a?(Class) && klass <= StandardError
             raise InvalidWorkerDefinition,
-                  "`shutdown_on` expects exception classes, got #{klass.inspect}"
+                  "`shutdown_on` expects StandardError subclasses, got #{klass.inspect}"
           end
         end
 

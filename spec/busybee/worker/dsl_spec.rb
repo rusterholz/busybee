@@ -689,7 +689,7 @@ RSpec.describe Busybee::Worker::DSL do
         stub_const("BadShutdownWorker", Class.new(Busybee::Worker) do
           shutdown_on String
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /shutdown_on.*exception classes/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /shutdown_on.*StandardError/)
     end
 
     it "raises on non-class argument" do
@@ -697,7 +697,15 @@ RSpec.describe Busybee::Worker::DSL do
         stub_const("InstanceShutdownWorker", Class.new(Busybee::Worker) do
           shutdown_on "RuntimeError"
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /shutdown_on.*exception classes/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /shutdown_on.*StandardError/)
+    end
+
+    it "raises on non-StandardError exception class (e.g., Interrupt)" do
+      expect do
+        stub_const("NonStdShutdownWorker", Class.new(Busybee::Worker) do
+          shutdown_on Interrupt
+        end)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /shutdown_on.*StandardError/)
     end
   end
 end

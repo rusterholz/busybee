@@ -40,10 +40,11 @@ module Busybee
           break if stopping?
 
           polled_count = @client.with_each_job(job_type, **drain_options) do |job|
+            activate_job(job, source: :poll)
             if stopping?
               handle_shutdown_job(job)
             else
-              @worker_class.perform_job(job)
+              execute_job(job)
               # After each polled job, drain any stream jobs that arrived —
               # always prioritize keeping up with the stream over working through backlog.
               process_buffered_jobs(blocking: false)

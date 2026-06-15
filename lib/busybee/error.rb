@@ -42,6 +42,11 @@ module Busybee
   # Raised when OAuth2 token refresh fails (HTTP error from token endpoint)
   OAuthTokenRefreshFailed = Class.new(Error)
 
+  # Raised when perform_job's hook machinery catches an attempt to change
+  # job status (complete!, fail!, throw_bpmn_error!) from outside the
+  # perform method — e.g. from inside a before_job or around_job hook.
+  StatusChangeOutsidePerform = Class.new(Error)
+
   # Raised when attempting to iterate a stream that has been closed
   StreamAlreadyClosed = Class.new(Error)
 

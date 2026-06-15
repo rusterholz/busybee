@@ -265,7 +265,7 @@ job.complete!
 job.complete!(result: "success", processedAt: Time.now.iso8601)
 ```
 
-**`fail!(error_message_or_exception, retries: nil, backoff: nil)`** — Fail the job. You can pass a string or an exception:
+**`fail!(message_or_exception, retries: nil, backoff: nil)`** — Fail the job. You can pass a string or an exception:
 
 ```ruby
 job.fail!("Payment gateway timeout")
