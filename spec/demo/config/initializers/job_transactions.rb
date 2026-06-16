@@ -14,8 +14,10 @@
 #
 # The job types listed here are synchronous and write only to the database, so
 # the hook owns their atomicity and they no longer open transactions themselves.
-Busybee.around_job(
-  job_type: %w[update_order_status create_shipment update_shipment_status assign_driver]
-) do |_job, perform|
-  ActiveRecord::Base.transaction { perform.call }
+Busybee.configure do |config|
+  config.around_job(
+    job_type: %w[update_order_status create_shipment update_shipment_status assign_driver]
+  ) do |_job, perform|
+    ActiveRecord::Base.transaction { perform.call }
+  end
 end

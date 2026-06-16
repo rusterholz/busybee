@@ -10,5 +10,7 @@
 # small retry of its own because the demo's worker containers share one SQLite
 # file. The two hooks bracket the lifecycle: activation captures the live buffer
 # state and start timestamp; execution completes the row with timings + outcome.
-Busybee.on_job_activated { |job| Monitoring::Recorder.record_activation(job) }
-Busybee.on_job_executed  { |job| Monitoring::Recorder.record_execution(job) }
+Busybee.configure do |config|
+  config.on_job_activated { |job| Monitoring::Recorder.record_activation(job) }
+  config.on_job_executed  { |job| Monitoring::Recorder.record_execution(job) }
+end
