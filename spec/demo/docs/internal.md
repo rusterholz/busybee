@@ -105,6 +105,19 @@ Each file demonstrates a different aspect of YAML configuration:
 
 Note that some worker settings remain in the DSL (e.g., Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning — settings that might vary by environment or deployment.
 
+## Monitoring & Lifecycle Hooks
+
+The Monitoring domain demonstrates how an app consumes busybee's lifecycle hooks. It owns no business logic — it's a passive recorder plus a read-only dashboard.
+
+**Data model.** `Monitoring::JobRun` (`monitoring_job_runs`) holds one row per job activation, keyed by Zeebe's `job_key` (unique index). The row is upserted across two hook firings: `on_job_activated` creates it (job type, source, buffer depth, `activated_at`); `on_job_executed` completes it (`executed_at`, final status, durations, error). `Monitoring::Recorder` does the upsert with `find_or_initialize_by(job_key:)`.
+
+**Two initializers register the hooks:**
+
+- `config/initializers/monitoring.rb` — `on_job_activated` + `on_job_executed`, delegating to `Monitoring::Recorder`. The runner fires these with `safe: true`, so a raised error can't disrupt job execution. On top of that, `Recorder` retries transient SQLite write contention (`MAX_ATTEMPTS = 3`, detected by matching `/lock|busy/` in the error message), because the four worker containers share one database file.
+- `config/initializers/job_transactions.rb` — an `around_job` hook wrapping `perform` in `ActiveRecord::Base.transaction`, registered for a set of `job_type`s via the filter's array match-any support (`job_type: %w[update_order_status create_shipment update_shipment_status assign_driver]`). Only synchronous, DB-only job types are listed; `complete_driver_delivery` (publishes a Zeebe message mid-`perform`) and the async Sim job types are excluded.
+
+**UI.** `MonitoringController#index` renders a filterable dashboard in its own dark `monitoring` layout (`data-theme="dark"`), so only this area is dark while the business app stays light. Filters — a job-type multi-select plus `status` and `process` (`bpmn_process_id`) dropdowns — are carried in the query string so they survive the page's 5-second auto-refresh (a `<meta http-equiv="refresh">`). `Monitoring::Stats` computes the headline numbers over the filtered scope: total and per-status counts, the max buffer depth, and the mean/max of the total, perform, and buffer-wait durations. **The duration stats are taken over resolved rows only** (`status != "ready"`), so the async workers' dispatch-time near-zeros don't drag the means down — the `ready` count still shows in the status breakdown. The recent-runs table lists each run with its perform/buffer/total timings, `element_id` and `retries` (read from the `tags` JSON), and any error.
+
 ## Test Hardpoints
 
 ### Smoke Test: `bin/demo test`
@@ -201,3 +214,4 @@ For bulk order creation in a running Docker stack, prefer the `demo:run_orders` 
 - **Fixed fleet size**. The driver fleet is seeded at startup and doesn't scale dynamically. The checkout/wait queue handles burst load gracefully, but under sustained overload, orders queue up rather than triggering new driver creation.
 - **No BPMN call activities for process chaining**. The `prepare_order` → `ship_order` → `deliver_shipment` chain uses ActiveRecord callbacks instead. This is pragmatic (call activities require parent process awareness of child details) but means the chain isn't visible in a single BPMN diagram.
 - **Inventory is guaranteed**. `GuaranteedRestock` ensures every order can be fulfilled. This makes the demo reliable but removes the "out of stock" scenario that a real system would need to handle.
+- **Async workers record as `ready` in Monitoring**. The Sim workers complete from a background `Concurrent::Promises` future, *after* their `on_job_executed` hook has already fired. So `Monitoring::JobRun` captures them in the `ready` state with a near-zero duration. This is accurate to how busybee's hooks observe an async `perform` — they bracket the synchronous dispatch, not the deferred completion — rather than a recording bug.
