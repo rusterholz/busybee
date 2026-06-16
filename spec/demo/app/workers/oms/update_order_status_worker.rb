@@ -12,7 +12,7 @@ module Oms
     def perform
       validate_status!
 
-      Order.transaction { order.update!(status: status) }
+      order.update!(status: status)
       Rails.logger.info("Order ##{order.short_id} marked as #{status}")
     end
 

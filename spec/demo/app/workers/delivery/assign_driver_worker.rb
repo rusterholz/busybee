@@ -31,14 +31,12 @@ module Delivery
     private
 
     def try_assign_driver!(request)
-      Driver.transaction do
-        driver = Driver.available.by_mileage.first
-        return unless driver
+      driver = Driver.available.by_mileage.first
+      return unless driver
 
-        driver.update!(current_shipment_id: shipment_id)
-        request.update!(driver_id: driver.id)
-        driver
-      end
+      driver.update!(current_shipment_id: shipment_id)
+      request.update!(driver_id: driver.id)
+      driver
     end
 
     def short_shipment_id
