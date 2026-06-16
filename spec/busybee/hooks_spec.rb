@@ -122,6 +122,20 @@ RSpec.describe Busybee::Hooks do
     it "does not use name fallback for non-Class values" do
       expect(described_class.match?(/boom/, RuntimeError.new("boom"))).to be false
     end
+
+    it "matches any element when the filter is an array" do
+      expect(described_class.match?(%i[failed error], :error)).to be true
+      expect(described_class.match?(%i[failed error], :complete)).to be false
+    end
+
+    it "applies each element matcher (string, regex, class name) inside an array" do
+      expect(described_class.match?(["create_shipment", /assign/], "assign_driver")).to be true
+      expect(described_class.match?(["create_shipment", /assign/], "load_warehouses")).to be false
+    end
+
+    it "treats an empty array as matching nothing" do
+      expect(described_class.match?([], :anything)).to be false
+    end
   end
 
   describe ".matches?" do

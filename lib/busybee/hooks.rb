@@ -77,7 +77,13 @@ module Busybee
 
       # ====== Filter matching ======
 
-      # Test whether a single filter matches a value, in three layers:
+      # Test whether a single filter matches a value.
+      #
+      # An Array filter matches if any of its elements matches (match-any), so
+      # `job_type: %w[create_shipment assign_driver]` fires for either. Each
+      # element is matched by the same rules, so arrays can mix matchers.
+      #
+      # A scalar filter matches in three layers:
       #   1. Case equality (===) — Symbol/String exact match, Regexp pattern,
       #      Class is_a?, Proc/Lambda custom logic.
       #   2. Equality (==) — catches direct identity, notably Class === Class
@@ -86,10 +92,12 @@ module Busybee
       #   3. Class name fallback — when value is a Class, also match the filter
       #      against value.name. Lets `worker_class: /Order/` match class names.
       #
-      # @param filter [Object] the filter (Symbol, String, Regexp, Class, Proc, etc.)
+      # @param filter [Object] the filter (Array, Symbol, String, Regexp, Class, Proc, etc.)
       # @param value [Object] the value from the event
       # @return [Boolean]
       def match?(filter, value)
+        return filter.any? { |element| match?(element, value) } if filter.is_a?(Array)
+
         filter === value ||
           filter == value ||
           (value.is_a?(Class) && filter === value.name)
