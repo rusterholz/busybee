@@ -16,7 +16,7 @@
 #
 
 module Logistics
-  class StockItem < ApplicationRecord
+  class StockItem < Record
     self.table_name = "logistics_stock_items"
 
     belongs_to :warehouse, class_name: "Logistics::Warehouse", inverse_of: :stock_items

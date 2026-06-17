@@ -13,7 +13,7 @@
 #
 
 module Delivery
-  class DriverRequest < ApplicationRecord
+  class DriverRequest < Record
     self.table_name = "delivery_driver_requests"
 
     belongs_to :driver, optional: true

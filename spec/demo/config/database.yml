@@ -1,13 +1,47 @@
-development:
+default: &default
   adapter: sqlite3
-  database: db/data/development.sqlite3
   pool: 5
   timeout: 10000
   pragma:
     journal_mode: wal
 
+# One database per domain. Each domain's workers, models, and migrations are
+# self-contained (no cross-domain associations), so giving each its own SQLite
+# file removes the single-writer contention of a shared database and more
+# realistically models a distributed system. Monitoring is its own database too,
+# so the observability sink never contends with business writes.
+development:
+  oms:
+    <<: *default
+    database: db/data/oms_development.sqlite3
+    migrations_paths: db/oms_migrate
+  logistics:
+    <<: *default
+    database: db/data/logistics_development.sqlite3
+    migrations_paths: db/logistics_migrate
+  delivery:
+    <<: *default
+    database: db/data/delivery_development.sqlite3
+    migrations_paths: db/delivery_migrate
+  monitoring:
+    <<: *default
+    database: db/data/monitoring_development.sqlite3
+    migrations_paths: db/monitoring_migrate
+
 test:
-  adapter: sqlite3
-  database: db/test.sqlite3
-  pool: 5
-  timeout: 10000
+  oms:
+    <<: *default
+    database: db/oms_test.sqlite3
+    migrations_paths: db/oms_migrate
+  logistics:
+    <<: *default
+    database: db/logistics_test.sqlite3
+    migrations_paths: db/logistics_migrate
+  delivery:
+    <<: *default
+    database: db/delivery_test.sqlite3
+    migrations_paths: db/delivery_migrate
+  monitoring:
+    <<: *default
+    database: db/monitoring_test.sqlite3
+    migrations_paths: db/monitoring_migrate

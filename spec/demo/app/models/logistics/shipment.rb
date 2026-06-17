@@ -20,7 +20,7 @@
 #
 
 module Logistics
-  class Shipment < ApplicationRecord
+  class Shipment < Record
     self.table_name = "logistics_shipments"
 
     belongs_to :warehouse, class_name: "Logistics::Warehouse", inverse_of: :shipments

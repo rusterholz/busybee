@@ -12,26 +12,27 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 1) do
-  create_table "oms_line_items", id: :string, force: :cascade do |t|
-    t.string "item_type", null: false
-    t.string "order_id", null: false
-    t.integer "quantity", default: 1, null: false
-    t.index ["order_id"], name: "index_oms_line_items_on_order_id"
-  end
-
-  create_table "oms_orders", id: :string, force: :cascade do |t|
-    t.string "address_line_1"
-    t.string "city"
+ActiveRecord::Schema[8.1].define(version: 7) do
+  create_table "monitoring_job_runs", id: :string, force: :cascade do |t|
+    t.datetime "activated_at"
+    t.string "bpmn_process_id"
+    t.float "buffer_latency_ms"
+    t.integer "buffer_size"
     t.datetime "created_at", null: false
-    t.string "customer_name", null: false
-    t.decimal "lat", precision: 5, scale: 1, null: false
-    t.decimal "lon", precision: 5, scale: 1, null: false
-    t.bigint "prepare_order_instance_key"
-    t.bigint "ship_order_instance_key"
-    t.string "state"
-    t.string "status", default: "submitted", null: false
+    t.string "error_code"
+    t.string "error_message"
+    t.datetime "executed_at"
+    t.float "execution_duration_ms"
+    t.bigint "job_key", null: false
+    t.string "job_type", null: false
+    t.float "perform_duration_ms"
+    t.string "source"
+    t.string "status"
+    t.json "tags"
+    t.float "total_duration_ms"
     t.datetime "updated_at", null: false
-    t.string "zip"
+    t.index ["activated_at"], name: "index_monitoring_job_runs_on_activated_at"
+    t.index ["job_key"], name: "index_monitoring_job_runs_on_job_key", unique: true
+    t.index ["job_type"], name: "index_monitoring_job_runs_on_job_type"
   end
 end

@@ -20,7 +20,7 @@
 #
 
 module Oms
-  class Order < ApplicationRecord
+  class Order < Record
     self.table_name = "oms_orders"
 
     has_many :line_items, class_name: "Oms::LineItem", foreign_key: :order_id, inverse_of: :order, dependent: :destroy

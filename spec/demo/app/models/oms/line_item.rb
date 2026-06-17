@@ -15,7 +15,7 @@
 #
 
 module Oms
-  class LineItem < ApplicationRecord
+  class LineItem < Record
     self.table_name = "oms_line_items"
 
     belongs_to :order, class_name: "Oms::Order", inverse_of: :line_items

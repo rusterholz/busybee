@@ -28,7 +28,7 @@ Lint/UselessDefaultValueArgument:
 
 Metrics/AbcSize:
   Exclude:
-    - "spec/demo/db/migrate/**/*"
+    - "spec/demo/db/*_migrate/**/*"
 
 Metrics/BlockLength:
   Exclude:
@@ -41,7 +41,7 @@ Metrics/ClassLength:
 Metrics/MethodLength:
   Max: 20
   Exclude:
-    - "spec/demo/db/migrate/**/*"
+    - "spec/demo/db/*_migrate/**/*"
 
 Metrics/ModuleLength:
   Max: 150

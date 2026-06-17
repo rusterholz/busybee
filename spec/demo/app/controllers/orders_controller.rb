@@ -25,7 +25,7 @@ class OrdersController < ApplicationController
 
   def create
     order = nil
-    ActiveRecord::Base.transaction do
+    Oms::Record.transaction do
       order = Oms::Order.create!(order_params)
       build_line_items(order)
     end
