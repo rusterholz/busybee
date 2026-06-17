@@ -15,7 +15,7 @@
 #
 
 module Logistics
-  class Warehouse < ApplicationRecord
+  class Warehouse < Record
     self.table_name = "logistics_warehouses"
 
     has_many :stock_items, class_name: "Logistics::StockItem",

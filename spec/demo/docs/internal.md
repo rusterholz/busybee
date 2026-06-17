@@ -105,6 +105,21 @@ Each file demonstrates a different aspect of YAML configuration:
 
 Note that some worker settings remain in the DSL (e.g., Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning — settings that might vary by environment or deployment.
 
+## Monitoring & Lifecycle Hooks
+
+The Monitoring domain demonstrates how an app consumes busybee's lifecycle hooks. It owns no business logic — it's a passive recorder plus a read-only dashboard.
+
+**Data model.** `Monitoring::JobRun` (`monitoring_job_runs`, in the dedicated `monitoring` database) holds one row per job activation, keyed by Zeebe's `job_key` (unique index). The row is upserted across two hook firings: `on_job_activated` creates it (job type, source, buffer depth, `activated_at`); `on_job_executed` completes it (`executed_at`, final status, durations, error). `Monitoring::Recorder` does the upsert with `find_or_initialize_by(job_key:)`.
+
+**Async recording.** The hooks fire inline in the runner thread, so `Recorder` must not block it. Each hook **snapshots** the job's fields synchronously (the `Job` is mutated as it progresses, so we can't defer reading it) and `post`s the write to a `Concurrent::SingleThreadExecutor`. The single background thread drains the queue in FIFO order — so a job's activation row is always written before its execution update — and a single writer matches SQLite's one-writer-per-file model. Writes run inside `Monitoring::Record.connection_pool.with_connection`; recording is best-effort, so a failed write is logged and dropped rather than retried into the hot path.
+
+**Hook registration.** All hooks live in one `Busybee.configure` block in `config/initializers/busybee.rb` (the brownfield-typical shape):
+
+- Observability — `on_job_activated` + `on_job_executed` delegating to `Monitoring::Recorder`. The runner fires these with `safe: true`, so a raised error can't disrupt job execution.
+- Per-job transactions — one `around_job` per domain, each wrapping `perform` in a transaction on **that domain's** connection (e.g. `Oms::Record.transaction`). A base-class `ActiveRecord::Base.transaction` would now wrap nothing, since each domain has its own connection. The logistics registration uses the `job_type` array filter to cover its two transactional jobs in one go. `complete_driver_delivery` (publishes a Zeebe message mid-`perform`) and the async Sim jobs are excluded.
+
+**UI.** `MonitoringController#index` renders a filterable dashboard in its own dark `monitoring` layout (`data-theme="dark"`), so only this area is dark while the business app stays light. Filters — a job-type multi-select plus `status` and `process` (`bpmn_process_id`) dropdowns — are carried in the query string so they survive the page's 5-second auto-refresh (a `<meta http-equiv="refresh">`). `Monitoring::Stats` computes the headline numbers over the filtered scope: total and per-status counts, the max buffer depth, and the mean/max of the total, perform, and buffer-wait durations. **The duration stats are taken over resolved rows only** (`status != "ready"`), so the async workers' dispatch-time near-zeros don't drag the means down — the `ready` count still shows in the status breakdown. The recent-runs table lists each run with its perform/buffer/total timings, `element_id` and `retries` (read from the `tags` JSON), and any error.
+
 ## Test Hardpoints
 
 ### Smoke Test: `bin/demo test`
@@ -197,7 +212,8 @@ For bulk order creation in a running Docker stack, prefer the `demo:run_orders` 
 ## Known Limitations
 
 - **Single-threaded per worker type** (MRI Ruby). The Sim workers work around this with `Concurrent::Promises` futures, but other workers process one job at a time. This is fine for the demo's throughput but wouldn't scale for production.
-- **SQLite as single-node store**. WAL mode allows concurrent reads, but writes are serialized. At very high speeds (50+), write contention on the shared SQLite database can become a bottleneck.
+- **SQLite as single-node store**. WAL allows concurrent reads but serializes writes *per file*. Splitting into one database per domain removes cross-domain contention, and the monitoring sink writes asynchronously to its own file; within a single domain, writes still serialize, so that domain's own write rate is its ceiling at very high speeds.
 - **Fixed fleet size**. The driver fleet is seeded at startup and doesn't scale dynamically. The checkout/wait queue handles burst load gracefully, but under sustained overload, orders queue up rather than triggering new driver creation.
 - **No BPMN call activities for process chaining**. The `prepare_order` → `ship_order` → `deliver_shipment` chain uses ActiveRecord callbacks instead. This is pragmatic (call activities require parent process awareness of child details) but means the chain isn't visible in a single BPMN diagram.
 - **Inventory is guaranteed**. `GuaranteedRestock` ensures every order can be fulfilled. This makes the demo reliable but removes the "out of stock" scenario that a real system would need to handle.
+- **Async workers record as `ready` in Monitoring**. The Sim workers complete from a background `Concurrent::Promises` future, *after* their `on_job_executed` hook has already fired. So `Monitoring::JobRun` captures them in the `ready` state with a near-zero duration. This is accurate to how busybee's hooks observe an async `perform` — they bracket the synchronous dispatch, not the deferred completion — rather than a recording bug.

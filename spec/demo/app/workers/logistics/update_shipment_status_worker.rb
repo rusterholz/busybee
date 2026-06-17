@@ -16,13 +16,11 @@ module Logistics
       validate_status!
 
       { first_in_transit: nil, all_delivered: nil }.tap do |result|
-        Shipment.transaction do
-          shipment.update!(status: status)
+        shipment.update!(status: status)
 
-          case status
-          when "in_transit" then result[:first_in_transit] = first_in_transit?
-          when "delivered" then result[:all_delivered] = all_delivered?
-          end
+        case status
+        when "in_transit" then result[:first_in_transit] = first_in_transit?
+        when "delivered" then result[:all_delivered] = all_delivered?
         end
 
         Rails.logger.info("Shipment ##{shipment.short_id} marked as #{status}")

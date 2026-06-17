@@ -17,11 +17,8 @@ require "busybee/testing"
 # Disable CSRF protection in tests so Rack::Test requests work without tokens.
 ActionController::Base.allow_forgery_protection = false
 
-# Ensure test database exists and is migrated.
-ActiveRecord::Tasks::DatabaseTasks.create_current
-ActiveRecord::MigrationContext.new(
-  Rails.root.join("db/migrate")
-).migrate
+# Ensure all per-domain test databases exist and are migrated/loaded.
+ActiveRecord::Tasks::DatabaseTasks.prepare_all
 
 RSpec.configure do |config|
   config.disable_monkey_patching!
@@ -30,11 +27,21 @@ RSpec.configure do |config|
     c.syntax = :expect
   end
 
-  # Wrap each example in a database transaction for isolation.
+  # Wrap each example in a transaction per database for isolation. Each domain
+  # has its own connection, so a single ActiveRecord::Base transaction would roll
+  # back only one of them; nest a rolled-back transaction on each domain base.
   config.around do |example|
-    ActiveRecord::Base.transaction do
-      example.run
-      raise ActiveRecord::Rollback
+    bases = [Oms::Record, Logistics::Record, Delivery::Record, Monitoring::Record]
+    runner = -> { example.run }
+    bases.each do |base|
+      inner = runner
+      runner = lambda do
+        base.transaction do
+          inner.call
+          raise ActiveRecord::Rollback
+        end
+      end
     end
+    runner.call
   end
 end

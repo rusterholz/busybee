@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="5">
+  <title>Busybee Monitoring — Dropship Co.</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <%= csrf_meta_tags %>
+  <style>
+    :root {
+      --pico-font-size: 16px;
+    }
+    body { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    nav ul { margin-bottom: 0; }
+    .ops-tag { color: var(--pico-primary); letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.75rem; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { padding: 1rem; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); text-align: center; }
+    .stat-card h2 { margin-bottom: 0.25rem; }
+    .stat-card small { color: var(--pico-muted-color); }
+    .status-ready    { color: #94a3b8; }
+    .status-complete { color: #4ade80; }
+    .status-failed   { color: #f87171; }
+    .status-error    { color: #fbbf24; }
+    table { width: 100%; font-size: 0.85rem; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .filters { margin-bottom: 1.5rem; }
+    .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: start; }
+    .filter-grid label { margin-bottom: 0; }
+  </style>
+</head>
+<body>
+  <header class="container">
+    <nav>
+      <ul>
+        <li><strong><a href="<%= monitoring_path %>">busybee // Monitoring</a></strong></li>
+      </ul>
+      <ul>
+        <li class="ops-tag">platform observability</li>
+        <li><a href="<%= root_path %>">← Dropship Co.</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="container">
+    <%= yield %>
+  </main>
+
+  <footer class="container">
+    <small>What busybee is doing — recorded via lifecycle hooks, not the business app.</small>
+  </footer>
+</body>
+</html>

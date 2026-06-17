@@ -32,6 +32,10 @@ RSpec.describe Busybee::Job::Payload do
       expect(payload.retries).to eq(3)
     end
 
+    it "aliases #job_type to #type so hook filters can read it by its domain name" do
+      expect(payload.job_type).to eq(payload.type)
+    end
+
     it "computes a frozen UTC Time deadline from the millisecond protobuf field" do
       expect(payload.deadline).to be_a(Time)
       expect(payload.deadline).to be_utc

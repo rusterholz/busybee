@@ -1,0 +1,113 @@
+<% fmt_ms = ->(ms) { ms.nil? ? "—" : number_with_delimiter(ms.round(1)) } %>
+
+<hgroup>
+  <h1>What busybee is doing</h1>
+  <p>Every job the workers run, recorded by lifecycle hooks the app registers — the same way you'd wire a Datadog or OpenTelemetry sink in production.</p>
+</hgroup>
+
+<form method="get" action="<%= monitoring_path %>" class="filters">
+  <div class="filter-grid">
+    <label>
+      Job types
+      <select name="job_types[]" multiple size="6" onchange="this.form.submit()">
+        <% @job_types.each do |jt| %>
+          <option value="<%= jt %>" <%= "selected" if @selected_types.include?(jt) %>><%= jt %></option>
+        <% end %>
+      </select>
+    </label>
+
+    <label>
+      Status
+      <select name="status" onchange="this.form.submit()">
+        <option value="">All statuses</option>
+        <% %w[ready complete failed error].each do |st| %>
+          <option value="<%= st %>" <%= "selected" if @selected_status == st %>><%= st %></option>
+        <% end %>
+      </select>
+    </label>
+
+    <label>
+      Process
+      <select name="process" onchange="this.form.submit()">
+        <option value="">All processes</option>
+        <% @processes.each do |proc_id| %>
+          <option value="<%= proc_id %>" <%= "selected" if @selected_process == proc_id %>><%= proc_id %></option>
+        <% end %>
+      </select>
+    </label>
+  </div>
+
+  <p>
+    <button type="submit">Apply</button>
+    <a href="<%= monitoring_path %>" role="button" class="secondary outline">Clear</a>
+    <% if @selected_types.any? %><small class="ops-tag">filtered: <%= @selected_types.join(", ") %></small><% end %>
+  </p>
+</form>
+
+<section>
+  <h2>Stats <small>(<%= @selected_types.any? ? @selected_types.join(" + ") : "all job types" %>)</small></h2>
+
+  <div class="stat-grid">
+    <article class="stat-card"><h2><%= @stats.total_count %></h2><small>total</small></article>
+    <% @stats.counts_by_status.each do |status, count| %>
+      <article class="stat-card"><h2 class="status-<%= status %>"><%= count %></h2><small><%= status %></small></article>
+    <% end %>
+    <article class="stat-card"><h2><%= @stats.max_buffer_depth || 0 %></h2><small>max buffer depth</small></article>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Timing (resolved jobs)</th><th class="num">Mean</th><th class="num">Max</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Total</td><td class="num"><%= fmt_ms.(@stats.mean_total_ms) %> ms</td><td class="num"><%= fmt_ms.(@stats.max_total_ms) %> ms</td></tr>
+      <tr><td>Perform</td><td class="num"><%= fmt_ms.(@stats.mean_perform_ms) %> ms</td><td class="num"><%= fmt_ms.(@stats.max_perform_ms) %> ms</td></tr>
+      <tr><td>Buffer wait</td><td class="num"><%= fmt_ms.(@stats.mean_buffer_ms) %> ms</td><td class="num"><%= fmt_ms.(@stats.max_buffer_ms) %> ms</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Recent job runs</h2>
+  <% if @runs.any? %>
+    <table>
+      <thead>
+        <tr>
+          <th>Job type</th>
+          <th>Status</th>
+          <th>Process</th>
+          <th>Element</th>
+          <th>Src</th>
+          <th class="num">Buf</th>
+          <th class="num">Perform</th>
+          <th class="num">Buffer</th>
+          <th class="num">Total</th>
+          <th class="num">Retries</th>
+          <th>Activated</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @runs.each do |run| %>
+          <% tags = run.tags || {} %>
+          <tr>
+            <td><code><%= run.job_type %></code></td>
+            <td class="status-<%= run.status %>"><%= run.status %></td>
+            <td><%= run.bpmn_process_id %></td>
+            <td><%= tags["element_id"] %></td>
+            <td><%= run.source %></td>
+            <td class="num"><%= run.buffer_size.nil? ? "—" : run.buffer_size %></td>
+            <td class="num"><%= fmt_ms.(run.perform_duration_ms) %></td>
+            <td class="num"><%= fmt_ms.(run.buffer_latency_ms) %></td>
+            <td class="num"><%= fmt_ms.(run.total_duration_ms) %></td>
+            <td class="num"><%= tags["retries"] %></td>
+            <td><%= run.activated_at&.strftime("%H:%M:%S") %></td>
+            <td><%= run.error_code || run.error_message&.truncate(40) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p><em>No job runs match the current filter.</em></p>
+  <% end %>
+</section>

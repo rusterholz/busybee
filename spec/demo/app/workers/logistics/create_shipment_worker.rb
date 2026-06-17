@@ -11,15 +11,13 @@ module Logistics
     output :shipment_id, type: :uuid,    description: "Created shipment's ID"
     output :item_count,  type: :integer, description: "Total item count across all line items"
 
-    def perform # rubocop:disable Metrics/AbcSize
-      shipment = Shipment.transaction do
-        Shipment.create!(
-          order_id: order_id,
-          warehouse_id: warehouse_id,
-          status: "planned",
-          items: item_list
-        ).tap { decrement_stock!(item_list) }
-      end
+    def perform
+      shipment = Shipment.create!(
+        order_id: order_id,
+        warehouse_id: warehouse_id,
+        status: "planned",
+        items: item_list
+      ).tap { decrement_stock!(item_list) }
 
       warehouse = Warehouse.find(warehouse_id)
       Rails.logger.info("Created Shipment ##{shipment.short_id} from #{warehouse.name} with #{total_count} items")

@@ -10,7 +10,7 @@ namespace :demo do
     puts "Creating #{count} orders at speed #{speed}..."
 
     order_ids = count.times.map do |i|
-      order = ActiveRecord::Base.transaction do
+      order = Oms::Record.transaction do
         Oms::Order.create!(
           customer_name: "Test Customer #{i + 1}",
           address_line_1: "#{100 + i} Test St",

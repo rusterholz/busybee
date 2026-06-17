@@ -11,6 +11,7 @@ RSpec.describe Oms::LoadOrderAddressWorker do
 
     result = execute_worker(described_class, variables: { order_id: order.id })
 
-    expect(result).to eq(lat: 3.5, lon: -7.2)
+    # job.result is a frozen HashWithIndifferentAccess, so it reads back string-keyed.
+    expect(result).to eq("lat" => 3.5, "lon" => -7.2)
   end
 end

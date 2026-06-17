@@ -12,7 +12,7 @@ bin/demo start --speed 10   # 10x faster — useful for stress testing
 bin/demo start --manual     # No auto-ordering — create orders through the UI
 ```
 
-Open [localhost:3000](http://localhost:3000). The dashboard shows order counts by status; click into individual orders to watch shipments progress from planned → packed → in transit → delivered.
+Open [localhost:3000](http://localhost:3000). The dashboard shows order counts by status; click into individual orders to watch shipments progress from planned → packed → in transit → delivered. The **Monitoring** link in the nav opens a separate dark dashboard showing what busybee itself is doing — every job run, its timings, and status.
 
 Other commands:
 
@@ -27,14 +27,15 @@ bin/demo status     # Show containers + order status counts
 
 ## Business Domains
 
-Dropship Co. has separate services for its three core business domains, plus a simulation domain that stands in for real-world delays:
+Dropship Co. has separate services for its three core business domains, plus two behind-the-scenes domains:
 
 - **OMS** — Order Management System. Owns orders and their lifecycle status.
 - **Logistics** — Warehouses, inventory, and shipment planning.
 - **Delivery** — Driver fleet management and delivery execution.
 - **Sim** — Simulates physical processes (pick-and-pack, driving) with time-scaled delays.
+- **Monitoring** — Operational observability. Records every job busybee runs — timings, status, tags — and surfaces it on a separate dark dashboard. This is what *busybee* is doing, as distinct from what the *business* is doing.
 
-Each domain has its own models, workers, and namespace. They communicate only through BPMN process variables — no cross-domain model references.
+Each business domain has its own models, workers, and namespace. They communicate only through BPMN process variables — no cross-domain model references. Monitoring is a passive observer: it owns no business logic and writes nothing the workflows read.
 
 ## BPMN Processes
 
@@ -89,7 +90,7 @@ This process demonstrates **BPMN message correlation**, **conditional branching*
 | `LoadWarehousesWorker` | Logistics | Returns a **collection** as a process variable (array of warehouse objects) |
 | `LoadItemAvailabilityWorker` | Logistics | Per-item availability check used inside a **multi-instance subprocess** — shows how each instance enriches its element |
 | `PlanShipmentsWorker` | Logistics | **Pure computation worker** — receives enriched data, runs a greedy optimization algorithm, returns planned shipments. No database access. |
-| `CreateShipmentWorker` | Logistics | **Transactional worker** — creates a shipment and decrements inventory atomically in an ActiveRecord transaction |
+| `CreateShipmentWorker` | Logistics | **Transactional worker** — creates a shipment and decrements inventory atomically; the transaction is supplied by the demo's `around_job` hook (see [Lifecycle Hooks](#lifecycle-hooks)), not opened by the worker |
 | `LoadOrderShipmentsWorker` | Logistics | Cross-domain data loading (reads shipments for an OMS order ID) |
 | `UpdateShipmentStatusWorker` | Logistics | **Header-driven status transitions** with **conditional outputs** — handles `packed`, `in_transit`, and `delivered` via a BPMN header, returning `first_in_transit` or `all_delivered` booleans depending on the transition |
 | `CalculateDistanceWorker` | Delivery | **Header-driven behavior** — reads `algorithm` from the job header to select computation strategy |
@@ -98,11 +99,20 @@ This process demonstrates **BPMN message correlation**, **conditional branching*
 | `PickAndPackWorker` | Sim | **Non-blocking worker with custom job lifecycle** — runs delays in `Concurrent::Promises` futures, manages its own `complete_job`/`fail_job` calls, uses a semaphore to limit concurrent pickers |
 | `DeliveryRunWorker` | Sim | **Semaphore-limited concurrency** — lazy-loads permit count from Driver table, limits concurrent delivery simulations to fleet size |
 
+## Lifecycle Hooks
+
+The app configures busybee **lifecycle hooks** — the same extension points a production app would use to plug in observability or cross-cutting behavior. They're all registered in one `Busybee.configure` block in `config/initializers/busybee.rb`, the way you'd wire busybee into a brownfield app:
+
+- **Observability** — `on_job_activated` and `on_job_executed` record each job run into `Monitoring::JobRun`: job type, status, source, buffer depth, lifecycle timestamps, durations, and tags. This is the demo's stand-in for a Datadog/OpenTelemetry sink. The runner fires these hooks safely (a failure can't disrupt job execution), and the recorder offloads each write to a single background thread, so recording never blocks job processing. Monitoring has its own database, so the sink never contends with business writes.
+- **Per-job transactions** — `around_job` hooks wrap specific jobs' `perform` in a transaction on their domain's database, so their writes commit atomically. They're registered one per domain (the `job_type` array filter covers logistics' two transactional jobs in one go), each transacting on its own connection — not globally, because a blanket wrapper is wrong for some workers: `complete_driver_delivery` publishes a Zeebe message mid-`perform` (a transaction can't roll that back), and the Sim workers are async (their `perform` returns immediately and the real work runs in a background future, so a transaction around it would be a no-op). The covered jobs no longer open transactions themselves.
+
+One honest wrinkle the Monitoring view surfaces: because the async Sim workers complete from a background thread *after* their lifecycle hooks have fired, the dashboard records them as `ready` with a near-zero duration. That accurately reflects how busybee's hooks observe an async `perform` — the hooks bracket the synchronous dispatch, not the deferred completion.
+
 ## Architecture
 
 Docker Compose runs the full stack: Zeebe (with Elasticsearch for storage), a Rails web server, 4 worker processes (one per domain), and an optional clockwork process for auto-ordering.
 
-- **Database**: SQLite with WAL mode. Single file, shared across containers via a Docker volume.
+- **Databases**: One SQLite database per domain (`oms`, `logistics`, `delivery`) plus one for `monitoring`, each its own file (WAL mode) in a Docker volume. Because SQLite serializes writes per file, separate databases let the domains — and the observability sink — write without contending, and more realistically model a distributed system. Each domain's models inherit a `connects_to` base class (e.g. `Oms::Record`); there are no cross-domain associations.
 - **Workers**: Each domain runs as a separate `busybee` CLI process, configured via per-domain YAML files in `config/busybee/`. Workers are single-threaded (MRI), but the Sim workers use `Concurrent::Promises` for non-blocking delays.
 - **YAML configuration**: Worker containers use `busybee --config config/busybee/<domain>.yml` instead of listing class names on the command line. Each YAML file defines which workers run in that process and any per-worker tuning (e.g., higher `max_jobs` for the bottleneck `LoadItemAvailabilityWorker`). See `config/busybee/` for examples, and [Workers: YAML Configuration](../../docs/workers.md#yaml-configuration) for the full reference.
 - **Process chaining**: `prepare_order` → `ship_order` → `deliver_shipment` are chained via ActiveRecord `after_commit` callbacks, not BPMN call activities.

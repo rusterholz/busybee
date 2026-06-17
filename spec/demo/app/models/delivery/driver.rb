@@ -11,7 +11,7 @@
 #
 
 module Delivery
-  class Driver < ApplicationRecord
+  class Driver < Record
     self.table_name = "delivery_drivers"
 
     # current_shipment_id is a cross-domain reference — no belongs_to association.

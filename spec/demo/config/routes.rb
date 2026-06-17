@@ -16,4 +16,6 @@ Rails.application.routes.draw do
   end
   resources :warehouses, only: %i[index show]
   resources :drivers, only: %i[index]
+
+  get "monitoring", to: "monitoring#index"
 end

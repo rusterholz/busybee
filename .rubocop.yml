@@ -26,6 +26,10 @@ Layout/LineLength:
 Lint/UselessDefaultValueArgument:
   Enabled: false
 
+Metrics/AbcSize:
+  Exclude:
+    - "spec/demo/db/*_migrate/**/*"
+
 Metrics/BlockLength:
   Exclude:
     - "Rakefile"
@@ -36,6 +40,8 @@ Metrics/ClassLength:
 
 Metrics/MethodLength:
   Max: 20
+  Exclude:
+    - "spec/demo/db/*_migrate/**/*"
 
 Metrics/ModuleLength:
   Max: 150

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class CreateLogisticsTables < ActiveRecord::Migration[7.0]
-  def change # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+  def change
     create_table :logistics_warehouses, id: false do |t|
       t.string :id, null: false, primary_key: true
       t.string :name, null: false
