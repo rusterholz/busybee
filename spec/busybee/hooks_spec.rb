@@ -525,4 +525,59 @@ RSpec.describe Busybee::Hooks do
       end
     end
   end
+
+  describe ".context / .with_context" do
+    it "defaults to an empty hash" do
+      expect(described_class.context).to eq({})
+    end
+
+    it "exposes pushed attributes for the duration of the block" do
+      inside = nil
+      described_class.with_context(job_key: 42) { inside = described_class.context }
+      expect(inside).to eq(job_key: 42)
+    end
+
+    it "restores the previous (empty) context after the block" do
+      described_class.with_context(job_key: 42) {} # rubocop:disable Lint/EmptyBlock
+      expect(described_class.context).to eq({})
+    end
+
+    it "merges nested context, inner values winning" do
+      captured = nil
+      described_class.with_context(a: 1, b: 1) do
+        described_class.with_context(b: 2, c: 3) { captured = described_class.context }
+      end
+      expect(captured).to eq(a: 1, b: 2, c: 3)
+    end
+
+    it "restores the outer context when a nested block exits" do
+      captured = nil
+      described_class.with_context(a: 1) do
+        described_class.with_context(b: 2) {} # rubocop:disable Lint/EmptyBlock
+        captured = described_class.context
+      end
+      expect(captured).to eq(a: 1)
+    end
+
+    it "restores context even when the block raises" do
+      expect { described_class.with_context(a: 1) { raise "boom" } }.to raise_error("boom")
+      expect(described_class.context).to eq({})
+    end
+
+    it "returns the block's value" do
+      expect(described_class.with_context(a: 1) { :result }).to eq(:result)
+    end
+
+    # The defining property: a call initiates on the caller thread (where
+    # ambient context lives) but executes/retries on background threads that
+    # see none of it. This is why Client::Call must snapshot context by value
+    # at construction rather than read the thread-local later.
+    it "is thread-local — a spawned thread does not see the caller's context" do
+      seen = nil
+      described_class.with_context(job_key: 42) do
+        seen = Thread.new { described_class.context }.value
+      end
+      expect(seen).to eq({})
+    end
+  end
 end
