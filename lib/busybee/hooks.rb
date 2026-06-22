@@ -145,6 +145,16 @@ module Busybee
         Busybee.logger&.error("[busybee] Error in hooks (ignored): [#{error.class}] #{error.message}#{suffix}")
       end
 
+      # Warn when an observing around-hook returned without yielding (calling
+      # perform). The chain force-runs the continuation regardless — an observer
+      # must not silently cancel the wrapped work — but the operator should know
+      # a hook is misbehaving. Includes the hook's source location.
+      def log_forgotten_yield(callback)
+        location = callback.source_location&.join(":")
+        suffix = location ? " (at #{location})" : ""
+        Busybee.logger&.warn("[busybee] Observing around-hook returned without yielding; forcing continuation#{suffix}")
+      end
+
       # Run an around-hook chain wrapping a core block. Middleware callbacks
       # receive (target, perform). The chain return value is the captured
       # result (HWIA-coerced for job-noun chains via Resolution#set_result).

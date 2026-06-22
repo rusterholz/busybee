@@ -42,6 +42,17 @@ module Busybee
                 next_link.call
               }
               hook[:callback].call(target, wrapped)
+              # Clean return without yielding: an observing middleware must not
+              # be able to silently cancel the wrapped work, so force the
+              # continuation and warn. This sits on the normal-return path (not
+              # an ensure) so a Shutdown signal still stops the chain below.
+              # Setting `called` first keeps the rescue from re-running it if the
+              # forced continuation raises.
+              unless called
+                Hooks.log_forgotten_yield(hook[:callback])
+                called = true
+                next_link.call
+              end
             rescue Busybee::Worker::Shutdown
               raise
             rescue StandardError => e

@@ -846,7 +846,7 @@ RSpec.describe Busybee::Worker do
         end
 
         performing_worker.perform_job(job)
-        expect(job.perform_started_at).to be >= middleware_timestamp
+        expect(job.perform_started_at(:monotonic)).to be >= middleware_timestamp
       end
     end
 
