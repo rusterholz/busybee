@@ -15,6 +15,18 @@ module Busybee
     #   end
     #
     class Error < Busybee::Error
+      # Wrap a raw GRPC error as a Busybee::GRPC::Error, preserving the original
+      # as the cause so grpc_status/grpc_code/grpc_details/message read through.
+      # Returns the wrapped error (does not raise) so a caller can either raise
+      # it or record it — the per-attempt call seam records it, then re-raises
+      # later. Sets the cause via Kernel#raise (Exception.new doesn't accept a
+      # cause: keyword), so this works outside the raw error's own rescue too.
+      def self.wrap(raw, message = "GRPC request failed")
+        raise(self, message, cause: raw)
+      rescue self => e
+        e
+      end
+
       def initialize(message = "GRPC request failed")
         super
       end

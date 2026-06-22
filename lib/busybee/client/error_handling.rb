@@ -26,10 +26,9 @@ module Busybee
             sleep(Busybee.grpc_retry_delay_ms / 1000.0)
             retry
           end
-          message = attempts > 1 ? "GRPC call failed after retry" : "GRPC call failed"
-          raise Busybee::GRPC::Error, message
+          raise Busybee::GRPC::Error.wrap(e, attempts > 1 ? "GRPC call failed after retry" : "GRPC call failed")
         rescue ::GRPC::BadStatus => e
-          raise Busybee::GRPC::Error, "GRPC call failed"
+          raise Busybee::GRPC::Error.wrap(e, "GRPC call failed")
         end
       end
     end
