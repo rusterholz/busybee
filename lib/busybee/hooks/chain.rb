@@ -49,7 +49,7 @@ module Busybee
               # Setting `called` first keeps the rescue from re-running it if the
               # forced continuation raises.
               unless called
-                Hooks.log_forgotten_yield(hook[:callback])
+                log_forgotten_yield(hook[:callback])
                 called = true
                 next_link.call
               end
@@ -60,6 +60,19 @@ module Busybee
               next_link.call unless called
             end
           end
+        end
+
+        # Warn when an observing around-hook returned without yielding (calling
+        # perform). build_safe force-runs the continuation regardless — an
+        # observer must not silently cancel the wrapped work — but the operator
+        # should know a hook is misbehaving. Includes the hook's source location.
+        def log_forgotten_yield(callback)
+          location = callback.source_location&.join(":")
+          suffix = location ? " (at #{location})" : ""
+          Busybee.logger&.warn(
+            "[busybee] Observing around-hook returned without yielding; " \
+            "forcing continuation#{suffix}"
+          )
         end
       end
     end
