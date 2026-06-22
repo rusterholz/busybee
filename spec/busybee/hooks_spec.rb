@@ -494,6 +494,35 @@ RSpec.describe Busybee::Hooks do
         described_class.run_chain(:around_job, job, safe: true) { results << :core }
         expect(results).to eq(%i[inner_before core inner_after])
       end
+
+      it "force-runs the core when an observing middleware returns without yielding" do
+        results = []
+        Busybee.around_job { |_job, _perform| results << :hook } # never calls perform
+
+        described_class.run_chain(:around_job, job, safe: true) { results << :core }
+        expect(results).to eq(%i[hook core])
+      end
+
+      it "warns when an observing middleware returns without yielding" do
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        Busybee.around_job { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
+
+        described_class.run_chain(:around_job, job, safe: true) { "core" }
+        expect(logger).to have_received(:warn).
+          with(/\[busybee\].*without yielding/)
+      end
+
+      it "does not double-run the core when a forced continuation raises" do
+        call_count = 0
+        Busybee.around_job { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
+
+        described_class.run_chain(:around_job, job, safe: true) do
+          call_count += 1
+          raise "core boom"
+        end
+        expect(call_count).to eq(1)
+      end
     end
   end
 end
