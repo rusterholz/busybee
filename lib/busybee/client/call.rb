@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/hash/indifferent_access"
+require "busybee/client/call/timestamps"
 require "busybee/grpc/error"
 require "busybee/hooks"
 
@@ -17,6 +18,30 @@ module Busybee
     # (_begin_attempt / _record_result / _record_error / _resolve); there are no
     # public setters, so the absence of a setter is the seal.
     class Call
+      # Errors the seam catches and records. StandardError today; widening to
+      # also include ScriptError is tracked as a future mission.
+      RECOVERABLE_ERRORS = [StandardError].freeze
+
+      # Wrap a logical client call: construct the carrier, fire the gating
+      # before_call, run the operation (which records its per-attempt outcome onto
+      # the carrier), resolve, and fire the observing after_call exactly once.
+      # before_call propagates (so it can abort the call); after_call observes
+      # (swallows). Returns the recorded result on success; re-raises on error.
+      def self.with_hooks(rpc)
+        call = new(rpc)
+        Busybee::Hooks.run(:before_call, call)
+        begin
+          yield(call)
+          call._resolve(status: :succeeded)
+          call.result
+        rescue *RECOVERABLE_ERRORS
+          call._resolve(status: :errored)
+          raise
+        ensure
+          Busybee::Hooks.run(:after_call, call, safe: true) if call.resolved?
+        end
+      end
+
       attr_reader :rpc, :status, :result, :error, :attempts, :context
 
       def initialize(rpc)
@@ -25,9 +50,8 @@ module Busybee
         @result = nil
         @error = nil
         @attempts = 0
-        @cumulative_network_mono = 0.0
         @context = Busybee::Hooks.context.with_indifferent_access
-        @created_at_mono, @created_at_utc = now_pair
+        @timestamps = Timestamps.new
       end
 
       # ===== Status predicates =====
@@ -71,54 +95,15 @@ module Busybee
         nil
       end
 
-      # ===== Timing =====
+      # ===== Timing (delegated to Timestamps) =====
       #
-      # Public readers expose the UTC stamps (for logging); durations are
-      # computed from the paired monotonic stamps, rounded to ms at read.
-
-      # Logical start (construction / before_call) and end (resolution).
-      def created_at
-        @created_at_utc
-      end
-
-      def resolved_at
-        @resolved_at_utc
-      end
-
-      # The current attempt's network window (overwritten each attempt).
-      def network_started_at
-        @network_started_at_utc
-      end
-
-      def network_finished_at
-        @network_finished_at_utc
-      end
-
-      # This attempt's on-wire time (finished - started); nil until end-of-attempt.
-      def network_ms
-        ms_between(@network_started_at_mono, @network_finished_at_mono)
-      end
-
-      # The real inter-retry gap (this attempt's network start minus the prior
-      # attempt's network finish); nil on the first attempt.
-      def backoff_ms
-        ms_between(@last_attempt_finished_at_mono, @network_started_at_mono)
-      end
-
-      # Scheduling latency from construction to the first attempt's network start
-      # (~0 when synchronous; meaningful once calls dispatch to a pool).
-      def queue_ms
-        ms_between(@created_at_mono, @first_attempt_started_at_mono)
-      end
-
-      # Total logical wall time from construction to resolution; nil until resolved.
-      def total_ms
-        ms_between(@created_at_mono, @resolved_at_mono)
-      end
-
-      # Cumulative on-wire time summed across all attempts.
-      def cumulative_network_ms
-        (@cumulative_network_mono * 1000).round(1)
+      # The logical span and per-attempt network durations live on Timestamps;
+      # its read surface is exposed directly on the call.
+      %i[
+        created_at resolved_at network_started_at network_finished_at
+        network_ms backoff_ms queue_ms total_ms cumulative_network_ms
+      ].each do |name|
+        define_method(name) { @timestamps.public_send(name) }
       end
 
       # ===== Context =====
@@ -144,27 +129,37 @@ module Busybee
         context_contributions(:logging_context).merge(own_logging_context).compact
       end
 
+      # ===== Execution seam =====
+
+      # Execute one gRPC attempt inside the observing around_call chain. Records
+      # the outcome onto the carrier (translating gRPC errors per attempt), then
+      # re-raises any error *past* the chain: around_call is observing (the safe
+      # chain swallows raises), so the error is recorded, not raised through it.
+      def attempt
+        _begin_attempt
+        Busybee::Hooks.run_chain(:around_call, self, safe: true) do
+          @timestamps.begin_network
+          begin
+            _record_result(yield)
+          rescue *RECOVERABLE_ERRORS => e
+            _record_error(translate_error(e))
+          ensure
+            @timestamps.end_network
+          end
+        end
+        # `error` and `result` are the carrier's own readers (attr_reader), set
+        # just above by _record_result / _record_error inside the chain core —
+        # they are not local variables.
+        raise error if error
+
+        result
+      end
+
       # ===== Framework-write seam (underscore idiom; no public setters) =====
 
       # Count an initiated attempt. Called once per around_call entry.
       def _begin_attempt
         @attempts += 1
-      end
-
-      # Open this attempt's network window (proceed entry, just before the stub
-      # call). Snapshots the prior attempt's finish as the backoff basis before
-      # overwriting it, and records the first attempt's start for queue_ms.
-      def _begin_network
-        @last_attempt_finished_at_mono = @network_finished_at_mono
-        @network_started_at_mono, @network_started_at_utc = now_pair
-        @first_attempt_started_at_mono ||= @network_started_at_mono # rubocop:disable Naming/MemoizedInstanceVariableName
-      end
-
-      # Close this attempt's network window (proceed exit, just after the stub
-      # call) and add it to the cumulative on-wire total.
-      def _end_network
-        @network_finished_at_mono, @network_finished_at_utc = now_pair
-        @cumulative_network_mono += @network_finished_at_mono - @network_started_at_mono
       end
 
       # Record this attempt's success result. result and error are mutually
@@ -187,20 +182,10 @@ module Busybee
       # resolution.
       def _resolve(status:)
         @status = status
-        @resolved_at_mono, @resolved_at_utc = now_pair
+        @timestamps.stamp_resolved!
       end
 
       private
-
-      def now_pair
-        [Process.clock_gettime(Process::CLOCK_MONOTONIC), Time.now.utc]
-      end
-
-      def ms_between(from, to)
-        return nil unless from && to
-
-        ((to - from) * 1000).round(1)
-      end
 
       def own_context_tags
         { rpc: rpc, status: status, grpc_status: grpc_status, error_class: error_class }
@@ -223,6 +208,13 @@ module Busybee
         @context.each_value.with_object({}) do |value, contributions|
           contributions.merge!(value.public_send(method_name)) if value.respond_to?(method_name)
         end
+      end
+
+      # Translate a raw gRPC error to a Busybee::GRPC::Error (preserving it as the
+      # cause); pass any non-gRPC error through unchanged. Per attempt, so the
+      # recorded error and grpc_status read uniformly across retries.
+      def translate_error(error)
+        error.is_a?(::GRPC::BadStatus) ? Busybee::GRPC::Error.wrap(error) : error
       end
     end
   end

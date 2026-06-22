@@ -120,74 +120,24 @@ RSpec.describe Busybee::Client::Call do
     end
   end
 
-  # The monotonic clock can't be controlled, so these assert ordering/sign and
-  # nil-until-stamped semantics rather than exact durations.
-  describe "timing and durations" do
-    it "stamps created_at at construction" do
+  # Timing logic lives in Call::Timestamps (see call/timestamps_spec); here we
+  # just confirm the call delegates and that #attempt drives the network window.
+  describe "timing (delegated to Timestamps)" do
+    it "exposes created_at from construction" do
       expect(described_class.new(:complete_job).created_at).to be_a(Time)
     end
 
-    it "leaves resolved_at and total_ms nil until resolved" do
+    it "computes total_ms once resolved" do
       call = described_class.new(:complete_job)
-      expect(call.resolved_at).to be_nil
       expect(call.total_ms).to be_nil
-    end
-
-    it "stamps resolved_at and computes a non-negative total_ms on resolve" do
-      call = described_class.new(:complete_job)
       call._resolve(status: :succeeded)
-      expect(call.resolved_at).to be_a(Time)
       expect(call.total_ms).to be >= 0
     end
 
-    it "computes a non-negative network_ms across an attempt's network bracket" do
+    it "records network timing across an attempt" do
       call = described_class.new(:complete_job)
-      call._begin_attempt
-      call._begin_network
-      call._end_network
+      call.attempt { "ok" }
       expect(call.network_ms).to be >= 0
-    end
-
-    it "leaves queue_ms nil before the first attempt starts" do
-      expect(described_class.new(:complete_job).queue_ms).to be_nil
-    end
-
-    it "computes a non-negative queue_ms from created to first attempt start" do
-      call = described_class.new(:complete_job)
-      call._begin_attempt
-      call._begin_network
-      expect(call.queue_ms).to be >= 0
-    end
-
-    it "has nil backoff_ms on the first attempt" do
-      call = described_class.new(:complete_job)
-      call._begin_attempt
-      call._begin_network
-      call._end_network
-      expect(call.backoff_ms).to be_nil
-    end
-
-    it "computes a non-negative backoff_ms on a retry, readable post-yield" do
-      call = described_class.new(:complete_job)
-      call._begin_attempt
-      call._begin_network
-      call._end_network                  # attempt 1 finished
-      call._begin_attempt
-      call._begin_network                # attempt 2 started
-      call._end_network                  # post-yield: prior finish still the backoff basis
-      expect(call.backoff_ms).to be >= 0
-    end
-
-    it "accumulates network time across attempts" do
-      call = described_class.new(:complete_job)
-      call._begin_attempt
-      call._begin_network
-      call._end_network
-      first = call.cumulative_network_ms
-      call._begin_attempt
-      call._begin_network
-      call._end_network
-      expect(call.cumulative_network_ms).to be >= first
     end
   end
 
@@ -250,6 +200,116 @@ RSpec.describe Busybee::Client::Call do
         expect(tags[:region]).to eq("us-east")
         expect(tags[:rpc]).to eq(:complete_job)
       end
+    end
+  end
+
+  describe "#attempt (per-attempt bracket)" do
+    after { Busybee::Hooks.reset! }
+
+    it "runs around_call around the gRPC attempt, observing" do
+      events = []
+      Busybee.around_call do |_call, proceed|
+        events << :before
+        proceed.call
+        events << :after
+      end
+
+      described_class.new(:complete_job).attempt { events << :stub }
+      expect(events).to eq(%i[before stub after])
+    end
+
+    it "records the result of a successful attempt and counts the attempt" do
+      call = described_class.new(:complete_job)
+      call.attempt { "result-value" }
+      aggregate_failures do
+        expect(call.result).to eq("result-value")
+        expect(call.error).to be_nil
+        expect(call.attempts).to eq(1)
+      end
+    end
+
+    it "records and re-raises a raw GRPC error, translated to Busybee::GRPC::Error" do
+      call = described_class.new(:complete_job)
+      expect { call.attempt { raise GRPC::Unavailable, "down" } }.to raise_error(Busybee::GRPC::Error)
+      aggregate_failures do
+        expect(call.error).to be_a(Busybee::GRPC::Error)
+        expect(call.grpc_status).to eq(:unavailable)
+      end
+    end
+
+    it "records and re-raises a non-GRPC error as-is" do
+      call = described_class.new(:complete_job)
+      boom = RuntimeError.new("boom")
+      expect { call.attempt { raise boom } }.to raise_error(boom)
+      expect(call.error).to be(boom)
+    end
+
+    it "re-raises past the observing chain (the safe chain would otherwise swallow it)" do
+      Busybee.around_call { |_call, proceed| proceed.call }
+      call = described_class.new(:complete_job)
+      expect { call.attempt { raise GRPC::Unavailable, "x" } }.to raise_error(Busybee::GRPC::Error)
+    end
+
+    it "swallows a raising around_call middleware and still runs the attempt" do
+      ran = false
+      Busybee.around_call { |_call, _proceed| raise "broken middleware" }
+      described_class.new(:complete_job).attempt { ran = true }
+      expect(ran).to be(true)
+    end
+  end
+
+  describe ".with_hooks (logical bracket)" do
+    after { Busybee::Hooks.reset! }
+
+    it "fires before_call once at initiation and returns the result on success" do
+      fired = []
+      Busybee.before_call { |call| fired << call.rpc }
+
+      result = described_class.with_hooks(:complete_job) { |call| call.attempt { "ok" } }
+      aggregate_failures do
+        expect(fired).to eq([:complete_job])
+        expect(result).to eq("ok")
+      end
+    end
+
+    it "resolves to succeeded and fires after_call (observing) on success" do
+      statuses = []
+      Busybee.after_call { |call| statuses << call.status }
+
+      described_class.with_hooks(:complete_job) { |call| call.attempt { "ok" } }
+      expect(statuses).to eq([:succeeded])
+    end
+
+    it "treats before_call as gating: a raising before_call aborts before yield, with no after_call" do
+      yielded = false
+      after_fired = false
+      Busybee.before_call { raise "gate closed" }
+      Busybee.after_call { after_fired = true }
+
+      expect do
+        described_class.with_hooks(:complete_job) { |_call| yielded = true }
+      end.to raise_error("gate closed")
+      aggregate_failures do
+        expect(yielded).to be(false)
+        expect(after_fired).to be(false)
+      end
+    end
+
+    it "on error: resolves to errored, re-raises, and fires after_call once" do
+      after_statuses = []
+      Busybee.after_call { |call| after_statuses << call.status }
+
+      expect do
+        described_class.with_hooks(:complete_job) { |call| call.attempt { raise GRPC::Unavailable, "x" } }
+      end.to raise_error(Busybee::GRPC::Error)
+      expect(after_statuses).to eq([:errored])
+    end
+
+    it "treats after_call as observing: a raising after_call does not mask the result" do
+      Busybee.after_call { raise "logging hook died" }
+
+      result = described_class.with_hooks(:complete_job) { |call| call.attempt { "ok" } }
+      expect(result).to eq("ok")
     end
   end
 end
