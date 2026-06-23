@@ -23,7 +23,7 @@ module Busybee
     FILTER_KEYS = {
       job: %i[job_type worker_class status bpmn_process_id source error].freeze,
       worker: %i[worker_class job_type worker_mode error].freeze,
-      call: %i[method result error].freeze
+      call: %i[rpc status grpc_status error_class].freeze
     }.freeze
 
     # Map each hook type to its noun for filter validation

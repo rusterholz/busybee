@@ -196,14 +196,15 @@ RSpec.describe Busybee::Hooks do
 
     it "accepts valid call filter kwargs" do
       expect do
-        Busybee.before_call(method: :complete_job, result: :completed, error: RuntimeError, &noop)
+        Busybee.before_call(rpc: :complete_job, status: :errored, grpc_status: :ok,
+                            error_class: "Busybee::GRPC::Error", &noop)
       end.not_to raise_error
     end
 
-    it "rejects unknown call filter kwargs" do
+    it "rejects unknown call filter kwargs (including the retired method/result keys)" do
       expect do
-        Busybee.before_call(job_type: "test", &noop)
-      end.to raise_error(ArgumentError, /job_type/)
+        Busybee.before_call(method: :complete_job, &noop)
+      end.to raise_error(ArgumentError, /method/)
     end
   end
 
