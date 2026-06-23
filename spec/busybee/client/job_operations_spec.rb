@@ -747,4 +747,34 @@ RSpec.describe Busybee::Client::JobOperations do
       )
     end
   end
+
+  describe "call-hook wiring" do
+    let(:response) { double("CompleteJobResponse") } # rubocop:disable RSpec/VerifiedDoubles
+
+    after { Busybee::Hooks.reset! }
+
+    it "routes an operation through the Call seam, firing before_call then after_call" do
+      fired = []
+      Busybee.before_call { |call| fired << [:before, call.rpc] }
+      Busybee.after_call { |call| fired << [:after, call.rpc, call.status] }
+      allow(stub).to receive(:complete_job).and_return(response)
+
+      client.complete_job(123456)
+
+      expect(fired).to eq([%i[before complete_job], %i[after complete_job succeeded]])
+    end
+
+    it "records an errored, translated outcome on the Call when the stub raises" do
+      seen = nil
+      Busybee.after_call { |call| seen = call }
+      allow(stub).to receive(:complete_job).and_raise(GRPC::Internal.new("boom"))
+
+      expect { client.complete_job(123456) }.to raise_error(Busybee::GRPC::Error)
+      aggregate_failures do
+        expect(seen.status).to eq(:errored)
+        expect(seen.error).to be_a(Busybee::GRPC::Error)
+        expect(seen.rpc).to eq(:complete_job)
+      end
+    end
+  end
 end

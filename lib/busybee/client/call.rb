@@ -27,8 +27,8 @@ module Busybee
       # the carrier), resolve, and fire the observing after_call exactly once.
       # before_call propagates (so it can abort the call); after_call observes
       # (swallows). Returns the recorded result on success; re-raises on error.
-      def self.with_hooks(rpc)
-        call = new(rpc)
+      def self.with_hooks(rpc, request = nil)
+        call = new(rpc, request)
         Busybee::Hooks.run(:before_call, call)
         begin
           yield(call)
@@ -42,10 +42,11 @@ module Busybee
         end
       end
 
-      attr_reader :rpc, :status, :result, :error, :attempts, :context
+      attr_reader :rpc, :request, :status, :result, :error, :attempts, :context
 
-      def initialize(rpc)
+      def initialize(rpc, request = nil)
         @rpc = rpc
+        @request = request
         @status = :pending
         @result = nil
         @error = nil

@@ -35,11 +35,9 @@ module Busybee
           tenantId: tenant_id&.to_s
         )
 
-        with_retry do
-          response = stub.deploy_resource(request)
-          response.deployments.to_h do |deployment|
-            [deployment.process.bpmnProcessId, deployment.process.processDefinitionKey]
-          end
+        response = run_hooked(:deploy_resource, request)
+        response.deployments.to_h do |deployment|
+          [deployment.process.bpmnProcessId, deployment.process.processDefinitionKey]
         end
       end
 
@@ -67,9 +65,7 @@ module Busybee
           tenantId: tenant_id&.to_s
         )
 
-        with_retry do
-          stub.create_process_instance(request).processInstanceKey
-        end
+        run_hooked(:create_process_instance, request).processInstanceKey
       end
       alias start_process_instance start_instance
 
@@ -93,10 +89,8 @@ module Busybee
           processInstanceKey: process_instance_key.to_i
         )
 
-        with_retry do
-          stub.cancel_process_instance(request)
-          true
-        end
+        run_hooked(:cancel_process_instance, request)
+        true
       rescue Busybee::GRPC::Error => e
         raise unless ignore_missing && e.grpc_status == :not_found
 

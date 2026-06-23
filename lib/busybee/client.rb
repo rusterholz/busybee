@@ -3,6 +3,7 @@
 require "active_support"
 require "active_support/duration"
 require "busybee/credentials"
+require "busybee/client/call"
 require "busybee/client/error_handling"
 require "busybee/client/job_operations"
 require "busybee/client/message_operations"
@@ -75,6 +76,16 @@ module Busybee
     # @return [Busybee::GRPC::Gateway::Stub]
     def stub
       credentials.grpc_stub
+    end
+
+    # Run a gRPC stub call through the call-hook seam: build the request-bearing
+    # Call, fire the gating before_call, make the retrying / per-attempt-
+    # instrumented call, and fire the observing after_call. Extra kwargs (e.g.
+    # return_op:) pass through to the stub method. Returns the raw stub response.
+    def run_hooked(rpc, request, **kwargs)
+      Call.with_hooks(rpc, request) do |call|
+        with_retry { call.attempt { stub.public_send(rpc, request, **kwargs) } }
+      end
     end
 
     # Ensures a value is in milliseconds.

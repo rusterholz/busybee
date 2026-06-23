@@ -17,6 +17,15 @@ RSpec.describe Busybee::Client::Call do
         expect(call.attempts).to eq(0)
       end
     end
+
+    it "defaults the request to nil" do
+      expect(described_class.new(:complete_job).request).to be_nil
+    end
+
+    it "carries the request when given" do
+      req = double("Request") # rubocop:disable RSpec/VerifiedDoubles
+      expect(described_class.new(:complete_job, req).request).to be(req)
+    end
   end
 
   describe "#_begin_attempt" do
@@ -310,6 +319,15 @@ RSpec.describe Busybee::Client::Call do
 
       result = described_class.with_hooks(:complete_job) { |call| call.attempt { "ok" } }
       expect(result).to eq("ok")
+    end
+
+    it "exposes the request to hooks" do
+      seen = nil
+      Busybee.before_call { |call| seen = call.request }
+      req = double("Request") # rubocop:disable RSpec/VerifiedDoubles
+
+      described_class.with_hooks(:complete_job, req) { |call| call.attempt { "ok" } }
+      expect(seen).to be(req)
     end
   end
 end
