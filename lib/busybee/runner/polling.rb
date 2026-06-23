@@ -20,7 +20,10 @@ module Busybee
 
           process_all_available_jobs { |e| shutdown_error = e }
         rescue *BACKPRESSURE_ERRORS
-          # [hook: runner.backpressure]
+          # Backpressure back-off. Mechanism under review: the client wraps gRPC
+          # errors as Busybee::GRPC::Error, so real ResourceExhausted may arrive
+          # wrapped rather than as the raw class matched here. (It is also now
+          # observable as an errored after_call with grpc_status :resource_exhausted.)
           sleep @runtime_config.backpressure_delay
         end
 
