@@ -9,6 +9,20 @@ RSpec.describe Busybee::Client::Call::Timestamps do
     expect(described_class.new.created_at).to be_a(Time)
   end
 
+  it "reads the monotonic stamp with the :monotonic kind" do
+    expect(described_class.new.created_at(:monotonic)).to be_a(Float)
+  end
+
+  it "defaults the kind to :utc" do
+    ts = described_class.new
+    expect(ts.created_at).to be_a(Time)
+    expect(ts.created_at).to eq(ts.created_at(:utc))
+  end
+
+  it "raises on an unknown kind" do
+    expect { described_class.new.created_at(:bogus) }.to raise_error(ArgumentError, /:utc or :monotonic/)
+  end
+
   it "leaves resolved_at and total_ms nil until resolved" do
     ts = described_class.new
     expect(ts.resolved_at).to be_nil

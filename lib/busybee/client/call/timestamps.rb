@@ -14,22 +14,23 @@ module Busybee
           @created_at_mono, @created_at_utc = now_pair
         end
 
-        # Logical span (UTC readers).
-        def created_at
-          @created_at_utc
+        # Logical span. Readers take a kind arg (:utc default, for logging;
+        # :monotonic for math) — the same API as Job::Timestamps.
+        def created_at(type = :utc)
+          read_pair(@created_at_utc, @created_at_mono, type)
         end
 
-        def resolved_at
-          @resolved_at_utc
+        def resolved_at(type = :utc)
+          read_pair(@resolved_at_utc, @resolved_at_mono, type)
         end
 
-        # Current attempt's network window (overwritten each attempt; UTC readers).
-        def network_started_at
-          @network_started_at_utc
+        # Current attempt's network window (overwritten each attempt).
+        def network_started_at(type = :utc)
+          read_pair(@network_started_at_utc, @network_started_at_mono, type)
         end
 
-        def network_finished_at
-          @network_finished_at_utc
+        def network_finished_at(type = :utc)
+          read_pair(@network_finished_at_utc, @network_finished_at_mono, type)
         end
 
         # This attempt's on-wire time (finished - started); nil until end-of-attempt.
@@ -89,6 +90,16 @@ module Busybee
           return nil unless from && to
 
           ((to - from) * 1000).round(1)
+        end
+
+        # Select the UTC or monotonic stamp of a pair; mirrors Job::Timestamps'
+        # kind arg.
+        def read_pair(utc, monotonic, type)
+          case type
+          when :utc then utc
+          when :monotonic then monotonic
+          else raise ArgumentError, "Unknown timestamp type: #{type.inspect}. Expected :utc or :monotonic."
+          end
         end
       end
     end

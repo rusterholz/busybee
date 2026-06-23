@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/hash/indifferent_access"
+require "active_support/core_ext/module/delegation"
 require "busybee/client/call/timestamps"
 require "busybee/grpc/error"
 require "busybee/hooks"
@@ -100,12 +101,9 @@ module Busybee
       #
       # The logical span and per-attempt network durations live on Timestamps;
       # its read surface is exposed directly on the call.
-      %i[
-        created_at resolved_at network_started_at network_finished_at
-        network_ms backoff_ms queue_ms total_ms cumulative_network_ms
-      ].each do |name|
-        define_method(name) { @timestamps.public_send(name) }
-      end
+      delegate :created_at, :resolved_at, :network_started_at, :network_finished_at,
+               :network_ms, :backoff_ms, :queue_ms, :total_ms, :cumulative_network_ms,
+               to: :@timestamps
 
       # ===== Context =====
 
