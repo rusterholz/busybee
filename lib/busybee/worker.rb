@@ -4,6 +4,7 @@ require "active_support/core_ext/module/delegation"
 require "busybee/worker/configuration"
 require "busybee/worker/dsl"
 require "busybee/worker/shutdown"
+require "busybee/worker/timestamps"
 
 module Busybee
   # Base class for defining job workers.
