@@ -45,7 +45,7 @@ module Busybee
     # forward to the Timestamps PORO, kind arg and all — delegate forwards it,
     # and the :utc default lives on the PORO. job.timestamps.stamp! remains the
     # write surface; there is no Job-level stamp! delegate.
-    delegate(*Timestamps::NAMES, to: :timestamps)
+    delegate(*Timestamps.timestamp_names, to: :timestamps)
 
     # Create a new Job wrapper.
     #

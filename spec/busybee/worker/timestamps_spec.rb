@@ -30,10 +30,6 @@ RSpec.describe Busybee::Worker::Timestamps do
     expect { ts.started_at(:bogus) }.to raise_error(ArgumentError, /:utc or :monotonic/)
   end
 
-  it "raises on an unknown moment name" do
-    expect { described_class.new.stamp!(:bogus) }.to raise_error(ArgumentError, /Unknown timestamp/)
-  end
-
   it "returns self from stamp! for chaining" do
     ts = described_class.new
     expect(ts.stamp!(:started_at)).to be(ts)

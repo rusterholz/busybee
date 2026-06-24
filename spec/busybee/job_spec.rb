@@ -1004,8 +1004,8 @@ RSpec.describe Busybee::Job do
         expect(job.activated_at).to be_between(before, after)
       end
 
-      it "raises for unknown timestamp names" do
-        expect { job.timestamps.stamp!(:bogus_at) }.to raise_error(ArgumentError, /bogus_at/)
+      it "accepts undeclared names (the timing primitive is name-agnostic)" do
+        expect { job.timestamps.stamp!(:bogus_at) }.not_to raise_error
       end
     end
 
