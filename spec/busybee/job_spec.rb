@@ -44,6 +44,13 @@ RSpec.describe Busybee::Job do
     end
   end
 
+  describe "#worker_name" do
+    it "returns the process-wide worker identity (container, not the per-job worker)" do
+      allow(Busybee).to receive(:worker_name).and_return("orders-pod-7")
+      expect(job.worker_name).to eq("orders-pod-7")
+    end
+  end
+
   describe "#client" do
     it "returns the client instance" do
       expect(job.client).to be(client)

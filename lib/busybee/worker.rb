@@ -31,6 +31,10 @@ module Busybee
     delegate :variables, :headers, :client, :fail!, :throw_bpmn_error!,
              :update_retries, :update_timeout, to: :job
 
+    # Container identity (Busybee.worker_name) — not the per-job worker instance.
+    # Explicit identity for metrics/registries.
+    delegate :worker_name, to: :Busybee
+
     def complete!(vars = {})
       self.class.validate_required_outputs!(vars)
       self.class.validate_undeclared_outputs!(vars)

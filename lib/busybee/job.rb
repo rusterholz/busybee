@@ -47,6 +47,10 @@ module Busybee
     # write surface; there is no Job-level stamp! delegate.
     delegate(*Timestamps.timestamp_names, to: :timestamps)
 
+    # Container identity (Busybee.worker_name) — the per-job worker instance is
+    # job.worker; this is the process/container the job ran in.
+    delegate :worker_name, to: :Busybee
+
     # Create a new Job wrapper.
     #
     # @param raw_job [Busybee::GRPC::ActivatedJob] The raw GRPC job protobuf
