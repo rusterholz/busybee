@@ -5,6 +5,7 @@ require "busybee/worker/configuration"
 require "busybee/worker/dsl"
 require "busybee/worker/shutdown"
 require "busybee/worker/timestamps"
+require "busybee/worker/status"
 
 module Busybee
   # Base class for defining job workers.
