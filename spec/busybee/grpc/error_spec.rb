@@ -50,7 +50,7 @@ RSpec.describe Busybee::GRPC::Error do
       wrapped = e
     end
 
-    expect(wrapped.message).to eq("GRPC request failed (connection refused)")
+    expect(wrapped.message).to eq("GRPC call failed (connection refused)")
   end
 
   it "uses custom message when no cause present" do
@@ -60,7 +60,7 @@ RSpec.describe Busybee::GRPC::Error do
 
   it "uses default message when no cause present" do
     error = described_class.new
-    expect(error.message).to eq("GRPC request failed")
+    expect(error.message).to eq("GRPC call failed")
   end
 
   it "returns nil for grpc_code, grpc_status, and grpc_details when cause is not a GRPC error" do

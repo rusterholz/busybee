@@ -21,13 +21,13 @@ module Busybee
       # it or record it — the per-attempt call seam records it, then re-raises
       # later. Sets the cause via Kernel#raise (Exception.new doesn't accept a
       # cause: keyword), so this works outside the raw error's own rescue too.
-      def self.wrap(raw, message = "GRPC request failed")
+      def self.wrap(raw, message = "GRPC call failed")
         raise(self, message, cause: raw)
       rescue self => e
         e
       end
 
-      def initialize(message = "GRPC request failed")
+      def initialize(message = "GRPC call failed")
         super
       end
 
