@@ -28,9 +28,7 @@ module Busybee
           variables: Busybee::Serialization.to_json(vars)
         )
 
-        with_retry do
-          stub.complete_job(request)
-        end
+        run_hooked(:complete_job, request)
       end
 
       # Fail a job with an error message.
@@ -63,9 +61,7 @@ module Busybee
 
         request.retries = retries.to_i if retries
 
-        with_retry do
-          stub.fail_job(request)
-        end
+        run_hooked(:fail_job, request)
       end
 
       # Throw a BPMN error to be caught by an error boundary event.
@@ -89,9 +85,7 @@ module Busybee
           errorMessage: message.to_s
         )
 
-        with_retry do
-          stub.throw_error(request)
-        end
+        run_hooked(:throw_error, request)
       end
 
       # Update the retry count for a job.
@@ -110,9 +104,7 @@ module Busybee
           retries: retries.to_i
         )
 
-        with_retry do
-          stub.update_job_retries(request)
-        end
+        run_hooked(:update_job_retries, request)
       end
 
       # Update the timeout for a job.
@@ -136,9 +128,7 @@ module Busybee
           timeout: timeout_ms
         )
 
-        with_retry do
-          stub.update_job_timeout(request)
-        end
+        run_hooked(:update_job_timeout, request)
       end
 
       # Activate and process jobs with a block (bounded, non-streaming).
@@ -178,7 +168,7 @@ module Busybee
         )
 
         count = 0
-        responses = with_retry { stub.activate_jobs(request) }
+        responses = run_hooked(:activate_jobs, request)
 
         responses.each do |response|
           response.jobs.each do |raw_job|
@@ -224,12 +214,7 @@ module Busybee
           timeout: milliseconds_from(job_timeout)
         )
 
-        with_retry do
-          Busybee::JobStream.new(
-            stub.stream_activated_jobs(request, return_op: true),
-            client: self
-          )
-        end
+        Busybee::JobStream.new(run_hooked(:stream_activated_jobs, request, return_op: true), client: self)
       end
     end
   end

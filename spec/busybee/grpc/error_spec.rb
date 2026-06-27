@@ -50,7 +50,7 @@ RSpec.describe Busybee::GRPC::Error do
       wrapped = e
     end
 
-    expect(wrapped.message).to eq("GRPC request failed (connection refused)")
+    expect(wrapped.message).to eq("GRPC call failed (connection refused)")
   end
 
   it "uses custom message when no cause present" do
@@ -60,7 +60,7 @@ RSpec.describe Busybee::GRPC::Error do
 
   it "uses default message when no cause present" do
     error = described_class.new
-    expect(error.message).to eq("GRPC request failed")
+    expect(error.message).to eq("GRPC call failed")
   end
 
   it "returns nil for grpc_code, grpc_status, and grpc_details when cause is not a GRPC error" do
@@ -68,5 +68,27 @@ RSpec.describe Busybee::GRPC::Error do
     expect(error.grpc_code).to be_nil
     expect(error.grpc_status).to be_nil
     expect(error.grpc_details).to be_nil
+  end
+
+  describe ".wrap" do
+    it "wraps a raw GRPC error, preserving it as the cause" do
+      wrapped = described_class.wrap(grpc_error)
+      expect(wrapped).to be_a(described_class)
+      expect(wrapped.cause).to be(grpc_error)
+    end
+
+    it "exposes the raw error's status through the wrapper" do
+      expect(described_class.wrap(GRPC::ResourceExhausted.new("backpressure")).grpc_status).
+        to eq(:resource_exhausted)
+    end
+
+    it "returns the wrapped error without raising, so callers can record it" do
+      expect { described_class.wrap(grpc_error) }.not_to raise_error
+    end
+
+    it "uses the provided message, with GRPC details appended" do
+      expect(described_class.wrap(grpc_error, "GRPC call failed").message).
+        to eq("GRPC call failed (connection refused)")
+    end
   end
 end

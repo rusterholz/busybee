@@ -45,9 +45,7 @@ module Busybee
           tenantId: tenant_id&.to_s
         )
 
-        with_retry do
-          stub.publish_message(request).key
-        end
+        run_hooked(:publish_message, request).key
       end
 
       # Broadcast a signal to all process instances with matching signal catch events.
@@ -75,9 +73,7 @@ module Busybee
           tenantId: tenant_id&.to_s
         )
 
-        with_retry do
-          stub.broadcast_signal(request).key
-        end
+        run_hooked(:broadcast_signal, request).key
       end
     end
   end

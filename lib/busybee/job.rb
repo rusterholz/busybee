@@ -42,12 +42,10 @@ module Busybee
              to: :timestamps
 
     # Per-moment timestamp readers (job.activated_at, job.executed_at, etc.)
-    # forward to the Timestamps PORO with the kind arg (default :utc, same as
-    # the PORO). job.timestamps.stamp! remains the write surface — there is
-    # no Job-level stamp! delegate; timestamp mutation stays on the PORO.
-    Timestamps::NAMES.each do |name|
-      define_method(name) { |type = :utc| @timestamps.public_send(name, type) }
-    end
+    # forward to the Timestamps PORO, kind arg and all — delegate forwards it,
+    # and the :utc default lives on the PORO. job.timestamps.stamp! remains the
+    # write surface; there is no Job-level stamp! delegate.
+    delegate(*Timestamps::NAMES, to: :timestamps)
 
     # Create a new Job wrapper.
     #

@@ -23,7 +23,7 @@ module Busybee
     FILTER_KEYS = {
       job: %i[job_type worker_class status bpmn_process_id source error].freeze,
       worker: %i[worker_class job_type worker_mode error].freeze,
-      call: %i[method result error].freeze
+      call: %i[rpc status grpc_status error_class].freeze
     }.freeze
 
     # Map each hook type to its noun for filter validation
@@ -35,6 +35,9 @@ module Busybee
              end
       h[type] = noun
     end.freeze
+
+    # Thread-local key for ambient hook context (see .context / .with_context).
+    CONTEXT_THREAD_KEY = :_busybee_hooks_context
 
     class << self
       # ====== Hook storage ======
@@ -51,6 +54,28 @@ module Busybee
       # Clear all registered hooks. Intended for test isolation.
       def reset!
         @hooks = HOOK_TYPES.to_h { |type| [type, []] }
+      end
+
+      # ====== Ambient context ======
+
+      # The current thread-local hook context. Hooks and the Client::Call
+      # carrier read ambient context seeded here (e.g. the active Job, a
+      # Sidekiq jid). Thread-local: a call snapshots this by value at
+      # construction, since it executes/retries on threads that won't see it.
+      # @return [Hash]
+      def context
+        Thread.current[CONTEXT_THREAD_KEY] || {}
+      end
+
+      # Push context for the duration of the block, merging with any existing
+      # context (inner values win). Restores the previous context on exit, even
+      # when the block raises.
+      def with_context(**attrs)
+        previous = Thread.current[CONTEXT_THREAD_KEY]
+        Thread.current[CONTEXT_THREAD_KEY] = (previous || {}).merge(attrs)
+        yield
+      ensure
+        Thread.current[CONTEXT_THREAD_KEY] = previous
       end
 
       # ====== Registration ======
@@ -143,16 +168,6 @@ module Busybee
         location = error.backtrace&.first
         suffix = location ? " (at #{location})" : ""
         Busybee.logger&.error("[busybee] Error in hooks (ignored): [#{error.class}] #{error.message}#{suffix}")
-      end
-
-      # Warn when an observing around-hook returned without yielding (calling
-      # perform). The chain force-runs the continuation regardless — an observer
-      # must not silently cancel the wrapped work — but the operator should know
-      # a hook is misbehaving. Includes the hook's source location.
-      def log_forgotten_yield(callback)
-        location = callback.source_location&.join(":")
-        suffix = location ? " (at #{location})" : ""
-        Busybee.logger&.warn("[busybee] Observing around-hook returned without yielding; forcing continuation#{suffix}")
       end
 
       # Run an around-hook chain wrapping a core block. Middleware callbacks

@@ -34,9 +34,7 @@ module Busybee
           local: local
         )
 
-        with_retry do
-          stub.set_variables(request).key
-        end
+        run_hooked(:set_variables, request).key
       end
 
       # Resolve an incident.
@@ -49,15 +47,13 @@ module Busybee
       #   client.resolve_incident(54321)
       #   # => true
       #
-      def resolve_incident(incident_key)
+      def resolve_incident(incident_key) # rubocop:disable Naming/PredicateMethod
         request = Busybee::GRPC::ResolveIncidentRequest.new(
           incidentKey: incident_key.to_i
         )
 
-        with_retry do
-          stub.resolve_incident(request)
-          true
-        end
+        run_hooked(:resolve_incident, request)
+        true
       end
     end
   end
