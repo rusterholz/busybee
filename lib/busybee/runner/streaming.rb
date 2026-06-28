@@ -22,29 +22,6 @@ module Busybee
         @shutdown_error = Concurrent::AtomicReference.new(nil)
       end
 
-      def run!
-        return if stopping?
-
-        @running.make_true
-        # [hook: runner.started]
-
-        @stream = @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
-
-        if buffer?
-          run_with_buffer
-        else
-          run_inline
-        end
-      ensure
-        # [hook: runner.stopping]
-        @stream&.close
-        if buffer?
-          @pump_thread&.join(5)
-          handle_remaining_jobs_in_buffer
-        end
-        @running.make_false
-      end
-
       def stop!
         super
         @stream&.close # unblocks stream.each via GRPC::Cancelled
@@ -61,6 +38,32 @@ module Busybee
       end
 
       private
+
+      # Fills Runner#run!'s loop: open the job stream and process jobs (via the
+      # pump + buffer, or inline). Raises a worker Shutdown to signal an error exit.
+      def run_loop
+        @stream = @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
+
+        if buffer?
+          run_with_buffer
+        else
+          run_inline
+        end
+      end
+
+      # Close the job stream so no new jobs are activated. Backstop for the
+      # error-exit path; stop! already closes it on the graceful path.
+      def cease_intake
+        @stream&.close
+      end
+
+      # When buffered, join the pump thread and fail any jobs still in the buffer.
+      def drain_on_shutdown
+        return unless buffer?
+
+        @pump_thread&.join(5)
+        handle_remaining_jobs_in_buffer
+      end
 
       def current_buffer_size
         return nil if @job_buffer.nil?
@@ -90,7 +93,6 @@ module Busybee
 
           execute_job(job)
         rescue Busybee::Worker::Shutdown => e
-          # [hook: runner.shutdown]
           shutdown_error = e
           stop!
           break

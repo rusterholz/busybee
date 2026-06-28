@@ -3,10 +3,13 @@
 require "concurrent"
 
 module Busybee
-  # Base class for all runner types. Provides shared interface (run!, stop!, stopping?,
-  # running?, kill!) and the Runner.for factory method for mode resolution.
+  # Base class for all runner types. Provides the shared lifecycle (run!, stop!,
+  # stopping?, running?, kill!) and the Runner.for factory for mode resolution.
   #
-  # Subclasses must implement #run! to define their job-fetching loop.
+  # #run! is a template method owning the worker run lifecycle (started → loop →
+  # stopping → drain → shutdown). Subclasses implement #run_loop (the fetch loop)
+  # and optionally #drain_on_shutdown (graceful drain). Multi overrides #run! to
+  # opt out — it manages child runners rather than being a worker itself.
   class Runner
     def initialize(worker_class = nil, runtime_config: nil, client: nil)
       @worker_class = worker_class
@@ -16,9 +19,21 @@ module Busybee
       @running = Concurrent::AtomicBoolean.new(false)
     end
 
-    # Blocks until stopped or error. Subclasses must implement.
+    # Template method owning the worker run lifecycle. Blocks until the runner
+    # is stopped or #run_loop raises. The ensure runs on every exit path (signal,
+    # error, normal return), on the runner thread.
     def run!
-      raise NotImplementedError
+      return if stopping?
+
+      @running.make_true
+      # [hook: runner.started]
+      run_loop
+    ensure
+      cease_intake
+      # [hook: runner.stopping]
+      drain_on_shutdown
+      # [hook: runner.shutdown]
+      @running.make_false
     end
 
     # Signals graceful shutdown. Thread-safe (called from signal handler).
@@ -76,6 +91,26 @@ module Busybee
     end
 
     private
+
+    # The fetch/process loop. Fills Runner#run!'s body between on_worker_started
+    # and the stopping/drain/shutdown ensure; raises to signal an error exit.
+    def run_loop
+      raise NotImplementedError
+    end
+
+    # Cease intake — the first step in Runner#run!'s ensure, before
+    # on_worker_stopping fires (close-before-fire), so a misbehaving stopping
+    # observer can never leave the job stream open and wedge shutdown. No-op by
+    # default (polling has no stream); streaming overrides to close the stream.
+    # Idempotent with stop!'s own close on the graceful path; the real close for
+    # the uncaught-error exit path (where stop! was never called).
+    def cease_intake; end
+
+    # Graceful drain — runs in Runner#run!'s ensure, between on_worker_stopping
+    # and on_worker_shutdown, on every exit path. No-op by default (polling has
+    # nothing to drain); buffering subclasses override to join the pump and fail
+    # any jobs still sitting in the buffer.
+    def drain_on_shutdown; end
 
     # Fails a job during graceful shutdown, preserving its retry count.
     # Uses the worker's configured backoff (or gem default).
