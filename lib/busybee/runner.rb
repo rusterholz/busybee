@@ -17,28 +17,45 @@ module Busybee
       @client = client || Busybee::Client.new
       @stop_requested = Concurrent::AtomicBoolean.new(false)
       @running = Concurrent::AtomicBoolean.new(false)
+      @worker_started = false
+      @worker_timestamps = Worker::Timestamps.new
     end
 
     # Template method owning the worker run lifecycle. Blocks until the runner
     # is stopped or #run_loop raises. The ensure runs on every exit path (signal,
     # error, normal return), on the runner thread.
+    #
+    # Fires the worker-lifecycle hooks at three of the four moments — started
+    # (T0, here), stopping (T2) and shutdown (T3, in the ensure); stop_requested
+    # (T1) fires from #stop! on the signalling thread. Each fires with a fresh
+    # Worker::Status. The @worker_started guard keeps the `return if stopping?`
+    # early-exit (and any pre-loop failure) from firing the T2/T3 pair.
     def run!
       return if stopping?
 
-      @running.make_true
-      # [hook: runner.started]
+      start!
       run_loop
     ensure
       cease_intake
-      # [hook: runner.stopping]
+      reason, error = classify_exit($!)
+      fire_worker_lifecycle(:stopping_at, :on_worker_stopping, reason, error)
       drain_on_shutdown
-      # [hook: runner.shutdown]
+      fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, reason, error)
       @running.make_false
     end
 
-    # Signals graceful shutdown. Thread-safe (called from signal handler).
+    # Signals graceful shutdown. Thread-safe (called from a signal handler — the
+    # CLI runs the handler on its own thread, so this is never raw trap context).
+    # The AtomicBoolean CAS gates the whole body, so T1 fires exactly once across
+    # repeated signals / per-job Shutdowns. Intake ceases (cease_intake) *before*
+    # the hook fires, so a propagating observer can never skip the close and wedge
+    # shutdown (close-before-fire).
     def stop!
-      @stop_requested.make_true
+      return unless @stop_requested.make_true
+
+      @worker_timestamps.stamp!(:stop_requested_at)
+      cease_intake
+      Hooks.run(:on_worker_stop_requested, worker_status, safe: true)
     end
 
     # True if stop! has been called.
@@ -92,6 +109,54 @@ module Busybee
 
     private
 
+    # T0 — the run has started: mark it running, stamp the moment, record that
+    # it started (so the ensure fires the stopping/shutdown pair as a matched
+    # set, never on the `return if stopping?` early-exit), and announce it via
+    # on_worker_started. The internal start transition; the public entry is #run!.
+    def start!
+      @running.make_true
+      @worker_timestamps.stamp!(:started_at)
+      @worker_started = true
+      Hooks.run(:on_worker_started, worker_status, safe: true)
+    end
+
+    # Stamp a closing lifecycle moment (T2 stopping / T3 shutdown) and fire its
+    # observation-only hook with a fresh Status — but only once the run actually
+    # started, so a pre-loop exit fires neither. reason/error are the classified
+    # in-flight exception, shared by both moments.
+    def fire_worker_lifecycle(stamp, type, reason, error)
+      return unless @worker_started
+
+      @worker_timestamps.stamp!(stamp)
+      Hooks.run(type, worker_status(reason: reason, error: error), safe: true)
+    end
+
+    # Classify the run's exit from the in-flight exception ($! in the ensure):
+    # no exception → a clean stop signal; a Worker::Shutdown → an error reported
+    # as its triggering cause; any other exception → an error reported as-is
+    # (covers the raw activation-path fatal that exits run! unwrapped).
+    def classify_exit(exception)
+      case exception
+      when nil then [:signal, nil]
+      when Busybee::Worker::Shutdown then [:error, exception.cause]
+      else [:error, exception]
+      end
+    end
+
+    # Build a fresh, point-in-time Worker::Status snapshot — the carrier handed
+    # to worker hooks and stamped into job context for job-hook visibility.
+    def worker_status(reason: nil, error: nil)
+      Worker::Status.new(
+        worker_class: @worker_class,
+        worker_mode: @runtime_config&.worker_mode,
+        timestamps: @worker_timestamps,
+        current_buffer_size: current_buffer_size,
+        peak_buffer_size: peak_buffer_size,
+        reason: reason,
+        error: error
+      )
+    end
+
     # The fetch/process loop. Fills Runner#run!'s body between on_worker_started
     # and the stopping/drain/shutdown ensure; raises to signal an error exit.
     def run_loop
@@ -133,7 +198,8 @@ module Busybee
     #   Buffered call sites pass true; direct (poll/inline) sites leave it false.
     def activate_job(job, source:, buffered: false)
       job.timestamps.stamp!(:activated_at)
-      job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
+      job.set_context(source: source, buffered: buffered, worker_class: @worker_class,
+                      worker_status: worker_status)
       Hooks.run(:on_job_activated, job, safe: true)
     end
 
@@ -142,6 +208,9 @@ module Busybee
     #
     # @param job [Busybee::Job]
     def execute_job(job)
+      # Re-stamp a fresh Status: the buffer gauge may have moved since activation,
+      # and execution-time is the heartbeat job hooks read job.worker_status at.
+      job.set_context(worker_status: worker_status)
       Hooks.run_chain(:around_job_execution, job, safe: true) do
         @worker_class.perform_job(job)
       end
@@ -158,6 +227,13 @@ module Busybee
     # buffer (Polling). Subclasses with a buffer override. The buffer-depth
     # gauge — read into Worker::Status for worker- and job-hook visibility.
     def current_buffer_size
+      nil
+    end
+
+    # Lifetime high-water mark of this runner's job buffer, or nil if the runner
+    # has no buffer (Polling). Buffering subclasses override. Read into
+    # Worker::Status alongside current_buffer_size.
+    def peak_buffer_size
       nil
     end
   end

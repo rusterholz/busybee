@@ -59,7 +59,7 @@ RSpec.describe Busybee::Hooks do
       expect(results).to eq(%i[first second third])
     end
 
-    it "supports all 12 hook types" do
+    it "supports all 13 hook types" do
       described_class::HOOK_TYPES.each do |type|
         Busybee.configure { |c| c.public_send(type) { |_| } } # rubocop:disable Lint/EmptyBlock
         expect(described_class.hooks_for(type).length).to eq(1), "expected #{type} to have 1 hook"
@@ -184,7 +184,8 @@ RSpec.describe Busybee::Hooks do
     it "accepts valid worker filter kwargs" do
       expect do
         Busybee.on_worker_started(worker_class: /Order/, job_type: "test",
-                                  worker_mode: :polling, error: RuntimeError, &noop)
+                                  worker_mode: :polling, reason: :error,
+                                  error: RuntimeError, error_class: "RuntimeError", &noop)
       end.not_to raise_error
     end
 
@@ -192,6 +193,10 @@ RSpec.describe Busybee::Hooks do
       expect do
         Busybee.on_worker_started(status: :failed, &noop)
       end.to raise_error(ArgumentError, /status/)
+    end
+
+    it "registers the on_worker_stop_requested hook type" do
+      expect { Busybee.on_worker_stop_requested(&noop) }.not_to raise_error
     end
 
     it "accepts valid call filter kwargs" do

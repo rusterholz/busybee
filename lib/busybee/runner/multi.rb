@@ -40,7 +40,11 @@ module Busybee
       end
 
       def stop!
-        super
+        # Multi is transparent — it manages child runners rather than being a
+        # worker, so it fires no worker hooks of its own. Flip the flag directly
+        # instead of via super (whose stop! now fires on_worker_stop_requested);
+        # each child fires its own lifecycle hooks per worker-class.
+        @stop_requested.make_true
         @runners.each(&:stop!)
         @thread_pool.shutdown
       end

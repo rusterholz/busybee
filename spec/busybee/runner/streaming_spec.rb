@@ -432,6 +432,8 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     describe "#stop!" do
+      after { Busybee::Hooks.reset! }
+
       it "closes the stream and pushes :stop sentinel" do
         runner.instance_variable_set(:@stream, stream)
 
@@ -439,6 +441,17 @@ RSpec.describe Busybee::Runner::Streaming do
 
         expect(stream).to have_received(:close)
         expect(runner.instance_variable_get(:@job_buffer).pop(true)).to eq(:stop)
+      end
+
+      it "closes the stream before firing on_worker_stop_requested (close-before-fire)" do
+        order = []
+        allow(stream).to receive(:close) { order << :close }
+        Busybee.on_worker_stop_requested { order << :hook }
+        runner.instance_variable_set(:@stream, stream)
+
+        runner.stop!
+
+        expect(order).to eq(%i[close hook])
       end
     end
 

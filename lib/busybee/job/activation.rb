@@ -17,10 +17,13 @@ module Busybee
     # — extracting any Activation-owned keys from the kwargs hash in place
     # and applying them.
     class Activation
-      KEYS = %i[worker worker_class source buffered].freeze
+      KEYS = %i[worker worker_class source buffered worker_status].freeze
       VALID_SOURCES = %i[poll stream].freeze
 
-      attr_reader :worker, :source
+      # worker_status is the runner's point-in-time Worker::Status, re-stamped at
+      # execution (latest-wins via harvest!). Deliberately absent from
+      # context_tags / logging_context — it's a rich object, not a loggable tag.
+      attr_reader :worker, :source, :worker_status
 
       # worker_class is known at activate_job time (the runner has it) before
       # the worker instance exists (created later in Worker.perform_job). Prefer

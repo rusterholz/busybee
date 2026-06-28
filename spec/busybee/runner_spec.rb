@@ -243,6 +243,13 @@ RSpec.describe Busybee::Runner do
       expect(received.buffered?).to be(true)
     end
 
+    it "stamps a Worker::Status onto the Job for job-hook visibility" do
+      received = nil
+      Busybee.on_job_activated { |job| received = job }
+      runner.send(:activate_job, job, source: :poll)
+      expect(received.worker_status).to be_a(Busybee::Worker::Status)
+    end
+
     it "requires source: kwarg" do
       expect { runner.send(:activate_job, job) }.to raise_error(ArgumentError)
     end
@@ -309,6 +316,13 @@ RSpec.describe Busybee::Runner do
     it "calls @worker_class.perform_job(job)" do
       runner.send(:execute_job, job)
       expect(worker_class).to have_received(:perform_job).with(job)
+    end
+
+    it "stamps a fresh Worker::Status onto the Job before executing" do
+      captured = nil
+      Busybee.on_job_executed { |job| captured = job }
+      runner.send(:execute_job, job)
+      expect(captured.worker_status).to be_a(Busybee::Worker::Status)
     end
 
     it "wraps perform_job in the around_job_execution chain" do

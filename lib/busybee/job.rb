@@ -33,7 +33,7 @@ module Busybee
     delegate :key, :type, :job_type, :process_instance_key, :bpmn_process_id, :element_id,
              :variables, :headers,
              to: :payload
-    delegate :source, :buffered?, :worker, :worker_class, to: :activation
+    delegate :source, :buffered?, :worker, :worker_class, :worker_status, to: :activation
     delegate :status, :result, :error, :error_message, :error_code,
              :ready?, :complete?, :completed?, :failed?, :error?, :errored?, :resolved?,
              to: :resolution

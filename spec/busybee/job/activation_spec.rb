@@ -48,6 +48,20 @@ RSpec.describe Busybee::Job::Activation do
       expect(activation.worker_class).to eq(worker_class)
     end
 
+    it "captures worker_status (the runner's point-in-time snapshot)" do
+      status = Object.new
+      activation.harvest!(worker_status: status)
+      expect(activation.worker_status).to be(status)
+    end
+
+    it "overwrites worker_status on a later harvest (execution re-stamp wins)" do
+      first = Object.new
+      second = Object.new
+      activation.harvest!(worker_status: first)
+      activation.harvest!(worker_status: second)
+      expect(activation.worker_status).to be(second)
+    end
+
     it "leaves unknown keys in the kwargs hash (for downstream harvesters)" do
       kwargs = { source: :poll, my_scratch: "value" }
       activation.harvest!(kwargs)
@@ -94,6 +108,13 @@ RSpec.describe Busybee::Job::Activation do
     it "includes buffered once harvested (the low-card per-job bit)" do
       activation.harvest!(source: :stream, buffered: true)
       expect(activation.context_tags).to include(buffered: true)
+    end
+
+    it "excludes worker_status (a rich object, not a loggable tag)" do
+      activation.harvest!(source: :poll, worker_status: Object.new)
+
+      expect(activation.context_tags).not_to have_key(:worker_status)
+      expect(activation.logging_context).not_to have_key(:worker_status)
     end
   end
 
