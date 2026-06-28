@@ -107,7 +107,7 @@ module Busybee
         @stream.each do |job|
           break if stopping?
 
-          activate_job(job, source: :stream, buffer_size: @job_buffer.size)
+          activate_job(job, source: :stream, buffered: true)
           @job_buffer.push(job)
           sleep(delay.to_f / 1000) if delay
         end

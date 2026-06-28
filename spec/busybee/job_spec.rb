@@ -1185,7 +1185,7 @@ RSpec.describe Busybee::Job do
 
   describe "#logging_context" do
     it "is a strict superset of context_tags" do
-      job.set_context(source: :stream, buffer_size: 3)
+      job.set_context(source: :stream, buffered: true)
       job.send(:resolution).resolve_to(:complete)
       job.context[:correlation_id] = "abc-123"
       job.context[:span] = Object.new # logging_context drops this
@@ -1197,7 +1197,6 @@ RSpec.describe Busybee::Job do
         expect(logging[key]).to eq(value), "expected logging_context[#{key.inspect}] to mirror context_tags"
       end
       expect(logging[:job_key]).to eq(job.key) # high-card, logging-only
-      expect(logging[:buffer_size]).to eq(3)
       expect(logging[:correlation_id]).to eq("abc-123") # primitive scratch
       expect(logging).not_to have_key(:span) # complex object dropped
     end

@@ -587,7 +587,7 @@ RSpec.describe Busybee::Runner::Streaming do
   describe "on_job_activated wiring (inline mode)" do
     after { Busybee::Hooks.reset! }
 
-    it "fires on_job_activated with source: :stream and no buffer_size" do
+    it "fires on_job_activated with source: :stream, not buffered (inline)" do
       captured = nil
       Busybee.on_job_activated { |job| captured = job }
 
@@ -600,7 +600,7 @@ RSpec.describe Busybee::Runner::Streaming do
       runner.run!
 
       expect(captured.source).to eq(:stream)
-      expect(captured.buffer_size).to be_nil
+      expect(captured.buffered?).to be(false)
     end
   end
 
@@ -620,7 +620,7 @@ RSpec.describe Busybee::Runner::Streaming do
     before { allow(stream).to receive(:close) { stream_gate.set } }
     after { Busybee::Hooks.reset! }
 
-    it "fires on_job_activated with source: :stream and the buffer depth at receive time" do
+    it "fires on_job_activated with source: :stream, buffered" do
       streamed_job = build_test_job(key: 42, retries: 1)
       captured = nil
       Busybee.on_job_activated { |job| captured = job }
@@ -637,38 +637,7 @@ RSpec.describe Busybee::Runner::Streaming do
       runner.run!
 
       expect(captured.source).to eq(:stream)
-      expect(captured.buffer_size).to eq(0) # captured BEFORE push, queue was empty
-    end
-  end
-
-  describe "buffer_size refresh on on_job_executed (buffered mode)" do
-    subject(:runner) { described_class.new(queue_worker_class, runtime_config: runtime_config, client: client) }
-
-    let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(queue_worker_class) }
-    let(:queue_worker_class) do
-      Class.new(Busybee::Worker) do
-        job_type "test_worker"
-        strict_outputs false
-        define_method(:perform) { { done: true } }
-      end
-    end
-
-    after { Busybee::Hooks.reset! }
-
-    it "reports execution-time buffer depth on on_job_executed, not receive-time" do
-      job = build_test_job(type: "test_worker", key: 1)
-      captured = nil
-      Busybee.on_job_executed { |job| captured = job }
-
-      runner.send(:activate_job, job, source: :stream, buffer_size: 0)
-      # Simulate two new jobs arriving in the buffer between activation and execution.
-      buffer = runner.instance_variable_get(:@job_buffer)
-      buffer.push(build_test_job(type: "test_worker", key: 2))
-      buffer.push(build_test_job(type: "test_worker", key: 3))
-
-      runner.send(:execute_job, job)
-
-      expect(captured.buffer_size).to eq(2)
+      expect(captured.buffered?).to be(true)
     end
   end
 end

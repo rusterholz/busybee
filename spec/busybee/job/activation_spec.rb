@@ -6,10 +6,10 @@ RSpec.describe Busybee::Job::Activation do
   subject(:activation) { described_class.new }
 
   describe "initial state" do
-    it "has no worker, source, or buffer_size" do
+    it "has no worker or source, and is not buffered" do
       expect(activation.worker).to be_nil
       expect(activation.source).to be_nil
-      expect(activation.buffer_size).to be_nil
+      expect(activation.buffered?).to be(false)
     end
 
     it "derives a nil worker_class" do
@@ -18,23 +18,23 @@ RSpec.describe Busybee::Job::Activation do
   end
 
   describe "#harvest!" do
-    it "extracts and applies source and buffer_size" do
-      kwargs = { source: :stream, buffer_size: 3 }
+    it "extracts and applies source and buffered" do
+      kwargs = { source: :stream, buffered: true }
       activation.harvest!(kwargs)
 
       expect(activation.source).to eq(:stream)
-      expect(activation.buffer_size).to eq(3)
+      expect(activation.buffered?).to be(true)
       expect(kwargs).to be_empty
     end
 
-    it "preserves buffer_size of 0 (queue empty but buffered)" do
-      activation.harvest!(buffer_size: 0)
-      expect(activation.buffer_size).to eq(0)
+    it "harvests buffered: false (received unbuffered)" do
+      activation.harvest!(source: :poll, buffered: false)
+      expect(activation.buffered?).to be(false)
     end
 
-    it "leaves buffer_size nil when not in kwargs" do
+    it "leaves buffered? false when not in kwargs" do
       activation.harvest!(source: :stream)
-      expect(activation.buffer_size).to be_nil
+      expect(activation.buffered?).to be(false)
     end
 
     it "captures worker later (second harvest call)" do
@@ -90,6 +90,11 @@ RSpec.describe Busybee::Job::Activation do
 
       expect(activation.context_tags).to eq(source: :poll, worker_class: "MyWorker")
     end
+
+    it "includes buffered once harvested (the low-card per-job bit)" do
+      activation.harvest!(source: :stream, buffered: true)
+      expect(activation.context_tags).to include(buffered: true)
+    end
   end
 
   describe "#logging_context" do
@@ -97,18 +102,13 @@ RSpec.describe Busybee::Job::Activation do
       expect(activation.logging_context).to eq({})
     end
 
-    it "extends context_tags with buffer_size" do
+    it "mirrors context_tags (depth is no longer on the job; it lives on Worker::Status)" do
       worker_class = stub_const("MyWorker", Class.new)
-      activation.harvest!(source: :stream, buffer_size: 5, worker: worker_class.allocate)
+      activation.harvest!(source: :stream, buffered: true, worker: worker_class.allocate)
 
       expect(activation.logging_context).to eq(
-        source: :stream, worker_class: "MyWorker", buffer_size: 5
+        source: :stream, worker_class: "MyWorker", buffered: true
       )
-    end
-
-    it "includes buffer_size of 0" do
-      activation.harvest!(source: :stream, buffer_size: 0)
-      expect(activation.logging_context[:buffer_size]).to eq(0)
     end
   end
 end

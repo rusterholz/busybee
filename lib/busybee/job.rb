@@ -33,7 +33,7 @@ module Busybee
     delegate :key, :type, :job_type, :process_instance_key, :bpmn_process_id, :element_id,
              :variables, :headers,
              to: :payload
-    delegate :source, :buffer_size, :worker, :worker_class, to: :activation
+    delegate :source, :buffered?, :worker, :worker_class, to: :activation
     delegate :status, :result, :error, :error_message, :error_code,
              :ready?, :complete?, :completed?, :failed?, :error?, :errored?, :resolved?,
              to: :resolution
@@ -50,6 +50,11 @@ module Busybee
     # Container identity (Busybee.worker_name) — the per-job worker instance is
     # job.worker; this is the process/container the job ran in.
     delegate :worker_name, to: :Busybee
+
+    # Non-predicate reader for the `buffered` hook filter key: Hooks.attribute
+    # resolves a filter value via public_send(key), and a kwarg key can't carry
+    # the `?`. buffered? (delegated above) stays the idiomatic predicate.
+    def buffered = buffered? # rubocop:disable Naming/PredicateMethod
 
     # Create a new Job wrapper.
     #

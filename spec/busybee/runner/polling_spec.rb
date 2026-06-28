@@ -268,7 +268,7 @@ RSpec.describe Busybee::Runner::Polling do
   describe "on_job_activated wiring" do
     after { Busybee::Hooks.reset! }
 
-    it "fires on_job_activated with source: :poll and no buffer_size" do
+    it "fires on_job_activated with source: :poll, not buffered" do
       captured = nil
       Busybee.on_job_activated { |job| captured = job }
 
@@ -286,7 +286,7 @@ RSpec.describe Busybee::Runner::Polling do
       runner.run!
 
       expect(captured.source).to eq(:poll)
-      expect(captured.buffer_size).to be_nil
+      expect(captured.buffered?).to be(false)
     end
   end
 

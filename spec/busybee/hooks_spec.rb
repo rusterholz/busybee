@@ -171,7 +171,7 @@ RSpec.describe Busybee::Hooks do
     it "accepts valid job filter kwargs" do
       expect do
         Busybee.before_job(job_type: "test", worker_class: /Order/, status: :failed,
-                           bpmn_process_id: "flow", error: RuntimeError, &noop)
+                           bpmn_process_id: "flow", buffered: true, error: RuntimeError, &noop)
       end.not_to raise_error
     end
 
@@ -314,6 +314,18 @@ RSpec.describe Busybee::Hooks do
 
         described_class.run(:before_job, job) # event has status: :ready
         expect(results).to eq([:unfiltered])
+      end
+
+      it "resolves the buffered filter off the job (Job#buffered, not its negation)" do
+        fired = []
+        buffered_job = build_test_job(type: "test", key: 1).tap { |j| j.set_context(buffered: true) }
+        unbuffered_job = build_test_job(type: "test", key: 2) # buffered? false
+        Busybee.before_job(buffered: true) { |job| fired << job.key }
+
+        described_class.run(:before_job, buffered_job)
+        described_class.run(:before_job, unbuffered_job)
+
+        expect(fired).to eq([buffered_job.key])
       end
     end
   end

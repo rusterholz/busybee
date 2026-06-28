@@ -582,7 +582,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       runner.run!
 
       expect(captured.source).to eq(:poll)
-      expect(captured.buffer_size).to be_nil
+      expect(captured.buffered?).to be(false) # drain-phase jobs arrive via poll, unbuffered
     end
   end
 end

@@ -229,25 +229,18 @@ RSpec.describe Busybee::Runner do
       end
     end
 
-    it "defaults buffer_size to nil (signals job-not-buffered)" do
+    it "defaults buffered? to false (job not buffered)" do
       received = nil
       Busybee.on_job_activated { |job| received = job }
       runner.send(:activate_job, job, source: :poll)
-      expect(received.buffer_size).to be_nil
+      expect(received.buffered?).to be(false)
     end
 
-    it "captures the given buffer_size on the Job" do
+    it "records buffered: true on the Job" do
       received = nil
       Busybee.on_job_activated { |job| received = job }
-      runner.send(:activate_job, job, source: :stream, buffer_size: 7)
-      expect(received.buffer_size).to eq(7)
-    end
-
-    it "allows buffer_size of 0 (queue was empty when job arrived)" do
-      received = nil
-      Busybee.on_job_activated { |job| received = job }
-      runner.send(:activate_job, job, source: :stream, buffer_size: 0)
-      expect(received.buffer_size).to eq(0)
+      runner.send(:activate_job, job, source: :stream, buffered: true)
+      expect(received.buffered?).to be(true)
     end
 
     it "requires source: kwarg" do
