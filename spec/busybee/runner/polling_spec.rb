@@ -190,6 +190,7 @@ RSpec.describe Busybee::Runner::Polling do
 
         expect(runner).to have_received(:sleep).with(runtime_config.backpressure_delay) # rubocop:disable RSpec/SubjectStub
         expect(call_count).to eq(2)
+        expect(runner.send(:worker_status).backpressure_count).to eq(1)
       end
 
       it "re-raises a non-backpressure wrapped error (e.g. Unavailable)" do

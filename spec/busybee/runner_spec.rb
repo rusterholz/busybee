@@ -537,4 +537,51 @@ RSpec.describe Busybee::Runner do
       end
     end
   end
+
+  describe "job counters (Worker::Status)" do
+    def status_for(runner) = runner.send(:worker_status)
+
+    it "counts every processed job in total_job_count" do
+      worker_class = stub_const("CountTotalWorker", Class.new(Busybee::Worker) do
+        job_type "count_total"
+        strict_outputs false
+        define_method(:perform) { { ok: true } }
+      end)
+      runner = described_class.new(worker_class, client: client)
+
+      3.times { runner.send(:execute_job, build_test_job(type: "count_total")) }
+
+      expect(status_for(runner).total_job_count).to eq(3)
+    end
+
+    it "counts a :failed outcome (autofail) in failed_job_count" do
+      worker_class = stub_const("CountFailWorker", Class.new(Busybee::Worker) do
+        job_type "count_fail"
+        define_method(:perform) { raise "boom" }
+      end)
+      runner = described_class.new(worker_class, client: client)
+
+      runner.send(:execute_job, build_test_job(type: "count_fail"))
+
+      aggregate_failures do
+        expect(status_for(runner).failed_job_count).to eq(1)
+        expect(status_for(runner).total_job_count).to eq(1)
+      end
+    end
+
+    it "does not count a thrown BPMN error (:error) as failed" do
+      worker_class = stub_const("CountBpmnWorker", Class.new(Busybee::Worker) do
+        job_type "count_bpmn"
+        define_method(:perform) { throw_bpmn_error!(:rejected, "no") }
+      end)
+      runner = described_class.new(worker_class, client: client)
+
+      runner.send(:execute_job, build_test_job(type: "count_bpmn"))
+
+      aggregate_failures do
+        expect(status_for(runner).failed_job_count).to eq(0)
+        expect(status_for(runner).total_job_count).to eq(1)
+      end
+    end
+  end
 end

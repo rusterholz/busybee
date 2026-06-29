@@ -18,6 +18,9 @@ module Busybee
       @stop_requested = Concurrent::AtomicBoolean.new(false)
       @running = Concurrent::AtomicBoolean.new(false)
       @worker_timestamps = Worker::Timestamps.new
+      @total_job_count = Concurrent::AtomicFixnum.new(0)
+      @failed_job_count = Concurrent::AtomicFixnum.new(0)
+      @backpressure_count = Concurrent::AtomicFixnum.new(0)
     end
 
     # Template method owning the worker run lifecycle. Blocks until the runner
@@ -148,6 +151,7 @@ module Busybee
     def handle_grpc_error(error)
       raise error unless Busybee.backpressure_statuses.include?(error.grpc_status)
 
+      @backpressure_count.increment
       sleep @runtime_config.backpressure_delay
     end
 
@@ -170,6 +174,9 @@ module Busybee
         worker_class: @worker_class,
         worker_mode: @runtime_config&.worker_mode,
         timestamps: @worker_timestamps,
+        total_job_count: @total_job_count.value,
+        failed_job_count: @failed_job_count.value,
+        backpressure_count: @backpressure_count.value,
         current_buffer_size: current_buffer_size,
         peak_buffer_size: peak_buffer_size,
         reason: reason,
@@ -240,6 +247,8 @@ module Busybee
       # even when the worker is shutting down, keeping observability of the
       # final activation intact.
       job.timestamps.stamp!(:executed_at)
+      @total_job_count.increment
+      @failed_job_count.increment if job.failed?
       Hooks.run(:on_job_executed, job, safe: true)
     end
 
