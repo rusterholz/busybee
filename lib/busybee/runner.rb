@@ -140,6 +140,17 @@ module Busybee
       Hooks.run(type, worker_status(reason: reason, error: error), safe: true)
     end
 
+    # Handle a wrapped gRPC error raised by a fetch loop. The *outcome* is matched
+    # by status symbol (grpc_status) against Busybee.backpressure_statuses —
+    # independent of which gRPC exception class the gateway raised. A backpressure
+    # outcome backs off (sleeps the configured delay) and returns, so the loop
+    # retries the fetch; any other gRPC error re-raises and propagates.
+    def handle_grpc_error(error)
+      raise error unless Busybee.backpressure_statuses.include?(error.grpc_status)
+
+      sleep @runtime_config.backpressure_delay
+    end
+
     # Classify the run's exit from the in-flight exception ($! in the ensure):
     # no exception → a clean stop signal; a Worker::Shutdown → an error reported
     # as its triggering cause; any other exception → an error reported as-is

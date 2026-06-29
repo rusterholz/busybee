@@ -8,8 +8,6 @@ module Busybee
     # The pump thread reads from the stream into a thread-safe buffer; the main thread does
     # all perform_job calls (sequential guarantee).
     class Hybrid < Streaming
-      BACKPRESSURE_ERRORS = [::GRPC::ResourceExhausted].freeze
-
       private
 
       # Always uses pump thread + buffer — the drain phase requires it.
@@ -55,12 +53,8 @@ module Busybee
           end
 
           break if polled_count < drain_options[:max_jobs] # Caught up: fewer than requested
-        rescue *BACKPRESSURE_ERRORS
-          # Backpressure back-off. Mechanism under review: the client wraps gRPC
-          # errors as Busybee::GRPC::Error, so real ResourceExhausted may arrive
-          # wrapped rather than as the raw class matched here. (It is also now
-          # observable as an errored after_call with grpc_status :resource_exhausted.)
-          sleep @runtime_config.backpressure_delay
+        rescue Busybee::GRPC::Error => e
+          handle_grpc_error(e) # back off + retry on backpressure, else re-raise
         end
       end
     end

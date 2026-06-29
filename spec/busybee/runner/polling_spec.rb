@@ -172,11 +172,14 @@ RSpec.describe Busybee::Runner::Polling do
     end
 
     context "when GRPC backpressure errors occur" do
-      it "sleeps and retries on GRPC::ResourceExhausted" do
+      # The client wraps raw gRPC errors as Busybee::GRPC::Error before they
+      # reach the runner, so backpressure arrives wrapped (grpc_status
+      # :resource_exhausted), not as the raw ::GRPC::ResourceExhausted.
+      it "backs off on a wrapped ResourceExhausted (gateway backpressure)" do
         call_count = 0
         allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
           call_count += 1
-          raise GRPC::ResourceExhausted, "rate limited" if call_count == 1
+          raise Busybee::GRPC::Error.wrap(GRPC::ResourceExhausted.new("rate limited")) if call_count == 1
 
           runner.stop!
           0
@@ -189,11 +192,28 @@ RSpec.describe Busybee::Runner::Polling do
         expect(call_count).to eq(2)
       end
 
-      it "lets GRPC::Unavailable propagate (client already retried)" do
-        allow(client).to receive(:with_each_job).and_raise(GRPC::Unavailable, "service down")
+      it "re-raises a non-backpressure wrapped error (e.g. Unavailable)" do
+        allow(client).to receive(:with_each_job).
+          and_raise(Busybee::GRPC::Error.wrap(GRPC::Unavailable.new("service down")))
 
-        expect { runner.run! }.to raise_error(GRPC::Unavailable)
+        expect { runner.run! }.to raise_error(Busybee::GRPC::Error)
         expect(runner.running?).to be false
+      end
+
+      it "honors Busybee.backpressure_statuses (a configured status backs off)" do
+        original = Busybee.backpressure_statuses
+        Busybee.backpressure_statuses = %i[unavailable]
+        allow(client).to receive(:with_each_job) do
+          runner.stop!
+          raise Busybee::GRPC::Error.wrap(GRPC::Unavailable.new("down"))
+        end
+        allow(runner).to receive(:sleep)
+
+        runner.run!
+
+        expect(runner).to have_received(:sleep).with(runtime_config.backpressure_delay)
+      ensure
+        Busybee.backpressure_statuses = original
       end
     end
 
