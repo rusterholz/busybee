@@ -17,31 +17,39 @@ module Busybee
       @client = client || Busybee::Client.new
       @stop_requested = Concurrent::AtomicBoolean.new(false)
       @running = Concurrent::AtomicBoolean.new(false)
-      @worker_started = false
       @worker_timestamps = Worker::Timestamps.new
     end
 
     # Template method owning the worker run lifecycle. Blocks until the runner
-    # is stopped or #run_loop raises. The ensure runs on every exit path (signal,
-    # error, normal return), on the runner thread.
+    # is stopped or #run_loop raises. Once a run is accepted, the ensure runs on
+    # every exit path (signal, error, normal return), on the runner thread.
     #
     # Fires the worker-lifecycle hooks at three of the four moments — started
     # (T0, here), stopping (T2) and shutdown (T3, in the ensure); stop_requested
     # (T1) fires from #stop! on the signalling thread. Each fires with a fresh
-    # Worker::Status. The @worker_started guard keeps the `return if stopping?`
-    # early-exit (and any pre-loop failure) from firing the T2/T3 pair.
+    # Worker::Status.
+    #
+    # Single-entry: start! flips @running with an atomic compare-and-set and
+    # reports whether this call won it, so a second run! while one is already
+    # active is a no-op — without it, two callers would each block their own
+    # run_loop. The `return unless start!` sits before the begin/ensure so a
+    # rejected entry (and the `return if stopping?` early-exit) returns without
+    # running the teardown — which is also what makes the T0/T2/T3 set fire
+    # all-or-none: the ensure is reached only once start! has succeeded.
     def run!
       return if stopping?
+      return unless start!
 
-      start!
-      run_loop
-    ensure
-      cease_intake
-      reason, error = classify_exit($!)
-      fire_worker_lifecycle(:stopping_at, :on_worker_stopping, reason, error)
-      drain_on_shutdown
-      fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, reason, error)
-      @running.make_false
+      begin
+        run_loop
+      ensure
+        cease_intake
+        reason, error = classify_exit($!)
+        fire_worker_lifecycle(:stopping_at, :on_worker_stopping, reason, error)
+        drain_on_shutdown
+        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, reason, error)
+        @running.make_false
+      end
     end
 
     # Signals graceful shutdown. Thread-safe (called from a signal handler — the
@@ -109,24 +117,25 @@ module Busybee
 
     private
 
-    # T0 — the run has started: mark it running, stamp the moment, record that
-    # it started (so the ensure fires the stopping/shutdown pair as a matched
-    # set, never on the `return if stopping?` early-exit), and announce it via
-    # on_worker_started. The internal start transition; the public entry is #run!.
-    def start!
-      @running.make_true
+    # T0 — try to begin the run. The @running flip is an atomic compare-and-set
+    # that doubles as the single-entry gate: lose it (a run is already active)
+    # and start! returns false at once, BEFORE stamping or firing — so a rejected
+    # re-entry can't overwrite started_at or re-announce. On winning the flip,
+    # stamp the moment, announce via on_worker_started, and return true.
+    def start! # rubocop:disable Naming/PredicateMethod
+      return false unless @running.make_true
+
       @worker_timestamps.stamp!(:started_at)
-      @worker_started = true
       Hooks.run(:on_worker_started, worker_status, safe: true)
+      true
     end
 
     # Stamp a closing lifecycle moment (T2 stopping / T3 shutdown) and fire its
-    # observation-only hook with a fresh Status — but only once the run actually
-    # started, so a pre-loop exit fires neither. reason/error are the classified
-    # in-flight exception, shared by both moments.
+    # observation-only hook with a fresh Status. Reached only from run!'s ensure,
+    # which runs only after start! won the entry, so the T0/T2/T3 set is
+    # all-or-none. reason/error are the classified in-flight exception, shared by
+    # both moments.
     def fire_worker_lifecycle(stamp, type, reason, error)
-      return unless @worker_started
-
       @worker_timestamps.stamp!(stamp)
       Hooks.run(type, worker_status(reason: reason, error: error), safe: true)
     end

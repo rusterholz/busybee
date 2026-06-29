@@ -24,12 +24,12 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
   # raising loop with zero gRPC plumbing.
   let(:runner_class) do
     Class.new(Busybee::Runner) do
-      attr_writer :loop_body
+      attr_writer :test_run_loop
 
       private
 
       def run_loop
-        @loop_body&.call
+        @test_run_loop&.call
       end
     end
   end
@@ -62,7 +62,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
     it "fires all four moments, started first and shutdown last, when stopped mid-loop" do
       record_all_lifecycle_hooks
-      runner.loop_body = -> { sleep 0.005 until runner.stopping? }
+      runner.test_run_loop = -> { sleep 0.005 until runner.stopping? }
       thread = Thread.new { runner.run! }
       wait_until { moments.include?(:started) }
       runner.stop!
@@ -143,7 +143,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       captured = nil
       Busybee.on_worker_shutdown { |worker| captured = worker }
       boom = RuntimeError.new("boom")
-      runner.loop_body = -> { raise boom }
+      runner.test_run_loop = -> { raise boom }
 
       expect { runner.run! }.to raise_error(boom)
       aggregate_failures do
@@ -156,7 +156,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "unwraps a Worker::Shutdown to its triggering cause" do
       captured = nil
       Busybee.on_worker_shutdown { |worker| captured = worker }
-      runner.loop_body = lambda do
+      runner.test_run_loop = lambda do
         raise "underlying"
       rescue RuntimeError
         raise Busybee::Worker::Shutdown.new(worker: LifecycleWorker)
@@ -175,7 +175,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "computes stop_latency_ms and stop_duration_ms after a signalled stop" do
       captured = nil
       Busybee.on_worker_shutdown { |worker| captured = worker }
-      runner.loop_body = -> { sleep 0.005 until runner.stopping? }
+      runner.test_run_loop = -> { sleep 0.005 until runner.stopping? }
       thread = Thread.new { runner.run! }
       wait_until { runner.running? } # the loop is live; stop! now yields a real latency
       runner.stop!
@@ -211,6 +211,29 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "swallows a StandardError raised from a worker hook" do
       Busybee.on_worker_started { raise "broken hook" }
       expect { runner.run! }.not_to raise_error
+    end
+  end
+
+  describe "single-entry guard (no concurrent / repeated run!)" do
+    it "rejects a second run! while already running, without re-entering the loop" do
+      loop_entries = Concurrent::AtomicFixnum.new(0)
+      runner.test_run_loop = lambda do
+        loop_entries.increment
+        sleep 0.005 until runner.stopping?
+      end
+      active = Thread.new { runner.run! }
+      wait_until { runner.running? }
+
+      second = Thread.new { runner.run! }
+
+      aggregate_failures do
+        expect(second.join(0.5)).to be_truthy # rejected entry returns at once, no run loop
+        expect(loop_entries.value).to eq(1)   # the loop was entered exactly once
+        expect(runner.running?).to be(true)   # the rejected entry didn't clear the active run
+      end
+
+      runner.stop!
+      active.join(2)
     end
   end
 end

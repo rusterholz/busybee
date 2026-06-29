@@ -28,15 +28,17 @@ module Busybee
 
       def run!
         return if stopping?
+        return unless @running.make_true # single-entry CAS, mirroring Runner#run!
 
-        @running.make_true
-        post_runners_to_pool
-        @thread_pool.wait_for_termination
+        begin
+          post_runners_to_pool
+          @thread_pool.wait_for_termination
 
-        err = @thread_error.get
-        raise err if err
-      ensure
-        @running.make_false
+          err = @thread_error.get
+          raise err if err
+        ensure
+          @running.make_false
+        end
       end
 
       def stop!
