@@ -4,27 +4,31 @@
 
 ### New Features:
 
-- **Lifecycle Hooks / Instrumentation** – Register callbacks at job lifecycle moments via `Busybee.configure`, for middleware (transactions, retries) and observation (metrics, tracing, error reporting):
-  - Job hooks `before_job`, `around_job`, and `after_job`, plus runner-level `on_job_activated`, `on_job_executed`, and `around_job_execution`. Each callback receives the `Busybee::Job`.
-  - Prefilter registrations by `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `source:`, `buffered:`, or `error:` (matched with `===`, with a Class-name fallback so `worker_class: /Order/` matches by name).
-  - Wrapping hooks (`before_job`, `around_job`) let errors propagate; observing hooks (`after_job`, the `on_*` family, `around_job_execution`) log and swallow errors so instrumentation can't break job processing. Errors matching a worker's `shutdown_on` always propagate as a graceful shutdown.
-  - `job.context` – a scratch bag for passing data between hooks (e.g. a tracing span opened in `before_job` and finished in `after_job`).
-  - `job.context_tags` (low-cardinality, for metric labels) and `job.logging_context` (high-cardinality superset, for log fields) project the job's state for instrumentation.
-  - Lifecycle timestamps and computed durations on the Job (`perform_duration_ms`, `execution_duration_ms`, `total_duration_ms`, and more).
-  - Hooks observe but cannot resolve a job: calling `complete!` / `fail!` / `throw_bpmn_error!` from inside a hook raises `Busybee::StatusChangeOutsidePerform`.
-  - `after_job` fires once after `perform` for a settled job; `on_job_executed` fires unconditionally per attempt at the runner level.
-  - **Worker-lifecycle hooks** `on_worker_started`, `on_worker_stop_requested`, `on_worker_stopping`, and `on_worker_shutdown` fire at the four moments of a worker's run (start, stop requested, stopping, shutdown). Each callback receives a `Busybee::Worker::Status` — a frozen snapshot of the run's identity (`worker_class`, `worker_mode`, `job_type`, `worker_name`), lifecycle timestamps and durations, job counters (`total_job_count`, `failed_job_count`, `backpressure_count`), buffer-depth gauges (`current_buffer_size`, `peak_buffer_size`), and outcome (`reason`, `error`). Prefilter by `worker_class:`, `job_type:`, `worker_mode:`, `reason:`, `error:`, or `error_class:`.
-  - **Call hooks** `before_call`, `around_call`, and `after_call` wrap each Client gRPC operation. Each callback receives a `Busybee::Client::Call` carrying the `rpc` name, resolved `status`, `grpc_status` code, `attempts` count, and total duration. Prefilter by `rpc:`, `status:`, `grpc_status:`, or `error_class:`.
-  - `job.worker_status` exposes the running worker's `Busybee::Worker::Status` to job hooks, so job-level instrumentation can read worker identity, counters, and live buffer depth. `job.buffered?` reports whether a job was delivered through a runner's in-memory buffer rather than polled or streamed directly.
+- **Lifecycle Hooks** – Register callbacks to run at various lifecycle moments for middleware (transactions, retries) and observation (metrics, tracing, error reporting):
+  - Worker lifecycle hooks: on process start, stop requested, stopping, and shutdown
+  - Job lifecycle hooks: both logical, systemic lifecycle (on activated, on executed, around execution) and local, usercode lifecycle (before, after, and around the `perform` method)
+  - Call lifecycle hooks: before, after, and around every GRPC call
+  - Each callback receives a lifecycle object which exposes the appropriate information (status, gauges, counters, timestamps, durations, configuration) for that lifecycle
+  - Callbacks may be prefiltered by attributes of the lifecycle object (e.g. register an after_job callback only for failed jobs)
+  - Lifecycle objects expose separate low-cardinality (for metric labels/tags) and high-cardinality (for logging) state projections
+  - Support points for integrating with any APM / observability or error reporting platform: Datadog, NewRelic, Dynatrace, Airbrake, Sentry, etc.
+
 - **Configurable Backpressure Statuses** – `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) names the gRPC status codes that mean the gateway is applying backpressure. Polling and hybrid workers back off (sleeping `backpressure_delay`) and retry the fetch when a job-activation call resolves to one of these — matched by status code, independent of which gRPC exception class the gateway raised
-- **Expose Client on Job + Worker Delegation** – `job.client` returns the `Busybee::Client` instance; `client` in workers delegates to `job.client` for direct API access (e.g., message correlation)
-- **Strict Output Validation** – Workers validate outputs against declared `output` definitions by default. Undeclared output keys raise `Busybee::UndeclaredOutput`. Opt out per-worker with `strict_outputs false` or gem-wide via `Busybee.default_strict_outputs = false`
+
+- **Exposed Client on Job and Worker Delegation** – Easier access for other GRPC calls within your worker's `perform` method (like updating retries or publishing BPMN messages)
+  - `client` in workers delegates to `job.client`, which returns the `Busybee::Client` instance that yielded the job
+
+- **Strict Output Validation** – Stronger guards against data leakage into the workflow engine
+  - Workers now validate that all output keys match declared `output` definitions; undeclared keys raise `Busybee::UndeclaredOutput`
+  - Opt out per-worker with `strict_outputs false` or gem-wide via `Busybee.default_strict_outputs = false`
   - Manual `complete!` calls also validate outputs
-- **`build_test_job` accepts `key:`** – `Busybee::Testing::Helpers#build_test_job` gains an optional `key:` keyword argument for tests that need a stable, known job key (e.g., correlating the same job across multiple assertions). Defaults to a random integer when omitted
+  - Note: this feature is **on by default,** which is a breaking behavior change; see below
+
+- **Improved Test Job Helper** – `Busybee::Testing::Helpers#build_test_job` now accepts an optional `key:` keyword argument for tests that need a stable, known job key (e.g., correlating the same job across multiple assertions). Defaults to a random integer when omitted
 
 ### Breaking Changes:
 
-- **Testing helper `publish_message` parameter renames** – `variables:` is now `vars:` and `ttl_ms:` is now `ttl:` to match `Client#publish_message` naming. `ttl:` now accepts both Integer (milliseconds) and `ActiveSupport::Duration`
+- **Testing helper `publish_message` parameters renamed** – `variables:` is now `vars:` and `ttl_ms:` is now `ttl:` to match `Client#publish_message` naming. `ttl:` now accepts both Integer (milliseconds) and `ActiveSupport::Duration`
 - **Strict output validation enabled by default** – Workers with `complete_job_on_success` or manual `complete!` calls will raise `Busybee::UndeclaredOutput` if `perform` returns keys not declared as `output`. Add `strict_outputs false` to workers that intentionally return ad-hoc keys
 
 ## v0.3.0 (2026-03-13)
