@@ -244,6 +244,42 @@ RSpec.describe Busybee do
     end
   end
 
+  describe ".backpressure_statuses" do
+    around do |example|
+      original = described_class.instance_variable_get(:@backpressure_statuses)
+      example.run
+      described_class.backpressure_statuses = original
+    end
+
+    it "defaults to resource_exhausted" do
+      described_class.backpressure_statuses = nil
+      expect(described_class.backpressure_statuses).to eq(%i[resource_exhausted])
+    end
+
+    it "accepts an Array of gRPC status symbols" do
+      described_class.backpressure_statuses = %i[resource_exhausted unavailable]
+      expect(described_class.backpressure_statuses).to eq(%i[resource_exhausted unavailable])
+    end
+
+    it "rejects a non-Array" do
+      expect { described_class.backpressure_statuses = :resource_exhausted }.to raise_error(
+        ArgumentError, /backpressure_statuses.*Array/
+      )
+    end
+
+    it "rejects Array elements that are not symbols" do
+      expect { described_class.backpressure_statuses = ["resource_exhausted"] }.to raise_error(
+        ArgumentError, /backpressure_statuses.*status symbols/
+      )
+    end
+
+    it "resets to default when set to nil" do
+      described_class.backpressure_statuses = %i[unavailable]
+      described_class.backpressure_statuses = nil
+      expect(described_class.backpressure_statuses).to eq(%i[resource_exhausted])
+    end
+  end
+
   describe ".default_message_ttl" do
     it_behaves_like "a duration config setter", :default_message_ttl, :default_message_ttl,
                     :DEFAULT_MESSAGE_TTL_MS

@@ -212,6 +212,22 @@ GRPC error classes that trigger a retry.
 Busybee.grpc_retry_errors = [GRPC::Unavailable]
 ```
 
+#### `backpressure_statuses`
+
+The gRPC status codes that mean the Zeebe gateway is applying backpressure. When a job-activation call resolves to one of these, polling and hybrid workers back off (sleeping [`backpressure_delay`](workers.md#backpressure)) and retry the fetch.
+
+Matching is by status *symbol* against the resolved call's gRPC status, so it is independent of which gRPC exception class the gateway raised.
+
+| | |
+|--|--|
+| **Type** | Array of gRPC status symbols |
+| **Default** | `[:resource_exhausted]` |
+
+```ruby
+# Back off on RESOURCE_EXHAUSTED and UNAVAILABLE
+Busybee.backpressure_statuses = %i[resource_exhausted unavailable]
+```
+
 ### Operation Defaults
 
 #### `default_message_ttl`

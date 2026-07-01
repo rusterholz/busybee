@@ -238,6 +238,8 @@ RSpec.describe Busybee::Runner::Multi do
   end
 
   describe "#stop!" do
+    after { Busybee::Hooks.reset! }
+
     it "stops all child runners and shuts down the thread pool" do
       multi = described_class.new(worker_classes, client: client)
       multi.runners.each { |r| allow(r).to receive(:stop!) }
@@ -247,6 +249,18 @@ RSpec.describe Busybee::Runner::Multi do
 
       expect(multi.runners).to all(have_received(:stop!))
       expect(thread_pool).to have_received(:shutdown)
+    end
+
+    it "fires no worker hooks of its own (transparent — children fire theirs)" do
+      fired = []
+      Busybee.on_worker_stop_requested { fired << :multi }
+      multi = described_class.new(worker_classes, client: client)
+      multi.runners.each { |r| allow(r).to receive(:stop!) }
+      allow(thread_pool).to receive(:shutdown)
+
+      multi.stop!
+
+      expect(fired).to be_empty
     end
   end
 

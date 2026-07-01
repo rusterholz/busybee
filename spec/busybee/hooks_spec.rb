@@ -59,7 +59,7 @@ RSpec.describe Busybee::Hooks do
       expect(results).to eq(%i[first second third])
     end
 
-    it "supports all 12 hook types" do
+    it "supports all 13 hook types" do
       described_class::HOOK_TYPES.each do |type|
         Busybee.configure { |c| c.public_send(type) { |_| } } # rubocop:disable Lint/EmptyBlock
         expect(described_class.hooks_for(type).length).to eq(1), "expected #{type} to have 1 hook"
@@ -119,6 +119,14 @@ RSpec.describe Busybee::Hooks do
       expect(described_class.match?("ShipmentWorker", klass)).to be false
     end
 
+    it "matches a Class value by identity (what makes error_class: SomeError work)" do
+      # A _class-suffixed carrier value is a Class, so a Class filter matches it
+      # by identity (==), uniformly with worker_class. String/Regexp filters reach
+      # the same value through the name fallback above.
+      expect(described_class.match?(RuntimeError, RuntimeError)).to be true
+      expect(described_class.match?(RuntimeError, ArgumentError)).to be false
+    end
+
     it "does not use name fallback for non-Class values" do
       expect(described_class.match?(/boom/, RuntimeError.new("boom"))).to be false
     end
@@ -171,7 +179,7 @@ RSpec.describe Busybee::Hooks do
     it "accepts valid job filter kwargs" do
       expect do
         Busybee.before_job(job_type: "test", worker_class: /Order/, status: :failed,
-                           bpmn_process_id: "flow", error: RuntimeError, &noop)
+                           bpmn_process_id: "flow", buffered: true, error: RuntimeError, &noop)
       end.not_to raise_error
     end
 
@@ -184,7 +192,8 @@ RSpec.describe Busybee::Hooks do
     it "accepts valid worker filter kwargs" do
       expect do
         Busybee.on_worker_started(worker_class: /Order/, job_type: "test",
-                                  worker_mode: :polling, error: RuntimeError, &noop)
+                                  worker_mode: :polling, reason: :error,
+                                  error: RuntimeError, error_class: "RuntimeError", &noop)
       end.not_to raise_error
     end
 
@@ -192,6 +201,10 @@ RSpec.describe Busybee::Hooks do
       expect do
         Busybee.on_worker_started(status: :failed, &noop)
       end.to raise_error(ArgumentError, /status/)
+    end
+
+    it "registers the on_worker_stop_requested hook type" do
+      expect { Busybee.on_worker_stop_requested(&noop) }.not_to raise_error
     end
 
     it "accepts valid call filter kwargs" do
@@ -314,6 +327,18 @@ RSpec.describe Busybee::Hooks do
 
         described_class.run(:before_job, job) # event has status: :ready
         expect(results).to eq([:unfiltered])
+      end
+
+      it "resolves the buffered filter off the job (Job#buffered, not its negation)" do
+        fired = []
+        buffered_job = build_test_job(type: "test", key: 1).tap { |j| j.set_context(buffered: true) }
+        unbuffered_job = build_test_job(type: "test", key: 2) # buffered? false
+        Busybee.before_job(buffered: true) { |job| fired << job.key }
+
+        described_class.run(:before_job, buffered_job)
+        described_class.run(:before_job, unbuffered_job)
+
+        expect(fired).to eq([buffered_job.key])
       end
     end
   end

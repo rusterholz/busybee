@@ -91,7 +91,7 @@ RSpec.describe Busybee::Client::Call do
     it "derives both from the recorded error" do
       call = described_class.new(:complete_job)
       call._record_error(RuntimeError.new("boom"))
-      expect(call.error_class).to eq("RuntimeError")
+      expect(call.error_class).to eq(RuntimeError) # the Class, matching worker_class
       expect(call.error_message).to eq("boom")
     end
 
@@ -189,6 +189,16 @@ RSpec.describe Busybee::Client::Call do
       tags = call.context_tags
       expect(tags).to include(rpc: :complete_job, status: :succeeded, grpc_status: :ok)
       expect(tags).not_to have_key(:error_class)
+    end
+
+    it "renders error_class as its name string in tags/logging, not the Class object" do
+      # error_class the reader returns the Class (label-unfriendly); the projection
+      # coerces it to the name string so metric labels / log fields stay scalar.
+      call = described_class.new(:complete_job)
+      call._record_error(RuntimeError.new("boom"))
+      call._resolve(status: :errored)
+      expect(call.context_tags[:error_class]).to eq("RuntimeError")
+      expect(call.logging_context[:error_class]).to eq("RuntimeError")
     end
 
     it "is a superset in logging_context, adding attempts and durations" do

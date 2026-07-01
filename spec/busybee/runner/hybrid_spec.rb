@@ -282,14 +282,14 @@ RSpec.describe Busybee::Runner::Hybrid do
         expect(process_order).to eq([10, 20])
       end
 
-      it "sleeps and retries on GRPC::ResourceExhausted during drain" do
+      it "backs off on a wrapped ResourceExhausted during drain (gateway backpressure)" do
         call_count = 0
         allow(client).to receive(:open_job_stream).and_return(stream)
         allow(stream).to receive(:each)
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
           call_count += 1
-          raise GRPC::ResourceExhausted, "rate limited" if call_count == 1
+          raise Busybee::GRPC::Error.wrap(GRPC::ResourceExhausted.new("rate limited")) if call_count == 1
 
           runner.stop!
           0
@@ -582,7 +582,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       runner.run!
 
       expect(captured.source).to eq(:poll)
-      expect(captured.buffer_size).to be_nil
+      expect(captured.buffered?).to be(false) # drain-phase jobs arrive via poll, unbuffered
     end
   end
 end

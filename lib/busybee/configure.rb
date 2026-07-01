@@ -138,6 +138,18 @@ module Busybee
       @grpc_retry_errors = value
     end
 
+    # --- Backpressure statuses (gRPC status symbols, not classes) ---
+
+    def backpressure_statuses=(value)
+      if value.nil?
+        @backpressure_statuses = nil
+        return
+      end
+
+      validate_status_symbols!(:backpressure_statuses, value)
+      @backpressure_statuses = value
+    end
+
     # --- Shutdown errors (Array coercion, validates each is StandardError subclass) ---
 
     def shutdown_on_errors=(value)
@@ -293,6 +305,17 @@ module Busybee
         unless klass.is_a?(Class) && klass <= Exception
           raise ArgumentError,
                 "#{name} expects exception classes, got #{klass.inspect} (#{klass.class})"
+        end
+      end
+    end
+
+    def validate_status_symbols!(name, value)
+      raise ArgumentError, "#{name} accepts an Array of status symbols, got #{value.class}" unless value.is_a?(Array)
+
+      value.each do |status|
+        unless status.is_a?(Symbol)
+          raise ArgumentError,
+                "#{name} expects status symbols (e.g. :resource_exhausted), got #{status.inspect} (#{status.class})"
         end
       end
     end

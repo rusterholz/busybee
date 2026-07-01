@@ -118,6 +118,15 @@ module Busybee
       @grpc_retry_errors || default_retry_errors
     end
 
+    # gRPC outcomes (status symbols, not classes) that signify gateway
+    # backpressure — the runner backs off and retries the fetch when a call
+    # resolves to one of these. Class-independent by design: it names the
+    # outcome, not the exception type. (grpc_retry_errors, by contrast, is the
+    # transient-class set the legacy retry mechanic consumes.)
+    def backpressure_statuses
+      @backpressure_statuses || Defaults::DEFAULT_BACKPRESSURE_STATUSES
+    end
+
     def log_format
       @log_format || :text
     end

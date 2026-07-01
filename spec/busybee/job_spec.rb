@@ -44,6 +44,13 @@ RSpec.describe Busybee::Job do
     end
   end
 
+  describe "#worker_name" do
+    it "returns the process-wide worker identity (container, not the per-job worker)" do
+      allow(Busybee).to receive(:worker_name).and_return("orders-pod-7")
+      expect(job.worker_name).to eq("orders-pod-7")
+    end
+  end
+
   describe "#client" do
     it "returns the client instance" do
       expect(job.client).to be(client)
@@ -1004,8 +1011,8 @@ RSpec.describe Busybee::Job do
         expect(job.activated_at).to be_between(before, after)
       end
 
-      it "raises for unknown timestamp names" do
-        expect { job.timestamps.stamp!(:bogus_at) }.to raise_error(ArgumentError, /bogus_at/)
+      it "accepts undeclared names (the timing primitive is name-agnostic)" do
+        expect { job.timestamps.stamp!(:bogus_at) }.not_to raise_error
       end
     end
 
@@ -1178,7 +1185,7 @@ RSpec.describe Busybee::Job do
 
   describe "#logging_context" do
     it "is a strict superset of context_tags" do
-      job.set_context(source: :stream, buffer_size: 3)
+      job.set_context(source: :stream, buffered: true)
       job.send(:resolution).resolve_to(:complete)
       job.context[:correlation_id] = "abc-123"
       job.context[:span] = Object.new # logging_context drops this
@@ -1190,7 +1197,6 @@ RSpec.describe Busybee::Job do
         expect(logging[key]).to eq(value), "expected logging_context[#{key.inspect}] to mirror context_tags"
       end
       expect(logging[:job_key]).to eq(job.key) # high-card, logging-only
-      expect(logging[:buffer_size]).to eq(3)
       expect(logging[:correlation_id]).to eq("abc-123") # primitive scratch
       expect(logging).not_to have_key(:span) # complex object dropped
     end

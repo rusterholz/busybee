@@ -703,6 +703,13 @@ RSpec.describe Busybee::Worker do
     end
   end
 
+  describe "#worker_name" do
+    it "returns the process-wide worker identity" do
+      allow(Busybee).to receive(:worker_name).and_return("orders-pod-7")
+      expect(minimal_worker.new(job).worker_name).to eq("orders-pod-7")
+    end
+  end
+
   describe "delegations to job" do
     let(:instance) { performing_worker.new(job) }
 

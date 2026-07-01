@@ -76,9 +76,11 @@ module Busybee
 
       # ===== Outcome readers =====
 
-      # The recorded error's class name, or nil.
+      # The recorded error's class, or nil. Returns the Class (like worker_class),
+      # so a hook filter matches it by Class, name string, or Regexp uniformly; the
+      # tag/log projections coerce it to its name for scalar labels.
       def error_class
-        error&.class&.name
+        error&.class
       end
 
       # The recorded error's message, or nil.
@@ -186,8 +188,10 @@ module Busybee
 
       private
 
+      # error_class returns the Class; project its name so tags/logs stay scalar
+      # labels (own_logging_context builds on this, inheriting the coercion).
       def own_context_tags
-        { rpc: rpc, status: status, grpc_status: grpc_status, error_class: error_class }
+        { rpc: rpc, status: status, grpc_status: grpc_status, error_class: error_class&.name }
       end
 
       def own_logging_context

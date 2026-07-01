@@ -7,22 +7,24 @@ module Busybee
   # Provides hook registration and storage, prefilter matching, and
   # invocation (propagating and swallowing).
   module Hooks
-    # Hook types are declared per noun. The :job hooks (first six) are wired
-    # end-to-end. The :worker and :call entries are reserved for Mission 7
-    # and don't currently fire — registration succeeds but callbacks never
-    # run. Mission 7 will decide the right callback shape for each (likely
-    # Worker-/Call-as-lifecycle-object analogs to what Job did for jobs).
+    # Hook types are declared per noun. The :job and :worker hooks are wired
+    # end-to-end (jobs through the Worker/Runner job path; the four worker
+    # moments through Runner#run! / #stop! with a Worker::Status carrier). The
+    # :call entries fire through the Client::Call seam. Each callback receives
+    # its noun's carrier: Job, Worker::Status, or Client::Call.
     HOOK_TYPES = %i[
       before_job around_job after_job
       on_job_activated on_job_executed around_job_execution
-      on_worker_started on_worker_stopping on_worker_shutdown
+      on_worker_started on_worker_stop_requested on_worker_stopping on_worker_shutdown
       before_call around_call after_call
     ].freeze
 
-    # Allowed filter kwargs per noun
+    # Allowed filter kwargs per noun. Each key is resolved against the carrier
+    # via public_send at match time, so every key here must be a public reader
+    # on the noun's carrier (Worker::Status for :worker).
     FILTER_KEYS = {
-      job: %i[job_type worker_class status bpmn_process_id source error].freeze,
-      worker: %i[worker_class job_type worker_mode error].freeze,
+      job: %i[job_type worker_class status bpmn_process_id source buffered error].freeze,
+      worker: %i[worker_class job_type worker_mode reason error error_class].freeze,
       call: %i[rpc status grpc_status error_class].freeze
     }.freeze
 

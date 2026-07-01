@@ -67,7 +67,7 @@ RSpec.describe "Job lifecycle hooks", :integration do
         expect(activation[:job_type]).to eq("process-order")
         expect(activation[:bpmn_process_id]).to eq("job-process")
         expect(activation[:source]).to eq(:poll)
-        expect(activation[:buffer_size]).to be_nil # polling jobs are never buffered
+        expect(activation[:buffered]).to be(false) # polling jobs are never buffered
         expect(activation[:activated_at]).to be_a(Time)
         expect(activation[:executed_at]).to be_nil # not stamped until after execution
       end
@@ -214,7 +214,7 @@ RSpec.describe "Job lifecycle hooks", :integration do
   # public accessors (timestamp readers default to their UTC form).
   def snapshot_fields
     %i[
-      key job_type bpmn_process_id status source buffer_size
+      key job_type bpmn_process_id status source buffered
       result error_message error_code
       activated_at execution_started_at perform_started_at
       perform_finished_at resolved_at executed_at

@@ -4,6 +4,8 @@ require "active_support/core_ext/module/delegation"
 require "busybee/worker/configuration"
 require "busybee/worker/dsl"
 require "busybee/worker/shutdown"
+require "busybee/worker/timestamps"
+require "busybee/worker/status"
 
 module Busybee
   # Base class for defining job workers.
@@ -29,6 +31,10 @@ module Busybee
 
     delegate :variables, :headers, :client, :fail!, :throw_bpmn_error!,
              :update_retries, :update_timeout, to: :job
+
+    # Container identity (Busybee.worker_name) — not the per-job worker instance.
+    # Explicit identity for metrics/registries.
+    delegate :worker_name, to: :Busybee
 
     def complete!(vars = {})
       self.class.validate_required_outputs!(vars)

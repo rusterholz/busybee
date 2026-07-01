@@ -229,25 +229,25 @@ RSpec.describe Busybee::Runner do
       end
     end
 
-    it "defaults buffer_size to nil (signals job-not-buffered)" do
+    it "defaults buffered? to false (job not buffered)" do
       received = nil
       Busybee.on_job_activated { |job| received = job }
       runner.send(:activate_job, job, source: :poll)
-      expect(received.buffer_size).to be_nil
+      expect(received.buffered?).to be(false)
     end
 
-    it "captures the given buffer_size on the Job" do
+    it "records buffered: true on the Job" do
       received = nil
       Busybee.on_job_activated { |job| received = job }
-      runner.send(:activate_job, job, source: :stream, buffer_size: 7)
-      expect(received.buffer_size).to eq(7)
+      runner.send(:activate_job, job, source: :stream, buffered: true)
+      expect(received.buffered?).to be(true)
     end
 
-    it "allows buffer_size of 0 (queue was empty when job arrived)" do
+    it "stamps a Worker::Status onto the Job for job-hook visibility" do
       received = nil
       Busybee.on_job_activated { |job| received = job }
-      runner.send(:activate_job, job, source: :stream, buffer_size: 0)
-      expect(received.buffer_size).to eq(0)
+      runner.send(:activate_job, job, source: :poll)
+      expect(received.worker_status).to be_a(Busybee::Worker::Status)
     end
 
     it "requires source: kwarg" do
@@ -316,6 +316,13 @@ RSpec.describe Busybee::Runner do
     it "calls @worker_class.perform_job(job)" do
       runner.send(:execute_job, job)
       expect(worker_class).to have_received(:perform_job).with(job)
+    end
+
+    it "stamps a fresh Worker::Status onto the Job before executing" do
+      captured = nil
+      Busybee.on_job_executed { |job| captured = job }
+      runner.send(:execute_job, job)
+      expect(captured.worker_status).to be_a(Busybee::Worker::Status)
     end
 
     it "wraps perform_job in the around_job_execution chain" do
@@ -394,6 +401,46 @@ RSpec.describe Busybee::Runner do
       runner.send(:activate_job, job, source: :poll)
       runner.send(:execute_job, job)
       expect(fired).to eq([:poll])
+    end
+  end
+
+  describe "#execute_job ambient job context (private)" do
+    let(:worker_class) do
+      Class.new do
+        def self.name
+          "TestWorker"
+        end
+
+        def self.perform_job(_job); end
+      end
+    end
+
+    after { Busybee::Hooks.reset! }
+
+    it "seeds the job into thread-local context around perform, so a Call built there sees it" do
+      captured_call = nil
+      allow(worker_class).to receive(:perform_job) do
+        captured_call = Busybee::Client::Call.new(:complete_job)
+      end
+      runner.send(:execute_job, job)
+      expect(captured_call.context[:job]).to be(job)
+    end
+
+    it "does not seed the ambient context for around_job_execution middleware (they hold the Job as carrier)" do
+      allow(worker_class).to receive(:perform_job)
+      seen = :unset
+      Busybee.around_job_execution do |_job, process|
+        seen = Busybee::Hooks.context[:job]
+        process.call
+      end
+      runner.send(:execute_job, job)
+      expect(seen).to be_nil
+    end
+
+    it "restores the previous thread-local context after perform" do
+      allow(worker_class).to receive(:perform_job)
+      runner.send(:execute_job, job)
+      expect(Busybee::Hooks.context).to eq({})
     end
   end
 
@@ -527,6 +574,53 @@ RSpec.describe Busybee::Runner do
       aggregate_failures do
         expect(captured.perform_duration_ms).to be <= captured.resolution_duration_ms
         expect(captured.resolution_duration_ms).to be <= captured.execution_duration_ms
+      end
+    end
+  end
+
+  describe "job counters (Worker::Status)" do
+    def status_for(runner) = runner.send(:worker_status)
+
+    it "counts every processed job in total_job_count" do
+      worker_class = stub_const("CountTotalWorker", Class.new(Busybee::Worker) do
+        job_type "count_total"
+        strict_outputs false
+        define_method(:perform) { { ok: true } }
+      end)
+      runner = described_class.new(worker_class, client: client)
+
+      3.times { runner.send(:execute_job, build_test_job(type: "count_total")) }
+
+      expect(status_for(runner).total_job_count).to eq(3)
+    end
+
+    it "counts a :failed outcome (autofail) in failed_job_count" do
+      worker_class = stub_const("CountFailWorker", Class.new(Busybee::Worker) do
+        job_type "count_fail"
+        define_method(:perform) { raise "boom" }
+      end)
+      runner = described_class.new(worker_class, client: client)
+
+      runner.send(:execute_job, build_test_job(type: "count_fail"))
+
+      aggregate_failures do
+        expect(status_for(runner).failed_job_count).to eq(1)
+        expect(status_for(runner).total_job_count).to eq(1)
+      end
+    end
+
+    it "does not count a thrown BPMN error (:error) as failed" do
+      worker_class = stub_const("CountBpmnWorker", Class.new(Busybee::Worker) do
+        job_type "count_bpmn"
+        define_method(:perform) { throw_bpmn_error!(:rejected, "no") }
+      end)
+      runner = described_class.new(worker_class, client: client)
+
+      runner.send(:execute_job, build_test_job(type: "count_bpmn"))
+
+      aggregate_failures do
+        expect(status_for(runner).failed_job_count).to eq(0)
+        expect(status_for(runner).total_job_count).to eq(1)
       end
     end
   end

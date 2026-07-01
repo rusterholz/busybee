@@ -19,36 +19,11 @@ module Busybee
         return unless buffer?
 
         @job_buffer = Queue.new
+        # Real jobs in @job_buffer, tracked apart from Queue#size so the depth
+        # gauge ignores the :stop control sentinels the queue also carries.
+        @buffered_job_count = Concurrent::AtomicFixnum.new(0)
+        @peak_buffer_size = Concurrent::AtomicFixnum.new(0)
         @shutdown_error = Concurrent::AtomicReference.new(nil)
-      end
-
-      def run!
-        return if stopping?
-
-        @running.make_true
-        # [hook: runner.started]
-
-        @stream = @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
-
-        if buffer?
-          run_with_buffer
-        else
-          run_inline
-        end
-      ensure
-        # [hook: runner.stopping]
-        @stream&.close
-        if buffer?
-          @pump_thread&.join(5)
-          handle_remaining_jobs_in_buffer
-        end
-        @running.make_false
-      end
-
-      def stop!
-        super
-        @stream&.close # unblocks stream.each via GRPC::Cancelled
-        @job_buffer&.push(:stop) if buffer?
       end
 
       def kill!
@@ -57,17 +32,78 @@ module Busybee
         return unless buffer?
 
         @job_buffer.clear
+        @buffered_job_count.value = 0 # cleared queue holds no real jobs
         @job_buffer.push(:stop)
       end
 
       private
 
+      # Fills Runner#run!'s loop: open the job stream and process jobs (via the
+      # pump + buffer, or inline). Raises a worker Shutdown to signal an error exit.
+      def run_loop
+        @stream = @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
+
+        if buffer?
+          run_with_buffer
+        else
+          run_inline
+        end
+      end
+
+      # Stop new jobs arriving: close the stream (unblocks stream.each via
+      # GRPC::Cancelled) and drop the :stop sentinel that unblocks a blocking
+      # buffer pop. The single intake-cessation point — base #stop! calls it
+      # before firing on_worker_stop_requested (close-before-fire), and the
+      # run! ensure calls it again as the backstop for the error-exit path
+      # where stop! was never called. Idempotent: a second close is a no-op and
+      # extra :stop sentinels are skipped on drain.
+      def cease_intake
+        @stream&.close
+        @job_buffer&.push(:stop) if buffer?
+      end
+
+      # When buffered, join the pump thread and fail any jobs still in the buffer.
+      def drain_on_shutdown
+        return unless buffer?
+
+        @pump_thread&.join(5)
+        handle_remaining_jobs_in_buffer
+      end
+
       def current_buffer_size
         return nil if @job_buffer.nil?
 
-        # Discount the :stop sentinel that stop! pushes into the buffer so
-        # the depth reported during shutdown reflects only real jobs.
-        @job_buffer.size - (stopping? ? 1 : 0)
+        @buffered_job_count.value
+      end
+
+      def peak_buffer_size
+        return nil if @job_buffer.nil?
+
+        @peak_buffer_size.value
+      end
+
+      # Buffer a real job, keeping @buffered_job_count in step with the real jobs
+      # in @job_buffer — the depth/peak gauges read it, and it deliberately
+      # excludes the :stop control sentinels the queue also carries. Increment
+      # before the push so the gauge never momentarily under-reports; roll the
+      # increment back if the push raises, so a failed push can't leak phantom
+      # depth. (Deliberately not AtomicFixnum#update: under contention its block
+      # re-runs in a CAS loop, which would double-push a side-effecting push.)
+      #
+      # Record the high-water from increment's own return value, not a later
+      # value read — a consumer pop on another thread can decrement between the
+      # push and the peak update, so re-reading would miss the depth this push
+      # actually reached.
+      def buffer_job(job)
+        depth = @buffered_job_count.increment
+        pushed = false
+        begin
+          @job_buffer.push(job)
+          pushed = true
+        ensure
+          @buffered_job_count.decrement unless pushed
+        end
+        @peak_buffer_size.update { |peak| [peak, depth].max }
       end
 
       def run_with_buffer
@@ -90,7 +126,6 @@ module Busybee
 
           execute_job(job)
         rescue Busybee::Worker::Shutdown => e
-          # [hook: runner.shutdown]
           shutdown_error = e
           stop!
           break
@@ -105,8 +140,8 @@ module Busybee
         @stream.each do |job|
           break if stopping?
 
-          activate_job(job, source: :stream, buffer_size: @job_buffer.size)
-          @job_buffer.push(job)
+          activate_job(job, source: :stream, buffered: true)
+          buffer_job(job)
           sleep(delay.to_f / 1000) if delay
         end
       rescue StandardError => e
@@ -132,6 +167,7 @@ module Busybee
           job = @job_buffer.pop(!blocking)
           break if job == :stop
 
+          @buffered_job_count.decrement # a real job has left the buffer
           if stopping?
             handle_shutdown_job(job)
           else
@@ -151,6 +187,7 @@ module Busybee
           job = @job_buffer.pop(true) # non-blocking
           next if job == :stop
 
+          @buffered_job_count.decrement # a real job has left the buffer
           handle_shutdown_job(job)
         rescue ThreadError
           break # buffer empty
