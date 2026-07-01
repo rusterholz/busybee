@@ -60,6 +60,37 @@ module Busybee
       def error_message
         error&.message
       end
+
+      # Low-cardinality projection (metric labels): identity and outcome symbols.
+      # Class and error class render as names for scalar labels.
+      def context_tags
+        {
+          worker_class: worker_class&.name,
+          job_type: job_type,
+          worker_mode: worker_mode,
+          worker_name: worker_name,
+          reason: reason,
+          error_class: error_class&.name
+        }.compact
+      end
+
+      # High-cardinality projection (log fields): a superset adding lifecycle
+      # timestamps, durations, counters, buffer gauges, and the error message.
+      def logging_context
+        context_tags.
+          merge(timestamps.timestamp_hash).
+          merge(
+            stop_duration_ms: stop_duration_ms,
+            stop_latency_ms: stop_latency_ms,
+            lifetime_s: lifetime_s,
+            total_job_count: total_job_count,
+            failed_job_count: failed_job_count,
+            backpressure_count: backpressure_count,
+            current_buffer_size: current_buffer_size,
+            peak_buffer_size: peak_buffer_size,
+            error_message: error_message
+          ).compact
+      end
     end
   end
 end

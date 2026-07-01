@@ -125,6 +125,51 @@ RSpec.describe Busybee::Worker::Status do
     end
   end
 
+  describe "#context_tags / #logging_context" do
+    it "projects low-cardinality identity and outcome as tags (class and error class as names)" do
+      status = build_status(reason: :error, error: RuntimeError.new("boom"))
+      expect(status.context_tags).to include(
+        worker_class: "StatusOrderWorker",
+        job_type: "process_order",
+        worker_mode: :polling,
+        reason: :error,
+        error_class: "RuntimeError"
+      )
+    end
+
+    it "omits nil tags (no reason/error class on a clean, mid-run status)" do
+      tags = build_status.context_tags
+      aggregate_failures do
+        expect(tags).not_to have_key(:reason)
+        expect(tags).not_to have_key(:error_class)
+      end
+    end
+
+    it "is a superset in logging_context, adding timings, counters, gauges, and error message" do
+      timestamps.stamp!(:started_at)
+      status = build_status(reason: :error, error: RuntimeError.new("boom"),
+                            total_job_count: 3, failed_job_count: 1, backpressure_count: 2,
+                            current_buffer_size: 5, peak_buffer_size: 9)
+      log = status.logging_context
+      aggregate_failures do
+        expect(log).to include(status.context_tags)
+        expect(log).to include(total_job_count: 3, failed_job_count: 1, backpressure_count: 2)
+        expect(log).to include(current_buffer_size: 5, peak_buffer_size: 9)
+        expect(log).to include(error_message: "boom", started_at: status.started_at)
+      end
+    end
+
+    it "keeps high-cardinality dimensions out of the tags" do
+      timestamps.stamp!(:started_at)
+      tags = build_status(total_job_count: 3, current_buffer_size: 5).context_tags
+      aggregate_failures do
+        expect(tags).not_to have_key(:started_at)
+        expect(tags).not_to have_key(:total_job_count)
+        expect(tags).not_to have_key(:current_buffer_size)
+      end
+    end
+  end
+
   describe "immutability" do
     it "is frozen" do
       expect(build_status).to be_frozen

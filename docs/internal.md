@@ -444,7 +444,7 @@ All Client operation modules, Job, and Testing helpers route through this module
 
 ## Hooks Module
 
-`Busybee::Hooks` is the instrumentation system — lifecycle hooks enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting). Hooks fire around three nouns, each with its own carrier: **jobs** (`Busybee::Job`), **workers** (`Busybee::Worker::Status`), and **calls** (`Busybee::Client::Call`). Job hooks are the richest (wrapping + observing); worker and call hooks are observation-only.
+`Busybee::Hooks` is the instrumentation system — lifecycle hooks enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting). Hooks fire around three nouns, each with its own carrier: **jobs** (`Busybee::Job`), **workers** (`Busybee::Worker::Status`), and **calls** (`Busybee::Client::Call`). Job hooks are the richest (wrapping + observing); worker and call hooks are observation-only. Each carrier exposes `context_tags` (low-cardinality metric labels) and `logging_context` (high-cardinality log fields) — the uniform projection a hook reads to emit metrics or structured logs.
 
 ### Job as the hook target
 
