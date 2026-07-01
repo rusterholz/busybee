@@ -404,6 +404,46 @@ RSpec.describe Busybee::Runner do
     end
   end
 
+  describe "#execute_job ambient job context (private)" do
+    let(:worker_class) do
+      Class.new do
+        def self.name
+          "TestWorker"
+        end
+
+        def self.perform_job(_job); end
+      end
+    end
+
+    after { Busybee::Hooks.reset! }
+
+    it "seeds the job into thread-local context around perform, so a Call built there sees it" do
+      captured_call = nil
+      allow(worker_class).to receive(:perform_job) do
+        captured_call = Busybee::Client::Call.new(:complete_job)
+      end
+      runner.send(:execute_job, job)
+      expect(captured_call.context[:job]).to be(job)
+    end
+
+    it "does not seed the ambient context for around_job_execution middleware (they hold the Job as carrier)" do
+      allow(worker_class).to receive(:perform_job)
+      seen = :unset
+      Busybee.around_job_execution do |_job, process|
+        seen = Busybee::Hooks.context[:job]
+        process.call
+      end
+      runner.send(:execute_job, job)
+      expect(seen).to be_nil
+    end
+
+    it "restores the previous thread-local context after perform" do
+      allow(worker_class).to receive(:perform_job)
+      runner.send(:execute_job, job)
+      expect(Busybee::Hooks.context).to eq({})
+    end
+  end
+
   describe "execution lifecycle (executed_at + on_job_executed)" do
     let(:worker_class) do
       stub_const("LifecycleWorker", Class.new(Busybee::Worker) do

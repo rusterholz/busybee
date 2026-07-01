@@ -239,7 +239,9 @@ module Busybee
       # and execution-time is the heartbeat job hooks read job.worker_status at.
       job.set_context(worker_status: worker_status)
       Hooks.run_chain(:around_job_execution, job, safe: true) do
-        @worker_class.perform_job(job)
+        Hooks.with_context(job: job) do # so perform-issued Calls pick up the job
+          @worker_class.perform_job(job)
+        end
       end
     ensure
       # Even with safe: true above, run_chain re-raises Shutdown so the
