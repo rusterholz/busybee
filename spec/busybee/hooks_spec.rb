@@ -119,6 +119,14 @@ RSpec.describe Busybee::Hooks do
       expect(described_class.match?("ShipmentWorker", klass)).to be false
     end
 
+    it "matches a Class value by identity (what makes error_class: SomeError work)" do
+      # A _class-suffixed carrier value is a Class, so a Class filter matches it
+      # by identity (==), uniformly with worker_class. String/Regexp filters reach
+      # the same value through the name fallback above.
+      expect(described_class.match?(RuntimeError, RuntimeError)).to be true
+      expect(described_class.match?(RuntimeError, ArgumentError)).to be false
+    end
+
     it "does not use name fallback for non-Class values" do
       expect(described_class.match?(/boom/, RuntimeError.new("boom"))).to be false
     end

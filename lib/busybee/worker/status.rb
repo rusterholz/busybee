@@ -50,9 +50,10 @@ module Busybee
         freeze
       end
 
-      # The recorded error's class name, or nil.
+      # The recorded error's class, or nil. Returns the Class (like worker_class),
+      # so a hook filter matches it by Class, name string, or Regexp uniformly.
       def error_class
-        error&.class&.name
+        error&.class
       end
 
       # The recorded error's message, or nil.

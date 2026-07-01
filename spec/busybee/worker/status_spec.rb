@@ -59,12 +59,12 @@ RSpec.describe Busybee::Worker::Status do
       expect(build_status(reason: :signal).reason).to eq(:signal)
     end
 
-    it "reports an errored stop with its class name and message" do
+    it "reports an errored stop with its class and message" do
       error = RuntimeError.new("boom")
       status = build_status(reason: :error, error: error)
       expect(status.reason).to eq(:error)
       expect(status.error).to be(error)
-      expect(status.error_class).to eq("RuntimeError")
+      expect(status.error_class).to eq(RuntimeError) # the Class, matching worker_class
       expect(status.error_message).to eq("boom")
     end
   end

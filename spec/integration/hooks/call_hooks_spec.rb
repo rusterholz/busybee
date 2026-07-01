@@ -72,7 +72,7 @@ RSpec.describe "Call hooks", :integration do
       expect(after[:rpc]).to eq(:cancel_process_instance)
       expect(after[:status]).to eq(:errored)
       expect(after[:grpc_status]).to be_a(Symbol) # a real gRPC failure code
-      expect(after[:error_class]).to eq("Busybee::GRPC::Error")
+      expect(after[:error_class]).to eq(Busybee::GRPC::Error) # the Class, matching worker_class
     end
   end
 
