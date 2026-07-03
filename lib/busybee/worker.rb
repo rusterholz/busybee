@@ -65,23 +65,25 @@ module Busybee
       # @raise [Busybee::Worker::Shutdown] if a shutdown_on exception is caught
       # @raise [Busybee::StatusChangeOutsidePerform] if a hook calls complete!/fail!/throw_bpmn_error!
       def perform_job(job)
-        job.timestamps.stamp!(:execution_started_at)
-        instance = new(job)
-        job.set_context(worker: instance)
+        Client::Call.with_job(job) do # job window spans the whole chain: hooks, perform, autofail all fold it
+          job.timestamps.stamp!(:execution_started_at)
+          instance = new(job)
+          job.set_context(worker: instance)
 
-        run_hooked_perform(instance)
-      rescue StandardError => e
-        handle_perform_exception(job, e)
-      ensure
-        # Defensive: ensure the status-change flag is cleared on every exit
-        # path, including non-StandardError exceptions that escape the rescue.
-        job._allow_status_changes!
-        # Conditional on resolved?: after_job marks the moment the lifecycle
-        # reached a settled outcome the engine has on file. When the engine
-        # didn't learn (autofail disabled, any GRPC fail mid-resolution), the
-        # job will be re-yielded; per-attempt observability belongs to
-        # on_job_executed (runner-level, unconditional).
-        Hooks.run(:after_job, job, safe: true) if job.resolved?
+          run_hooked_perform(instance)
+        rescue StandardError => e
+          handle_perform_exception(job, e)
+        ensure
+          # Defensive: ensure the status-change flag is cleared on every exit
+          # path, including non-StandardError exceptions that escape the rescue.
+          job._allow_status_changes!
+          # Conditional on resolved?: after_job marks the moment the lifecycle
+          # reached a settled outcome the engine has on file. When the engine
+          # didn't learn (autofail disabled, any GRPC fail mid-resolution), the
+          # job will be re-yielded; per-attempt observability belongs to
+          # on_job_executed (runner-level, unconditional).
+          Hooks.run(:after_job, job, safe: true) if job.resolved?
+        end
       end
 
       # Validate that `result` includes every output declared `required: true`.

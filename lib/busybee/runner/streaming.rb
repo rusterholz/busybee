@@ -41,7 +41,12 @@ module Busybee
       # Fills Runner#run!'s loop: open the job stream and process jobs (via the
       # pump + buffer, or inline). Raises a worker Shutdown to signal an error exit.
       def run_loop
-        @stream = @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
+        # Attribute the stream-open fetch to the worker. This one snapshot goes
+        # stale over the stream's life; execute-time re-seeding keeps the per-job
+        # worker current (the stream's own jobs re-seed as they're processed).
+        @stream = Client::Call.with_worker_status(worker_status) do
+          @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
+        end
 
         if buffer?
           run_with_buffer

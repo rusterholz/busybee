@@ -311,6 +311,24 @@ RSpec.describe Busybee::Runner::Polling do
     end
   end
 
+  describe "worker context around the fetch call" do
+    it "seeds a fresh worker into ambient context around with_each_job, so the fetch Call folds it" do
+      seen = :unset
+      allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
+        seen = Busybee::Client::Call.current_worker_status
+        runner.stop!
+        0
+      end
+
+      runner.run!
+
+      aggregate_failures do
+        expect(seen).to be_a(Busybee::Worker::Status)
+        expect(seen.worker_class).to be(worker_class)
+      end
+    end
+  end
+
   describe "around_job_execution wiring" do
     after { Busybee::Hooks.reset! }
 

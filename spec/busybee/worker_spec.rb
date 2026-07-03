@@ -649,6 +649,36 @@ RSpec.describe Busybee::Worker do
     end
   end
 
+  describe "ambient job context (.perform_job)" do
+    before { allow(client).to receive(:complete_job) }
+    after { Busybee::Hooks.reset! }
+
+    it "seeds the job so a Call built inside perform folds it" do
+      captured_call = nil
+      worker = stub_const("JobContextWorker", Class.new(described_class) do
+        strict_outputs false
+        define_method(:perform) do
+          captured_call = Busybee::Client::Call.new(:complete_job)
+          {}
+        end
+      end)
+      worker.perform_job(job)
+      expect(captured_call.job).to be(job)
+    end
+
+    it "seeds the job for part-of-perform hooks (a Call in after_job folds it)" do
+      captured_call = nil
+      Busybee.after_job { captured_call = Busybee::Client::Call.new(:complete_job) }
+      performing_worker.perform_job(job)
+      expect(captured_call.job).to be(job)
+    end
+
+    it "restores the previous thread-local carrier after perform_job" do
+      performing_worker.perform_job(job)
+      expect(Busybee::Client::Call.current_job).to be_nil
+    end
+  end
+
   describe Busybee::Worker::Shutdown do
     def raise_with_cause(cause_class, cause_message, **shutdown_kwargs)
       raise cause_class, cause_message

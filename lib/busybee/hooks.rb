@@ -38,9 +38,6 @@ module Busybee
       h[type] = noun
     end.freeze
 
-    # Thread-local key for ambient hook context (see .context / .with_context).
-    CONTEXT_THREAD_KEY = :_busybee_hooks_context
-
     class << self
       # ====== Hook storage ======
 
@@ -56,28 +53,6 @@ module Busybee
       # Clear all registered hooks. Intended for test isolation.
       def reset!
         @hooks = HOOK_TYPES.to_h { |type| [type, []] }
-      end
-
-      # ====== Ambient context ======
-
-      # The current thread-local hook context. Hooks and the Client::Call
-      # carrier read ambient context seeded here (e.g. the active Job, a
-      # Sidekiq jid). Thread-local: a call snapshots this by value at
-      # construction, since it executes/retries on threads that won't see it.
-      # @return [Hash]
-      def context
-        Thread.current[CONTEXT_THREAD_KEY] || {}
-      end
-
-      # Push context for the duration of the block, merging with any existing
-      # context (inner values win). Restores the previous context on exit, even
-      # when the block raises.
-      def with_context(**attrs)
-        previous = Thread.current[CONTEXT_THREAD_KEY]
-        Thread.current[CONTEXT_THREAD_KEY] = (previous || {}).merge(attrs)
-        yield
-      ensure
-        Thread.current[CONTEXT_THREAD_KEY] = previous
       end
 
       # ====== Registration ======

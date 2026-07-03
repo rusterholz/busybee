@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "active_support/core_ext/hash/indifferent_access"
 require "active_support/core_ext/module/delegation"
 require "busybee/client/call/timestamps"
 require "busybee/grpc/error"
@@ -23,6 +22,11 @@ module Busybee
       # also include ScriptError is tracked as a future mission.
       RECOVERABLE_ERRORS = [StandardError].freeze
 
+      # Thread-local keys for the call-correlation carriers (see .with_job /
+      # .with_worker_status).
+      JOB_KEY = :_busybee_call_job
+      WORKER_STATUS_KEY = :_busybee_call_worker_status
+
       # Wrap a logical client call: construct the carrier, fire the gating
       # before_call, run the operation (which records its per-attempt outcome onto
       # the carrier), resolve, and fire the observing after_call exactly once.
@@ -43,7 +47,42 @@ module Busybee
         end
       end
 
-      attr_reader :rpc, :request, :status, :result, :error, :attempts, :context
+      # ===== Correlation context (class-level) =====
+      #
+      # The executing Job and the runner's Worker::Status are seeded on the thread
+      # so a Call built mid-operation attributes itself (see #initialize). Windows
+      # are single-carrier — a job window (worker's perform_job) or a worker window
+      # (the runner's fetch/lifecycle windows) — so each carrier has its own
+      # seeder/reader. Each is restored to its prior value on block exit.
+
+      def self.with_job(job)
+        previous = Thread.current[JOB_KEY]
+        Thread.current[JOB_KEY] = job
+        yield
+      ensure
+        Thread.current[JOB_KEY] = previous
+      end
+
+      def self.with_worker_status(worker_status)
+        previous = Thread.current[WORKER_STATUS_KEY]
+        Thread.current[WORKER_STATUS_KEY] = worker_status
+        yield
+      ensure
+        Thread.current[WORKER_STATUS_KEY] = previous
+      end
+
+      def self.current_job
+        Thread.current[JOB_KEY]
+      end
+
+      # Fall-through safety: a present job's own status wins over any separately-
+      # seeded one, so a Call's job and worker_status can never disagree.
+      def self.current_worker_status
+        job = current_job
+        job ? job.worker_status : Thread.current[WORKER_STATUS_KEY]
+      end
+
+      attr_reader :rpc, :request, :status, :result, :error, :attempts, :job, :worker_status
 
       def initialize(rpc, request = nil)
         @rpc = rpc
@@ -52,7 +91,8 @@ module Busybee
         @result = nil
         @error = nil
         @attempts = 0
-        @context = Busybee::Hooks.context.with_indifferent_access
+        @job = self.class.current_job
+        @worker_status = self.class.current_worker_status
         @timestamps = Timestamps.new
       end
 
@@ -107,27 +147,20 @@ module Busybee
                :network_ms, :backoff_ms, :queue_ms, :total_ms, :cumulative_network_ms,
                to: :@timestamps
 
-      # ===== Context =====
+      # ===== Projections =====
 
-      # Annotate the context bag from a hook. Set-once per key: seeded keys and
-      # prior annotations are never clobbered. For deliberate updates, mutate a
-      # mutable value stored under a fixed key.
-      def set_context(**kwargs)
-        kwargs.each { |key, value| @context[key] = value unless @context.key?(key) }
-        self
-      end
-
-      # Low-cardinality projection (metric labels): the call's own tags reverse-
-      # merged over any context value's context_tags, so the call's own keys win.
-      # Computed live, since status/grpc_status/durations evolve over the call.
+      # Low-cardinality projection (metric labels): worker + job *correlation*
+      # (curated to stable identity, not their lifecycle telemetry) under the
+      # call's own tags, which win. Computed live, since status/grpc_status evolve.
       def context_tags
-        context_contributions(:context_tags).merge(own_context_tags).compact
+        worker_correlation_tags.merge(job_correlation_tags).merge(own_context_tags).compact
       end
 
-      # High-cardinality projection (logs): a superset of context_tags adding
-      # attempts, durations, and error_message, reverse-merged the same way.
+      # High-cardinality projection (logs): a superset adding the worker/job keys
+      # a call log wants (worker_name, job/instance keys) plus the call's own
+      # attempts, durations, and error message.
       def logging_context
-        context_contributions(:logging_context).merge(own_logging_context).compact
+        worker_correlation_logging.merge(job_correlation_logging).merge(own_logging_context).compact
       end
 
       # ===== Execution seam =====
@@ -204,13 +237,39 @@ module Busybee
         )
       end
 
-      # Merge the context_tags/logging_context of any context value implementing
-      # the duck protocol. The value owns its own cardinality split (e.g. a Job
-      # puts job_type in tags, job_key in logging).
-      def context_contributions(method_name)
-        @context.each_value.with_object({}) do |value, contributions|
-          contributions.merge!(value.public_send(method_name)) if value.respond_to?(method_name)
-        end
+      # What a call log wants from its worker: identity, not lifetime gauges.
+      # worker_name is logging-only — it can be per-run-unique (high-cardinality
+      # as a metric label). worker_class is the source of job_type on a job-less
+      # fetch call, where no Job is in scope.
+      def worker_correlation_tags
+        return {} unless worker_status
+
+        { worker_class: worker_status.worker_class&.name,
+          job_type: worker_status.job_type,
+          worker_mode: worker_status.worker_mode }
+      end
+
+      def worker_correlation_logging
+        return {} unless worker_status
+
+        worker_correlation_tags.merge(worker_name: worker_status.worker_name)
+      end
+
+      # What a call log wants from its job: correlation identity, not lifecycle
+      # timing/result. retries is deliberately excluded — it reads like this call's
+      # attempts but means the engine's retry budget for the job.
+      def job_correlation_tags
+        return {} unless job
+
+        { bpmn_process_id: job.bpmn_process_id, source: job.source }
+      end
+
+      def job_correlation_logging
+        return {} unless job
+
+        job_correlation_tags.merge(job_key: job.key,
+                                   process_instance_key: job.process_instance_key,
+                                   element_id: job.element_id)
       end
 
       # Translate a raw gRPC error to a Busybee::GRPC::Error (preserving it as the

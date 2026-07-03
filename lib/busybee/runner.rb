@@ -207,11 +207,13 @@ module Busybee
     # Fails a job during graceful shutdown, preserving its retry count.
     # Uses the worker's configured backoff (or gem default).
     def handle_shutdown_job(job)
-      job.fail!(
-        "Worker shutting down",
-        retries: job.retries,
-        backoff: @runtime_config.backoff
-      )
+      with_fresh_worker_status(job) do
+        job.fail!(
+          "Worker shutting down",
+          retries: job.retries,
+          backoff: @runtime_config.backoff
+        )
+      end
     rescue StandardError => e
       Busybee.logger&.warn("Failed to fail job #{job.key} during shutdown: #{e.message}")
     end
@@ -225,9 +227,23 @@ module Busybee
     #   Buffered call sites pass true; direct (poll/inline) sites leave it false.
     def activate_job(job, source:, buffered: false)
       job.timestamps.stamp!(:activated_at)
-      job.set_context(source: source, buffered: buffered, worker_class: @worker_class,
-                      worker_status: worker_status)
-      Hooks.run(:on_job_activated, job, safe: true)
+      job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
+      with_fresh_worker_status(job) do
+        Hooks.run(:on_job_activated, job, safe: true)
+      end
+    end
+
+    # Open a worker window over a job: stamp a fresh point-in-time Worker::Status
+    # onto the job, then seed that SAME object for Calls via Call.with_worker_status.
+    # Reading it back off the job (rather than passing worker_status twice) is what
+    # guarantees a Call can never correlate to two statuses — the one it folds and
+    # job.worker_status are one object. Each window re-stamps, so its gauges read as
+    # of that moment. Worker only, never job: job is the perform-only carrier
+    # (Worker.perform_job); lifecycle hooks and around_job_execution middleware hold
+    # the Job directly.
+    def with_fresh_worker_status(job, &)
+      job.set_context(worker_status: worker_status)
+      Client::Call.with_worker_status(job.worker_status, &)
     end
 
     # Run @worker_class.perform_job(job) inside the around_job_execution chain,
@@ -235,23 +251,19 @@ module Busybee
     #
     # @param job [Busybee::Job]
     def execute_job(job)
-      # Re-stamp a fresh Status: the buffer gauge may have moved since activation,
-      # and execution-time is the heartbeat job hooks read job.worker_status at.
-      job.set_context(worker_status: worker_status)
-      Hooks.run_chain(:around_job_execution, job, safe: true) do
-        Hooks.with_context(job: job) do # so perform-issued Calls pick up the job
-          @worker_class.perform_job(job)
+      with_fresh_worker_status(job) do
+        Hooks.run_chain(:around_job_execution, job, safe: true) do
+          @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
         end
+      ensure
+        # Runs even under run_chain's Shutdown re-raise, so the final activation
+        # stays observable during teardown. A second window re-stamps: on_job_executed
+        # reads gauges/counters as of completion, not the (possibly long-ago) start.
+        job.timestamps.stamp!(:executed_at)
+        @total_job_count.increment
+        @failed_job_count.increment if job.failed?
+        with_fresh_worker_status(job) { Hooks.run(:on_job_executed, job, safe: true) }
       end
-    ensure
-      # Even with safe: true above, run_chain re-raises Shutdown so the
-      # runner can tear down. This ensure runs executed_at + on_job_executed
-      # even when the worker is shutting down, keeping observability of the
-      # final activation intact.
-      job.timestamps.stamp!(:executed_at)
-      @total_job_count.increment
-      @failed_job_count.increment if job.failed?
-      Hooks.run(:on_job_executed, job, safe: true)
     end
 
     # Current depth of this runner's job buffer, or nil if the runner has no

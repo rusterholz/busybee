@@ -60,6 +60,22 @@ RSpec.describe Busybee::Runner::Streaming do
       expect(client).not_to have_received(:open_job_stream)
     end
 
+    it "seeds a worker into ambient context around opening the stream, so the open Call folds it" do
+      seen = :unset
+      allow(client).to receive(:open_job_stream) do
+        seen = Busybee::Client::Call.current_worker_status
+        allow(stream).to receive(:each)
+        stream
+      end
+
+      runner.run!
+
+      aggregate_failures do
+        expect(seen).to be_a(Busybee::Worker::Status)
+        expect(seen.worker_class).to be(worker_class)
+      end
+    end
+
     it "processes jobs via worker_class.perform_job" do
       allow(client).to receive(:open_job_stream) do
         allow(stream).to receive(:each).and_yield(job)
