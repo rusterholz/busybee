@@ -41,13 +41,14 @@ module Busybee
         end
       end
 
-      def stop!
+      def stop!(reason: :signal)
         # Multi is transparent — it manages child runners rather than being a
-        # worker, so it fires no worker hooks of its own. Flip the flag directly
-        # instead of via super (whose stop! now fires on_worker_stop_requested);
-        # each child fires its own lifecycle hooks per worker-class.
-        @stop_requested.make_true
-        @runners.each(&:stop!)
+        # worker, so it fires no worker hooks of its own. Win the set-once reason
+        # gate directly instead of via super (whose stop! now fires
+        # on_worker_stop_requested); each child fires its own lifecycle hooks and
+        # takes the same reason (cascade below), per worker-class.
+        @stop_reason.compare_and_set(nil, reason)
+        @runners.each { |runner| runner.stop!(reason: reason) }
         @thread_pool.shutdown
       end
 
@@ -73,7 +74,7 @@ module Busybee
               "Error in runner for #{runner_worker_name(runner)}: " \
               "[#{e.class}] #{e.message}"
             )
-            stop!
+            stop!(reason: reason_for(e)) # container adopts the crash's reason (:crash/:gateway/:unhealthy)
           end
         end
       end

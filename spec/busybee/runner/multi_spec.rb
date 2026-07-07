@@ -205,6 +205,30 @@ RSpec.describe Busybee::Runner::Multi do
         expect(multi.runners).to all(be_stopping)
       end
 
+      it "cascades :crash to the container when a runner dies of an unrelated error" do
+        multi = described_class.new(worker_classes, client: client)
+        first_runner, second_runner = multi.runners
+        multi.runners.each { |r| allow(r).to receive(:stop!) }
+        allow(first_runner).to receive(:run!).and_return(true)
+        allow(second_runner).to receive(:run!).and_raise(StandardError, "worker crashed")
+
+        expect { multi.run! }.to raise_error(StandardError, "worker crashed")
+
+        expect(multi.runners).to all(have_received(:stop!).with(reason: :crash))
+      end
+
+      it "cascades :unhealthy when a runner goes down via Worker::Shutdown" do
+        multi = described_class.new(worker_classes, client: client)
+        first_runner, second_runner = multi.runners
+        multi.runners.each { |r| allow(r).to receive(:stop!) }
+        allow(first_runner).to receive(:run!).and_return(true)
+        allow(second_runner).to receive(:run!).and_raise(Busybee::Worker::Shutdown.new(worker: streaming_worker))
+
+        expect { multi.run! }.to raise_error(Busybee::Worker::Shutdown)
+
+        expect(multi.runners).to all(have_received(:stop!).with(reason: :unhealthy))
+      end
+
       it "logs the error with worker name" do
         logger = instance_double(Logger, error: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
@@ -249,6 +273,16 @@ RSpec.describe Busybee::Runner::Multi do
 
       expect(multi.runners).to all(have_received(:stop!))
       expect(thread_pool).to have_received(:shutdown)
+    end
+
+    it "cascades the stop reason to every child" do
+      multi = described_class.new(worker_classes, client: client)
+      multi.runners.each { |r| allow(r).to receive(:stop!) }
+      allow(thread_pool).to receive(:shutdown)
+
+      multi.stop!(reason: :rollover)
+
+      expect(multi.runners).to all(have_received(:stop!).with(reason: :rollover))
     end
 
     it "fires no worker hooks of its own (transparent — children fire theirs)" do
@@ -296,6 +330,20 @@ RSpec.describe Busybee::Runner::Multi do
 
       expect(multi.runners).to all(have_received(:kill!))
       expect(thread_pool).to have_received(:kill)
+    end
+
+    it "cascades :kill to children through super's stop!" do
+      multi = described_class.new(worker_classes, client: client)
+      multi.runners.each do |r|
+        allow(r).to receive(:stop!)
+        allow(r).to receive(:kill!)
+      end
+      allow(thread_pool).to receive(:shutdown)
+      allow(thread_pool).to receive(:kill)
+
+      multi.kill!
+
+      expect(multi.runners).to all(have_received(:stop!).with(reason: :kill))
     end
   end
 end

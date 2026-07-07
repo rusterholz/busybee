@@ -124,7 +124,7 @@ module Busybee
         # Capture early so after_job hooks see the error attached to Job even
         # when autofail is disabled (fail_job_on_error: false) or autofail's
         # GRPC fails. fail!'s own set_error during autofail no-ops harmlessly.
-        job.send(:resolution).set_error(underlying_error(exception))
+        job.send(:resolution).set_error(Shutdown.unwrap(exception))
         handle_failure(job, exception, configuration)
         raise if exception.is_a?(Shutdown) || exception.is_a?(Busybee::StatusChangeOutsidePerform)
         raise Shutdown.new(worker: self) if shutdown_error?(exception, configuration)
@@ -213,16 +213,9 @@ module Busybee
       end
 
       def attempt_auto_fail(job, error, config)
-        job.fail!(underlying_error(error), backoff: config.backoff)
+        job.fail!(Shutdown.unwrap(error), backoff: config.backoff)
       rescue StandardError => e
         Busybee.logger&.warn("Failed to fail job #{job.key}: #{e.message}. Job will timeout and retry.")
-      end
-
-      # When perform raises a Shutdown wrapping a triggering error, the
-      # triggering error — not the wrapper — is what the engine and
-      # Resolution should record. Returns the exception itself otherwise.
-      def underlying_error(exception)
-        exception.is_a?(Shutdown) ? (exception.cause || exception) : exception
       end
 
       def shutdown_error?(error, config)

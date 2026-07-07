@@ -15,7 +15,7 @@ module Busybee
       @worker_class = worker_class
       @runtime_config = runtime_config
       @client = client || Busybee::Client.new
-      @stop_requested = Concurrent::AtomicBoolean.new(false)
+      @stop_reason = Concurrent::AtomicReference.new(nil)
       @running = Concurrent::AtomicBoolean.new(false)
       @worker_timestamps = Worker::Timestamps.new
       @total_job_count = Concurrent::AtomicFixnum.new(0)
@@ -47,22 +47,32 @@ module Busybee
         run_loop
       ensure
         cease_intake
-        reason, error = classify_exit($!)
-        fire_worker_lifecycle(:stopping_at, :on_worker_stopping, reason, error)
+        exception = $!
+        error = Busybee::Worker::Shutdown.unwrap(exception)
+        # Discern a reason only from a real exit exception; compare_and_set no-ops
+        # when stop! already won the gate, so a caller reason (:sigterm, :rollover,
+        # :unhealthy) survives a coexisting error. Never fabricated — a clean exit
+        # carries only the reason stop! set (its :signal default).
+        @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
+        fire_worker_lifecycle(:stopping_at, :on_worker_stopping, error)
         drain_on_shutdown
-        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, reason, error)
+        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
         @running.make_false
       end
     end
 
-    # Signals graceful shutdown. Thread-safe (called from a signal handler — the
-    # CLI runs the handler on its own thread, so this is never raw trap context).
-    # The AtomicBoolean CAS gates the whole body, so T1 fires exactly once across
-    # repeated signals / per-job Shutdowns. Intake ceases (cease_intake) *before*
-    # the hook fires, so a propagating observer can never skip the close and wedge
-    # shutdown (close-before-fire).
-    def stop!
-      return unless @stop_requested.make_true
+    # Signals graceful shutdown, recording why. Thread-safe (called from a signal
+    # handler — the CLI runs the handler on its own thread, so this is never raw
+    # trap context). The reason IS the gate: compare_and_set(nil, reason) both
+    # stores it set-once and reports whether this call won, so "is-stopping" and
+    # "the reason" are one atomic fact (no window where stopping? is true but the
+    # reason unset) and T1 fires exactly once across repeated signals / per-job
+    # Shutdowns. Intake ceases (cease_intake) *before* the hook fires, so a
+    # propagating observer can never skip the close and wedge shutdown
+    # (close-before-fire). reason is a low-cardinality Symbol — see docs/internal.
+    def stop!(reason: :signal)
+      raise ArgumentError, "stop reason must be a Symbol, got #{reason.class}" unless reason.is_a?(Symbol)
+      return unless @stop_reason.compare_and_set(nil, reason)
 
       @worker_timestamps.stamp!(:stop_requested_at)
       cease_intake
@@ -71,7 +81,7 @@ module Busybee
 
     # True if stop! has been called.
     def stopping?
-      @stop_requested.true?
+      !@stop_reason.get.nil?
     end
 
     # True if run! is actively executing.
@@ -79,9 +89,9 @@ module Busybee
       @running.true?
     end
 
-    # Force shutdown. Base: calls stop!. Multi overrides to also kill thread pool.
+    # Force shutdown. Base: stop with :kill. Multi overrides to also kill the pool.
     def kill!
-      stop!
+      stop!(reason: :kill)
     end
 
     class << self
@@ -136,11 +146,11 @@ module Busybee
     # Stamp a closing lifecycle moment (T2 stopping / T3 shutdown) and fire its
     # observation-only hook with a fresh Status. Reached only from run!'s ensure,
     # which runs only after start! won the entry, so the T0/T2/T3 set is
-    # all-or-none. reason/error are the classified in-flight exception, shared by
-    # both moments.
-    def fire_worker_lifecycle(stamp, type, reason, error)
+    # all-or-none. error is the classified in-flight exception, shared by both
+    # moments; reason is read off @stop_reason by worker_status.
+    def fire_worker_lifecycle(stamp, type, error)
       @worker_timestamps.stamp!(stamp)
-      Hooks.run(type, worker_status(reason: reason, error: error), safe: true)
+      Hooks.run(type, worker_status(error: error), safe: true)
     end
 
     # Handle a wrapped gRPC error raised by a fetch loop. The *outcome* is matched
@@ -155,21 +165,27 @@ module Busybee
       sleep @runtime_config.backpressure_delay
     end
 
-    # Classify the run's exit from the in-flight exception ($! in the ensure):
-    # no exception → a clean stop signal; a Worker::Shutdown → an error reported
-    # as its triggering cause; any other exception → an error reported as-is
-    # (covers the raw activation-path fatal that exits run! unwrapped).
-    def classify_exit(exception)
-      case exception
-      when nil then [:signal, nil]
-      when Busybee::Worker::Shutdown then [:error, exception.cause]
-      else [:error, exception]
+    # Discern a stop reason from an exit error (never fabricated — the only
+    # presumption is stop!'s :signal default). A Worker::Shutdown is the worker
+    # declaring itself down (:unhealthy); an unrecovered gRPC failure means busybee
+    # couldn't reach the engine (:gateway); anything else is an internal defect
+    # (:crash). reason ⊥ error — this names the trigger; the exception rides the
+    # separate error axis. Shared by run!'s ensure, the streaming pump, and Multi's
+    # crash cascade.
+    def reason_for(error)
+      case error
+      when Busybee::Worker::Shutdown then :unhealthy
+      when Busybee::GRPC::Error then :gateway
+      else :crash
       end
     end
 
     # Build a fresh, point-in-time Worker::Status snapshot — the carrier handed
-    # to worker hooks and stamped into job context for job-hook visibility.
-    def worker_status(reason: nil, error: nil)
+    # to worker hooks and stamped into job context for job-hook visibility. Reads
+    # the set-once stop reason off @stop_reason, so every snapshot (lifecycle and
+    # per-job) reports one consistent value; error is the exit exception, known
+    # only in the ensure.
+    def worker_status(error: nil)
       Worker::Status.new(
         worker_class: @worker_class,
         worker_mode: @runtime_config&.worker_mode,
@@ -179,7 +195,7 @@ module Busybee
         backpressure_count: @backpressure_count.value,
         current_buffer_size: current_buffer_size,
         peak_buffer_size: peak_buffer_size,
-        reason: reason,
+        reason: @stop_reason.get,
         error: error
       )
     end

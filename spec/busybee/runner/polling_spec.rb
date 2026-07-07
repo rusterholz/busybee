@@ -145,6 +145,21 @@ RSpec.describe Busybee::Runner::Polling do
       let(:cause) { RuntimeError.new("DB connection lost") }
       let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: worker_class) }
 
+      after { Busybee::Hooks.reset! }
+
+      it "tags the stop :unhealthy — the worker declared itself down" do
+        captured = nil
+        Busybee.on_worker_shutdown { |worker| captured = worker }
+        allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
+          block.call(job)
+          0
+        end
+        allow(worker_class).to receive(:perform_job).and_raise(shutdown_error)
+
+        expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+        expect(captured.reason).to eq(:unhealthy)
+      end
+
       it "stores the error, stops, and re-raises after clean exit" do
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
           block.call(job)

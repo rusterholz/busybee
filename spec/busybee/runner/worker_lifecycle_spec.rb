@@ -95,6 +95,43 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     end
   end
 
+  describe "#stop!(reason:) — the caller-supplied stop reason" do
+    it "carries a caller-supplied reason onto on_worker_stop_requested" do
+      captured = nil
+      Busybee.on_worker_stop_requested { |worker| captured = worker }
+      runner.stop!(reason: :rollover)
+      expect(captured.reason).to eq(:rollover)
+    end
+
+    it "defaults the reason to :signal" do
+      captured = nil
+      Busybee.on_worker_stop_requested { |worker| captured = worker }
+      runner.stop!
+      expect(captured.reason).to eq(:signal)
+    end
+
+    it "rejects a non-symbol reason" do
+      expect { runner.stop!(reason: "rollover") }.to raise_error(ArgumentError, /symbol/i)
+    end
+
+    it "records the reason once — the first stop! wins (set-once)" do
+      reasons = Concurrent::Array.new
+      Busybee.on_worker_stop_requested { |worker| reasons << worker.reason }
+      runner.stop!(reason: :rollover)
+      runner.stop!(reason: :sigterm)
+      expect(reasons).to eq(%i[rollover])
+    end
+  end
+
+  describe "#kill!" do
+    it "stops with reason :kill" do
+      captured = nil
+      Busybee.on_worker_stop_requested { |worker| captured = worker }
+      runner.kill!
+      expect(captured.reason).to eq(:kill)
+    end
+  end
+
   describe "the Worker::Status carrier" do
     it "hands each hook a frozen Worker::Status with identity + timing" do
       captured = nil
@@ -127,11 +164,15 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     end
   end
 
-  describe "reason / error classification (from $! in the ensure)" do
-    it "classifies a clean exit as :signal with no error" do
+  describe "reason / error resolution (in the ensure)" do
+    it "reports a stop we were told to make as :signal (stop!'s default), no error" do
       captured = nil
       Busybee.on_worker_shutdown { |worker| captured = worker }
-      runner.run!
+      runner.test_run_loop = -> { sleep 0.005 until runner.stopping? }
+      thread = Thread.new { runner.run! }
+      wait_until { runner.running? }
+      runner.stop! # default reason
+      thread.join(2)
 
       aggregate_failures do
         expect(captured.reason).to eq(:signal)
@@ -139,7 +180,19 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       end
     end
 
-    it "classifies an uncaught error as :error carrying the exception, and re-raises" do
+    it "keeps an explicit stop reason through to shutdown" do
+      captured = nil
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+      runner.test_run_loop = -> { sleep 0.005 until runner.stopping? }
+      thread = Thread.new { runner.run! }
+      wait_until { runner.running? }
+      runner.stop!(reason: :rollover)
+      thread.join(2)
+
+      expect(captured.reason).to eq(:rollover)
+    end
+
+    it "reports an unhandled non-gRPC error as :crash, carrying the exception, and re-raises" do
       captured = nil
       Busybee.on_worker_shutdown { |worker| captured = worker }
       boom = RuntimeError.new("boom")
@@ -147,13 +200,42 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
       expect { runner.run! }.to raise_error(boom)
       aggregate_failures do
-        expect(captured.reason).to eq(:error)
+        expect(captured.reason).to eq(:crash)
         expect(captured.error).to be(boom)
         expect(captured.error_message).to eq("boom")
       end
     end
 
-    it "unwraps a Worker::Shutdown to its triggering cause" do
+    it "reports an unrecovered gRPC error as :gateway" do
+      captured = nil
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+      grpc = Busybee::GRPC::Error.new("gateway down")
+      runner.test_run_loop = -> { raise grpc }
+
+      expect { runner.run! }.to raise_error(grpc)
+      aggregate_failures do
+        expect(captured.reason).to eq(:gateway)
+        expect(captured.error).to be(grpc)
+      end
+    end
+
+    it "lets an explicit reason win over a coexisting exit error (reason ⊥ error)" do
+      captured = nil
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+      runner.test_run_loop = lambda do
+        runner.stop!(reason: :rollover)
+        raise "drain blew up"
+      end
+
+      expect { runner.run! }.to raise_error("drain blew up")
+      aggregate_failures do
+        expect(captured.reason).to eq(:rollover)       # the trigger stands
+        expect(captured.error).to be_a(RuntimeError)   # the outcome rides its own axis
+        expect(captured.error.message).to eq("drain blew up")
+      end
+    end
+
+    it "unwraps a Worker::Shutdown to its triggering cause on the error axis" do
       captured = nil
       Busybee.on_worker_shutdown { |worker| captured = worker }
       runner.test_run_loop = lambda do
@@ -164,9 +246,9 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
       expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
       aggregate_failures do
-        expect(captured.reason).to eq(:error)
-        expect(captured.error).to be_a(RuntimeError)
+        expect(captured.error).to be_a(RuntimeError)   # error axis = the triggering cause
         expect(captured.error.message).to eq("underlying")
+        expect(captured.reason).to eq(:unhealthy)      # a Worker::Shutdown = the worker declared itself down
       end
     end
   end
@@ -200,9 +282,13 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
     it "fires only the hook whose reason filter matches the outcome" do
       fired = []
-      Busybee.on_worker_shutdown(reason: :error) { fired << :error }
+      Busybee.on_worker_shutdown(reason: :crash) { fired << :crash }
       Busybee.on_worker_shutdown(reason: :signal) { fired << :signal }
-      runner.run! # clean -> :signal
+      runner.test_run_loop = -> { sleep 0.005 until runner.stopping? }
+      thread = Thread.new { runner.run! }
+      wait_until { runner.running? }
+      runner.stop! # default :signal
+      thread.join(2)
       expect(fired).to eq([:signal])
     end
   end

@@ -6,6 +6,9 @@ module Busybee
   class CLI
     attr_reader :runtime_config, :worker_class_names, :worker_classes
 
+    # Signals we trap to begin a graceful stop.
+    STOP_SIGNALS = %w[INT QUIT TERM].freeze
+
     def self.main(args)
       new(args).run
     end
@@ -33,17 +36,17 @@ module Busybee
       @client ||= Busybee::Client.new
     end
 
-    def handle_signal(_signal)
+    def handle_signal(signal)
       if @runner.stopping?
         @runner.kill!
         exit!(1)
       else
-        @runner.stop!
+        @runner.stop!(reason: :"sig#{signal.downcase}")
       end
     end
 
     def setup_signal_handlers!
-      %w[INT QUIT TERM].each do |signal|
+      STOP_SIGNALS.each do |signal|
         trap(signal) do
           Thread.new { handle_signal(signal) }.join
         end

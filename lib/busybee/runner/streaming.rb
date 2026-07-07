@@ -132,7 +132,7 @@ module Busybee
           execute_job(job)
         rescue Busybee::Worker::Shutdown => e
           shutdown_error = e
-          stop!
+          stop!(reason: :unhealthy) # the worker declared itself down
           break
         end
 
@@ -150,16 +150,15 @@ module Busybee
           sleep(delay.to_f / 1000) if delay
         end
       rescue StandardError => e
-        # Stream error (e.g., GRPC::Error). Store and stop so main thread can re-raise.
-        # Normal close via stop! produces GRPC::Cancelled, which JobStream#each absorbs —
-        # so this only fires on genuine failures.
+        # Stream error: stash for the main thread to re-raise, and stop with its
+        # discerned reason (Shutdown→:unhealthy, gRPC→:gateway, else :crash) before
+        # the ensure's default can mislabel it. Clean closes are Cancelled + absorbed.
         @shutdown_error.update { |prev| prev || e }
+        stop!(reason: reason_for(e))
       ensure
-        # Stream ended — either naturally (external close, server-side close),
-        # via error (handled above), or because stop! was already called.
-        # In all cases, stop! to unblock the main thread's buffer pop.
-        # Idempotent when stop! was already called.
-        stop!
+        # Backstop unblocking the main thread's blocking pop. No-op behind any earlier
+        # stop!; reached live only by a clean server-side close, which :stream_ended names.
+        stop!(reason: :stream_ended)
       end
 
       # Process jobs from the buffer.
@@ -182,7 +181,7 @@ module Busybee
           break # buffer empty (non-blocking only)
         rescue Busybee::Worker::Shutdown => e
           @shutdown_error.update { |prev| prev || e }
-          stop!
+          stop!(reason: :unhealthy) # the worker declared itself down
         end
       end
 

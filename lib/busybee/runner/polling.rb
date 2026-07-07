@@ -40,7 +40,7 @@ module Busybee
             end
           rescue Busybee::Worker::Shutdown => e
             @shutdown_error = e
-            stop!
+            stop!(reason: :unhealthy) # the worker declared itself down
           end
         end
       end
