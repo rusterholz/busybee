@@ -98,35 +98,16 @@ module Busybee
 
       # ===== Status predicates =====
 
-      def pending?
-        status == :pending
-      end
-
-      def succeeded?
-        status == :succeeded
-      end
-
-      def errored?
-        status == :errored
-      end
-
-      def resolved?
-        !pending?
-      end
+      def pending? = status == :pending
+      def succeeded? = status == :succeeded
+      def errored? = status == :errored
+      def resolved? = !pending?
 
       # ===== Outcome readers =====
 
-      # The recorded error's class, or nil. Returns the Class (like worker_class),
-      # so a hook filter matches it by Class, name string, or Regexp uniformly; the
-      # tag/log projections coerce it to its name for scalar labels.
-      def error_class
-        error&.class
-      end
-
-      # The recorded error's message, or nil.
-      def error_message
-        error&.message
-      end
+      # The recorded error's class and message, or nil.
+      def error_class = error&.class
+      def error_message = error&.message
 
       # The gRPC status as a symbol: :ok on success; the recorded gRPC error's
       # status when one is present (readable mid-retry, before resolution); nil
@@ -174,11 +155,12 @@ module Busybee
         Busybee::Hooks.run_chain(:around_call, self, safe: true) do
           @timestamps.begin_network
           begin
-            _record_result(yield)
+            value = yield
+            @timestamps.end_network # close the bracket the instant the op settles, before recording
+            _record_result(value)
           rescue *RECOVERABLE_ERRORS => e
-            _record_error(translate_error(e))
-          ensure
             @timestamps.end_network
+            _record_error(translate_error(e))
           end
         end
         # `error` and `result` are the carrier's own readers (attr_reader), set

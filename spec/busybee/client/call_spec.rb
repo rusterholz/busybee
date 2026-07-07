@@ -296,6 +296,17 @@ RSpec.describe Busybee::Client::Call do
       end
     end
 
+    it "closes the network bracket before recording the error (network_ms excludes translation)" do
+      call = described_class.new(:complete_job)
+      allow(call).to receive(:translate_error).and_wrap_original do |original, e|
+        sleep 0.1 # slow error translation/recording, after the gRPC op already returned
+        original.call(e)
+      end
+
+      expect { call.attempt { raise GRPC::Unavailable, "down" } }.to raise_error(Busybee::GRPC::Error)
+      expect(call.network_ms).to be < 50 # the 100ms delay is bookkeeping, outside the network window
+    end
+
     it "records and re-raises a non-GRPC error as-is" do
       call = described_class.new(:complete_job)
       boom = RuntimeError.new("boom")
