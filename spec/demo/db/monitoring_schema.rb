@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 9) do
+ActiveRecord::Schema[8.1].define(version: 10) do
   create_table "monitoring_job_runs", id: :string, force: :cascade do |t|
     t.datetime "activated_at"
     t.string "bpmn_process_id"
@@ -24,7 +24,9 @@ ActiveRecord::Schema[8.1].define(version: 9) do
     t.float "execution_duration_ms"
     t.bigint "job_key", null: false
     t.string "job_type", null: false
+    t.integer "lifecycle_rank"
     t.float "perform_duration_ms"
+    t.float "seen_at"
     t.string "source"
     t.string "status"
     t.json "tags"
@@ -43,8 +45,10 @@ ActiveRecord::Schema[8.1].define(version: 9) do
     t.string "error_message"
     t.integer "failed_job_count"
     t.string "job_type", null: false
+    t.integer "lifecycle_rank"
     t.integer "peak_buffer_size"
     t.string "reason"
+    t.float "seen_at"
     t.datetime "shutdown_at"
     t.datetime "started_at"
     t.string "status"

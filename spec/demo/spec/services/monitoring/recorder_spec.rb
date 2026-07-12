@@ -67,5 +67,47 @@ RSpec.describe Monitoring::Recorder do
       expect(Monitoring::WorkerProcess.count).to eq(1)
       expect(process).to have_attributes(status: "shutdown", reason: "rollover")
     end
+
+    it "keeps a later phase when an earlier-phase write arrives out of order" do
+      described_class.record_worker(:shutdown, worker_status(reason: :rollover))
+      described_class.record_worker(:running, worker_status) # a stale 'running' landing late
+
+      expect(process).to have_attributes(status: "shutdown", reason: "rollover")
+    end
+
+    it "keeps the freshest same-phase observation when a stale one is written last" do
+      # Same rank (running); the second write is an OLDER observation (smaller
+      # seen_at) whose write merely landed later — it must not overwrite.
+      allow(described_class).to receive(:monotonic_seq).and_return(100.0, 50.0)
+
+      described_class.record_worker(:running, worker_status(total_job_count: 7))
+      described_class.record_worker(:running, worker_status(total_job_count: 5))
+
+      expect(process.total_job_count).to eq(7)
+    end
+
+    it "is idempotent — a re-delivered observation neither duplicates nor regresses" do
+      allow(described_class).to receive(:monotonic_seq).and_return(100.0)
+
+      2.times { described_class.record_worker(:running, worker_status(total_job_count: 3)) }
+
+      expect(Monitoring::WorkerProcess.count).to eq(1)
+      expect(process.total_job_count).to eq(3)
+    end
+  end
+
+  describe "out-of-order guard (JobRun)" do
+    it "fills a late activation's gaps without downgrading a resolved status" do
+      executed = build_test_job(key: 7777)
+      allow(executed).to receive_messages(status: "complete", executed_at: Time.current)
+      activated = build_test_job(key: 7777)
+      allow(activated).to receive_messages(status: "ready", activated_at: Time.current,
+                                           worker_status: nil, buffered?: false)
+
+      described_class.record_execution(executed)   # rank 1
+      described_class.record_activation(activated) # rank 0 — arrives late
+
+      expect(recorded(7777)).to have_attributes(status: "complete", activated_at: be_present)
+    end
   end
 end
