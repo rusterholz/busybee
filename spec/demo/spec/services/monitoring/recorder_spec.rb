@@ -31,4 +31,41 @@ RSpec.describe Monitoring::Recorder do
       expect(recorded(4243)).to have_attributes(buffer_size: nil, buffered: false)
     end
   end
+
+  describe ".record_worker" do
+    def worker_status(**overrides)
+      defaults = {
+        worker_name: "oms-worker-abc12", job_type: "update_order_status",
+        worker_class: Oms::UpdateOrderStatusWorker, worker_mode: :hybrid,
+        reason: nil, error_class: nil, error_message: nil,
+        total_job_count: 0, failed_job_count: 0, backpressure_count: 0,
+        current_buffer_size: nil, peak_buffer_size: nil,
+        started_at: nil, stop_requested_at: nil, stopping_at: nil, shutdown_at: nil
+      }
+      instance_double(Busybee::Worker::Status, **defaults, **overrides)
+    end
+
+    def process = Monitoring::WorkerProcess.find_by(worker_name: "oms-worker-abc12", job_type: "update_order_status")
+
+    it "records identity, phase, counters and gauges keyed by (worker_name, job_type)" do
+      described_class.record_worker(:running, worker_status(
+                                                total_job_count: 7, failed_job_count: 2, backpressure_count: 1,
+                                                current_buffer_size: 3, peak_buffer_size: 9
+                                              ))
+
+      expect(process).to have_attributes(
+        status: "running", worker_class: "Oms::UpdateOrderStatusWorker", worker_mode: "hybrid",
+        total_job_count: 7, failed_job_count: 2, backpressure_count: 1,
+        current_buffer_size: 3, peak_buffer_size: 9
+      )
+    end
+
+    it "advances the same row through the lifecycle (upsert by identity, not a new row)" do
+      described_class.record_worker(:running, worker_status)
+      described_class.record_worker(:shutdown, worker_status(reason: :rollover))
+
+      expect(Monitoring::WorkerProcess.count).to eq(1)
+      expect(process).to have_attributes(status: "shutdown", reason: "rollover")
+    end
+  end
 end

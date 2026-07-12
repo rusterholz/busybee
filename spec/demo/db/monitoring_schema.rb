@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 8) do
+ActiveRecord::Schema[8.1].define(version: 9) do
   create_table "monitoring_job_runs", id: :string, force: :cascade do |t|
     t.datetime "activated_at"
     t.string "bpmn_process_id"
@@ -33,5 +33,30 @@ ActiveRecord::Schema[8.1].define(version: 8) do
     t.index ["activated_at"], name: "index_monitoring_job_runs_on_activated_at"
     t.index ["job_key"], name: "index_monitoring_job_runs_on_job_key", unique: true
     t.index ["job_type"], name: "index_monitoring_job_runs_on_job_type"
+  end
+
+  create_table "monitoring_worker_processes", id: :string, force: :cascade do |t|
+    t.integer "backpressure_count"
+    t.datetime "created_at", null: false
+    t.integer "current_buffer_size"
+    t.string "error_class"
+    t.string "error_message"
+    t.integer "failed_job_count"
+    t.string "job_type", null: false
+    t.integer "peak_buffer_size"
+    t.string "reason"
+    t.datetime "shutdown_at"
+    t.datetime "started_at"
+    t.string "status"
+    t.datetime "stop_requested_at"
+    t.datetime "stopping_at"
+    t.integer "total_job_count"
+    t.datetime "updated_at", null: false
+    t.string "worker_class"
+    t.string "worker_mode"
+    t.string "worker_name", null: false
+    t.index ["job_type"], name: "index_monitoring_worker_processes_on_job_type"
+    t.index ["status"], name: "index_monitoring_worker_processes_on_status"
+    t.index ["worker_name", "job_type"], name: "index_monitoring_worker_processes_on_worker_name_and_job_type", unique: true
   end
 end

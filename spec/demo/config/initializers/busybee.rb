@@ -11,6 +11,13 @@ Busybee.configure do |config|
   config.on_job_activated { |job| Monitoring::Recorder.record_activation(job) }
   config.on_job_executed  { |job| Monitoring::Recorder.record_execution(job) }
 
+  # Worker lifecycle: upsert each worker's phase into Monitoring::WorkerProcess as
+  # it moves through its run — the control center's "who's alive / what rolled" view.
+  config.on_worker_started        { |worker| Monitoring::Recorder.record_worker(:running, worker) }
+  config.on_worker_stop_requested { |worker| Monitoring::Recorder.record_worker(:stop_requested, worker) }
+  config.on_worker_stopping       { |worker| Monitoring::Recorder.record_worker(:stopping, worker) }
+  config.on_worker_shutdown       { |worker| Monitoring::Recorder.record_worker(:shutdown, worker) }
+
   # Per-job transactions: wrap the listed jobs' perform in a transaction on their
   # domain's database, so their writes commit atomically and these jobs no longer
   # open transactions themselves. Registered per job type (the array filter covers
