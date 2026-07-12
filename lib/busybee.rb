@@ -118,6 +118,24 @@ module Busybee
       @grpc_retry_errors || default_retry_errors
     end
 
+    # HTTP/2 keepalive on the gRPC channel: the interval between pings and how
+    # long a ping waits for its ack before the transport is declared dead. Their
+    # purpose is the deadline-less activation stream — unary calls already fail at
+    # their own deadline, but a silently-dropped stream (a suspended host, a
+    # transport reset a proxy swallowed) otherwise blocks forever. On the dead
+    # transport the stream raises UNAVAILABLE, which the runner already recovers.
+    # Integer ms or an ActiveSupport::Duration; nil resets to the default; false
+    # disables keepalive (both must be false — see Credentials#keepalive_channel_args).
+    # The interval must stay above the gateway's minKeepAliveInterval (30s default),
+    # or the gateway closes the connection with GOAWAY(too_many_pings).
+    def grpc_keepalive_interval
+      @grpc_keepalive_interval.nil? ? Defaults::DEFAULT_KEEPALIVE_INTERVAL_MS : @grpc_keepalive_interval
+    end
+
+    def grpc_keepalive_timeout
+      @grpc_keepalive_timeout.nil? ? Defaults::DEFAULT_KEEPALIVE_TIMEOUT_MS : @grpc_keepalive_timeout
+    end
+
     # gRPC outcomes (status symbols, not classes) that signify gateway
     # backpressure — the runner backs off and retries the fetch when a call
     # resolves to one of these. Class-independent by design: it names the

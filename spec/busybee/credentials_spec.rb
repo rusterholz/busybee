@@ -225,16 +225,57 @@ RSpec.describe Busybee::Credentials do
   end
 
   describe "#grpc_stub" do
-    it "creates a Gateway stub with cluster_address and channel credentials" do
+    it "creates a Gateway stub with cluster_address, channel credentials, and keepalive channel args" do
       creds = described_class.new(cluster_address: "test:26500")
       allow(creds).to receive(:grpc_channel_credentials).and_return(:this_channel_is_insecure)
 
       stub_double = instance_double(Busybee::GRPC::Gateway::Stub)
       expect(Busybee::GRPC::Gateway::Stub).to receive(:new). # rubocop:disable RSpec/StubbedMock, RSpec/MessageSpies
-        with("test:26500", :this_channel_is_insecure).
+        with("test:26500", :this_channel_is_insecure, channel_args: hash_including(
+          "grpc.keepalive_time_ms" => 45_000,
+          "grpc.keepalive_timeout_ms" => 20_000,
+          "grpc.keepalive_permit_without_calls" => 1,
+          "grpc.http2.max_pings_without_data" => 0
+        )).
         and_return(stub_double)
 
       expect(creds.grpc_stub).to eq(stub_double)
+    end
+
+    it "converts an ActiveSupport::Duration keepalive interval to wire milliseconds" do
+      described_class.new # ensure lib loaded
+      allow(Busybee).to receive_messages(grpc_keepalive_interval: 30.seconds, grpc_keepalive_timeout: 5.seconds)
+      creds = described_class.new(cluster_address: "test:26500")
+      allow(creds).to receive(:grpc_channel_credentials).and_return(:this_channel_is_insecure)
+
+      expect(Busybee::GRPC::Gateway::Stub).to receive(:new). # rubocop:disable RSpec/StubbedMock, RSpec/MessageSpies
+        with("test:26500", :this_channel_is_insecure, channel_args: hash_including(
+          "grpc.keepalive_time_ms" => 30_000, "grpc.keepalive_timeout_ms" => 5_000
+        )).
+        and_return(instance_double(Busybee::GRPC::Gateway::Stub))
+
+      creds.grpc_stub
+    end
+
+    it "omits all keepalive args when both knobs are false" do
+      allow(Busybee).to receive_messages(grpc_keepalive_interval: false, grpc_keepalive_timeout: false)
+      creds = described_class.new(cluster_address: "test:26500")
+      allow(creds).to receive(:grpc_channel_credentials).and_return(:this_channel_is_insecure)
+
+      expect(Busybee::GRPC::Gateway::Stub).to receive(:new) do |_addr, _creds, channel_args:| # rubocop:disable RSpec/MessageSpies
+        expect(channel_args.keys).to all(satisfy { |k| !k.start_with?("grpc.keepalive", "grpc.http2.max_pings") })
+        instance_double(Busybee::GRPC::Gateway::Stub)
+      end
+
+      creds.grpc_stub
+    end
+
+    it "raises when only one keepalive knob is disabled" do
+      allow(Busybee).to receive_messages(grpc_keepalive_interval: false, grpc_keepalive_timeout: 20_000)
+      creds = described_class.new(cluster_address: "test:26500")
+      allow(creds).to receive(:grpc_channel_credentials).and_return(:this_channel_is_insecure)
+
+      expect { creds.grpc_stub }.to raise_error(ArgumentError, /both.*set.*both.*false/i)
     end
 
     it "memoizes the stub instance" do

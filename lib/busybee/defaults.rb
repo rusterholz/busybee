@@ -18,5 +18,7 @@ module Busybee
     DEFAULT_WORKER_MODE = :hybrid
     DEFAULT_STREAMING_BUFFER = true
     DEFAULT_STRICT_OUTPUTS = true
+    DEFAULT_KEEPALIVE_INTERVAL_MS = 45_000 # > Zeebe gateway minKeepAliveInterval (30s default)
+    DEFAULT_KEEPALIVE_TIMEOUT_MS = 20_000
   end
 end

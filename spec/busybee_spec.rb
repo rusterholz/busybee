@@ -202,6 +202,40 @@ RSpec.describe Busybee do
                     :DEFAULT_GRPC_RETRY_DELAY_MS
   end
 
+  # The keepalive knobs are ordinary duration configs (nil resets to default) with
+  # one addition: an explicit false disables keepalive. false is deliberately NOT
+  # nil — nil keeps the sibling-wide "reset to default" meaning.
+  shared_examples "a keepalive duration config" do |setter|
+    around do |example|
+      original = described_class.instance_variable_get(:"@#{setter}")
+      example.run
+      described_class.instance_variable_set(:"@#{setter}", original)
+    end
+
+    it "accepts false to disable keepalive" do
+      described_class.public_send(:"#{setter}=", false)
+      expect(described_class.public_send(setter)).to be(false)
+    end
+
+    it "keeps false distinct from nil (nil still resets to the default)" do
+      described_class.public_send(:"#{setter}=", false)
+      described_class.public_send(:"#{setter}=", nil)
+      expect(described_class.public_send(setter)).to be_a(Integer)
+    end
+  end
+
+  describe ".grpc_keepalive_interval" do
+    it_behaves_like "a duration config setter", :grpc_keepalive_interval, :grpc_keepalive_interval,
+                    :DEFAULT_KEEPALIVE_INTERVAL_MS
+    it_behaves_like "a keepalive duration config", :grpc_keepalive_interval
+  end
+
+  describe ".grpc_keepalive_timeout" do
+    it_behaves_like "a duration config setter", :grpc_keepalive_timeout, :grpc_keepalive_timeout,
+                    :DEFAULT_KEEPALIVE_TIMEOUT_MS
+    it_behaves_like "a keepalive duration config", :grpc_keepalive_timeout
+  end
+
   describe ".grpc_retry_errors" do
     around do |example|
       original = described_class.instance_variable_get(:@grpc_retry_errors)

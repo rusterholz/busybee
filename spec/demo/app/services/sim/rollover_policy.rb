@@ -11,12 +11,23 @@ module Sim
   # first). The policy thinks entirely in sim-seconds — speed is only the
   # wall→sim conversion at the boundary — so rollover chance couples to
   # simulation speed exactly as the rest of the sim mechanics do
-  # (jobs-per-rollover stays flat as speed varies). `random`/`speed`/`now`
-  # are injectable so the model is unit-testable despite being random in
-  # production.
+  # (jobs-per-rollover stays flat as speed varies).
+  #
+  # ...up to a point. A rollover simulates container recycling, whose recovery
+  # cost (the reboot) is a fixed *wall*-clock expense that can't scale with sim
+  # speed. So the wall roll rate is floored: the effective speed is capped at
+  # MAX_ROLL_SPEED, guaranteeing a fresh container a mean lifetime of at least
+  # MIN_ROLL_WALL_SECONDS wall-seconds however fast the sim runs. Without it,
+  # past a few × real-time the roll interval collapses below the reboot time and
+  # each domain thrashes (down ~half the time), starving its jobs across
+  # successive rolls until they exhaust their retries. Impedance-matched below
+  # the cap; wall-floored above it. `random`/`speed`/`now` are injectable so the
+  # model is unit-testable despite being random in production.
   class RolloverPolicy
     BASE_ROLL_SECONDS = 240.0 # mean sim-seconds between rolls for a fresh container
     UPTIME_SCALE = 180.0      # sim-age over which the rate roughly doubles (ages the observed mean down)
+    MIN_ROLL_WALL_SECONDS = 60.0 # min WALL seconds a fresh container lives before rolling, at any sim speed
+    MAX_ROLL_SPEED = BASE_ROLL_SECONDS / MIN_ROLL_WALL_SECONDS # effective-speed cap; above it the rate stops climbing
 
     @last_checked = Concurrent::AtomicReference.new
 
@@ -30,11 +41,12 @@ module Sim
       end
 
       # Roll probability over an elapsed-seconds slice, capped at certainty.
-      # Wall quantities convert to sim-seconds up front; no explicit speed
-      # term survives into the formula.
+      # Wall quantities convert to sim-seconds at the (floored) effective speed;
+      # no explicit speed term survives into the formula.
       def hazard(worker_status, speed, elapsed)
-        sim_age = (worker_status&.uptime_s || 0.0) * speed
-        sim_elapsed = elapsed * speed
+        eff = [speed, MAX_ROLL_SPEED].min
+        sim_age = (worker_status&.uptime_s || 0.0) * eff
+        sim_elapsed = elapsed * eff
         [(1 + (sim_age / UPTIME_SCALE)) * sim_elapsed / BASE_ROLL_SECONDS, 1.0].min
       end
 

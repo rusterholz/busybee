@@ -21,6 +21,8 @@ Each tick, `accumulator += orders_per_tick`, then `batch = accumulator.floor` or
 
 **Restocking**: `Sim::GuaranteedRestock` runs before each order enters the BPMN pipeline. It ensures enough inventory exists to fulfill the order, creating a sawtooth restocking pattern (generous restock when any warehouse runs low, partial restock otherwise).
 
+**Worker rollovers**: the business workers recycle themselves like a rolling deploy, so the Monitoring dashboard shows a realistic incarnation history and busybee's graceful-shutdown path is exercised continuously. A non-Sim `around_job` hook (in the busybee initializer) samples a time-rate hazard at each job boundary; when it fires it raises `Sim::Rollover`, a declared shutdown error that busybee turns into a graceful `:unhealthy` shutdown — and `restart: unless-stopped` brings the container back as a fresh incarnation with a new `worker_name`. Rolling *before* `perform` also fails the triggering job, so one hook simulates two production events at once: a rollout and an ordinary transient failure that the engine's retry then recovers. The hazard rises with the worker's `uptime_s` and is computed entirely in sim-seconds, so jobs-per-rollover stays constant across `DEMO_SPEED` (mean time-to-roll is a few minutes per container at speed 1). Sim's own workers are exempt — recycling them mid-flight would stall the pipeline. Set `DEMO_ROLLOVERS=false` to disable rollovers for a stable watch session.
+
 ## Speed Scaling
 
 `DEMO_SPEED` (set via `bin/demo start --speed N`, default 1) affects every time-dependent parameter:
@@ -89,6 +91,8 @@ All constants with their formulas and derivation:
 | Message TTL | `CompleteDriverDeliveryWorker` | 30 seconds | Time window for message correlation before expiry |
 | Order interval | `clock.rb` | `12/speed` seconds | Base order rate |
 | Item count range | `clock.rb` | 3–10 items | Wide range for shipment count variety |
+| `BASE_ROLL_SECONDS` | `Sim::RolloverPolicy` | 240s | Base mean time-to-roll, in sim-seconds |
+| `UPTIME_SCALE` | `Sim::RolloverPolicy` | 180s | Uptime at which the roll hazard doubles |
 
 ## YAML Configuration
 
@@ -107,18 +111,40 @@ Note that some worker settings remain in the DSL (e.g., Sim workers' `complete_j
 
 ## Monitoring & Lifecycle Hooks
 
-The Monitoring domain demonstrates how an app consumes busybee's lifecycle hooks. It owns no business logic — it's a passive recorder plus a read-only dashboard.
+The Monitoring domain demonstrates how an app consumes busybee's lifecycle hooks. It owns no business logic — it's a passive recorder plus a read-only control center — and it records all three of busybee's lifecycle nouns (job, worker, call), each surfaced on the dashboard.
 
-**Data model.** `Monitoring::JobRun` (`monitoring_job_runs`, in the dedicated `monitoring` database) holds one row per job activation, keyed by Zeebe's `job_key` (unique index). The row is upserted across two hook firings: `on_job_activated` creates it (job type, source, buffer depth, `activated_at`); `on_job_executed` completes it (`executed_at`, final status, durations, error). `Monitoring::Recorder` does the upsert with `find_or_initialize_by(job_key:)`.
+**Data model.** Four tables in the dedicated `monitoring` database:
 
-**Async recording.** The hooks fire inline in the runner thread, so `Recorder` must not block it. Each hook **snapshots** the job's fields synchronously (the `Job` is mutated as it progresses, so we can't defer reading it) and `post`s the write to a `Concurrent::SingleThreadExecutor`. The single background thread drains the queue in FIFO order — so a job's activation row is always written before its execution update — and a single writer matches SQLite's one-writer-per-file model. Writes run inside `Monitoring::Record.connection_pool.with_connection`; recording is best-effort, so a failed write is logged and dropped rather than retried into the hot path.
+- `Monitoring::JobRun` — one row per job activation, keyed by Zeebe's `job_key` (unique index): type, source, buffer depth, status, timings, error, and the job's `tags`.
+- `Monitoring::WorkerProcess` — one row per worker *incarnation*, keyed by `(worker_name, job_type)`. The demo gives each container a per-boot-random `worker_name`, so every restart or `Sim` rollover is a new row — the dashboard's incarnation history. Holds the worker's phase, counters, buffer gauges, and lifecycle timestamps.
+- `Monitoring::CallMetric` — the low-cardinality **aggregate**: per `(metric_name, context_tags)` tuple it keeps count / min / max / EWMA / EWMV, so per-RPC and per-worker-class call stats stay O(tuples), not O(calls).
+- `Monitoring::EngineCall` — the high-cardinality **twin**: the call's `logging_context` persisted as one row, ordered by a monotonic `seq`. Only job-correlated calls are recorded (a `job_key` marks a perform-phase call), so the table stays bounded at ~calls-per-job; fetch/poll calls stay aggregate-only.
 
-**Hook registration.** All hooks live in one `Busybee.configure` block in `config/initializers/busybee.rb` (the brownfield-typical shape):
+The last two are the point of the exercise: they render busybee's **two-cardinality contract** — `context_tags` (grouping keys) fold into the aggregate, `logging_context` (measurements) into the per-call record.
 
-- Observability — `on_job_activated` + `on_job_executed` delegating to `Monitoring::Recorder`. The runner fires these with `safe: true`, so a raised error can't disrupt job execution.
-- Per-job transactions — one `around_job` per domain, each wrapping `perform` in a transaction on **that domain's** connection (e.g. `Oms::Record.transaction`). A base-class `ActiveRecord::Base.transaction` would now wrap nothing, since each domain has its own connection. The logistics registration uses the `job_type` array filter to cover its two transactional jobs in one go. `complete_driver_delivery` (publishes a Zeebe message mid-`perform`) and the async Sim jobs are excluded.
+**Hook registration.** All hooks live in one `Busybee.configure` block in `config/initializers/busybee.rb` (the brownfield-typical shape), fired by the runner with `safe: true` so a raised error can't disrupt job execution:
 
-**UI.** `MonitoringController#index` renders a filterable dashboard in its own dark `monitoring` layout (`data-theme="dark"`), so only this area is dark while the business app stays light. Filters — a job-type multi-select plus `status` and `process` (`bpmn_process_id`) dropdowns — are carried in the query string so they survive the page's 5-second auto-refresh (a `<meta http-equiv="refresh">`). `Monitoring::Stats` computes the headline numbers over the filtered scope: total and per-status counts, the max buffer depth, and the mean/max of the total, perform, and buffer-wait durations. **The duration stats are taken over resolved rows only** (`status != "ready"`), so the async workers' dispatch-time near-zeros don't drag the means down — the `ready` count still shows in the status breakdown. The recent-runs table lists each run with its perform/buffer/total timings, `element_id` and `retries` (read from the `tags` JSON), and any error.
+- **Job** — `on_job_activated` / `on_job_executed` → `JobRun`.
+- **Worker** — the four lifecycle hooks (`on_worker_started`, `_stop_requested`, `_stopping`, `_shutdown`) → `WorkerProcess`; `after_call` also refreshes the worker row, so a worker that only fetches still shows live counters.
+- **Call** — `after_call` folds every call into `CallMetric` and, when job-correlated, `EngineCall`.
+- **Per-job transactions** — one `around_job` per domain wrapping `perform` in a transaction on *that domain's* connection (e.g. `Oms::Record.transaction`); a base-class `ActiveRecord::Base.transaction` would wrap nothing now that each domain has its own connection. `complete_driver_delivery` (publishes a Zeebe message mid-`perform`) and the async `Sim` jobs are excluded.
+
+**Async recording & shutdown.** Hooks fire inline on the runner thread, so `Recorder` must not block it: each hook **snapshots** its subject synchronously (the `Job` mutates as it progresses) and `post`s the write to a `Concurrent::SingleThreadExecutor`. One writer matches SQLite's one-writer-per-file model. Because a real sink is out-of-order and at-least-once, each write carries a `(lifecycle_rank, seen_at)` ordering key: the upsert refuses to regress a row a later observation already advanced, but a behind-arriving write may still gap-fill columns it uniquely owns. Recording is best-effort — a failed write is logged and dropped, never retried into the hot path.
+
+The writer must also be **drained before the process exits**. Ruby's shutdown runs `at_exit` handlers, *then* kills surviving threads, *then* runs finalizers — and a writer thread killed mid-SQLite-write leaves the connection's native mutex locked, so the finalizer that closes the database deadlocks and the process never dies. `Recorder.shutdown!`, registered `at_exit`, drains and stops the writer before that thread-kill step; `Recorder.flush` on `on_worker_shutdown` additionally holds the graceful path until the final lifecycle row has landed.
+
+**Resolution folding.** The async `Sim` workers call `complete!`/`fail!` from a background future — *after* `on_job_executed` has already recorded the run, and with no job hook firing at resolution time. So `after_call` folds the resolution RPC's outcome (`complete_job` → `complete`, `fail_job` → `failed`, `throw_bpmn_error` → `error`) back onto the `JobRun` at execution rank. This works because a job's own engine calls self-correlate — the resolution call carries its `job_key` on whatever thread it runs — so the fold knows which run to update. An async run's *status* therefore resolves correctly; only its durations reflect the synchronous dispatch, since the hooks bracket the dispatch, not the deferred future.
+
+**Retention.** `Monitoring::Prune` (run by clockwork every 60s) deletes worker rows and stuck-`ready` runs whose `updated_at` is older than ten minutes, so the incarnation history stays bounded rather than growing without limit.
+
+**The control center.** `MonitoringController` renders a dark dashboard (`data-theme="dark"` on the `monitoring` layout, so only this area is dark) that auto-refreshes every 5 seconds via `<meta http-equiv="refresh">`; filters ride the query string so they survive the refresh. It has:
+
+- **Lifecycle tiles** — Ready / Failed / Error / Complete / Total across the filtered runs.
+- **Worker list** — filterable by phase (default `running`), domain, and job type; each row links to a per-worker **show page** (lifecycle moments with gap-diffs, gauges, full error, and that incarnation's own call log).
+- **Job list** — filterable by type, status, domain, and process; the recent-runs table (capped at ~10) shows each run's timings and unfolds the gRPC calls it made as inline pills, and each run links to a per-run **show page** (timing tiles, the verbatim tag table, and the ordered call sequence, cross-linked back to the workers that made each call).
+- **Engine-call rollups** — `CallMetric` aggregated by RPC and by worker class.
+
+`Monitoring::Stats` computes the headline numbers over the filtered scope; duration means are taken over resolved rows only (`status != "ready"`), so async dispatch-time near-zeros don't drag them down.
 
 ## Test Hardpoints
 
@@ -216,4 +242,4 @@ For bulk order creation in a running Docker stack, prefer the `demo:run_orders` 
 - **Fixed fleet size**. The driver fleet is seeded at startup and doesn't scale dynamically. The checkout/wait queue handles burst load gracefully, but under sustained overload, orders queue up rather than triggering new driver creation.
 - **No BPMN call activities for process chaining**. The `prepare_order` → `ship_order` → `deliver_shipment` chain uses ActiveRecord callbacks instead. This is pragmatic (call activities require parent process awareness of child details) but means the chain isn't visible in a single BPMN diagram.
 - **Inventory is guaranteed**. `GuaranteedRestock` ensures every order can be fulfilled. This makes the demo reliable but removes the "out of stock" scenario that a real system would need to handle.
-- **Async workers record as `ready` in Monitoring**. The Sim workers complete from a background `Concurrent::Promises` future, *after* their `on_job_executed` hook has already fired. So `Monitoring::JobRun` captures them in the `ready` state with a near-zero duration. This is accurate to how busybee's hooks observe an async `perform` — they bracket the synchronous dispatch, not the deferred completion — rather than a recording bug.
+- **Logistics runs more workers than its connection pool**. The logistics process runs 6 workers against a pool of 5 (`database.yml`), so busybee logs a pool-size warning at boot and, under load, a worker can briefly wait on a connection. Harmless at the demo's throughput; the fix is to size the pool to at least the worker count (e.g. via `RAILS_MAX_THREADS`).

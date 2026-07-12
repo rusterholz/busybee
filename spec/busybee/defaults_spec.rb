@@ -28,4 +28,12 @@ RSpec.describe Busybee::Defaults do
   it "defines DEFAULT_BACKPRESSURE_DELAY_MS as 2 seconds" do
     expect(described_class::DEFAULT_BACKPRESSURE_DELAY_MS).to eq(2_000)
   end
+
+  it "defines DEFAULT_KEEPALIVE_INTERVAL_MS as 45 seconds" do
+    expect(described_class::DEFAULT_KEEPALIVE_INTERVAL_MS).to eq(45_000)
+  end
+
+  it "defines DEFAULT_KEEPALIVE_TIMEOUT_MS as 20 seconds" do
+    expect(described_class::DEFAULT_KEEPALIVE_TIMEOUT_MS).to eq(20_000)
+  end
 end
