@@ -89,6 +89,9 @@ services:
     <<: *app
     container_name: busybee-demo-workers-oms
     command: bundle exec busybee --config config/busybee/oms.yml
+    environment:
+      <<: *app-env
+      DEMO_DOMAIN: oms
     depends_on:
       web:
         condition: service_healthy
@@ -103,6 +106,9 @@ services:
     <<: *app
     container_name: busybee-demo-workers-logistics
     command: bundle exec busybee --config config/busybee/logistics.yml
+    environment:
+      <<: *app-env
+      DEMO_DOMAIN: logistics
     depends_on:
       web:
         condition: service_healthy
@@ -117,6 +123,9 @@ services:
     <<: *app
     container_name: busybee-demo-workers-delivery
     command: bundle exec busybee --config config/busybee/delivery.yml
+    environment:
+      <<: *app-env
+      DEMO_DOMAIN: delivery
     depends_on:
       web:
         condition: service_healthy
@@ -131,6 +140,9 @@ services:
     <<: *app
     container_name: busybee-demo-workers-sim
     command: bundle exec busybee --config config/busybee/sim.yml
+    environment:
+      <<: *app-env
+      DEMO_DOMAIN: sim
     depends_on:
       web:
         condition: service_healthy

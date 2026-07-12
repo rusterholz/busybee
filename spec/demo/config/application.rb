@@ -10,6 +10,16 @@ require "active_record/railtie"
 Bundler.require(*Rails.groups)
 
 module Demo
+  # Per-boot worker identity for the running demo stack (wired in development.rb;
+  # application.rb keeps a fixed name for the test env). The random suffix makes
+  # each container boot a distinct incarnation in the monitoring control center;
+  # DEMO_DOMAIN, when set per service, prefixes it for legibility — the
+  # (worker_name, job_type) key already isolates domains without it.
+  def self.worker_name(domain: ENV.fetch("DEMO_DOMAIN", nil), random: SecureRandom.alphanumeric(5))
+    prefix = domain.present? ? "#{domain}-" : ""
+    "#{prefix}worker-#{random}"
+  end
+
   class Application < Rails::Application
     config.load_defaults Rails::VERSION::STRING.to_f
     config.eager_load = false
