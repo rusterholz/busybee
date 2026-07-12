@@ -10,7 +10,20 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 10) do
+ActiveRecord::Schema[8.1].define(version: 11) do
+  create_table "monitoring_call_metrics", id: :string, force: :cascade do |t|
+    t.integer "count", default: 0, null: false
+    t.float "ewma"
+    t.float "ewmv"
+    t.float "maximum"
+    t.string "metric_name", null: false
+    t.float "minimum"
+    t.string "tag_key", null: false
+    t.json "tags"
+    t.index ["metric_name", "tag_key"], name: "index_monitoring_call_metrics_on_metric_name_and_tag_key", unique: true
+    t.index ["metric_name"], name: "index_monitoring_call_metrics_on_metric_name"
+  end
+
   create_table "monitoring_job_runs", id: :string, force: :cascade do |t|
     t.datetime "activated_at"
     t.string "bpmn_process_id"
