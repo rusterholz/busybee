@@ -110,4 +110,28 @@ RSpec.describe Monitoring::Recorder do
       expect(recorded(7777)).to have_attributes(status: "complete", activated_at: be_present)
     end
   end
+
+  describe ".record_call" do
+    it "folds a resolved call's duration into the engine_call metric under its tags" do
+      call = instance_double(
+        Busybee::Client::Call,
+        network_ms: 42.0,
+        context_tags: { rpc: "activate_jobs", worker_class: "Oms::LoadOrderAddressWorker" }
+      )
+
+      described_class.record_call(call)
+
+      metric = Monitoring::CallMetric.find_by(metric_name: "engine_call")
+      expect(metric).to have_attributes(count: 1, ewma: 42.0)
+      expect(metric.tags).to eq("rpc" => "activate_jobs", "worker_class" => "Oms::LoadOrderAddressWorker")
+    end
+
+    it "ignores a call with no observed network time" do
+      call = instance_double(Busybee::Client::Call, network_ms: nil)
+
+      described_class.record_call(call)
+
+      expect(Monitoring::CallMetric.count).to eq(0)
+    end
+  end
 end

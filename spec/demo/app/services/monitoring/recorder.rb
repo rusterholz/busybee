@@ -73,6 +73,15 @@ module Monitoring
                **measurements)
       end
 
+      # Fold a resolved call's duration into the engine_call aggregate under its
+      # low-cardinality tags. Not offloaded — CallMetric's fold is atomic SQL, so
+      # it's safe (and cheaper) to run inline on the calling worker thread.
+      def record_call(call)
+        return if call.network_ms.nil?
+
+        CallMetric.observe("engine_call", call.context_tags, call.network_ms)
+      end
+
       # One background thread, unbounded queue: posts never block the runner, and
       # writes serialize (matching SQLite) in the order they were posted.
       def executor

@@ -18,6 +18,15 @@ Busybee.configure do |config|
   config.on_worker_stopping       { |worker| Monitoring::Recorder.record_worker(:stopping, worker) }
   config.on_worker_shutdown       { |worker| Monitoring::Recorder.record_worker(:shutdown, worker) }
 
+  # Call telemetry: fold every gRPC call (in-job and run-loop) into the engine_call
+  # aggregate, tagged by worker + rpc + status.
+  config.after_call { |call| Monitoring::Recorder.record_call(call) }
+
+  # Keep the running worker's row live between lifecycle events — a call is a free
+  # observation of its Worker::Status, and even a starved worker still fetches. The
+  # (rank, seen_at) guard keeps these :running writes from racing the on_worker_* phases.
+  config.after_call { |call| Monitoring::Recorder.record_worker(:running, call.worker_status) if call.worker_status }
+
   # Per-job transactions: wrap the listed jobs' perform in a transaction on their
   # domain's database, so their writes commit atomically and these jobs no longer
   # open transactions themselves. Registered per job type (the array filter covers
