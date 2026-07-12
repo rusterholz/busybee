@@ -23,7 +23,8 @@ module Monitoring
           bpmn_process_id: job.bpmn_process_id,
           status: job.status.to_s,
           source: job.source&.to_s,
-          buffer_size: job.buffer_size,
+          buffer_size: job.worker_status&.current_buffer_size,
+          buffered: job.buffered?,
           activated_at: job.activated_at,
           tags: job.context_tags
         )

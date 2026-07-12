@@ -53,6 +53,7 @@
       <article class="stat-card"><h2 class="status-<%= status %>"><%= count %></h2><small><%= status %></small></article>
     <% end %>
     <article class="stat-card"><h2><%= @stats.max_buffer_depth || 0 %></h2><small>max buffer depth</small></article>
+    <article class="stat-card"><h2><%= @stats.buffered_count %></h2><small>buffered</small></article>
   </div>
 
   <table>
@@ -79,6 +80,7 @@
           <th>Element</th>
           <th>Src</th>
           <th class="num">Buf</th>
+          <th>Buffered</th>
           <th class="num">Perform</th>
           <th class="num">Buffer</th>
           <th class="num">Total</th>
@@ -97,6 +99,7 @@
             <td><%= tags["element_id"] %></td>
             <td><%= run.source %></td>
             <td class="num"><%= run.buffer_size.nil? ? "—" : run.buffer_size %></td>
+            <td><%= run.buffered ? "✓" : "—" %></td>
             <td class="num"><%= fmt_ms.(run.perform_duration_ms) %></td>
             <td class="num"><%= fmt_ms.(run.buffer_latency_ms) %></td>
             <td class="num"><%= fmt_ms.(run.total_duration_ms) %></td>

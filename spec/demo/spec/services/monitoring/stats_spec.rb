@@ -52,4 +52,15 @@ RSpec.describe Monitoring::Stats do
       expect(stats.max_buffer_depth).to eq(7)
     end
   end
+
+  describe "#buffered_count" do
+    it "counts runs that were buffered on activation" do
+      create_run(buffered: true)
+      create_run(buffered: true)
+      create_run(buffered: false)
+      create_run(buffered: nil)
+
+      expect(stats.buffered_count).to eq(2)
+    end
+  end
 end

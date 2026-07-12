@@ -33,5 +33,9 @@ module Monitoring
     # Instantaneous gauge rather than a time-average: the deepest buffer seen
     # across the current selection (max across job types when several are shown).
     def max_buffer_depth = @scope.maximum(:buffer_size)
+
+    # How many runs arrived buffered (activated onto the stream while a job was
+    # already in flight) — hybrid mode's stream/poll split made visible.
+    def buffered_count = @scope.where(buffered: true).count
   end
 end
