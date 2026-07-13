@@ -88,6 +88,7 @@ services:
   workers_oms:
     <<: *app
     container_name: busybee-demo-workers-oms
+    restart: unless-stopped
     command: bundle exec busybee --config config/busybee/oms.yml
     environment:
       <<: *app-env
@@ -105,6 +106,7 @@ services:
   workers_logistics:
     <<: *app
     container_name: busybee-demo-workers-logistics
+    restart: unless-stopped
     command: bundle exec busybee --config config/busybee/logistics.yml
     environment:
       <<: *app-env
@@ -122,6 +124,7 @@ services:
   workers_delivery:
     <<: *app
     container_name: busybee-demo-workers-delivery
+    restart: unless-stopped
     command: bundle exec busybee --config config/busybee/delivery.yml
     environment:
       <<: *app-env
@@ -139,6 +142,7 @@ services:
   workers_sim:
     <<: *app
     container_name: busybee-demo-workers-sim
+    restart: unless-stopped
     command: bundle exec busybee --config config/busybee/sim.yml
     environment:
       <<: *app-env

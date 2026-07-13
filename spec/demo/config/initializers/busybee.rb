@@ -1,39 +1,26 @@
 # frozen_string_literal: true
 
-# All of the demo app's busybee hook configuration in one Busybee.configure
-# block — the way you'd typically wire busybee into a brownfield application.
-# (Connection settings live separately, in config/application.rb.)
+# All of the demo's busybee hook wiring in one Busybee.configure block — how you'd
+# wire it into a brownfield app. (Connection config lives in application.rb.)
 Busybee.configure do |config|
-  # Observability: record every job run into Monitoring::JobRun — the demo's
-  # stand-in for a Datadog/OTel sink. These hooks are fired by the runner with
-  # safe: true (a failure can't disrupt job execution), and the recorder offloads
-  # the write to a background thread so it never blocks the runner.
+  # Record each job run into Monitoring::JobRun — the demo's Datadog/OTel stand-in.
   config.on_job_activated { |job| Monitoring::Recorder.record_activation(job) }
   config.on_job_executed  { |job| Monitoring::Recorder.record_execution(job) }
 
-  # Worker lifecycle: upsert each worker's phase into Monitoring::WorkerProcess as
-  # it moves through its run — the control center's "who's alive / what rolled" view.
+  # Upsert each worker's phase into Monitoring::WorkerProcess as its run progresses.
   config.on_worker_started        { |worker| Monitoring::Recorder.record_worker(:running, worker) }
   config.on_worker_stop_requested { |worker| Monitoring::Recorder.record_worker(:stop_requested, worker) }
   config.on_worker_stopping       { |worker| Monitoring::Recorder.record_worker(:stopping, worker) }
   config.on_worker_shutdown       { |worker| Monitoring::Recorder.record_worker(:shutdown, worker) }
 
-  # Call telemetry: fold every gRPC call (in-job and run-loop) into the engine_call
-  # aggregate, tagged by worker + rpc + status.
+  # Fold every gRPC call into the engine_call aggregate.
   config.after_call { |call| Monitoring::Recorder.record_call(call) }
-
-  # Keep the running worker's row live between lifecycle events — a call is a free
-  # observation of its Worker::Status, and even a starved worker still fetches. The
-  # (rank, seen_at) guard keeps these :running writes from racing the on_worker_* phases.
+  # ...and refresh the worker's row from each call — keeps counters live, even for idle workers that only fetch.
   config.after_call { |call| Monitoring::Recorder.record_worker(:running, call.worker_status) if call.worker_status }
 
-  # Per-job transactions: wrap the listed jobs' perform in a transaction on their
-  # domain's database, so their writes commit atomically and these jobs no longer
-  # open transactions themselves. Registered per job type (the array filter covers
-  # logistics' two in one go). Deliberately NOT applied to: the async sim jobs
-  # (perform returns before the work runs, so a transaction would wrap nothing)
-  # and complete_driver_delivery (publishes a Zeebe message a transaction can't
-  # roll back).
+  # Wrap these jobs' perform in a domain transaction. Not the async sim jobs (perform
+  # returns before the work runs) nor complete_driver_delivery (publishes a message a
+  # transaction can't undo).
   config.around_job(job_type: "update_order_status") do |_job, perform|
     Oms::Record.transaction { perform.call }
   end
@@ -45,4 +32,25 @@ Busybee.configure do |config|
   config.around_job(job_type: "assign_driver") do |_job, perform|
     Delivery::Record.transaction { perform.call }
   end
+
+  # Simulated rollovers: recycle the business workers like a k8s rollout. A per-job
+  # hazard (rising with lifetime × sim speed) raises Sim::Rollover — a declared
+  # shutdown error → graceful :unhealthy shutdown; restart: unless-stopped (compose)
+  # then returns the container as a fresh incarnation. Sim's async workers are exempt.
+  config.around_job do |job, perform|
+    # Rolling *before* perform (not from on_job_executed) also fails-and-retries the
+    # pending job — so this one hook simulates two unrelated production behaviours: a
+    # rollout, and an ordinary job failure/retry (which nothing else here exercises).
+    if !job.worker_class.name.start_with?("Sim::") && Sim::RolloverPolicy.roll?(job.worker_status)
+      raise Sim::Rollover, "rolling over #{job.worker_status&.worker_name}"
+    end
+
+    perform.call
+  end
+end
+
+# Sim::Rollover is app-autoloaded, so it isn't resolvable while initializers run;
+# declare it a shutdown error post-boot (to_prepare re-runs on reload to stay fresh).
+Rails.application.config.to_prepare do
+  Busybee.configure { |config| config.shutdown_on_errors = [Sim::Rollover] }
 end
