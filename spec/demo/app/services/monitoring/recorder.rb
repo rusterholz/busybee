@@ -73,13 +73,17 @@ module Monitoring
                **measurements)
       end
 
-      # Fold a resolved call's duration into the engine_call aggregate under its
-      # low-cardinality tags. Not offloaded — CallMetric's fold is atomic SQL, so
-      # it's safe (and cheaper) to run inline on the calling worker thread.
+      # Fold a resolved call two ways — the call stream projected across both
+      # cardinalities. Low-card: its duration into the engine_call aggregate under
+      # its context_tags. High-card: its logging_context as an EngineCall row, but
+      # only for perform-phase calls (EngineCall.record no-ops without a job_key),
+      # so the per-job log stays bounded. Neither is offloaded — both are atomic
+      # single-statement writes, safe (and cheaper) inline on the worker thread.
       def record_call(call)
         return if call.network_ms.nil?
 
         CallMetric.observe("engine_call", call.context_tags, call.network_ms)
+        EngineCall.record(call, seq: monotonic_seq)
       end
 
       # One background thread, unbounded queue: posts never block the runner, and

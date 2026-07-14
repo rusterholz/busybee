@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 # This file is auto-generated from the current state of the database. Instead
 # of editing this file, please use the migrations feature of Active Record to
 # incrementally modify your database, and then regenerate this schema definition.
@@ -10,7 +12,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 11) do
+ActiveRecord::Schema[8.1].define(version: 12) do
   create_table "monitoring_call_metrics", id: :string, force: :cascade do |t|
     t.integer "count", default: 0, null: false
     t.float "ewma"
@@ -20,8 +22,22 @@ ActiveRecord::Schema[8.1].define(version: 11) do
     t.float "minimum"
     t.string "tag_key", null: false
     t.json "tags"
-    t.index ["metric_name", "tag_key"], name: "index_monitoring_call_metrics_on_metric_name_and_tag_key", unique: true
+    t.index %w[metric_name tag_key], name: "index_monitoring_call_metrics_on_metric_name_and_tag_key", unique: true
     t.index ["metric_name"], name: "index_monitoring_call_metrics_on_metric_name"
+  end
+
+  create_table "monitoring_engine_calls", id: :string, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "error_class"
+    t.bigint "job_key", null: false
+    t.float "network_ms"
+    t.string "rpc", null: false
+    t.float "seq", null: false
+    t.string "status"
+    t.datetime "updated_at", null: false
+    t.string "worker_name"
+    t.index ["job_key"], name: "index_monitoring_engine_calls_on_job_key"
+    t.index ["worker_name"], name: "index_monitoring_engine_calls_on_worker_name"
   end
 
   create_table "monitoring_job_runs", id: :string, force: :cascade do |t|
@@ -74,6 +90,7 @@ ActiveRecord::Schema[8.1].define(version: 11) do
     t.string "worker_name", null: false
     t.index ["job_type"], name: "index_monitoring_worker_processes_on_job_type"
     t.index ["status"], name: "index_monitoring_worker_processes_on_status"
-    t.index ["worker_name", "job_type"], name: "index_monitoring_worker_processes_on_worker_name_and_job_type", unique: true
+    t.index %w[worker_name job_type], name: "index_monitoring_worker_processes_on_worker_name_and_job_type",
+                                      unique: true
   end
 end

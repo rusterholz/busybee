@@ -113,10 +113,12 @@ RSpec.describe Monitoring::Recorder do
 
   describe ".record_call" do
     it "folds a resolved call's duration into the engine_call metric under its tags" do
+      # A fetch call: no job in scope, so logging_context carries no job_key.
       call = instance_double(
         Busybee::Client::Call,
         network_ms: 42.0,
-        context_tags: { rpc: "activate_jobs", worker_class: "Oms::LoadOrderAddressWorker" }
+        context_tags: { rpc: "activate_jobs", worker_class: "Oms::LoadOrderAddressWorker" },
+        logging_context: { rpc: "activate_jobs", worker_class: "Oms::LoadOrderAddressWorker", network_ms: 42.0 }
       )
 
       described_class.record_call(call)
@@ -124,6 +126,23 @@ RSpec.describe Monitoring::Recorder do
       metric = Monitoring::CallMetric.find_by(metric_name: "engine_call")
       expect(metric).to have_attributes(count: 1, ewma: 42.0)
       expect(metric.tags).to eq("rpc" => "activate_jobs", "worker_class" => "Oms::LoadOrderAddressWorker")
+      expect(Monitoring::EngineCall.count).to eq(0) # a fetch call is aggregate-only
+    end
+
+    it "also records a job-correlated call as an EngineCall row (the per-job log twin)" do
+      call = instance_double(
+        Busybee::Client::Call,
+        network_ms: 117.0,
+        context_tags: { rpc: "complete_job", worker_class: "Oms::UpdateOrderStatusWorker" },
+        logging_context: { rpc: "complete_job", worker_name: "oms-worker-ab12", job_key: 476,
+                           status: :succeeded, network_ms: 117.0 }
+      )
+
+      described_class.record_call(call)
+
+      expect(Monitoring::EngineCall.for_job(476).sole).to have_attributes(
+        rpc: "complete_job", worker_name: "oms-worker-ab12", network_ms: 117.0, status: "succeeded"
+      )
     end
 
     it "ignores a call with no observed network time" do
@@ -132,6 +151,7 @@ RSpec.describe Monitoring::Recorder do
       described_class.record_call(call)
 
       expect(Monitoring::CallMetric.count).to eq(0)
+      expect(Monitoring::EngineCall.count).to eq(0)
     end
   end
 end
