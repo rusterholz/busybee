@@ -41,7 +41,8 @@ Busybee.configure do |config|
     # Rolling *before* perform (not from on_job_executed) also fails-and-retries the
     # pending job — so this one hook simulates two unrelated production behaviours: a
     # rollout, and an ordinary job failure/retry (which nothing else here exercises).
-    if !job.worker_class.name.start_with?("Sim::") && Sim::RolloverPolicy.roll?(job.worker_status)
+    if Rails.application.config.x.demo.rollovers_enabled &&
+       !job.worker_class.name.start_with?("Sim::") && Sim::RolloverPolicy.roll?(job.worker_status)
       raise Sim::Rollover, "rolling over #{job.worker_status&.worker_name}"
     end
 
