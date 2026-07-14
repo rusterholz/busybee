@@ -60,6 +60,14 @@ RSpec.describe Monitoring::Recorder do
       )
     end
 
+    it "captures the recorder's write-queue backlog as a liveness gauge" do
+      allow(described_class).to receive(:queue_depth).and_return(5)
+
+      described_class.record_worker(:running, worker_status)
+
+      expect(process.write_queue_depth).to eq(5)
+    end
+
     it "advances the same row through the lifecycle (upsert by identity, not a new row)" do
       described_class.record_worker(:running, worker_status)
       described_class.record_worker(:shutdown, worker_status(reason: :rollover))

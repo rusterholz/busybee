@@ -54,23 +54,11 @@ module Monitoring
       # Upsert a worker's current lifecycle phase, keyed by its container identity
       # (worker_name is unique per boot, so each incarnation is its own row).
       def record_worker(status, worker)
-        # The high-cardinality measurements — counters, buffer gauges, lifecycle
-        # timestamps — read uniformly off the status snapshot.
-        measurements = %i[total_job_count failed_job_count backpressure_count
-                          current_buffer_size peak_buffer_size started_at
-                          stop_requested_at stopping_at shutdown_at].
-                       index_with { |reader| worker.public_send(reader) }
-
         upsert(WorkerProcess,
                { worker_name: worker.worker_name, job_type: worker.job_type },
                rank: WORKER_PHASES.fetch(status),
                status: status.to_s,
-               worker_class: worker.worker_class.name,
-               worker_mode: worker.worker_mode.to_s,
-               reason: worker.reason&.to_s,
-               error_class: worker.error_class&.name,
-               error_message: worker.error_message,
-               **measurements)
+               **worker_columns(worker))
       end
 
       # Fold a resolved call two ways — the call stream projected across both
@@ -129,7 +117,30 @@ module Monitoring
         end
       end
 
+      # A worker's descriptive columns: identity/outcome (scalarised for storage)
+      # plus the high-cardinality gauges/counters/timestamps read uniformly off the
+      # status snapshot, plus the recorder's own write backlog.
+      def worker_columns(worker)
+        gauges = %i[total_job_count failed_job_count backpressure_count
+                    current_buffer_size peak_buffer_size started_at
+                    stop_requested_at stopping_at shutdown_at].
+                 index_with { |reader| worker.public_send(reader) }
+
+        { worker_class: worker.worker_class.name,
+          worker_mode: worker.worker_mode.to_s,
+          reason: worker.reason&.to_s,
+          error_class: worker.error_class&.name,
+          error_message: worker.error_message,
+          write_queue_depth: queue_depth,
+          **gauges }
+      end
+
       def monotonic_seq = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      # The recorder's own write backlog, sampled synchronously in the hook — a
+      # "how live is this?" gauge persisted per worker. An immediate executor
+      # (tests) doesn't queue, so it has no backlog.
+      def queue_depth = executor.respond_to?(:queue_length) ? executor.queue_length : 0
     end
   end
 end

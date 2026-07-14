@@ -12,7 +12,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 12) do
+ActiveRecord::Schema[8.1].define(version: 13) do
   create_table "monitoring_call_metrics", id: :string, force: :cascade do |t|
     t.integer "count", default: 0, null: false
     t.float "ewma"
@@ -88,6 +88,7 @@ ActiveRecord::Schema[8.1].define(version: 12) do
     t.string "worker_class"
     t.string "worker_mode"
     t.string "worker_name", null: false
+    t.integer "write_queue_depth"
     t.index ["job_type"], name: "index_monitoring_worker_processes_on_job_type"
     t.index ["status"], name: "index_monitoring_worker_processes_on_status"
     t.index %w[worker_name job_type], name: "index_monitoring_worker_processes_on_worker_name_and_job_type",
