@@ -28,6 +28,11 @@ RSpec.describe Sim::RolloverPolicy do
     it "never exceeds certainty" do
       expect(described_class.hazard(status(1_000_000), 1000.0, 3600.0)).to eq(1.0)
     end
+
+    it "depends only on sim-time (speed × wall quantities), so speed is impedance-matched" do
+      expect(described_class.hazard(status(120), 2.0, 5.0)).
+        to be_within(1e-9).of(described_class.hazard(status(240), 1.0, 10.0))
+    end
   end
 
   describe ".roll" do
