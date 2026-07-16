@@ -63,4 +63,17 @@ RSpec.describe Monitoring::Stats do
       expect(stats.buffered_count).to eq(2)
     end
   end
+
+  describe "#by_job_type" do
+    it "breaks totals, outcomes and typical duration down per type, busiest first" do
+      create_run(job_type: "assign_driver", status: "complete", total_duration_ms: 100)
+      create_run(job_type: "assign_driver", status: "failed", total_duration_ms: 200)
+      create_run(job_type: "create_shipment", status: "complete", total_duration_ms: 50)
+
+      rows = stats.by_job_type
+      expect(rows.map { |r| r[:job_type] }).to eq(%w[assign_driver create_shipment])
+      expect(rows.first).to include(job_type: "assign_driver", total: 2, complete: 1, failed: 1, error: 0)
+      expect(rows.first[:mean_total_ms]).to eq(150.0)
+    end
+  end
 end

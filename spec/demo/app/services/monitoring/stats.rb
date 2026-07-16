@@ -37,5 +37,25 @@ module Monitoring
     # How many runs arrived buffered (activated onto the stream while a job was
     # already in flight) — hybrid mode's stream/poll split made visible.
     def buffered_count = @scope.where(buffered: true).count
+
+    # Per-job-type rollup for the contract view: [{ job_type:, total:, complete:,
+    # failed:, error:, mean_total_ms: }], busiest first. Means over resolved rows
+    # only (same async-dispatch caveat as the scalar timings above).
+    def by_job_type
+      by_status = @scope.group(:job_type, :status).count
+      means = @resolved.group(:job_type).average(:total_duration_ms)
+      rows = @scope.group(:job_type).count.map { |job_type, total| job_type_row(job_type, total, by_status, means) }
+      rows.sort_by { |row| [-row[:total], row[:job_type].to_s] }
+    end
+
+    private
+
+    def job_type_row(job_type, total, by_status, means)
+      { job_type: job_type, total: total,
+        complete: by_status.fetch([job_type, "complete"], 0),
+        failed: by_status.fetch([job_type, "failed"], 0),
+        error: by_status.fetch([job_type, "error"], 0),
+        mean_total_ms: means[job_type]&.to_f }
+    end
   end
 end
