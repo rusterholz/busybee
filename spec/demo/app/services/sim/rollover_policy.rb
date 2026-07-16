@@ -1,32 +1,51 @@
 # frozen_string_literal: true
 
 module Sim
-  # The shadow orchestrator's roll decision: a per-job coin flip whose hazard
-  # climbs with the worker's uptime and scales with simulation speed —
-  # modelling a deploy/rollout cadence (older pods get recycled; a faster-running
-  # sim rolls proportionally more often). `random` and `speed` are injectable so
-  # the model is unit-testable despite being random in production.
+  # The shadow orchestrator's roll decision: a hazard *rate* sampled at job
+  # boundaries. Each check converts the time since this container's previous
+  # check into a roll probability, so cadence tracks wall-clock (about one
+  # roll per BASE_ROLL_SECONDS at speed 1.0, any throughput) instead of job
+  # count — a busy container checks often over tiny slices, a quiet one
+  # rarely over wide ones, and the expected rolls per minute come out equal.
+  # The rate climbs with the worker's uptime (older incarnations get recycled
+  # first) and scales with simulation speed. `random`/`speed`/`now` are
+  # injectable so the model is unit-testable despite being random in production.
   class RolloverPolicy
-    BASE_HAZARD = 0.02  # per-job roll chance for a brand-new worker at speed 1.0
-    UPTIME_SCALE = 60.0 # seconds of uptime over which the hazard roughly doubles
+    BASE_ROLL_SECONDS = 240.0 # mean seconds between rolls for a fresh container at speed 1.0
+    UPTIME_SCALE = 180.0      # uptime over which the rate roughly doubles (ages the observed mean down)
+
+    @last_checked = Concurrent::AtomicReference.new
 
     class << self
-      def roll?(worker_status, speed: default_speed, random: rand)
-        random < hazard(worker_status, speed)
+      # Evaluate the hazard over the elapsed slice; returns the probability
+      # that fired (for logging) or nil. Consumes the slice either way — the
+      # next check starts fresh.
+      def roll(worker_status, speed: default_speed, random: rand, now: monotonic_now)
+        p = hazard(worker_status, speed, interval(now))
+        p if random < p
       end
 
-      # Per-job roll probability, capped at certainty.
-      def hazard(worker_status, speed)
+      # Roll probability over an elapsed-seconds slice, capped at certainty.
+      def hazard(worker_status, speed, elapsed)
         uptime = worker_status&.uptime_s || 0.0
-        [BASE_HAZARD * (1 + (uptime / UPTIME_SCALE)) * speed, 1.0].min
+        rate = (1 + (uptime / UPTIME_SCALE)) / BASE_ROLL_SECONDS
+        [rate * speed * elapsed, 1.0].min
       end
 
-      # The hazard at the current sim speed — for logging the p that fired a roll.
-      def hazard_for(worker_status) = hazard(worker_status, default_speed)
+      # Forget the current slice (test isolation).
+      def reset! = @last_checked.set(nil)
 
       private
 
+      # Seconds since the previous check. The first check ever is a zero-width
+      # slice: a brand-new container never rolls on its first job.
+      def interval(now)
+        previous = @last_checked.get_and_set(now)
+        previous ? now - previous : 0.0
+      end
+
       def default_speed = Rails.application.config.x.demo.simulation_speed
+      def monotonic_now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
   end
 end

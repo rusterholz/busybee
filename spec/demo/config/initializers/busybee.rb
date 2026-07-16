@@ -33,19 +33,19 @@ Busybee.configure do |config|
     Delivery::Record.transaction { perform.call }
   end
 
-  # Simulated rollovers: recycle the business workers like a k8s rollout. A per-job
-  # hazard (rising with uptime × sim speed) raises Sim::Rollover — a declared
-  # shutdown error → graceful :unhealthy shutdown; restart: unless-stopped (compose)
-  # then returns the container as a fresh incarnation. Sim's async workers are exempt.
+  # Simulated rollovers: recycle the business workers like a k8s rollout. A
+  # time-rate hazard (rising with uptime × sim speed, sampled at job boundaries)
+  # raises Sim::Rollover — a declared shutdown error → graceful :unhealthy
+  # shutdown; restart: unless-stopped (compose) then returns the container as a
+  # fresh incarnation. Sim's async workers are exempt.
   config.around_job do |job, perform|
     # Rolling *before* perform (not from on_job_executed) also fails the pending job —
     # so this one hook simulates two production behaviours at once: a rollout, and an
     # ordinary transient job failure that the engine's retry budget then recovers.
     ws = job.worker_status
     if Rails.application.config.x.demo.rollovers_enabled &&
-       !job.worker_class.name.start_with?("Sim::") && Sim::RolloverPolicy.roll?(ws)
-      Rails.logger.info("[sim] rolling over #{ws&.worker_name} " \
-                        "(p=#{Sim::RolloverPolicy.hazard_for(ws).round(5)}, uptime=#{ws&.uptime_s}s)")
+       !job.worker_class.name.start_with?("Sim::") && (p = Sim::RolloverPolicy.roll(ws))
+      Rails.logger.info("[sim] rolling over #{ws&.worker_name} (p=#{p.round(5)}, uptime=#{ws&.uptime_s}s)")
       raise Sim::Rollover, "rolling over #{ws&.worker_name}"
     end
 
