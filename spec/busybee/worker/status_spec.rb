@@ -156,6 +156,7 @@ RSpec.describe Busybee::Worker::Status do
         expect(log).to include(total_job_count: 3, failed_job_count: 1, backpressure_count: 2)
         expect(log).to include(current_buffer_size: 5, peak_buffer_size: 9)
         expect(log).to include(error_message: "boom", started_at: status.started_at)
+        expect(log[:uptime_s]).to be_a(Float)
       end
     end
 

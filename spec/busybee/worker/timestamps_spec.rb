@@ -40,7 +40,6 @@ RSpec.describe Busybee::Worker::Timestamps do
       ts = described_class.new
       expect(ts.stop_duration_ms).to be_nil
       expect(ts.stop_latency_ms).to be_nil
-      expect(ts.lifetime_s).to be_nil
     end
 
     it "computes a non-negative stop_duration_ms (stopping → shutdown)" do
@@ -57,11 +56,14 @@ RSpec.describe Busybee::Worker::Timestamps do
       expect(ts.stop_latency_ms).to be >= 0
     end
 
-    it "computes a non-negative lifetime_s in seconds (started → shutdown)" do
+    it "computes uptime_s as live seconds since started_at, re-read each call" do
+      allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).
+        and_return(100.0, 105.5, 107.2)
       ts = described_class.new
+      expect(ts.uptime_s).to be_nil
       ts.stamp!(:started_at)
-      ts.stamp!(:shutdown_at)
-      expect(ts.lifetime_s).to be >= 0
+      expect(ts.uptime_s).to eq(5.5)
+      expect(ts.uptime_s).to eq(7.2) # ticking: no shutdown stamp needed
     end
   end
 end

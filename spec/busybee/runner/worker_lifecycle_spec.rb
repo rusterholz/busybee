@@ -147,7 +147,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
         expect(captured.worker_name).to eq(Busybee.worker_name)
         expect(captured.started_at).to be_a(Time)
         expect(captured.shutdown_at).to be_a(Time)
-        expect(captured.lifetime_s).to be_a(Float)
+        expect(captured.uptime_s).to be_a(Float)
       end
     end
 

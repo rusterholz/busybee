@@ -82,7 +82,7 @@ RSpec.describe "Worker lifecycle hooks", :integration do
       expect(status.stop_requested_at).to be_a(Time)
       expect(status.stopping_at).to be_a(Time)
       expect(status.shutdown_at).to be_a(Time)
-      expect(status.lifetime_s).to be_a(Float)
+      expect(status.uptime_s).to be_a(Float)
       expect(status.reason).to eq(:signal) # clean stop, no error
       expect(status.error).to be_nil
       expect(status.total_job_count).to be >= 1

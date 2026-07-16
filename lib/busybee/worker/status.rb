@@ -28,7 +28,7 @@ module Busybee
       # Lifecycle timing — read off the snapshotted Worker::Timestamps; the
       # per-moment readers forward their (type = :utc) kind argument.
       delegate :started_at, :stop_requested_at, :stopping_at, :shutdown_at,
-               :stop_duration_ms, :stop_latency_ms, :lifetime_s, to: :timestamps
+               :stop_duration_ms, :stop_latency_ms, :uptime_s, to: :timestamps
 
       # Container identity (Busybee.worker_name) — not the per-job worker.
       delegate :worker_name, to: :Busybee
@@ -82,7 +82,7 @@ module Busybee
           merge(
             stop_duration_ms: stop_duration_ms,
             stop_latency_ms: stop_latency_ms,
-            lifetime_s: lifetime_s,
+            uptime_s: uptime_s,
             total_job_count: total_job_count,
             failed_job_count: failed_job_count,
             backpressure_count: backpressure_count,
