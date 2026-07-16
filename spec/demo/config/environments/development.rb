@@ -13,7 +13,11 @@ Rails.application.configure do
   if ENV["RAILS_LOG_TO_STDOUT"].present?
     $stdout.sync = true
     config.logger = ActiveSupport::Logger.new($stdout)
-    config.logger.formatter = config.log_formatter
+    # Stamp every line with a UTC time so container logs read on a timeline —
+    # busybee's JSON payloads and the sim's rollover notices alike.
+    config.logger.formatter = proc do |severity, time, _progname, msg|
+      "#{time.utc.iso8601(3)} #{severity.ljust(5)} #{msg}\n"
+    end
     config.log_level = :info
   end
 end

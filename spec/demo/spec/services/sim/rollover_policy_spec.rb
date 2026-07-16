@@ -3,10 +3,10 @@
 require_relative "../../rails_helper"
 
 RSpec.describe Sim::RolloverPolicy do
-  def status(lifetime) = instance_double(Busybee::Worker::Status, lifetime_s: lifetime)
+  def status(uptime) = instance_double(Busybee::Worker::Status, uptime_s: uptime)
 
   describe ".hazard" do
-    it "rises with the worker's lifetime" do
+    it "rises with the worker's uptime" do
       expect(described_class.hazard(status(120), 1.0)).to be > described_class.hazard(status(0), 1.0)
     end
 
@@ -18,6 +18,12 @@ RSpec.describe Sim::RolloverPolicy do
 
     it "never exceeds certainty" do
       expect(described_class.hazard(status(1_000_000), 1000.0)).to eq(1.0)
+    end
+  end
+
+  describe ".hazard_for" do
+    it "uses the configured simulation speed (1.0 under test)" do
+      expect(described_class.hazard_for(status(0))).to be_within(1e-9).of(0.02)
     end
   end
 
