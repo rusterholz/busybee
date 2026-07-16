@@ -235,7 +235,7 @@ RSpec.describe Busybee::CLI do
     end
 
     context "with Rails environment loading" do
-      it "requires config/environment when Rails is available" do
+      it "requires the Railtie then config/environment when Rails is available" do
         loaded_paths = []
         allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
           loaded_paths << path
@@ -243,7 +243,9 @@ RSpec.describe Busybee::CLI do
         end
 
         described_class.new(["TestCLIWorker"])
-        expect(loaded_paths).to eq(["rails", "./config/environment"])
+        # Railtie must load after Rails but before config/environment's initialize!,
+        # or config.x.busybee.* is silently ignored in CLI workers.
+        expect(loaded_paths).to eq(["rails", "busybee/railtie", "./config/environment"])
       end
 
       it "skips Rails loading when rails gem is not available" do
