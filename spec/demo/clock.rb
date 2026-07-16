@@ -32,7 +32,11 @@ module Clockwork
       customer = Faker::Name.name
       items = catalog.sample(rand(3..10))
 
-      order = ActiveRecord::Base.transaction do
+      # Oms::Record.transaction (not ActiveRecord::Base): Oms has its own connection
+      # pool via connects_to, so an AR::Base transaction wouldn't bracket these writes —
+      # Order.create! would commit and fire its after_commit hooks (prepare_order) before
+      # the line items exist, serialising an itemless order. (run_orders already does this.)
+      order = Oms::Record.transaction do
         Oms::Order.create!(
           customer_name: customer,
           address_line_1: Faker::Address.street_address,
