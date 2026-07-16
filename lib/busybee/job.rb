@@ -170,7 +170,9 @@ module Busybee
                    end
       resolution.set_error(error_data)
 
-      @client.fail_job(key, message, retries: retries, backoff: backoff).tap do
+      new_retries = next_retries(retries)
+      @client.fail_job(key, message, retries: new_retries, backoff: backoff).tap do
+        @retries_override = new_retries
         resolve!(:failed)
       end
     end
@@ -223,6 +225,13 @@ module Busybee
     private
 
     attr_reader :activation, :resolution
+
+    # Failing spends one retry — Zeebe doesn't auto-decrement on FailJob, the
+    # worker owns it. A bare fail! decrements the current count; an explicit
+    # retries: (incl. 0) sets it outright. Either way #retries mirrors it after.
+    def next_retries(explicit)
+      explicit || ((@retries_override || payload.retries) - 1)
+    end
 
     # Mark the job resolved: stamp resolved_at, advance the Resolution PORO
     # to the terminal status (fire-once enforced). Outcome data (result /
