@@ -11,6 +11,7 @@ x-app: &app
     RAILS_ENV: development
     RAILS_LOG_TO_STDOUT: "true"
     DEMO_SPEED: ${DEMO_SPEED:-1.0}
+    DEMO_ROLLOVERS: ${DEMO_ROLLOVERS:-true}
   networks:
     - camunda
   volumes:
