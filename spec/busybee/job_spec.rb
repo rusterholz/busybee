@@ -931,6 +931,38 @@ RSpec.describe Busybee::Job do
     end
   end
 
+  describe "call correlation" do
+    # A job's own engine calls must carry the job whatever the thread — a
+    # manual complete! from outside the perform window (an async worker's own
+    # thread) would otherwise build an uncorrelated Call.
+    it "seeds itself as the correlation job for the duration of complete!" do
+      seen = :unset
+      allow(client).to receive(:complete_job) { seen = Busybee::Client::Call.current_job }
+
+      job.complete!
+
+      expect(seen).to be(job)
+      expect(Busybee::Client::Call.current_job).to be_nil
+    end
+
+    it "seeds itself during fail!, throw_bpmn_error!, and the update calls" do
+      seen = {}
+      %i[fail_job throw_bpmn_error update_job_retries update_job_timeout].each do |op|
+        allow(client).to receive(op) { seen[op] = Busybee::Client::Call.current_job }
+      end
+      failer = described_class.new(raw_job, client: client)
+      thrower = described_class.new(raw_job, client: client)
+
+      failer.fail!("boom")
+      thrower.throw_bpmn_error!("CODE")
+      job.update_retries(5)
+      job.update_timeout(30_000)
+
+      expect(seen).to eq(fail_job: failer, throw_bpmn_error: thrower,
+                         update_job_retries: job, update_job_timeout: job)
+    end
+  end
+
   describe "#update_retries" do
     it "calls client.update_job_retries with job key and count" do
       allow(client).to receive(:update_job_retries)
