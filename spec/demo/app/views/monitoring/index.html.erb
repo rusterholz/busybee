@@ -22,7 +22,46 @@
 </section>
 
 <section>
-  <h2>Workers <small>— every incarnation, newest first (a rolled worker leaves its predecessor here)</small></h2>
+  <h2>Workers <small>— live incarnations by default; filter for the graveyard (dead rows pruned after ~10 minutes)</small></h2>
+
+  <form method="get" action="<%= monitoring_path %>" class="filters">
+    <%# carry the job-section filters so the two forms compose %>
+    <% @selected_types.each do |jt| %><input type="hidden" name="job_types[]" value="<%= jt %>"><% end %>
+    <input type="hidden" name="status" value="<%= @selected_status %>">
+    <input type="hidden" name="process" value="<%= @selected_process %>">
+    <input type="hidden" name="domain" value="<%= @selected_domain %>">
+    <div class="filter-grid">
+      <label>
+        Phase
+        <select name="worker_status" onchange="this.form.submit()">
+          <% %w[running all stop_requested stopping shutdown].each do |st| %>
+            <option value="<%= st %>" <%= "selected" if @worker_status == st %>><%= st %></option>
+          <% end %>
+        </select>
+      </label>
+
+      <label>
+        Domain
+        <select name="worker_domain" onchange="this.form.submit()">
+          <option value="">All domains</option>
+          <% @domains.each do |d| %>
+            <option value="<%= d %>" <%= "selected" if @worker_domain == d %>><%= d %></option>
+          <% end %>
+        </select>
+      </label>
+
+      <label>
+        Job type
+        <select name="worker_type" onchange="this.form.submit()">
+          <option value="">All types</option>
+          <% @worker_types.each do |jt| %>
+            <option value="<%= jt %>" <%= "selected" if @worker_type == jt %>><%= jt %></option>
+          <% end %>
+        </select>
+      </label>
+    </div>
+  </form>
+
   <% if @workers.any? %>
     <table>
       <thead>
@@ -52,6 +91,8 @@
         <% end %>
       </tbody>
     </table>
+  <% elsif @workers_exist %>
+    <p class="empty">No workers match the current filter.</p>
   <% else %>
     <p class="empty">No workers have reported yet.</p>
   <% end %>
@@ -105,6 +146,10 @@
   <h2>Jobs</h2>
 
   <form method="get" action="<%= monitoring_path %>" class="filters">
+    <%# carry the worker-section filters so the two forms compose %>
+    <input type="hidden" name="worker_status" value="<%= @worker_status %>">
+    <input type="hidden" name="worker_domain" value="<%= @worker_domain %>">
+    <input type="hidden" name="worker_type" value="<%= @worker_type %>">
     <div class="filter-grid">
       <label>
         Job types
@@ -121,6 +166,16 @@
           <option value="">All statuses</option>
           <% %w[ready complete failed error].each do |st| %>
             <option value="<%= st %>" <%= "selected" if @selected_status == st %>><%= st %></option>
+          <% end %>
+        </select>
+      </label>
+
+      <label>
+        Domain
+        <select name="domain" onchange="this.form.submit()">
+          <option value="">All domains</option>
+          <% @domains.each do |d| %>
+            <option value="<%= d %>" <%= "selected" if @selected_domain == d %>><%= d %></option>
           <% end %>
         </select>
       </label>
