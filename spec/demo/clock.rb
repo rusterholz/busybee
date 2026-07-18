@@ -61,4 +61,11 @@ module Clockwork
     Rails.logger.info("[clockwork] tick: #{batch} orders, total: #{total_created}, " \
                       "rate: #{(total_created / elapsed).round(2)}/s, submitted_backlog: #{submitted}")
   end
+
+  every(60, "prune_monitoring") do
+    dropped = Monitoring::Prune.run
+    if dropped.values.any?(&:positive?)
+      Rails.logger.info("[clockwork] pruned #{dropped[:workers]} dead workers, #{dropped[:runs]} stale runs")
+    end
+  end
 end
