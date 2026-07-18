@@ -84,6 +84,51 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
     expect(last_response.body).not_to include("<code>type_b</code>")
   end
 
+  it "links index lines to the show pages" do
+    w = worker!("oms-worker-link1", "Oms::UpdateOrderStatusWorker")
+    Monitoring::JobRun.create!(job_key: 850, job_type: "update_order_status", status: "complete")
+
+    get "/monitoring"
+
+    expect(last_response.body).to include("/monitoring/workers/#{w.id}")
+    expect(last_response.body).to include("/monitoring/runs/850")
+  end
+
+  it "renders a worker incarnation's full detail" do
+    w = worker!("oms-worker-deet1", "Oms::UpdateOrderStatusWorker", job_type: "update_order_status")
+    w.update!(total_job_count: 9, peak_buffer_size: 3, started_at: 5.minutes.ago,
+              error_class: "RuntimeError", error_message: "full error text here")
+    Monitoring::EngineCall.create!(job_key: 900, worker_name: "oms-worker-deet1", rpc: "activate_jobs",
+                                   status: "succeeded", network_ms: 12.0, seq: 1.0)
+
+    get "/monitoring/workers/#{w.id}"
+
+    expect(last_response.status).to eq(200)
+    expect(last_response.body).to include("oms-worker-deet1", "Oms::UpdateOrderStatusWorker",
+                                          "full error text here", "activate_jobs")
+  end
+
+  it "redirects to the dashboard for an unknown worker id" do
+    get "/monitoring/workers/nope"
+
+    expect(last_response.status).to eq(302)
+    expect(last_response.headers["Location"]).to include("/monitoring")
+  end
+
+  it "renders a run's full detail with its tags and call sequence" do
+    Monitoring::JobRun.create!(job_key: 901, job_type: "plan_shipments", status: "complete",
+                               perform_duration_ms: 12.5, total_duration_ms: 30.0,
+                               tags: { "element_id" => "plan-shipments-task", "retries" => 3 })
+    Monitoring::EngineCall.create!(job_key: 901, worker_name: "logistics-worker-x", rpc: "complete_job",
+                                   status: "succeeded", network_ms: 7.5, seq: 2.0)
+
+    get "/monitoring/runs/901"
+
+    expect(last_response.status).to eq(200)
+    expect(last_response.body).to include("plan_shipments", "plan-shipments-task",
+                                          "complete_job", "logistics-worker-x")
+  end
+
   it "caps recent runs at the ten newest" do
     12.times do |i|
       Monitoring::JobRun.create!(job_key: i, job_type: "t", status: "failed",

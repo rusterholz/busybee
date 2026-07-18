@@ -18,4 +18,6 @@ Rails.application.routes.draw do
   resources :drivers, only: %i[index]
 
   get "monitoring", to: "monitoring#index"
+  get "monitoring/workers/:id", to: "monitoring#worker", as: :monitoring_worker
+  get "monitoring/runs/:job_key", to: "monitoring#run", as: :monitoring_run
 end

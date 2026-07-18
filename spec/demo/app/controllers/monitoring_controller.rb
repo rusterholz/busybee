@@ -22,6 +22,27 @@ class MonitoringController < ApplicationController
     load_platform
   end
 
+  # One incarnation's full detail: everything the index line compresses, plus
+  # its recent engine calls (worker_name is per-boot unique, so the call log is
+  # the incarnation's own).
+  def worker
+    @worker = Monitoring::WorkerProcess.find(params[:id])
+    @calls = Monitoring::EngineCall.where(worker_name: @worker.worker_name).order(seq: :desc).limit(50)
+  rescue ActiveRecord::RecordNotFound
+    redirect_to monitoring_path
+  end
+
+  # One run's full detail: timings, the full tag set, and its call sequence,
+  # with each call linked back to the incarnation that made it.
+  def run
+    @run = Monitoring::JobRun.find_by!(job_key: params[:job_key])
+    @calls = Monitoring::EngineCall.for_job(@run.job_key)
+    @call_workers = Monitoring::WorkerProcess.where(worker_name: @calls.map(&:worker_name).uniq,
+                                                    job_type: @run.job_type).index_by(&:worker_name)
+  rescue ActiveRecord::RecordNotFound
+    redirect_to monitoring_path
+  end
+
   private
 
   # Job-centric sections, scoped by the active filter.

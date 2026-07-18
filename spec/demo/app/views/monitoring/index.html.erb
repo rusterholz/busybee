@@ -75,7 +75,7 @@
       <tbody>
         <% @workers.each do |w| %>
           <tr>
-            <td class="mono"><%= w.worker_name %></td>
+            <td class="mono"><a href="<%= monitoring_worker_path(w) %>"><%= w.worker_name %></a></td>
             <td><code><%= w.job_type %></code></td>
             <td class="wstatus-<%= w.status %>"><%= w.status %></td>
             <td><% if w.reason %><span class="badge <%= w.reason %>"><%= w.reason %></span><% end %></td>
@@ -231,7 +231,7 @@
         <% @runs.each do |run| %>
           <% tags = run.tags || {} %>
           <tr>
-            <td><code><%= run.job_type %></code></td>
+            <td><a href="<%= monitoring_run_path(run.job_key) %>"><code><%= run.job_type %></code></a></td>
             <td class="status-<%= run.status %>"><%= run.status %></td>
             <td><%= run.bpmn_process_id %></td>
             <td><%= tags["element_id"] %></td>
