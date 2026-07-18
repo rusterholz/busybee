@@ -16,6 +16,13 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
     expect(last_response.body).to include("No workers have reported yet")
   end
 
+  it "keeps the top tiles to the job lifecycle (calls live in their own section)" do
+    get "/monitoring"
+
+    expect(last_response.body).not_to include("buffered") # provenance, not lifecycle
+    expect(last_response.body).to include("calls / job")
+  end
+
   it "renders workers, engine calls and a per-job call sequence" do
     Monitoring::JobRun.create!(job_key: 476, job_type: "update_order_status", status: "complete",
                                perform_duration_ms: 12.0, total_duration_ms: 30.0)

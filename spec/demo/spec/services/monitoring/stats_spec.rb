@@ -53,17 +53,6 @@ RSpec.describe Monitoring::Stats do
     end
   end
 
-  describe "#buffered_count" do
-    it "counts runs that were buffered on activation" do
-      create_run(buffered: true)
-      create_run(buffered: true)
-      create_run(buffered: false)
-      create_run(buffered: nil)
-
-      expect(stats.buffered_count).to eq(2)
-    end
-  end
-
   describe "#by_job_type" do
     it "breaks totals, outcomes and typical duration down per type, busiest first" do
       create_run(job_type: "assign_driver", status: "complete", total_duration_ms: 100)

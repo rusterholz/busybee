@@ -10,14 +10,14 @@
 </hgroup>
 
 <section>
+  <%# The job lifecycle pipeline, one tile per stage — nothing off-axis here
+      (call volume lives with the calls; buffered is provenance, not a stage). %>
   <div class="stat-grid">
-    <article class="stat-card"><h2><%= @stats.total_count %></h2><small>jobs</small></article>
-    <% @stats.counts_by_status.each do |status, count| %>
-      <article class="stat-card"><h2 class="status-<%= status %>"><%= count %></h2><small><%= status %></small></article>
+    <% counts = @stats.counts_by_status %>
+    <% %w[ready failed error complete].each do |status| %>
+      <article class="stat-card"><h2 class="status-<%= status %>"><%= counts[status] %></h2><small><%= status %></small></article>
     <% end %>
-    <article class="stat-card"><h2><%= fmt_int.(@call_stats.total_calls) %></h2><small>engine calls</small></article>
-    <article class="stat-card"><h2><%= @calls_per_job.round(1) %></h2><small>calls / job</small></article>
-    <article class="stat-card"><h2><%= @stats.buffered_count %></h2><small>buffered</small></article>
+    <article class="stat-card"><h2><%= @stats.total_count %></h2><small>jobs</small></article>
   </div>
 </section>
 
@@ -59,6 +59,10 @@
 
 <section>
   <h2>Engine calls <small>— gRPC to the Zeebe gateway, the low-cardinality aggregate (context_tags)</small></h2>
+  <div class="stat-grid">
+    <article class="stat-card"><h2><%= fmt_int.(@call_stats.total_calls) %></h2><small>engine calls</small></article>
+    <article class="stat-card"><h2><%= @calls_per_job.round(1) %></h2><small>calls / job</small></article>
+  </div>
   <% if @call_stats.by_rpc.any? %>
     <div class="grid">
       <div>

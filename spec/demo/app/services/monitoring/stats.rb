@@ -34,10 +34,6 @@ module Monitoring
     # across the current selection (max across job types when several are shown).
     def max_buffer_depth = @scope.maximum(:buffer_size)
 
-    # How many runs arrived buffered (activated onto the stream while a job was
-    # already in flight) — hybrid mode's stream/poll split made visible.
-    def buffered_count = @scope.where(buffered: true).count
-
     # Per-job-type rollup for the contract view: [{ job_type:, total:, complete:,
     # failed:, error:, mean_total_ms: }], busiest first. Means over resolved rows
     # only (same async-dispatch caveat as the scalar timings above).
