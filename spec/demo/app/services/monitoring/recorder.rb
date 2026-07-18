@@ -21,6 +21,10 @@ module Monitoring
     # guard advances through (running never supersedes shutdown, however it lands).
     WORKER_PHASES = { running: 0, stop_requested: 1, stopping: 2, shutdown: 3 }.freeze
 
+    # The run outcome each resolution RPC implies.
+    RESOLUTION_STATUSES = { "complete_job" => "complete", "fail_job" => "failed",
+                            "throw_bpmn_error" => "error" }.freeze
+
     class << self
       def record_activation(job)
         upsert(JobRun, { job_key: job.key },
@@ -67,11 +71,14 @@ module Monitoring
       # only for perform-phase calls (EngineCall.record no-ops without a job_key),
       # so the per-job log stays bounded. Neither is offloaded — both are atomic
       # single-statement writes, safe (and cheaper) inline on the worker thread.
+      # (The resolution fold is the exception: a guarded upsert, so it rides the
+      # executor like the other lifecycle writes.)
       def record_call(call)
         return if call.network_ms.nil?
 
         CallMetric.observe("engine_call", call.context_tags, call.network_ms)
         EngineCall.record(call, seq: monotonic_seq)
+        record_resolution(call)
       end
 
       # One background thread, unbounded queue: posts never block the runner, and
@@ -81,6 +88,20 @@ module Monitoring
       end
 
       private
+
+      # An async resolution (a worker thread calling complete!/fail! after perform
+      # returned) lands after record_execution snapshotted the run still-ready, and
+      # no job hook fires at resolution time — the RPC itself is the last signal.
+      # Fold its outcome back in at execution rank: the (rank, seen_at) guard makes
+      # either arrival order converge (status from the later observation, timing
+      # columns gap-filled from the earlier one).
+      def record_resolution(call)
+        ctx = call.logging_context
+        status = RESOLUTION_STATUSES[ctx[:rpc].to_s]
+        return unless status && ctx[:job_key] && ctx[:status].to_s == "succeeded"
+
+        upsert(JobRun, { job_key: ctx[:job_key] }, rank: 1, status: status)
+      end
 
       # Capture the observation-order key NOW — in the hook, before the async post,
       # since write order is exactly what gets scrambled — then offload the write.

@@ -161,5 +161,51 @@ RSpec.describe Monitoring::Recorder do
       expect(Monitoring::CallMetric.count).to eq(0)
       expect(Monitoring::EngineCall.count).to eq(0)
     end
+
+    def resolution_call(rpc, job_key:, status: :succeeded)
+      instance_double(
+        Busybee::Client::Call,
+        network_ms: 9.0,
+        context_tags: { rpc: rpc, worker_class: "Sim::PickAndPackWorker" },
+        logging_context: { rpc: rpc, worker_name: "sim-worker-xy9", job_key: job_key,
+                           status: status, network_ms: 9.0 }
+      )
+    end
+
+    it "folds an async resolution's outcome back into its JobRun" do
+      # An async worker resolves after perform returned: record_execution saw the
+      # run still ready, and the resolution RPC is the only lifecycle signal left.
+      job = build_test_job(key: 600)
+      allow(job).to receive_messages(status: "ready", executed_at: Time.current)
+      described_class.record_execution(job)
+
+      described_class.record_call(resolution_call("complete_job", job_key: 600))
+
+      expect(recorded(600).status).to eq("complete")
+    end
+
+    it "maps fail_job and throw_bpmn_error to their run outcomes" do
+      [601, 602].each do |key|
+        job = build_test_job(key: key)
+        allow(job).to receive_messages(status: "ready", executed_at: Time.current)
+        described_class.record_execution(job)
+      end
+
+      described_class.record_call(resolution_call("fail_job", job_key: 601))
+      described_class.record_call(resolution_call("throw_bpmn_error", job_key: 602))
+
+      expect(recorded(601).status).to eq("failed")
+      expect(recorded(602).status).to eq("error")
+    end
+
+    it "does not mark a run resolved when the resolution RPC itself errored" do
+      job = build_test_job(key: 603)
+      allow(job).to receive_messages(status: "ready", executed_at: Time.current)
+      described_class.record_execution(job)
+
+      described_class.record_call(resolution_call("complete_job", job_key: 603, status: :errored))
+
+      expect(recorded(603).status).to eq("ready")
+    end
   end
 end
