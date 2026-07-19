@@ -208,4 +208,67 @@ RSpec.describe Monitoring::Recorder do
       expect(recorded(603).status).to eq("ready")
     end
   end
+
+  # The drain semantics need the real background executor, not the file-wide
+  # immediate stub — the unit under test is the wait across the writer thread.
+  describe ".shutdown!" do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.instance_variable_get(:@executor)&.kill
+      described_class.instance_variable_set(:@executor, nil)
+    end
+
+    it "waits for queued writes before returning" do
+      flag = Concurrent::AtomicBoolean.new(false)
+      described_class.executor.post do
+        sleep 0.05
+        flag.make_true
+      end
+
+      described_class.shutdown!
+
+      expect(flag).to be_true
+    end
+
+    it "quietly discards writes arriving after shutdown" do
+      described_class.executor
+      described_class.shutdown!
+
+      expect { described_class.executor.post { nil } }.not_to raise_error
+    end
+
+    it "does not create an executor when none was ever needed" do
+      described_class.shutdown!
+
+      expect(described_class.instance_variable_get(:@executor)).to be_nil
+    end
+  end
+
+  describe ".flush" do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.instance_variable_get(:@executor)&.kill
+      described_class.instance_variable_set(:@executor, nil)
+    end
+
+    it "returns true after queued writes complete, leaving the executor accepting" do
+      flag = Concurrent::AtomicBoolean.new(false)
+      described_class.executor.post do
+        sleep 0.05
+        flag.make_true
+      end
+
+      expect(described_class.flush).to be(true)
+      expect(flag).to be_true
+      expect(described_class.executor).not_to be_shutdown
+    end
+
+    it "returns false when the queue cannot drain in time" do
+      described_class.executor.post { sleep 0.3 }
+
+      expect(described_class.flush(timeout: 0.05)).to be(false)
+    end
+  end
 end

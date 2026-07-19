@@ -87,6 +87,32 @@ module Monitoring
         @executor ||= Concurrent::SingleThreadExecutor.new(fallback_policy: :discard)
       end
 
+      # Drain the queue and stop the writer — registered at_exit (initializer).
+      # Ruby's exit sequence runs at_exit handlers, then KILLS remaining threads,
+      # then runs finalizers; a writer killed mid-SQLite-write leaves the
+      # connection's native mutex locked, and the finalizer that closes the DB
+      # then deadlocks the process — immortal PID 1, restart policy never fires.
+      # Draining here, before the kill step, removes that window; late posts fall
+      # to the executor's :discard policy.
+      def shutdown!(timeout: 10)
+        writer = @executor
+        return unless writer
+
+        writer.shutdown
+        return if writer.wait_for_termination(timeout)
+
+        Rails.logger.warn("[monitoring] write queue did not drain by process exit")
+      end
+
+      # Block until everything queued so far has landed (or timeout, => false).
+      # Unlike shutdown!, leaves the executor accepting — the mid-run flush point
+      # (the on_worker_shutdown hook) where sibling runners still record.
+      def flush(timeout: 5)
+        latch = Concurrent::CountDownLatch.new(1)
+        executor.post { latch.count_down }
+        latch.wait(timeout)
+      end
+
       private
 
       # An async resolution (a worker thread calling complete!/fail! after perform
