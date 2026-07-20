@@ -365,6 +365,21 @@ RSpec.describe Busybee::CLI do
       expect(runner).to have_received(:stop!)
     end
 
+    it "maps TERM → stop!(reason: :sigterm)" do
+      cli.send(:handle_signal, "TERM")
+      expect(runner).to have_received(:stop!).with(reason: :sigterm)
+    end
+
+    it "maps INT → stop!(reason: :sigint)" do
+      cli.send(:handle_signal, "INT")
+      expect(runner).to have_received(:stop!).with(reason: :sigint)
+    end
+
+    it "maps QUIT → stop!(reason: :sigquit)" do
+      cli.send(:handle_signal, "QUIT")
+      expect(runner).to have_received(:stop!).with(reason: :sigquit)
+    end
+
     it "does not call kill! on first signal" do
       cli.send(:handle_signal, "TERM")
       expect(runner).not_to have_received(:kill!)

@@ -37,19 +37,22 @@ module Busybee
         loop do
           break if stopping?
 
-          polled_count = @client.with_each_job(job_type, **drain_options) do |job|
-            activate_job(job, source: :poll)
-            if stopping?
-              handle_shutdown_job(job)
-            else
-              execute_job(job)
-              # After each polled job, drain any stream jobs that arrived —
-              # always prioritize keeping up with the stream over working through backlog.
-              process_buffered_jobs(blocking: false)
+          # Attribute this drain cycle's poll to the worker (as Polling does).
+          polled_count = Client::Call.with_worker_status(worker_status) do
+            @client.with_each_job(job_type, **drain_options) do |job|
+              activate_job(job, source: :poll)
+              if stopping?
+                handle_shutdown_job(job)
+              else
+                execute_job(job)
+                # After each polled job, drain any stream jobs that arrived —
+                # always prioritize keeping up with the stream over working through backlog.
+                process_buffered_jobs(blocking: false)
+              end
+            rescue Busybee::Worker::Shutdown => e
+              @shutdown_error.update { |prev| prev || e }
+              stop!(reason: :unhealthy) # the worker declared itself down
             end
-          rescue Busybee::Worker::Shutdown => e
-            @shutdown_error.update { |prev| prev || e }
-            stop!
           end
 
           break if polled_count < drain_options[:max_jobs] # Caught up: fewer than requested

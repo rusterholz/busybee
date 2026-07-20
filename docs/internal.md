@@ -307,9 +307,22 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 
 **Single-entry gate.** `start!` flips `@running` with an atomic compare-and-set and reports whether *this* call won it; `run!` does `return unless start!` before its `begin/ensure`. A second `run!` on an already-running runner is a no-op (without it, both callers would block their own `run_loop`). The same CAS placement makes the T0/T2/T3 set fire all-or-none — the `ensure` is reached only once `start!` has won.
 
-**Close-before-fire.** `stop!` gates on `@stop_requested.make_true` (fire-once across repeated signals and per-job `Shutdown`s), then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires — so a propagating observer can never skip the close and wedge shutdown. The `ensure`'s `cease_intake` is the backstop for the uncaught-error exit where `stop!` was never called.
+**Close-before-fire.** `stop!(reason:)` gates on `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate, so `stopping?` and the reason are one atomic fact (no window where a reader sees `stopping?` true but the reason unset), and T1 fires once across repeated signals / per-job `Shutdown`s. Then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires — so a propagating observer can never skip the close and wedge shutdown. The `ensure`'s `cease_intake` is the backstop for the uncaught-error exit where `stop!` was never called.
 
-**Exit classification.** `classify_exit($!)` reads the in-flight exception in the `ensure`: none → `[:signal, nil]`; `Worker::Shutdown` → `[:error, cause]`; anything else → `[:error, exception]`. The result stamps `reason`/`error` on the closing `Worker::Status`.
+**Stop reason (`reason` ⊥ `error`).** The closing `Worker::Status` carries two independent axes: `reason` names *why* the run stopped (a low-cardinality Symbol); `error` carries the exception, if any. They don't collapse into one another — a `:rollover` that errors mid-drain reports `reason: :rollover, error: <exception>`. The reason is set once, through the `@stop_reason` gate; `stop!` defaults it to `:signal` and accepts only a Symbol (`ArgumentError` otherwise). Canonical values and who sets each:
+
+| reason | set by |
+|--------|--------|
+| `:signal` | a bare `stop!` — a graceful stop with no stated cause (the default) |
+| `:sigint` / `:sigterm` / `:sigquit` | the CLI signal handler (`STOP_SIGNALS`, mapped `sig` + lowercased name) |
+| `:unhealthy` | the worker declared itself down — a `shutdown_on` error surfaced as `Worker::Shutdown`, caught by a fetch/pump rescue |
+| `:gateway` | an unrecovered gRPC failure — busybee couldn't reach the engine |
+| `:crash` | any other unhandled error |
+| `:stream_ended` | the streaming pump's backstop, when the stream closed cleanly on its own |
+| `:kill` | `kill!` (forced shutdown) |
+| *(app-supplied)* | any Symbol a caller passes, e.g. a demo's `:rollover` |
+
+`:signal` is **never fabricated** — it only ever arrives via `stop!`'s default param. For a run that exits *without* any `stop!` (a raw fetch-loop error), `run!`'s `ensure` fills the reason from the in-flight exception via `reason_for` (`Worker::Shutdown → :unhealthy`, `Busybee::GRPC::Error → :gateway`, else `:crash`), using `compare_and_set` so a caller-set reason survives a coexisting exit error. The `error` axis is the *unwrapped* triggering cause — `Worker::Shutdown.unwrap($!)` (the wrapped `cause`, or the Shutdown itself) — while the reason classifies the raw exception. The `sig*` values share a prefix by design: `on_worker_shutdown(reason: /\Asig/)` matches every signal-driven stop. Multi is transparent — a reasoned `stop!` cascades the reason to every child, and a child crash makes the container adopt `reason_for(error)`.
 
 **Counters.** `execute_job` increments `@total_job_count` per attempt and `@failed_job_count` when `job.failed?` (`:failed` only — BPMN `:error` is a business outcome, not a worker fault). `handle_grpc_error` increments `@backpressure_count`. All three read into every `Worker::Status`. Multi is transparent — no process-wide rollup; operators sum by `worker_name`.
 
@@ -318,7 +331,7 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 From the Runner's perspective, `perform_job` has a simple two-outcome contract (returns or raises `Shutdown`). All other exceptions are handled inside `perform_job`. In the fetch loop:
 
 - **Backpressure** — a wrapped `Busybee::GRPC::Error` whose `grpc_status` is in `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) is handled by the shared `handle_grpc_error`: increment `@backpressure_count`, sleep `backpressure_delay`, retry the fetch. Matched by status *symbol*, so it catches the backpressure outcome however the gateway raised it; any other gRPC error re-raises.
-- **`Worker::Shutdown`** → propagates into `run!`'s `ensure` (see Run Lifecycle); `classify_exit` records it as the run's `[:error, cause]` outcome.
+- **`Worker::Shutdown`** → the fetch/pump rescue stops with `reason: :unhealthy` and stashes it, then re-raises into `run!`'s `ensure`, where `error` is recorded as its unwrapped cause (see Stop reason).
 - **Other errors** → propagate up (to Multi/CLI). Likely fatal (auth, config).
 
 ### Shutdown Sequence
@@ -532,9 +545,16 @@ Worker- and call-level hooks fire observation-only, each with its own carrier:
 - **Worker hooks** (`on_worker_started`, `on_worker_stop_requested`, `on_worker_stopping`, `on_worker_shutdown`) fire from `Runner#run!` / `#stop!` at the four lifecycle moments, each with a fresh frozen `Worker::Status` snapshot. See [Runner Module](#runner-module) for the run lifecycle and where each fires.
 - **Call hooks** (`before_call`, `around_call`, `after_call`) fire through the `Client::Call` seam: `before_call`/`after_call` bracket the logical operation, `around_call` wraps each attempt. Each receives the `Client::Call` carrying the rpc, resolved status, gRPC status, attempt count, and durations.
 
-### Ambient context
+### Call correlation context
 
-`Hooks.with_context(**attrs) { ... }` pushes a thread-local context bag (restored on block exit); `Hooks.context` reads it. A `Client::Call` snapshots this bag by value at construction — it may execute/retry on threads that won't see the thread-local — and folds any context value implementing the duck protocol (`context_tags`/`logging_context`) into its own projections. The runner seeds the executing `Job` (`Hooks.with_context(job: job)` around `perform_job`), so a Call built inside `perform` correlates to the job that spawned it. Only `Call` consumes ambient context; `Job` does not, so seeding the Job is fold-safe.
+A `Client::Call` correlates itself to the executing Job and the runner's `Worker::Status` by capturing them from thread-locals at construction (exposed as `call.job` / `call.worker_status`). They are seeded per single-carrier window by class methods on `Call` — `Call.with_job(job)` / `Call.with_worker_status(ws)`, read via `Call.current_job` / `Call.current_worker_status` — each restored to its prior value on block exit. **Fall-through safety** lives in the reader: when a job is present, `current_worker_status` returns `job.worker_status` — a separately-seeded status can't override it — so a Call's two carriers can never disagree. This lives on `Call`, not `Hooks`: nothing hook-related reads it; it's call correlation.
+
+The carriers seed with deliberately different **window widths**:
+
+- **`job` — narrow (the perform-only crutch).** `Worker.perform_job` wraps its whole body in `Call.with_job(job)`, so `before/around/after_job`, `perform`, and autofail/autocomplete — everything that "runs as part of perform" — correlate to the job. It is deliberately *not* seeded for the runner-level `around_job_execution` middleware, which sit *outside* `perform_job` and already hold the Job as their carrier.
+- **`worker_status` — wide (every job-in-scope window).** Nothing but `job.worker_status` reaches the runner's snapshot, so each per-job window seeds it through `Runner#with_fresh_worker_status(job)`: stamp a fresh point-in-time `Worker::Status` onto the job, then `Call.with_worker_status(job.worker_status)` — one object in both places. It runs at activation, at execution (wrapping the `around_job_execution` chain and `perform`), again around `on_job_executed` (a fresh re-stamp, so completion-time gauges are reported rather than the possibly long-ago start), and on the shutdown-fail path. A job-less **fetch scope** (`Call.with_worker_status(worker_status)` around polling `with_each_job`, stream open, hybrid drain) attributes the `ActivateJobs`/stream-open Call to the worker before any job exists.
+
+A Call folds a **curated** correlation subset — not the carriers' full `context_tags`/`logging_context` (those stay right for logging the Job and Worker *directly*). It takes worker identity (`worker_class`, `job_type`, `worker_mode`; `worker_name` logging-only, since it can be per-run-unique) and job identity (`bpmn_process_id`, `source`; `job_key` / `process_instance_key` / `element_id` logging-only), and deliberately excludes lifecycle telemetry — job timestamps, worker gauges, and `retries` (which reads like the call's `attempts` but means the engine's retry budget). The composition lives in `Call#{worker,job}_correlation_{tags,logging}`.
 
 ## Testing Module
 

@@ -150,35 +150,41 @@ RSpec.describe Busybee::Client::Call do
     end
   end
 
-  describe "context bag" do
-    it "seeds from the ambient hook context at construction, as an HWIA" do
-      Busybee::Hooks.with_context(job_key: 42) do
-        call = described_class.new(:complete_job)
-        expect(call.context[:job_key]).to eq(42)
-        expect(call.context["job_key"]).to eq(42)
-      end
-    end
+  describe "correlation carriers" do
+    let(:worker_status) { instance_double(Busybee::Worker::Status) }
+    let(:job) { instance_double(Busybee::Job, worker_status: worker_status) }
 
-    it "snapshots the ambient context, decoupled from later restoration" do
+    it "captures the ambient worker_status at construction" do
       call = nil
-      Busybee::Hooks.with_context(job_key: 42) { call = described_class.new(:complete_job) }
-      expect(call.context[:job_key]).to eq(42)
+      described_class.with_worker_status(worker_status) { call = described_class.new(:activate_jobs) }
+      expect(call.worker_status).to be(worker_status)
     end
 
-    it "lets a hook annotate a new key" do
-      call = described_class.new(:complete_job)
-      call.set_context(trace_id: "abc")
-      expect(call.context[:trace_id]).to eq("abc")
+    it "captures the ambient job at construction" do
+      call = nil
+      described_class.with_job(job) { call = described_class.new(:complete_job) }
+      expect(call.job).to be(job)
     end
 
-    it "is set-once: neither seeded nor previously-annotated keys can be clobbered" do
-      Busybee::Hooks.with_context(job_key: 42) do
-        call = described_class.new(:complete_job)
-        call.set_context(job_key: 99, trace_id: "abc")
-        call.set_context(trace_id: "xyz")
-        expect(call.context[:job_key]).to eq(42)
-        expect(call.context[:trace_id]).to eq("abc")
+    it "restores each carrier after its block, even when the block raises" do
+      expect { described_class.with_worker_status(worker_status) { raise "boom" } }.to raise_error("boom")
+      expect(described_class.current_worker_status).to be_nil
+    end
+
+    it "falls through to a present job's own worker_status (a separately-seeded one cannot override)" do
+      job_status = instance_double(Busybee::Worker::Status)
+      job_with_status = instance_double(Busybee::Job, worker_status: job_status)
+      described_class.with_worker_status(worker_status) do
+        described_class.with_job(job_with_status) do
+          expect(described_class.current_worker_status).to be(job_status)
+        end
       end
+    end
+
+    it "is thread-local — a spawned thread sees neither carrier" do
+      seen = :unset
+      described_class.with_job(job) { seen = Thread.new { described_class.current_job }.value }
+      expect(seen).to be_nil
     end
   end
 
@@ -210,14 +216,48 @@ RSpec.describe Busybee::Client::Call do
       expect(log).to have_key(:total_ms)
     end
 
-    it "merges context-value contributions via the duck protocol, the call's own keys winning" do
-      contributor = Struct.new(:context_tags).new({ rpc: :should_lose, region: "us-east" })
+    context "with correlation carriers seeded" do
+      let(:worker_status) do
+        instance_double(Busybee::Worker::Status,
+                        worker_class: stub_const("CorrWorker", Class.new),
+                        job_type: "process_order", worker_mode: :polling, worker_name: "host-7")
+      end
+      let(:job) do
+        instance_double(Busybee::Job, worker_status: worker_status,
+                                      bpmn_process_id: "order-flow", source: :poll,
+                                      key: 123, process_instance_key: 456, element_id: "task-1")
+      end
 
-      Busybee::Hooks.with_context(thing: contributor) do
-        call = described_class.new(:complete_job)
-        tags = call.context_tags
-        expect(tags[:region]).to eq("us-east")
-        expect(tags[:rpc]).to eq(:complete_job)
+      def call_in_context
+        captured = nil
+        described_class.with_worker_status(worker_status) do
+          described_class.with_job(job) { captured = described_class.new(:complete_job) }
+        end
+        captured
+      end
+
+      it "folds curated worker + job identity into context_tags, the call's own winning" do
+        expect(call_in_context.context_tags).to include(
+          worker_class: "CorrWorker", job_type: "process_order", worker_mode: :polling,
+          bpmn_process_id: "order-flow", source: :poll,
+          rpc: :complete_job, status: :pending
+        )
+      end
+
+      it "keeps worker_name, gauges, job keys/timings, and retries out of the tags" do
+        tags = call_in_context.context_tags
+        aggregate_failures do
+          expect(tags).not_to have_key(:worker_name) # per-run-unique → logging only
+          expect(tags).not_to have_key(:retries) # engine budget; collides with attempts
+          expect(tags).not_to have_key(:job_key)
+          expect(tags).not_to have_key(:total_job_count)
+        end
+      end
+
+      it "adds worker_name and job/instance keys in logging_context" do
+        expect(call_in_context.logging_context).to include(
+          worker_name: "host-7", job_key: 123, process_instance_key: 456, element_id: "task-1"
+        )
       end
     end
   end
@@ -254,6 +294,17 @@ RSpec.describe Busybee::Client::Call do
         expect(call.error).to be_a(Busybee::GRPC::Error)
         expect(call.grpc_status).to eq(:unavailable)
       end
+    end
+
+    it "closes the network bracket before recording the error (network_ms excludes translation)" do
+      call = described_class.new(:complete_job)
+      allow(call).to receive(:translate_error).and_wrap_original do |original, e|
+        sleep 0.1 # slow error translation/recording, after the gRPC op already returned
+        original.call(e)
+      end
+
+      expect { call.attempt { raise GRPC::Unavailable, "down" } }.to raise_error(Busybee::GRPC::Error)
+      expect(call.network_ms).to be < 50 # the 100ms delay is bookkeeping, outside the network window
     end
 
     it "records and re-raises a non-GRPC error as-is" do

@@ -22,6 +22,16 @@ module Busybee
           msg << ": \"#{cause.message}\"" if cause
         end
       end
+
+      # The triggering error behind a shutdown: for a Shutdown, its wrapped cause
+      # (or the Shutdown itself when raised without one); any other exception —
+      # nil included — passes through unchanged. The single unwrap the runner's
+      # exit classification and the worker's autofail both read.
+      def self.unwrap(exception)
+        return exception unless exception.is_a?(self)
+
+        exception.cause || exception
+      end
     end
   end
 end

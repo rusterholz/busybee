@@ -60,6 +60,22 @@ RSpec.describe Busybee::Runner::Streaming do
       expect(client).not_to have_received(:open_job_stream)
     end
 
+    it "seeds a worker into ambient context around opening the stream, so the open Call folds it" do
+      seen = :unset
+      allow(client).to receive(:open_job_stream) do
+        seen = Busybee::Client::Call.current_worker_status
+        allow(stream).to receive(:each)
+        stream
+      end
+
+      runner.run!
+
+      aggregate_failures do
+        expect(seen).to be_a(Busybee::Worker::Status)
+        expect(seen.worker_class).to be(worker_class)
+      end
+    end
+
     it "processes jobs via worker_class.perform_job" do
       allow(client).to receive(:open_job_stream) do
         allow(stream).to receive(:each).and_yield(job)
@@ -149,6 +165,21 @@ RSpec.describe Busybee::Runner::Streaming do
 
     context "when worker raises Busybee::Worker::Shutdown" do
       let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: worker_class) }
+
+      after { Busybee::Hooks.reset! }
+
+      it "tags the stop :unhealthy — the worker declared itself down" do
+        captured = nil
+        Busybee.on_worker_shutdown { |worker| captured = worker }
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each).and_yield(job)
+          stream
+        end
+        allow(worker_class).to receive(:perform_job).and_raise(shutdown_error)
+
+        expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+        expect(captured.reason).to eq(:unhealthy)
+      end
 
       it "stores the error, stops, and re-raises after clean exit" do
         allow(client).to receive(:open_job_stream) do
@@ -370,6 +401,41 @@ RSpec.describe Busybee::Runner::Streaming do
         expect(runner.running?).to be false
       end
 
+      it "reports an unrecovered pump stream error as :gateway, not a fabricated :signal" do
+        stream_error = Busybee::GRPC::Error.new("Job stream failed")
+        captured = nil
+        Busybee.on_worker_shutdown { |worker| captured = worker }
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each).and_raise(stream_error)
+          stream
+        end
+
+        expect { runner.run! }.to raise_error(Busybee::GRPC::Error)
+        expect(captured.reason).to eq(:gateway)
+      ensure
+        Busybee::Hooks.reset!
+      end
+
+      it "reports :stream_ended when the stream closes cleanly on its own (pump backstop)" do
+        captured = nil
+        Busybee.on_worker_shutdown { |worker| captured = worker }
+        allow(client).to receive(:open_job_stream) do
+          allow(stream).to receive(:each) # yields nothing, returns at once = clean server-side close
+          stream
+        end
+
+        thread = Thread.new { runner.run! }
+        joined = thread.join(3)
+
+        aggregate_failures do
+          expect(joined).not_to be_nil, "runner.run! hung — pump ensure did not unblock the main thread"
+          expect(runner.running?).to be false
+          expect(captured.reason).to eq(:stream_ended)
+        end
+      ensure
+        Busybee::Hooks.reset!
+      end
+
       it "joins pump thread and drains remaining buffer during shutdown" do # rubocop:disable RSpec/ExampleLength
         leftover = build_test_job(key: 88, retries: 2)
         allow(leftover).to receive(:fail!)
@@ -413,6 +479,24 @@ RSpec.describe Busybee::Runner::Streaming do
 
       context "when worker raises Busybee::Worker::Shutdown" do
         let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: queue_worker_class) }
+
+        after { Busybee::Hooks.reset! }
+
+        it "tags the stop :unhealthy — the worker declared itself down" do
+          captured = nil
+          Busybee.on_worker_shutdown { |worker| captured = worker }
+          allow(client).to receive(:open_job_stream) do
+            allow(stream).to receive(:each) do |&block|
+              block.call(job)
+              stream_gate.wait
+            end
+            stream
+          end
+          allow(queue_worker_class).to receive(:perform_job).and_raise(shutdown_error)
+
+          expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+          expect(captured.reason).to eq(:unhealthy)
+        end
 
         it "stores the error, stops, and re-raises after clean exit" do
           allow(client).to receive(:open_job_stream) do

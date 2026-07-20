@@ -145,6 +145,21 @@ RSpec.describe Busybee::Runner::Polling do
       let(:cause) { RuntimeError.new("DB connection lost") }
       let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: worker_class) }
 
+      after { Busybee::Hooks.reset! }
+
+      it "tags the stop :unhealthy — the worker declared itself down" do
+        captured = nil
+        Busybee.on_worker_shutdown { |worker| captured = worker }
+        allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
+          block.call(job)
+          0
+        end
+        allow(worker_class).to receive(:perform_job).and_raise(shutdown_error)
+
+        expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+        expect(captured.reason).to eq(:unhealthy)
+      end
+
       it "stores the error, stops, and re-raises after clean exit" do
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
           block.call(job)
@@ -308,6 +323,24 @@ RSpec.describe Busybee::Runner::Polling do
 
       expect(captured.source).to eq(:poll)
       expect(captured.buffered?).to be(false)
+    end
+  end
+
+  describe "worker context around the fetch call" do
+    it "seeds a fresh worker into ambient context around with_each_job, so the fetch Call folds it" do
+      seen = :unset
+      allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
+        seen = Busybee::Client::Call.current_worker_status
+        runner.stop!
+        0
+      end
+
+      runner.run!
+
+      aggregate_failures do
+        expect(seen).to be_a(Busybee::Worker::Status)
+        expect(seen.worker_class).to be(worker_class)
+      end
     end
   end
 

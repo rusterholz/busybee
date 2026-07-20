@@ -299,6 +299,38 @@ RSpec.describe Busybee::Runner do
     end
   end
 
+  describe "#activate_job ambient context (private)" do
+    let(:worker_class) do
+      Class.new do
+        def self.name
+          "TestWorker"
+        end
+      end
+    end
+
+    after { Busybee::Hooks.reset! }
+
+    it "seeds the job's worker (same object as job.worker_status) so a Call in on_job_activated folds it" do
+      captured_call = nil
+      Busybee.on_job_activated { captured_call = Busybee::Client::Call.new(:complete_job) }
+      runner.send(:activate_job, job, source: :poll)
+      expect(captured_call.worker_status).to be(job.worker_status)
+    end
+
+    it "does not seed ambient job for on_job_activated (it holds the Job as its carrier)" do
+      captured_call = nil
+      Busybee.on_job_activated { captured_call = Busybee::Client::Call.new(:complete_job) }
+      runner.send(:activate_job, job, source: :poll)
+      expect(captured_call.job).to be_nil
+    end
+
+    it "restores the previous thread-local carrier after on_job_activated" do
+      Busybee.on_job_activated {} # rubocop:disable Lint/EmptyBlock
+      runner.send(:activate_job, job, source: :poll)
+      expect(Busybee::Client::Call.current_worker_status).to be_nil
+    end
+  end
+
   describe "#execute_job (private)" do
     let(:worker_class) do
       Class.new do
@@ -404,7 +436,7 @@ RSpec.describe Busybee::Runner do
     end
   end
 
-  describe "#execute_job ambient job context (private)" do
+  describe "#execute_job ambient worker context (private)" do
     let(:worker_class) do
       Class.new do
         def self.name
@@ -417,30 +449,118 @@ RSpec.describe Busybee::Runner do
 
     after { Busybee::Hooks.reset! }
 
-    it "seeds the job into thread-local context around perform, so a Call built there sees it" do
+    it "seeds the worker (same object as job.worker_status) around perform, so a Call built there folds it" do
       captured_call = nil
+      status_during = nil
       allow(worker_class).to receive(:perform_job) do
+        status_during = job.worker_status # W_B — before the on_job_executed re-stamp to W_C
         captured_call = Busybee::Client::Call.new(:complete_job)
       end
       runner.send(:execute_job, job)
-      expect(captured_call.context[:job]).to be(job)
+      expect(captured_call.worker_status).to be(status_during)
     end
 
-    it "does not seed the ambient context for around_job_execution middleware (they hold the Job as carrier)" do
+    it "seeds around_job_execution middleware's worker as the same object the Job carries" do
+      seen_ambient = :unset
+      seen_carried = :unset
+      Busybee.around_job_execution do |j, process|
+        seen_ambient = Busybee::Client::Call.current_worker_status
+        seen_carried = j.worker_status
+        process.call
+      end
+      runner.send(:execute_job, job)
+      expect(seen_ambient).to be(seen_carried)
+    end
+
+    it "does not seed ambient job for around_job_execution middleware (they hold the Job as carrier)" do
       allow(worker_class).to receive(:perform_job)
       seen = :unset
       Busybee.around_job_execution do |_job, process|
-        seen = Busybee::Hooks.context[:job]
+        seen = Busybee::Client::Call.current_job
         process.call
       end
       runner.send(:execute_job, job)
       expect(seen).to be_nil
     end
 
-    it "restores the previous thread-local context after perform" do
+    it "re-stamps a fresh worker for on_job_executed, distinct from the execution-start snapshot" do
+      at_perform = nil
+      allow(worker_class).to receive(:perform_job) { at_perform = job.worker_status }
+      at_executed = nil
+      Busybee.on_job_executed { |j| at_executed = j.worker_status }
+      runner.send(:execute_job, job)
+      aggregate_failures do
+        expect(at_perform).to be_a(Busybee::Worker::Status)
+        expect(at_executed).to be_a(Busybee::Worker::Status)
+        expect(at_executed).not_to be(at_perform)
+      end
+    end
+
+    it "seeds on_job_executed's ambient worker as the same object job.worker_status carries" do
+      captured_call = nil
+      Busybee.on_job_executed { captured_call = Busybee::Client::Call.new(:complete_job) }
+      runner.send(:execute_job, job)
+      expect(captured_call.worker_status).to be(job.worker_status)
+    end
+
+    it "restores the previous thread-local carriers after execute_job" do
       allow(worker_class).to receive(:perform_job)
       runner.send(:execute_job, job)
-      expect(Busybee::Hooks.context).to eq({})
+      aggregate_failures do
+        expect(Busybee::Client::Call.current_job).to be_nil
+        expect(Busybee::Client::Call.current_worker_status).to be_nil
+      end
+    end
+  end
+
+  # End-to-end through the real seed wiring: a Call built inside a real perform,
+  # driven by activate_job + execute_job, folds the curated worker + job correlation.
+  describe "correlation folded by a perform-issued Call" do
+    let(:job) { build_test_job(type: "process_order", retries: 3) }
+
+    def call_from_perform
+      captured = nil
+      worker_class = stub_const("FoldWiringWorker", Class.new(Busybee::Worker) do
+        job_type "process_order"
+        strict_outputs false
+        complete_job_on_success false
+        define_method(:perform) do
+          captured = Busybee::Client::Call.new(:complete_job)
+          {}
+        end
+      end)
+      rc = Busybee::RuntimeConfig.new(worker_mode: :polling).resolve_for(worker_class)
+      runner = described_class.new(worker_class, runtime_config: rc, client: client)
+      runner.send(:activate_job, job, source: :poll)
+      runner.send(:execute_job, job)
+      captured
+    end
+
+    it "folds curated worker + job identity into context_tags" do
+      expect(call_from_perform.context_tags).to include(
+        worker_class: "FoldWiringWorker", job_type: "process_order", worker_mode: :polling,
+        bpmn_process_id: job.bpmn_process_id, source: :poll, rpc: :complete_job
+      )
+    end
+
+    it "keeps lifecycle telemetry (retries, timestamps, gauges, worker_name) out of the tags" do
+      tags = call_from_perform.context_tags
+      aggregate_failures do
+        expect(tags).not_to have_key(:retries)
+        expect(tags).not_to have_key(:worker_name)
+        expect(tags).not_to have_key(:executed_at)
+        expect(tags).not_to have_key(:total_job_count)
+      end
+    end
+
+    it "adds worker_name and job/instance keys in logging_context, still no job timings" do
+      log = call_from_perform.logging_context
+      aggregate_failures do
+        expect(log).to include(worker_name: Busybee.worker_name, job_key: job.key,
+                               process_instance_key: job.process_instance_key)
+        expect(log).not_to have_key(:executed_at)
+        expect(log).not_to have_key(:deadline)
+      end
     end
   end
 
