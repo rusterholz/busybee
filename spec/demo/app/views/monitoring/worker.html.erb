@@ -1,0 +1,76 @@
+<%
+  fmt_int = ->(n) { n.nil? ? "—" : number_with_delimiter(n) }
+  fmt_at  = ->(t) { t.nil? ? "—" : t.utc.strftime("%H:%M:%S.%L") }
+  gap_ms  = ->(a, b) { a && b ? "#{((b - a) * 1000).round}ms" : "—" }
+%>
+
+<p><a href="<%= monitoring_path %>">← control center</a></p>
+
+<hgroup>
+  <h1 class="mono"><%= @worker.worker_name %></h1>
+  <p>
+    <span class="wstatus-<%= @worker.status %>"><%= @worker.status %></span>
+    <% if @worker.reason %><span class="badge <%= @worker.reason %>"><%= @worker.reason %></span><% end %>
+    — <%= @worker.worker_class %> · <code><%= @worker.job_type %></code> · <%= @worker.worker_mode %> mode
+  </p>
+</hgroup>
+
+<section>
+  <div class="stat-grid">
+    <article class="stat-card"><h2><%= fmt_int.(@worker.total_job_count) %></h2><small>jobs</small></article>
+    <article class="stat-card"><h2 class="status-failed"><%= fmt_int.(@worker.failed_job_count) %></h2><small>failed</small></article>
+    <article class="stat-card"><h2><%= fmt_int.(@worker.backpressure_count) %></h2><small>backpressure</small></article>
+    <article class="stat-card"><h2><%= fmt_int.(@worker.current_buffer_size) %></h2><small>buffer</small></article>
+    <article class="stat-card"><h2><%= fmt_int.(@worker.peak_buffer_size) %></h2><small>buffer peak</small></article>
+    <article class="stat-card"><h2><%= fmt_int.(@worker.write_queue_depth) %></h2><small>write queue</small></article>
+  </div>
+</section>
+
+<section>
+  <h2>Lifecycle <small>— raw moments; every duration is just a diff between two of them</small></h2>
+  <table>
+    <thead><tr><th>Moment</th><th>At (UTC)</th><th class="num">Gap from previous</th></tr></thead>
+    <tbody>
+      <tr><td>started</td><td class="mono"><%= fmt_at.(@worker.started_at) %></td><td class="num">—</td></tr>
+      <tr><td>stop requested</td><td class="mono"><%= fmt_at.(@worker.stop_requested_at) %></td>
+          <td class="num"><%= gap_ms.(@worker.started_at, @worker.stop_requested_at) %></td></tr>
+      <tr><td>stopping</td><td class="mono"><%= fmt_at.(@worker.stopping_at) %></td>
+          <td class="num"><%= gap_ms.(@worker.stop_requested_at, @worker.stopping_at) %></td></tr>
+      <tr><td>shutdown</td><td class="mono"><%= fmt_at.(@worker.shutdown_at) %></td>
+          <td class="num"><%= gap_ms.(@worker.stopping_at, @worker.shutdown_at) %></td></tr>
+    </tbody>
+  </table>
+  <% if @worker.started_at %>
+    <p><small class="empty">age: <%= ((@worker.shutdown_at || Time.current) - @worker.started_at).round %>s
+       <%= @worker.shutdown_at ? "(closed run)" : "(still ticking)" %></small></p>
+  <% end %>
+</section>
+
+<% if @worker.error_class || @worker.error_message %>
+  <section>
+    <h2>Error</h2>
+    <p><strong><%= @worker.error_class %></strong> <%= @worker.error_message %></p>
+  </section>
+<% end %>
+
+<section>
+  <h2>Engine calls <small>— this incarnation's own call log, newest first</small></h2>
+  <% if @calls.any? %>
+    <table>
+      <thead><tr><th class="num">Seq</th><th>RPC</th><th>Status</th><th class="num">Network</th><th>Job</th></tr></thead>
+      <tbody>
+        <% @calls.each do |call| %>
+          <tr>
+            <td class="num"><%= call.seq&.round(1) %></td>
+            <td><code><%= call.rpc %></code></td>
+            <td class="<%= "status-failed" if call.status == "errored" %>"><%= call.status %></td>
+            <td class="num"><%= call.network_ms&.round(1) %> ms</td>
+            <td><a href="<%= monitoring_run_path(call.job_key) %>" class="mono"><%= call.job_key %></a></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p class="empty">No job-correlated calls recorded for this incarnation.</p>
+  <% end %>
+</section>

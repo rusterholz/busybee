@@ -28,9 +28,14 @@ module Busybee
         elapsed_ms(:stop_requested_at, :stopping_at)
       end
 
-      # Total run lifetime in seconds: started (T0) → shutdown (T3).
-      def lifetime_s
-        elapsed_ms(:started_at, :shutdown_at)&.then { |ms| (ms / 1000.0).round(1) }
+      # Seconds since the run started, re-read from the clock on every call —
+      # live even on a frozen snapshot (the frozen thing is the stamp, not the
+      # clock). Nil until started_at is stamped.
+      def uptime_s
+        started = started_at(:monotonic)
+        return nil unless started
+
+        (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(1)
       end
     end
   end

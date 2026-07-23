@@ -1,0 +1,274 @@
+# frozen_string_literal: true
+
+require_relative "../../rails_helper"
+
+RSpec.describe Monitoring::Recorder do
+  # Run the background write inline so we can assert on the persisted row within
+  # the example's transaction (the real executor writes on another thread/connection).
+  before do
+    allow(described_class).to receive(:executor).and_return(Concurrent::ImmediateExecutor.new)
+  end
+
+  def recorded(job_key) = Monitoring::JobRun.find_by(job_key: job_key)
+
+  describe ".record_activation" do
+    it "records buffer depth from the worker status and whether the job was buffered" do
+      status = instance_double(Busybee::Worker::Status, current_buffer_size: 4)
+      job = build_test_job(key: 4242)
+      allow(job).to receive_messages(worker_status: status, buffered?: true)
+
+      described_class.record_activation(job)
+
+      expect(recorded(4242)).to have_attributes(buffer_size: 4, buffered: true)
+    end
+
+    it "is nil-safe when no worker status is attached" do
+      job = build_test_job(key: 4243)
+      allow(job).to receive_messages(worker_status: nil, buffered?: false)
+
+      described_class.record_activation(job)
+
+      expect(recorded(4243)).to have_attributes(buffer_size: nil, buffered: false)
+    end
+  end
+
+  describe ".record_worker" do
+    def worker_status(**overrides)
+      defaults = {
+        worker_name: "oms-worker-abc12", job_type: "update_order_status",
+        worker_class: Oms::UpdateOrderStatusWorker, worker_mode: :hybrid,
+        reason: nil, error_class: nil, error_message: nil,
+        total_job_count: 0, failed_job_count: 0, backpressure_count: 0,
+        current_buffer_size: nil, peak_buffer_size: nil,
+        started_at: nil, stop_requested_at: nil, stopping_at: nil, shutdown_at: nil
+      }
+      instance_double(Busybee::Worker::Status, **defaults, **overrides)
+    end
+
+    def process = Monitoring::WorkerProcess.find_by(worker_name: "oms-worker-abc12", job_type: "update_order_status")
+
+    it "records identity, phase, counters and gauges keyed by (worker_name, job_type)" do
+      described_class.record_worker(:running, worker_status(
+                                                total_job_count: 7, failed_job_count: 2, backpressure_count: 1,
+                                                current_buffer_size: 3, peak_buffer_size: 9
+                                              ))
+
+      expect(process).to have_attributes(
+        status: "running", worker_class: "Oms::UpdateOrderStatusWorker", worker_mode: "hybrid",
+        total_job_count: 7, failed_job_count: 2, backpressure_count: 1,
+        current_buffer_size: 3, peak_buffer_size: 9
+      )
+    end
+
+    it "captures the recorder's write-queue backlog as a liveness gauge" do
+      allow(described_class).to receive(:queue_depth).and_return(5)
+
+      described_class.record_worker(:running, worker_status)
+
+      expect(process.write_queue_depth).to eq(5)
+    end
+
+    it "advances the same row through the lifecycle (upsert by identity, not a new row)" do
+      described_class.record_worker(:running, worker_status)
+      described_class.record_worker(:shutdown, worker_status(reason: :rollover))
+
+      expect(Monitoring::WorkerProcess.count).to eq(1)
+      expect(process).to have_attributes(status: "shutdown", reason: "rollover")
+    end
+
+    it "keeps a later phase when an earlier-phase write arrives out of order" do
+      described_class.record_worker(:shutdown, worker_status(reason: :rollover))
+      described_class.record_worker(:running, worker_status) # a stale 'running' landing late
+
+      expect(process).to have_attributes(status: "shutdown", reason: "rollover")
+    end
+
+    it "keeps the freshest same-phase observation when a stale one is written last" do
+      # Same rank (running); the second write is an OLDER observation (smaller
+      # seen_at) whose write merely landed later — it must not overwrite.
+      allow(described_class).to receive(:monotonic_seq).and_return(100.0, 50.0)
+
+      described_class.record_worker(:running, worker_status(total_job_count: 7))
+      described_class.record_worker(:running, worker_status(total_job_count: 5))
+
+      expect(process.total_job_count).to eq(7)
+    end
+
+    it "is idempotent — a re-delivered observation neither duplicates nor regresses" do
+      allow(described_class).to receive(:monotonic_seq).and_return(100.0)
+
+      2.times { described_class.record_worker(:running, worker_status(total_job_count: 3)) }
+
+      expect(Monitoring::WorkerProcess.count).to eq(1)
+      expect(process.total_job_count).to eq(3)
+    end
+  end
+
+  describe "out-of-order guard (JobRun)" do
+    it "fills a late activation's gaps without downgrading a resolved status" do
+      executed = build_test_job(key: 7777)
+      allow(executed).to receive_messages(status: "complete", executed_at: Time.current)
+      activated = build_test_job(key: 7777)
+      allow(activated).to receive_messages(status: "ready", activated_at: Time.current,
+                                           worker_status: nil, buffered?: false)
+
+      described_class.record_execution(executed)   # rank 1
+      described_class.record_activation(activated) # rank 0 — arrives late
+
+      expect(recorded(7777)).to have_attributes(status: "complete", activated_at: be_present)
+    end
+  end
+
+  describe ".record_call" do
+    it "folds a resolved call's duration into the engine_call metric under its tags" do
+      # A fetch call: no job in scope, so logging_context carries no job_key.
+      call = instance_double(
+        Busybee::Client::Call,
+        network_ms: 42.0,
+        context_tags: { rpc: "activate_jobs", worker_class: "Oms::LoadOrderAddressWorker" },
+        logging_context: { rpc: "activate_jobs", worker_class: "Oms::LoadOrderAddressWorker", network_ms: 42.0 }
+      )
+
+      described_class.record_call(call)
+
+      metric = Monitoring::CallMetric.find_by(metric_name: "engine_call")
+      expect(metric).to have_attributes(count: 1, ewma: 42.0)
+      expect(metric.tags).to eq("rpc" => "activate_jobs", "worker_class" => "Oms::LoadOrderAddressWorker")
+      expect(Monitoring::EngineCall.count).to eq(0) # a fetch call is aggregate-only
+    end
+
+    it "also records a job-correlated call as an EngineCall row (the per-job log twin)" do
+      call = instance_double(
+        Busybee::Client::Call,
+        network_ms: 117.0,
+        context_tags: { rpc: "complete_job", worker_class: "Oms::UpdateOrderStatusWorker" },
+        logging_context: { rpc: "complete_job", worker_name: "oms-worker-ab12", job_key: 476,
+                           status: :succeeded, network_ms: 117.0 }
+      )
+
+      described_class.record_call(call)
+
+      expect(Monitoring::EngineCall.for_job(476).sole).to have_attributes(
+        rpc: "complete_job", worker_name: "oms-worker-ab12", network_ms: 117.0, status: "succeeded"
+      )
+    end
+
+    it "ignores a call with no observed network time" do
+      call = instance_double(Busybee::Client::Call, network_ms: nil)
+
+      described_class.record_call(call)
+
+      expect(Monitoring::CallMetric.count).to eq(0)
+      expect(Monitoring::EngineCall.count).to eq(0)
+    end
+
+    def resolution_call(rpc, job_key:, status: :succeeded)
+      instance_double(
+        Busybee::Client::Call,
+        network_ms: 9.0,
+        context_tags: { rpc: rpc, worker_class: "Sim::PickAndPackWorker" },
+        logging_context: { rpc: rpc, worker_name: "sim-worker-xy9", job_key: job_key,
+                           status: status, network_ms: 9.0 }
+      )
+    end
+
+    it "folds an async resolution's outcome back into its JobRun" do
+      # An async worker resolves after perform returned: record_execution saw the
+      # run still ready, and the resolution RPC is the only lifecycle signal left.
+      job = build_test_job(key: 600)
+      allow(job).to receive_messages(status: "ready", executed_at: Time.current)
+      described_class.record_execution(job)
+
+      described_class.record_call(resolution_call("complete_job", job_key: 600))
+
+      expect(recorded(600).status).to eq("complete")
+    end
+
+    it "maps fail_job and throw_bpmn_error to their run outcomes" do
+      [601, 602].each do |key|
+        job = build_test_job(key: key)
+        allow(job).to receive_messages(status: "ready", executed_at: Time.current)
+        described_class.record_execution(job)
+      end
+
+      described_class.record_call(resolution_call("fail_job", job_key: 601))
+      described_class.record_call(resolution_call("throw_bpmn_error", job_key: 602))
+
+      expect(recorded(601).status).to eq("failed")
+      expect(recorded(602).status).to eq("error")
+    end
+
+    it "does not mark a run resolved when the resolution RPC itself errored" do
+      job = build_test_job(key: 603)
+      allow(job).to receive_messages(status: "ready", executed_at: Time.current)
+      described_class.record_execution(job)
+
+      described_class.record_call(resolution_call("complete_job", job_key: 603, status: :errored))
+
+      expect(recorded(603).status).to eq("ready")
+    end
+  end
+
+  # The drain semantics need the real background executor, not the file-wide
+  # immediate stub — the unit under test is the wait across the writer thread.
+  describe ".shutdown!" do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.instance_variable_get(:@executor)&.kill
+      described_class.instance_variable_set(:@executor, nil)
+    end
+
+    it "waits for queued writes before returning" do
+      flag = Concurrent::AtomicBoolean.new(false)
+      described_class.executor.post do
+        sleep 0.05
+        flag.make_true
+      end
+
+      described_class.shutdown!
+
+      expect(flag).to be_true
+    end
+
+    it "quietly discards writes arriving after shutdown" do
+      described_class.executor
+      described_class.shutdown!
+
+      expect { described_class.executor.post { nil } }.not_to raise_error
+    end
+
+    it "does not create an executor when none was ever needed" do
+      described_class.shutdown!
+
+      expect(described_class.instance_variable_get(:@executor)).to be_nil
+    end
+  end
+
+  describe ".flush" do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.instance_variable_get(:@executor)&.kill
+      described_class.instance_variable_set(:@executor, nil)
+    end
+
+    it "returns true after queued writes complete, leaving the executor accepting" do
+      flag = Concurrent::AtomicBoolean.new(false)
+      described_class.executor.post do
+        sleep 0.05
+        flag.make_true
+      end
+
+      expect(described_class.flush).to be(true)
+      expect(flag).to be_true
+      expect(described_class.executor).not_to be_shutdown
+    end
+
+    it "returns false when the queue cannot drain in time" do
+      described_class.executor.post { sleep 0.3 }
+
+      expect(described_class.flush(timeout: 0.05)).to be(false)
+    end
+  end
+end

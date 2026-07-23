@@ -142,11 +142,10 @@ module Busybee
     # @return [Object] Response from complete_job operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def complete!(vars = {})
-      check_status_change_allowed!(:complete)
-      raise Busybee::JobAlreadyHandled, "Cannot complete job #{key} because it is already #{status}" unless ready?
+      ensure_resolvable!(:complete, "complete")
 
       resolution.set_result(vars)
-      @client.complete_job(key, vars: resolution.result || {}).tap do
+      correlated { @client.complete_job(key, vars: resolution.result || {}) }.tap do
         resolve!(:complete)
       end
     end
@@ -159,8 +158,7 @@ module Busybee
     # @return [Object] Response from fail_job operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def fail!(message_or_exception, retries: nil, backoff: nil)
-      check_status_change_allowed!(:fail)
-      raise Busybee::JobAlreadyHandled, "Cannot fail job #{key} because it is already #{status}" unless ready?
+      ensure_resolvable!(:fail, "fail")
 
       message = format_error_message(message_or_exception)
       error_data = if message_or_exception.is_a?(Exception)
@@ -170,7 +168,9 @@ module Busybee
                    end
       resolution.set_error(error_data)
 
-      @client.fail_job(key, message, retries: retries, backoff: backoff).tap do
+      new_retries = next_retries(retries)
+      correlated { @client.fail_job(key, message, retries: new_retries, backoff: backoff) }.tap do
+        @retries_override = new_retries
         resolve!(:failed)
       end
     end
@@ -182,17 +182,13 @@ module Busybee
     # @return [Object] Response from throw_bpmn_error operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def throw_bpmn_error!(code_or_exception, message = "")
-      check_status_change_allowed!(:throw_bpmn_error)
-      unless ready?
-        raise Busybee::JobAlreadyHandled,
-              "Cannot throw BPMN error on job #{key} because it is already #{status}"
-      end
+      ensure_resolvable!(:throw_bpmn_error, "throw BPMN error on")
 
       code = format_error_code(code_or_exception)
       message = code_or_exception.message if code_or_exception.is_a?(Exception) && message.empty?
       resolution.set_error(bpmn_error_data(code_or_exception, code, message))
 
-      @client.throw_bpmn_error(key, code, message: message).tap do
+      correlated { @client.throw_bpmn_error(key, code, message: message) }.tap do
         resolve!(:error)
       end
     end
@@ -203,7 +199,7 @@ module Busybee
     # @return [Object] Response from update_job_retries operation
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_retries(count)
-      @client.update_job_retries(key, count).tap do
+      correlated { @client.update_job_retries(key, count) }.tap do
         @retries_override = count
       end
     end
@@ -215,7 +211,7 @@ module Busybee
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_timeout(duration)
       duration_seconds = duration.is_a?(ActiveSupport::Duration) ? duration.in_seconds : duration / 1000.0
-      @client.update_job_timeout(key, duration).tap do
+      correlated { @client.update_job_timeout(key, duration) }.tap do
         @deadline_override = (Time.now.utc + duration_seconds).freeze
       end
     end
@@ -223,6 +219,26 @@ module Busybee
     private
 
     attr_reader :activation, :resolution
+
+    # A job's own engine calls carry the job whatever the thread — a manual
+    # complete!/fail! from outside the perform window (an async worker's own
+    # thread) would otherwise build an uncorrelated Call.
+    def correlated(&) = Client::Call.with_job(self, &)
+
+    # Shared fire-once guard for the resolution ops.
+    def ensure_resolvable!(action, verb)
+      check_status_change_allowed!(action)
+      return if ready?
+
+      raise Busybee::JobAlreadyHandled, "Cannot #{verb} job #{key} because it is already #{status}"
+    end
+
+    # Failing spends one retry — Zeebe doesn't auto-decrement on FailJob, the
+    # worker owns it. A bare fail! decrements the current count; an explicit
+    # retries: (incl. 0) sets it outright. Either way #retries mirrors it after.
+    def next_retries(explicit)
+      explicit || ((@retries_override || payload.retries) - 1)
+    end
 
     # Mark the job resolved: stamp resolved_at, advance the Resolution PORO
     # to the terminal status (fire-once enforced). Outcome data (result /

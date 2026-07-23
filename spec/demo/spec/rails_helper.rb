@@ -30,7 +30,12 @@ RSpec.configure do |config|
   # Wrap each example in a transaction per database for isolation. Each domain
   # has its own connection, so a single ActiveRecord::Base transaction would roll
   # back only one of them; nest a rolled-back transaction on each domain base.
+  # Tag an example :no_transaction to opt out — needed when it spawns threads
+  # whose separate connections must see each other's committed writes (e.g.
+  # concurrency tests); such examples clean up after themselves.
   config.around do |example|
+    next example.run if example.metadata[:no_transaction]
+
     bases = [Oms::Record, Logistics::Record, Delivery::Record, Monitoring::Record]
     runner = -> { example.run }
     bases.each do |base|

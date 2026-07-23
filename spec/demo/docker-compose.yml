@@ -11,6 +11,7 @@ x-app: &app
     RAILS_ENV: development
     RAILS_LOG_TO_STDOUT: "true"
     DEMO_SPEED: ${DEMO_SPEED:-1.0}
+    DEMO_ROLLOVERS: ${DEMO_ROLLOVERS:-true}
   networks:
     - camunda
   volumes:
@@ -88,7 +89,11 @@ services:
   workers_oms:
     <<: *app
     container_name: busybee-demo-workers-oms
+    restart: unless-stopped
     command: bundle exec busybee --config config/busybee/oms.yml
+    environment:
+      <<: *app-env
+      DEMO_DOMAIN: oms
     depends_on:
       web:
         condition: service_healthy
@@ -102,7 +107,11 @@ services:
   workers_logistics:
     <<: *app
     container_name: busybee-demo-workers-logistics
+    restart: unless-stopped
     command: bundle exec busybee --config config/busybee/logistics.yml
+    environment:
+      <<: *app-env
+      DEMO_DOMAIN: logistics
     depends_on:
       web:
         condition: service_healthy
@@ -116,7 +125,11 @@ services:
   workers_delivery:
     <<: *app
     container_name: busybee-demo-workers-delivery
+    restart: unless-stopped
     command: bundle exec busybee --config config/busybee/delivery.yml
+    environment:
+      <<: *app-env
+      DEMO_DOMAIN: delivery
     depends_on:
       web:
         condition: service_healthy
@@ -130,7 +143,11 @@ services:
   workers_sim:
     <<: *app
     container_name: busybee-demo-workers-sim
+    restart: unless-stopped
     command: bundle exec busybee --config config/busybee/sim.yml
+    environment:
+      <<: *app-env
+      DEMO_DOMAIN: sim
     depends_on:
       web:
         condition: service_healthy

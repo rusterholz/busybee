@@ -483,7 +483,7 @@ RSpec.describe Busybee::Job do
         expect(client).to have_received(:fail_job).with(
           123456,
           "Something went wrong",
-          retries: nil,
+          retries: 2,
           backoff: nil
         )
       end
@@ -501,6 +501,25 @@ RSpec.describe Busybee::Job do
         )
       end
 
+      it "decrements the activation retry count and reflects it in #retries afterward" do
+        allow(client).to receive(:fail_job)
+
+        job.fail!("Error") # activation retries: 3
+
+        expect(client).to have_received(:fail_job).with(123456, "Error", retries: 2, backoff: nil)
+        expect(job.retries).to eq(2) # #retries now returns what the engine believes
+      end
+
+      it "decrements from an update_retries override rather than the activation count" do
+        allow(client).to receive_messages(update_job_retries: nil, fail_job: nil)
+        job.update_retries(7)
+
+        job.fail!("Error")
+
+        expect(client).to have_received(:fail_job).with(123456, "Error", retries: 6, backoff: nil)
+        expect(job.retries).to eq(6)
+      end
+
       it "passes through optional backoff parameter as integer" do
         allow(client).to receive(:fail_job)
 
@@ -509,7 +528,7 @@ RSpec.describe Busybee::Job do
         expect(client).to have_received(:fail_job).with(
           123456,
           "Error",
-          retries: nil,
+          retries: 2,
           backoff: 5000
         )
       end
@@ -523,7 +542,7 @@ RSpec.describe Busybee::Job do
         expect(client).to have_received(:fail_job).with(
           123456,
           "Error",
-          retries: nil,
+          retries: 2,
           backoff: duration
         )
       end
@@ -568,7 +587,7 @@ RSpec.describe Busybee::Job do
           expect(client).to have_received(:fail_job).with(
             123456,
             "[StandardError] Something broke",
-            retries: nil,
+            retries: 2,
             backoff: nil
           )
         end
@@ -592,7 +611,7 @@ RSpec.describe Busybee::Job do
             expect(client).to have_received(:fail_job).with(
               123456,
               "[StandardError] Something broke (caused by: [ArgumentError] Invalid input)",
-              retries: nil,
+              retries: 2,
               backoff: nil
             )
           end
@@ -909,6 +928,38 @@ RSpec.describe Busybee::Job do
       job.throw_bpmn_error!(:some_code)
 
       expect(invocations).to eq(0)
+    end
+  end
+
+  describe "call correlation" do
+    # A job's own engine calls must carry the job whatever the thread — a
+    # manual complete! from outside the perform window (an async worker's own
+    # thread) would otherwise build an uncorrelated Call.
+    it "seeds itself as the correlation job for the duration of complete!" do
+      seen = :unset
+      allow(client).to receive(:complete_job) { seen = Busybee::Client::Call.current_job }
+
+      job.complete!
+
+      expect(seen).to be(job)
+      expect(Busybee::Client::Call.current_job).to be_nil
+    end
+
+    it "seeds itself during fail!, throw_bpmn_error!, and the update calls" do
+      seen = {}
+      %i[fail_job throw_bpmn_error update_job_retries update_job_timeout].each do |op|
+        allow(client).to receive(op) { seen[op] = Busybee::Client::Call.current_job }
+      end
+      failer = described_class.new(raw_job, client: client)
+      thrower = described_class.new(raw_job, client: client)
+
+      failer.fail!("boom")
+      thrower.throw_bpmn_error!("CODE")
+      job.update_retries(5)
+      job.update_timeout(30_000)
+
+      expect(seen).to eq(fail_job: failer, throw_bpmn_error: thrower,
+                         update_job_retries: job, update_job_timeout: job)
     end
   end
 

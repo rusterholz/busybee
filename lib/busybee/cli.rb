@@ -62,6 +62,10 @@ module Busybee
         return
       end
 
+      # Register the Railtie before config/environment's initialize!: busybee.rb's
+      # guarded self-require ran before Rails (exe requires busybee first), so
+      # without this every config.x.busybee.* is silently dropped in CLI workers.
+      require "busybee/railtie"
       require "./config/environment"
     rescue StandardError, LoadError => e
       Busybee.logger&.error("Failed to load Rails environment: [#{e.class}] #{e.message}. " \

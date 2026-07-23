@@ -128,7 +128,7 @@ RSpec.describe Busybee::Worker do
         end)
 
         worker.perform_job(job)
-        expect(client).to have_received(:fail_job).with(123456, /RuntimeError.*boom/, retries: nil, backoff: nil)
+        expect(client).to have_received(:fail_job).with(123456, /RuntimeError.*boom/, retries: 2, backoff: nil)
       end
 
       it "uses configured backoff" do
@@ -138,7 +138,7 @@ RSpec.describe Busybee::Worker do
         end)
 
         worker.perform_job(job)
-        expect(client).to have_received(:fail_job).with(123456, anything, retries: nil, backoff: 30_000)
+        expect(client).to have_received(:fail_job).with(123456, anything, retries: 2, backoff: 30_000)
       end
 
       it "does not auto-fail when disabled" do
@@ -276,7 +276,7 @@ RSpec.describe Busybee::Worker do
         end)
 
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
-        expect(client).to have_received(:fail_job).with(123456, /PGConnectionBad.*gone/, retries: nil, backoff: nil)
+        expect(client).to have_received(:fail_job).with(123456, /PGConnectionBad.*gone/, retries: 2, backoff: nil)
       end
 
       it "does not wrap non-matching exceptions" do
@@ -317,7 +317,7 @@ RSpec.describe Busybee::Worker do
         end)
 
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
-        expect(client).to have_received(:fail_job).with(123456, /RuntimeError.*root cause/, retries: nil, backoff: nil)
+        expect(client).to have_received(:fail_job).with(123456, /RuntimeError.*root cause/, retries: 2, backoff: nil)
       end
 
       it "captures the underlying cause (not the Shutdown wrapper) to Resolution" do
@@ -361,7 +361,7 @@ RSpec.describe Busybee::Worker do
 
         expect { worker.perform_job(job) }.not_to raise_error
         expect(client).to have_received(:fail_job).
-          with(123456, /MissingInput.*:nonexistent/, retries: nil, backoff: nil)
+          with(123456, /MissingInput.*:nonexistent/, retries: 2, backoff: nil)
       end
 
       it "lists all missing inputs" do
@@ -372,7 +372,7 @@ RSpec.describe Busybee::Worker do
         end)
 
         expect { worker.perform_job(job) }.not_to raise_error
-        expect(client).to have_received(:fail_job).with(123456, /missing_one.*missing_two/, retries: nil, backoff: nil)
+        expect(client).to have_received(:fail_job).with(123456, /missing_one.*missing_two/, retries: 2, backoff: nil)
       end
 
       it "passes when required inputs are present" do
@@ -404,7 +404,7 @@ RSpec.describe Busybee::Worker do
         end)
 
         expect { worker.perform_job(job) }.not_to raise_error
-        expect(client).to have_received(:fail_job).with(123456, /process-order worker/, retries: nil, backoff: nil)
+        expect(client).to have_received(:fail_job).with(123456, /process-order worker/, retries: 2, backoff: nil)
       end
     end
 
@@ -422,7 +422,7 @@ RSpec.describe Busybee::Worker do
         expect { worker.perform_job(job) }.not_to raise_error
         expect(client).not_to have_received(:complete_job)
         expect(client).to have_received(:fail_job).
-          with(123456, /MissingOutput.*:notification_id/, retries: nil, backoff: nil)
+          with(123456, /MissingOutput.*:notification_id/, retries: 2, backoff: nil)
       end
 
       it "passes when required outputs are present as symbols" do
@@ -481,7 +481,7 @@ RSpec.describe Busybee::Worker do
         expect { worker.perform_job(job) }.not_to raise_error
         expect(client).not_to have_received(:complete_job)
         expect(client).to have_received(:fail_job).
-          with(123456, /UndeclaredOutput.*:extra/, retries: nil, backoff: nil)
+          with(123456, /UndeclaredOutput.*:extra/, retries: 2, backoff: nil)
       end
 
       it "passes when all returned keys are declared" do
@@ -561,7 +561,7 @@ RSpec.describe Busybee::Worker do
         expect { worker.perform_job(job) }.not_to raise_error
         expect(client).not_to have_received(:complete_job)
         expect(client).to have_received(:fail_job).
-          with(123456, /UndeclaredOutput.*:unexpected/, retries: nil, backoff: nil)
+          with(123456, /UndeclaredOutput.*:unexpected/, retries: 2, backoff: nil)
       end
     end
 
@@ -583,7 +583,7 @@ RSpec.describe Busybee::Worker do
         expect { worker.perform_job(job) }.not_to raise_error
         expect(client).not_to have_received(:complete_job)
         expect(client).to have_received(:fail_job).
-          with(123456, /UndeclaredOutput.*:extra/, retries: nil, backoff: nil)
+          with(123456, /UndeclaredOutput.*:extra/, retries: 2, backoff: nil)
       end
 
       it "validates required outputs on manual complete!" do
@@ -598,7 +598,7 @@ RSpec.describe Busybee::Worker do
         expect { worker.perform_job(job) }.not_to raise_error
         expect(client).not_to have_received(:complete_job)
         expect(client).to have_received(:fail_job).
-          with(123456, /MissingOutput.*:notification_id/, retries: nil, backoff: nil)
+          with(123456, /MissingOutput.*:notification_id/, retries: 2, backoff: nil)
       end
 
       it "re-raises validation error when fail_job_on_error is false" do
@@ -943,7 +943,7 @@ RSpec.describe Busybee::Worker do
         Busybee.before_job { raise "hook boom" }
 
         performing_worker.perform_job(job)
-        expect(client).to have_received(:fail_job).with(123456, /hook boom/, retries: nil, backoff: nil)
+        expect(client).to have_received(:fail_job).with(123456, /hook boom/, retries: 2, backoff: nil)
       end
 
       it "prevents status changes during before_job hooks" do
