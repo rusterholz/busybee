@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-require "rails"
+require "active_support"
 require "active_support/core_ext/object/blank"
+require "rails"
 require "busybee"
 
 module Busybee

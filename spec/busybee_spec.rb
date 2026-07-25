@@ -1,8 +1,21 @@
 # frozen_string_literal: true
 
 require "logger"
+require "open3"
+require "rbconfig"
 
 RSpec.describe Busybee do
+  describe "cold load" do
+    # A pristine subprocess (bundler load paths only, nothing required) is how
+    # CI first touches the gem. Guards Active Support's cherry-pick contract:
+    # active_support itself must load before any core_ext/duration piece, on
+    # every AS in the support matrix — not just whichever the dev lock holds.
+    it "loads standalone without a preloaded Active Support" do
+      _stdout, stderr, status = Open3.capture3(RbConfig.ruby, "-e", 'require "busybee"')
+      expect(status).to be_success, "cold require of busybee failed:\n#{stderr}"
+    end
+  end
+
   shared_examples "a duration config setter" do |setter, getter, default_const|
     around do |example|
       original = described_class.instance_variable_get(:"@#{getter}")
