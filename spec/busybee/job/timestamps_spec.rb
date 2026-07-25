@@ -5,6 +5,10 @@ require "busybee/job/timestamps"
 RSpec.describe Busybee::Job::Timestamps do
   subject(:timestamps) { described_class.new }
 
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) { described_class.new.stamp!(:activated_at).stamp!(:executed_at) }
+  end
+
   describe "#context_tags" do
     it "is always empty (timestamps aren't low-card labels)" do
       timestamps.stamp!(:activated_at)

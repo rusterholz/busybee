@@ -3,6 +3,15 @@
 require "active_support/core_ext/numeric/time"
 
 RSpec.describe Busybee::Job do
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) do
+      described_class.new(raw_job, client: client).tap do |job|
+        job.timestamps.stamp!(:activated_at)
+        job.set_context(source: :poll, buffered: true, worker_class: String, note: "scratch")
+      end
+    end
+  end
+
   let(:client) { instance_double(Busybee::Client) }
 
   let(:raw_job) do

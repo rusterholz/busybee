@@ -5,6 +5,10 @@ require "busybee/job/context"
 RSpec.describe Busybee::Job::Context do
   subject(:context) { described_class.new }
 
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) { described_class.new.tap { |c| c.absorb(note: "hi", at: Time.now.utc) } }
+  end
+
   describe "initial state" do
     it "is empty" do
       expect(context.to_h).to eq({})

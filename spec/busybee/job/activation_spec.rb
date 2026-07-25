@@ -5,6 +5,12 @@ require "busybee/job/activation"
 RSpec.describe Busybee::Job::Activation do
   subject(:activation) { described_class.new }
 
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) do
+      described_class.new.tap { |a| a.harvest!({ source: :stream, buffered: true, worker_class: String }) }
+    end
+  end
+
   describe "initial state" do
     it "has no worker or source, and is not buffered" do
       expect(activation.worker).to be_nil
