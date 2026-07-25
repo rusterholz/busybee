@@ -13,7 +13,11 @@ lib/busybee/
 ├── cli.rb                   # CLI entry point: arg parsing, env loading, signal handling, runner wiring
 ├── configure.rb             # Validated setters for gem-level config (included into Busybee singleton)
 ├── client.rb                # Client class - main user-facing API
-├── client/                  # Client operation modules
+├── client/                  # Client operation modules + the call seam
+│   ├── call.rb              # Per-call hook carrier and execution seam (attempt)
+│   ├── call/
+│   │   ├── correlation.rb   # Thread-local job/worker seeding (Call.with_job etc.)
+│   │   └── timestamps.rb    # Logical span + per-attempt network windows
 │   ├── error_handling.rb    # Retry logic and error wrapping
 │   ├── job_operations.rb    # complete_job, fail_job, with_each_job, etc.
 │   ├── message_operations.rb # publish_message, broadcast_signal
