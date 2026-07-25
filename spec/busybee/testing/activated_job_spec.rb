@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-require "busybee/testing/activated_job"
 require "json"
+
+require "busybee/testing/activated_job"
 
 RSpec.describe Busybee::Testing::ActivatedJob do
   subject(:job) { described_class.new(raw_job, client: client) }

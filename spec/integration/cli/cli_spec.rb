@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-require "tempfile"
+require "base64"
 require "fileutils"
+require "tempfile"
 
 RSpec.describe "CLI", :integration do
   let(:harness) { File.expand_path("test_harness.rb", __dir__) }

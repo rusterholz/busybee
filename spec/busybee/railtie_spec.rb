@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-require "busybee/railtie" if defined?(Rails::Railtie)
 require "busybee/credentials/insecure"
+require "busybee/railtie" if defined?(Rails::Railtie)
 
 # All Busybee config instance variables that the Railtie may set
 def busybee_config_ivars

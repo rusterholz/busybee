@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-require "active_support/core_ext/object/json"
 require "active_support/core_ext/numeric/time"
+require "active_support/core_ext/object/json"
 
 RSpec.describe Busybee::Serialization do
   describe ".to_json" do

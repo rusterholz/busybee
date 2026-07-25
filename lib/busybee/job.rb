@@ -1,15 +1,17 @@
 # frozen_string_literal: true
 
-require "active_support"
 require "active_support/core_ext/module/delegation"
+
+require "busybee/client/call"
 require "busybee/durations"
-require "busybee/serialization"
+require "busybee/error"
 require "busybee/job/activation"
 require "busybee/job/context"
 require "busybee/job/error_formatting"
 require "busybee/job/payload"
 require "busybee/job/resolution"
 require "busybee/job/timestamps"
+require "busybee/serialization"
 
 module Busybee
   # Represents a job activated from Zeebe for processing by a worker.

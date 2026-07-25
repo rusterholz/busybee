@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-require "busybee/credentials"
 require "busybee/client/call"
 require "busybee/client/error_handling"
 require "busybee/client/job_operations"
 require "busybee/client/message_operations"
 require "busybee/client/process_operations"
 require "busybee/client/variable_operations"
+require "busybee/credentials"
 
 module Busybee
   # Ruby-idiomatic wrapper around Zeebe GRPC API.

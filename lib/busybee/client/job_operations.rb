@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
+require "busybee/defaults"
 require "busybee/durations"
 require "busybee/grpc"
+require "busybee/job"
+require "busybee/job_stream"
 require "busybee/serialization"
 
 module Busybee

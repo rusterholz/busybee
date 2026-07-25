@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
-require "active_support"
 require "active_support/core_ext/string/inflections"
+
+require "busybee/defaults"
 require "busybee/durations"
+require "busybee/error"
 
 module Busybee
   class Worker

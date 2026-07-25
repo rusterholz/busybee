@@ -1,5 +1,10 @@
 # frozen_string_literal: true
 
+require "busybee/client/call"
+require "busybee/grpc/error"
+require "busybee/runner/streaming"
+require "busybee/worker/shutdown"
+
 module Busybee
   class Runner
     # Hybrid runner — combines polling and streaming for best-of-both-worlds job processing.

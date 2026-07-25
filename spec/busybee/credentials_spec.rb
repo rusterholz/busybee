@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
+
 RSpec.describe Busybee::Credentials do
   describe ".build" do
     # As new credential types are added (OAuth, CamundaCloud, etc.),

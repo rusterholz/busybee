@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
-require "base64"
-require "securerandom"
+require "grpc"
+
 require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 require "busybee/testing/activated_job"
-require "busybee/testing/helpers/support"
 require "busybee/testing/helpers/execution"
+require "busybee/testing/helpers/support"
 
 module Busybee
   module Testing

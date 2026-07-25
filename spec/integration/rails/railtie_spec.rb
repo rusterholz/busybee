@@ -5,8 +5,6 @@
 #
 # To run: TEST_RAILS_INTEGRATION=1 bundle exec rspec spec/integration/rails/railtie_spec.rb
 
-require "spec_helper"
-
 RSpec.describe "Railtie integration with demo Rails app", :rails do
   # These tests only make sense when we've booted the full Rails app
   before do

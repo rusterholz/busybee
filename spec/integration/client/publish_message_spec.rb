@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/numeric/time"
+require "securerandom"
 
 RSpec.describe Busybee::Client, "#publish_message" do
   shared_context "with deployed waiting process" do

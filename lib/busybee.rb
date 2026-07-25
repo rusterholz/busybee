@@ -1,21 +1,24 @@
 # frozen_string_literal: true
 
+require "active_support" # the one base-AS site: every core_ext cherry-pick below assumes it (AS load contract)
+require "grpc"
 require "socket"
-require "busybee/version"
-require "busybee/defaults"
-require "busybee/durations"
+
+require "busybee/cli"
+require "busybee/client"
 require "busybee/configure"
 require "busybee/credentials"
-require "busybee/logging"
-require "busybee/serialization"
+require "busybee/defaults"
+require "busybee/durations"
+require "busybee/hooks"
 require "busybee/job"
 require "busybee/job_stream"
-require "busybee/client"
-require "busybee/worker"
-require "busybee/runtime_config"
+require "busybee/logging"
 require "busybee/runner"
-require "busybee/cli"
-require "busybee/hooks"
+require "busybee/runtime_config"
+require "busybee/serialization"
+require "busybee/version"
+require "busybee/worker"
 
 # Top-level gem module. Configuration readers and defaults live here;
 # validated setters live in Busybee::Configure.
@@ -170,7 +173,6 @@ module Busybee
     private
 
     def default_retry_errors
-      require "grpc"
       [::GRPC::Unavailable, ::GRPC::DeadlineExceeded, ::GRPC::ResourceExhausted]
     end
   end

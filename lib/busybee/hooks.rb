@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "busybee/hooks/chain"
+require "busybee/worker/shutdown"
 
 module Busybee
   # Central module for the hook/instrumentation system.

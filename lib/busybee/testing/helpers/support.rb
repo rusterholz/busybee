@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
-require "json"
+require "grpc"
 require "securerandom"
+
+require "busybee/credentials"
 require "busybee/durations"
 require "busybee/grpc"
 
@@ -64,7 +66,6 @@ module Busybee
         # The actual public helper instance method delegates to this. It uses Busybee.credential_type
         # if set, and attempts to autodetect from env vars otherwise.
         def grpc_client
-          require "busybee/credentials"
           Busybee::Credentials.build.grpc_stub
         end
       end

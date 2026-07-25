@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "busybee"
 require "busybee/grpc/error"
 require "busybee/logging"
 

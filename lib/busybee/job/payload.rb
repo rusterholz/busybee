@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "busybee/error"
 require "busybee/serialization"
 
 module Busybee

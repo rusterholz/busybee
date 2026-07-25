@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "active_support"
 require "active_support/core_ext/module/delegation"
+
 require "busybee/client/call/correlation"
 require "busybee/client/call/timestamps"
 require "busybee/grpc/error"

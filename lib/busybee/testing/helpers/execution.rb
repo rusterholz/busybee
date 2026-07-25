@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "busybee/client"
+require "busybee/grpc"
 require "busybee/job"
 require "busybee/serialization"
 

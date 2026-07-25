@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "busybee/worker/shutdown"
+
 module Busybee
   module Hooks
     # Builds the nested lambda chain used by Hooks.run_chain.

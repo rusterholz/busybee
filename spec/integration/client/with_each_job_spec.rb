@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
+
 RSpec.describe Busybee::Client, "#with_each_job" do
   let(:job_bpmn_path) { File.expand_path("../../fixtures/job_process.bpmn", __dir__) }
 

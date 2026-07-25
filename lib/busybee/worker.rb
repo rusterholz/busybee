@@ -1,12 +1,15 @@
 # frozen_string_literal: true
 
-require "active_support"
 require "active_support/core_ext/module/delegation"
+
+require "busybee/client/call"
+require "busybee/error"
+require "busybee/hooks"
 require "busybee/worker/configuration"
 require "busybee/worker/dsl"
 require "busybee/worker/shutdown"
-require "busybee/worker/timestamps"
 require "busybee/worker/status"
+require "busybee/worker/timestamps"
 
 module Busybee
   # Base class for defining job workers.

@@ -2,6 +2,8 @@
 
 require "rspec/expectations"
 
+require "busybee/testing/helpers"
+
 # Matcher to check if jobs are available for activation.
 #
 # This matcher is designed to work with blocks that call `activate_job` or similar methods

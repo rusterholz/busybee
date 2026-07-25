@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "busybee/testing/matchers/have_activated"
 require "busybee/testing/helpers"
+require "busybee/testing/matchers/have_activated"
 
 RSpec.describe "have_activated matcher" do
   let(:test_class) do

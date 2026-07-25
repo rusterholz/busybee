@@ -1,5 +1,11 @@
 # frozen_string_literal: true
 
+require "concurrent"
+
+require "busybee/client/call"
+require "busybee/runner"
+require "busybee/worker/shutdown"
+
 module Busybee
   class Runner
     # Streaming runner — receives jobs via client.open_job_stream.
@@ -210,3 +216,6 @@ module Busybee
     end
   end
 end
+
+# Direct subclass loads after the class body; it requires this file back.
+require "busybee/runner/hybrid"

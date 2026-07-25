@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
-require "busybee/job"
+require "grpc"
+
+require "busybee/error"
 require "busybee/grpc/error"
+require "busybee/job"
 
 module Busybee
   # Wraps a gRPC server stream of activated jobs with a Ruby-idiomatic interface.

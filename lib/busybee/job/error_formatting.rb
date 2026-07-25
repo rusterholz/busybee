@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/string/inflections"
+
 module Busybee
   class Job
     # Stateless input-shaping helpers used by Job's lifecycle methods to

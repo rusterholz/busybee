@@ -2,6 +2,9 @@
 
 require "concurrent"
 
+require "busybee/runner"
+require "busybee/runtime_config"
+
 module Busybee
   class Runner
     # Multi runner — manages multiple worker types in a single process.

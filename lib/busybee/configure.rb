@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require "busybee/credentials"
+require "busybee/durations"
+require "busybee/logging"
+
 module Busybee
   # Validated setters for gem-level configuration.
   # Included into Busybee's singleton class; readers live in busybee.rb.

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "busybee/grpc"
+require "busybee/grpc/error"
 require "busybee/serialization"
 
 module Busybee

@@ -2,6 +2,13 @@
 
 require "concurrent"
 
+require "busybee/client"
+require "busybee/grpc/error"
+require "busybee/hooks"
+require "busybee/runtime_config"
+require "busybee/worker/shutdown"
+require "busybee/worker/status"
+
 module Busybee
   # Base class for all runner types. Provides the shared lifecycle (run!, stop!,
   # stopping?, running?, kill!) and the Runner.for factory for mode resolution.
@@ -299,7 +306,8 @@ module Busybee
   end
 end
 
+# Direct subclasses load after the class body; each requires this file back.
+# Hybrid rides at the bottom of streaming.rb — it subclasses Streaming.
+require "busybee/runner/multi"
 require "busybee/runner/polling"
 require "busybee/runner/streaming"
-require "busybee/runner/hybrid"
-require "busybee/runner/multi"

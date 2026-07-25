@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-require "busybee"
 require "busybee/durations"
+require "busybee/error"
+require "busybee/grpc"
 
 module Busybee
   # Base class for credentials. Defines interface for all credential types.
@@ -182,12 +183,9 @@ module Busybee
     #
     # @return [Busybee::GRPC::Gateway::Stub]
     def grpc_stub
-      @grpc_stub ||= begin
-        require "busybee/grpc"
-        Busybee::GRPC::Gateway::Stub.new(
-          cluster_address, grpc_channel_credentials, channel_args: keepalive_channel_args
-        )
-      end
+      @grpc_stub ||= Busybee::GRPC::Gateway::Stub.new(
+        cluster_address, grpc_channel_credentials, channel_args: keepalive_channel_args
+      )
     end
 
     # Returns gRPC channel credentials for authentication.
