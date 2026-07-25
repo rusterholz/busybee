@@ -13,7 +13,7 @@ module Busybee
     # :call entries fire through the Client::Call seam. Each callback receives
     # its noun's carrier: Job, Worker::Status, or Client::Call.
     HOOK_TYPES = %i[
-      before_job around_job after_job
+      before_perform around_perform after_perform
       on_job_activated on_job_executed around_job_execution
       on_worker_started on_worker_stop_requested on_worker_stopping on_worker_shutdown
       before_call around_call after_call
@@ -28,15 +28,17 @@ module Busybee
       call: %i[rpc status grpc_status error_class].freeze
     }.freeze
 
-    # Map each hook type to its noun for filter validation
-    HOOK_NOUN = HOOK_TYPES.each_with_object({}) do |type, h|
-      noun = case type
-             when /job/ then :job
-             when /worker/ then :worker
-             when /call/ then :call
-             end
-      h[type] = noun
-    end.freeze
+    # Map each hook type to its noun for filter validation. Explicit, not derived
+    # from the name: the perform triple carries the usercode lifecycle's name
+    # ("perform" = wraps usercode; "job" = the system's job lifecycle), while its
+    # carrier — and so its filter noun — is still the Job.
+    HOOK_NOUN = {
+      before_perform: :job, around_perform: :job, after_perform: :job,
+      on_job_activated: :job, on_job_executed: :job, around_job_execution: :job,
+      on_worker_started: :worker, on_worker_stop_requested: :worker,
+      on_worker_stopping: :worker, on_worker_shutdown: :worker,
+      before_call: :call, around_call: :call, after_call: :call
+    }.freeze
 
     class << self
       # ====== Hook storage ======
@@ -121,9 +123,9 @@ module Busybee
       # Run all matching hooks for the given type. Callbacks receive the target
       # (e.g. Busybee::Job for job-noun hooks).
       #
-      # By default, errors propagate (for wrapping hooks like before_job).
+      # By default, errors propagate (for wrapping hooks like before_perform).
       # With safe: true, errors are logged and iteration continues (for
-      # observing hooks like after_job, on_job_executed). Shutdown errors
+      # observing hooks like after_perform, on_job_executed). Shutdown errors
       # always propagate regardless of the safe: flag.
       def run(type, target, safe: false)
         matching_hooks(type, target).each do |hook|

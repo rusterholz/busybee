@@ -16,11 +16,16 @@ RSpec.describe Busybee::Hooks do
       expect { described_class.hooks_for(:bogus) }.to raise_error(ArgumentError, /bogus/)
     end
 
+    it "maps every hook type to a filter noun (HOOK_NOUN is explicit, not derived)" do
+      expect(described_class::HOOK_NOUN.keys).to match_array(described_class::HOOK_TYPES)
+      expect(described_class::HOOK_NOUN.values.uniq).to match_array(described_class::FILTER_KEYS.keys)
+    end
+
     describe ".reset!" do
       it "clears all hook arrays" do
-        described_class.hooks_for(:before_job) << { callback: -> {}, filters: {} }
+        described_class.hooks_for(:before_perform) << { callback: -> {}, filters: {} }
         described_class.reset!
-        expect(described_class.hooks_for(:before_job)).to eq([])
+        expect(described_class.hooks_for(:before_perform)).to eq([])
       end
     end
   end
@@ -28,32 +33,32 @@ RSpec.describe Busybee::Hooks do
   describe "registration" do
     after { described_class.reset! }
 
-    it "registers a before_job hook via Busybee.configure" do
+    it "registers a before_perform hook via Busybee.configure" do
       callback = proc { |_event| }
-      Busybee.configure { |c| c.before_job(&callback) }
+      Busybee.configure { |c| c.before_perform(&callback) }
 
-      hooks = described_class.hooks_for(:before_job)
+      hooks = described_class.hooks_for(:before_perform)
       expect(hooks.length).to eq(1)
       expect(hooks.first[:callback]).to be(callback)
       expect(hooks.first[:filters]).to eq({})
     end
 
     it "registers with filter kwargs" do
-      Busybee.configure { |c| c.after_job(status: :failed) { |_| } } # rubocop:disable Lint/EmptyBlock
+      Busybee.configure { |c| c.after_perform(status: :failed) { |_| } } # rubocop:disable Lint/EmptyBlock
 
-      hook = described_class.hooks_for(:after_job).first
+      hook = described_class.hooks_for(:after_perform).first
       expect(hook[:filters]).to eq(status: :failed)
     end
 
     it "preserves FIFO ordering" do
       results = []
       Busybee.configure do |c|
-        c.before_job { results << :first }
-        c.before_job { results << :second }
-        c.before_job { results << :third }
+        c.before_perform { results << :first }
+        c.before_perform { results << :second }
+        c.before_perform { results << :third }
       end
 
-      hooks = described_class.hooks_for(:before_job)
+      hooks = described_class.hooks_for(:before_perform)
       expect(hooks.length).to eq(3)
       hooks.each { |h| h[:callback].call(nil) }
       expect(results).to eq(%i[first second third])
@@ -67,7 +72,7 @@ RSpec.describe Busybee::Hooks do
     end
 
     it "requires a block" do
-      expect { Busybee.before_job }.to raise_error(ArgumentError, /block/)
+      expect { Busybee.before_perform }.to raise_error(ArgumentError, /block/)
     end
   end
 
@@ -178,14 +183,14 @@ RSpec.describe Busybee::Hooks do
 
     it "accepts valid job filter kwargs" do
       expect do
-        Busybee.before_job(job_type: "test", worker_class: /Order/, status: :failed,
-                           bpmn_process_id: "flow", buffered: true, error: RuntimeError, &noop)
+        Busybee.before_perform(job_type: "test", worker_class: /Order/, status: :failed,
+                               bpmn_process_id: "flow", buffered: true, error: RuntimeError, &noop)
       end.not_to raise_error
     end
 
     it "rejects unknown job filter kwargs" do
       expect do
-        Busybee.before_job(method: :complete_job, &noop)
+        Busybee.before_perform(method: :complete_job, &noop)
       end.to raise_error(ArgumentError, /method/)
     end
 
@@ -228,38 +233,38 @@ RSpec.describe Busybee::Hooks do
 
     it "calls matching hooks in FIFO order" do
       results = []
-      Busybee.before_job { results << :first }
-      Busybee.before_job { results << :second }
+      Busybee.before_perform { results << :first }
+      Busybee.before_perform { results << :second }
 
-      described_class.run(:before_job, job)
+      described_class.run(:before_perform, job)
       expect(results).to eq(%i[first second])
     end
 
     it "passes the job to each hook" do
       received = nil
-      Busybee.before_job { |arg| received = arg }
+      Busybee.before_perform { |arg| received = arg }
 
-      described_class.run(:before_job, job)
+      described_class.run(:before_perform, job)
       expect(received).to be(job)
     end
 
     it "does nothing when no hooks are registered" do
-      expect { described_class.run(:before_job, job) }.not_to raise_error
+      expect { described_class.run(:before_perform, job) }.not_to raise_error
     end
 
     context "with safe: false (default, propagating)" do
       it "lets errors propagate" do
-        Busybee.before_job { raise "boom" }
+        Busybee.before_perform { raise "boom" }
 
-        expect { described_class.run(:before_job, job) }.to raise_error(RuntimeError, "boom")
+        expect { described_class.run(:before_perform, job) }.to raise_error(RuntimeError, "boom")
       end
 
       it "stops at the first error" do
         results = []
-        Busybee.before_job { raise "boom" }
-        Busybee.before_job { results << :second }
+        Busybee.before_perform { raise "boom" }
+        Busybee.before_perform { results << :second }
 
-        described_class.run(:before_job, job) rescue nil # rubocop:disable Style/RescueModifier
+        described_class.run(:before_perform, job) rescue nil # rubocop:disable Style/RescueModifier
         expect(results).to eq([])
       end
     end
@@ -267,28 +272,28 @@ RSpec.describe Busybee::Hooks do
     context "with safe: true (swallowing)" do
       it "swallows errors and continues to the next hook" do
         results = []
-        Busybee.after_job { raise "boom" }
-        Busybee.after_job { results << :second }
+        Busybee.after_perform { raise "boom" }
+        Busybee.after_perform { results << :second }
 
-        described_class.run(:after_job, job, safe: true)
+        described_class.run(:after_perform, job, safe: true)
         expect(results).to eq([:second])
       end
 
       it "logs swallowed errors with class, message, and source location" do
         logger = instance_double(Logger, error: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
-        Busybee.after_job { raise "boom" }
+        Busybee.after_perform { raise "boom" }
 
-        described_class.run(:after_job, job, safe: true)
+        described_class.run(:after_perform, job, safe: true)
         expect(logger).to have_received(:error).
           with(%r{\[busybee\] Error in hooks \(ignored\): \[RuntimeError\] boom \(at .+/hooks_spec\.rb:\d+})
       end
 
       it "always propagates Busybee::Worker::Shutdown" do
-        Busybee.after_job { raise Busybee::Worker::Shutdown.new(worker: nil) }
+        Busybee.after_perform { raise Busybee::Worker::Shutdown.new(worker: nil) }
 
         expect do
-          described_class.run(:after_job, job, safe: true)
+          described_class.run(:after_perform, job, safe: true)
         end.to raise_error(Busybee::Worker::Shutdown)
       end
 
@@ -297,10 +302,10 @@ RSpec.describe Busybee::Hooks do
           shutdown_on RuntimeError
         end
         job.set_context(worker: worker_class.allocate)
-        Busybee.after_job { raise "db gone" }
+        Busybee.after_perform { raise "db gone" }
 
         expect do
-          described_class.run(:after_job, job, safe: true)
+          described_class.run(:after_perform, job, safe: true)
         end.to raise_error(Busybee::Worker::Shutdown)
       end
 
@@ -308,10 +313,10 @@ RSpec.describe Busybee::Hooks do
         original = Busybee.shutdown_on_errors
         begin
           Busybee.shutdown_on_errors = [RuntimeError]
-          Busybee.after_job { raise "db gone" }
+          Busybee.after_perform { raise "db gone" }
 
           expect do
-            described_class.run(:after_job, job, safe: true)
+            described_class.run(:after_perform, job, safe: true)
           end.to raise_error(Busybee::Worker::Shutdown)
         ensure
           Busybee.shutdown_on_errors = original
@@ -322,10 +327,10 @@ RSpec.describe Busybee::Hooks do
     context "with prefiltering" do
       it "skips hooks whose filters do not match" do
         results = []
-        Busybee.before_job(status: :failed) { results << :filtered }
-        Busybee.before_job { results << :unfiltered }
+        Busybee.before_perform(status: :failed) { results << :filtered }
+        Busybee.before_perform { results << :unfiltered }
 
-        described_class.run(:before_job, job) # event has status: :ready
+        described_class.run(:before_perform, job) # event has status: :ready
         expect(results).to eq([:unfiltered])
       end
 
@@ -333,10 +338,10 @@ RSpec.describe Busybee::Hooks do
         fired = []
         buffered_job = build_test_job(type: "test", key: 1).tap { |j| j.set_context(buffered: true) }
         unbuffered_job = build_test_job(type: "test", key: 2) # buffered? false
-        Busybee.before_job(buffered: true) { |job| fired << job.key }
+        Busybee.before_perform(buffered: true) { |job| fired << job.key }
 
-        described_class.run(:before_job, buffered_job)
-        described_class.run(:before_job, unbuffered_job)
+        described_class.run(:before_perform, buffered_job)
+        described_class.run(:before_perform, unbuffered_job)
 
         expect(fired).to eq([buffered_job.key])
       end
@@ -350,33 +355,33 @@ RSpec.describe Busybee::Hooks do
 
     it "calls the core block when no around hooks are registered" do
       called = false
-      described_class.run_chain(:around_job, job) { called = true }
+      described_class.run_chain(:around_perform, job) { called = true }
       expect(called).to be true
     end
 
     it "wraps the core block with a single around hook" do
       results = []
-      Busybee.around_job do |_job, perform|
+      Busybee.around_perform do |_job, perform|
         results << :before
         perform.call
         results << :after
       end
 
-      described_class.run_chain(:around_job, job) { results << :core }
+      described_class.run_chain(:around_perform, job) { results << :core }
       expect(results).to eq(%i[before core after])
     end
 
     it "nests 3 hooks in FIFO order (outermost registered first)" do
       results = []
       %i[outer middle inner].each do |label|
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           results << :"#{label}_before"
           perform.call
           results << :"#{label}_after"
         end
       end
 
-      described_class.run_chain(:around_job, job) { results << :core }
+      described_class.run_chain(:around_perform, job) { results << :core }
       expect(results).to eq(%i[
                               outer_before middle_before inner_before
                               core
@@ -386,60 +391,60 @@ RSpec.describe Busybee::Hooks do
 
     it "passes the job to each hook" do
       received = []
-      Busybee.around_job do |arg, perform|
+      Busybee.around_perform do |arg, perform|
         received << arg
         perform.call
       end
 
-      described_class.run_chain(:around_job, job) {} # rubocop:disable Lint/EmptyBlock
+      described_class.run_chain(:around_perform, job) {} # rubocop:disable Lint/EmptyBlock
       expect(received).to eq([job])
     end
 
     it "captures the core block return value onto job.result (set-once + HWIA + freeze)" do
-      result = described_class.run_chain(:around_job, job) { { order_id: 123 } }
+      result = described_class.run_chain(:around_perform, job) { { order_id: 123 } }
       expect(result).to eq("order_id" => 123)
       expect(job.result).to eq("order_id" => 123)
     end
 
     it "returns job.result even when middleware forgets to return it" do
-      Busybee.around_job do |_job, perform|
+      Busybee.around_perform do |_job, perform|
         perform.call
         "middleware forgot to return result"
       end
 
-      result = described_class.run_chain(:around_job, job) { { order_id: 123 } }
+      result = described_class.run_chain(:around_perform, job) { { order_id: 123 } }
       expect(result).to eq("order_id" => 123)
     end
 
     it "freezes the captured result so it can't be mutated post-capture" do
-      described_class.run_chain(:around_job, job) { { order_id: 123 } }
+      described_class.run_chain(:around_perform, job) { { order_id: 123 } }
       expect(job.result).to be_frozen
     end
 
     it "applies with_indifferent_access to the result" do
-      described_class.run_chain(:around_job, job) { { order_id: 123 } }
+      described_class.run_chain(:around_perform, job) { { order_id: 123 } }
       expect(job.result).to be_a(ActiveSupport::HashWithIndifferentAccess)
       expect(job.result[:order_id]).to eq(123)
       expect(job.result["order_id"]).to eq(123)
     end
 
     it "leaves job.result nil when core returns non-Hash (Resolution rejects)" do
-      result = described_class.run_chain(:around_job, job) { nil }
+      result = described_class.run_chain(:around_perform, job) { nil }
       expect(result).to be_nil
       expect(job.result).to be_nil
     end
 
     it "lets errors from around hooks propagate" do
-      Busybee.around_job { |_job, _perform| raise "middleware boom" }
+      Busybee.around_perform { |_job, _perform| raise "middleware boom" }
 
       expect do
-        described_class.run_chain(:around_job, job) { "core" }
+        described_class.run_chain(:around_perform, job) { "core" }
       end.to raise_error(RuntimeError, "middleware boom")
     end
 
     it "lets errors from the core block propagate through middleware" do
       results = []
-      Busybee.around_job do |_job, perform|
+      Busybee.around_perform do |_job, perform|
         results << :before
         perform.call
       rescue RuntimeError
@@ -448,7 +453,7 @@ RSpec.describe Busybee::Hooks do
       end
 
       expect do
-        described_class.run_chain(:around_job, job) { raise "core boom" }
+        described_class.run_chain(:around_perform, job) { raise "core boom" }
       end.to raise_error(RuntimeError, "core boom")
       expect(results).to eq(%i[before rescued])
     end
@@ -456,16 +461,16 @@ RSpec.describe Busybee::Hooks do
     context "with prefiltering" do
       it "excludes non-matching hooks from the chain" do
         results = []
-        Busybee.around_job(status: :failed) do |_job, perform|
+        Busybee.around_perform(status: :failed) do |_job, perform|
           results << :filtered
           perform.call
         end
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           results << :unfiltered
           perform.call
         end
 
-        described_class.run_chain(:around_job, job) { results << :core }
+        described_class.run_chain(:around_perform, job) { results << :core }
         expect(results).to eq(%i[unfiltered core])
       end
     end
@@ -473,77 +478,77 @@ RSpec.describe Busybee::Hooks do
     context "with safe: true" do
       it "swallows hook error and still runs the core" do
         results = []
-        Busybee.around_job { |_job, _perform| raise "broken hook" }
+        Busybee.around_perform { |_job, _perform| raise "broken hook" }
 
-        described_class.run_chain(:around_job, job, safe: true) { results << :core }
+        described_class.run_chain(:around_perform, job, safe: true) { results << :core }
         expect(results).to eq([:core])
       end
 
       it "does not double-run core when hook raises after calling process" do
         call_count = 0
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           perform.call
           raise "post-process error"
         end
 
-        described_class.run_chain(:around_job, job, safe: true) { call_count += 1 }
+        described_class.run_chain(:around_perform, job, safe: true) { call_count += 1 }
         expect(call_count).to eq(1)
       end
 
       it "logs swallowed errors with class, message, and source location" do
         logger = instance_double(Logger, error: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
-        Busybee.around_job { |_job, _perform| raise "broken" }
+        Busybee.around_perform { |_job, _perform| raise "broken" }
 
-        described_class.run_chain(:around_job, job, safe: true) { "core" }
+        described_class.run_chain(:around_perform, job, safe: true) { "core" }
         expect(logger).to have_received(:error).
           with(%r{\[busybee\] Error in hooks \(ignored\): \[RuntimeError\] broken \(at .+/hooks_spec\.rb:\d+})
       end
 
       it "always propagates Shutdown" do
-        Busybee.around_job { |_job, _perform| raise Busybee::Worker::Shutdown.new(worker: nil) }
+        Busybee.around_perform { |_job, _perform| raise Busybee::Worker::Shutdown.new(worker: nil) }
 
         expect do
-          described_class.run_chain(:around_job, job, safe: true) { "core" }
+          described_class.run_chain(:around_perform, job, safe: true) { "core" }
         end.to raise_error(Busybee::Worker::Shutdown)
       end
 
       it "swallows outer hook but inner hook still wraps core" do
         results = []
-        Busybee.around_job { |_job, _perform| raise "outer broken" }
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform { |_job, _perform| raise "outer broken" }
+        Busybee.around_perform do |_job, perform|
           results << :inner_before
           perform.call
           results << :inner_after
         end
 
-        described_class.run_chain(:around_job, job, safe: true) { results << :core }
+        described_class.run_chain(:around_perform, job, safe: true) { results << :core }
         expect(results).to eq(%i[inner_before core inner_after])
       end
 
       it "force-runs the core when an observing middleware returns without yielding" do
         results = []
-        Busybee.around_job { |_job, _perform| results << :hook } # never calls perform
+        Busybee.around_perform { |_job, _perform| results << :hook } # never calls perform
 
-        described_class.run_chain(:around_job, job, safe: true) { results << :core }
+        described_class.run_chain(:around_perform, job, safe: true) { results << :core }
         expect(results).to eq(%i[hook core])
       end
 
       it "warns when an observing middleware returns without yielding" do
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
-        Busybee.around_job { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
+        Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
 
-        described_class.run_chain(:around_job, job, safe: true) { "core" }
+        described_class.run_chain(:around_perform, job, safe: true) { "core" }
         expect(logger).to have_received(:warn).
           with(/\[busybee\].*without yielding/)
       end
 
       it "does not double-run the core when a forced continuation raises" do
         call_count = 0
-        Busybee.around_job { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
+        Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
 
-        described_class.run_chain(:around_job, job, safe: true) do
+        described_class.run_chain(:around_perform, job, safe: true) do
           call_count += 1
           raise "core boom"
         end

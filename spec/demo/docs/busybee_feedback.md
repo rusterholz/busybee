@@ -78,7 +78,7 @@ Non-bottlenecked workers confirmed this diagnosis:
 - **Saturation detection**: When a worker's inter-job idle time drops near zero, it's saturated — that's the bottleneck. A metric like `idle_fraction` per worker type would make bottlenecks immediately visible.
 - **Pipeline throughput view**: For BPMN processes with multiple steps, the ability to see throughput at each stage and identify where backpressure builds.
 
-An `around_job` or `on_job_complete` hook that receives timing metadata would let users build dashboards, emit StatsD metrics, or simply log structured data:
+An `around_perform` or `on_job_complete` hook that receives timing metadata would let users build dashboards, emit StatsD metrics, or simply log structured data:
 
 ```ruby
 # Hypothetical API

@@ -44,7 +44,7 @@ module Busybee
 
   # Raised when perform_job's hook machinery catches an attempt to change
   # job status (complete!, fail!, throw_bpmn_error!) from outside the
-  # perform method — e.g. from inside a before_job or around_job hook.
+  # perform method — e.g. from inside a before_perform or around_perform hook.
   StatusChangeOutsidePerform = Class.new(Error)
 
   # Raised when attempting to iterate a stream that has been closed

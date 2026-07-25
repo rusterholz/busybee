@@ -243,7 +243,7 @@ module Busybee
     # Mark the job resolved: stamp resolved_at, advance the Resolution PORO
     # to the terminal status (fire-once enforced). Outcome data (result /
     # error trio) is captured separately by the calling lifecycle method
-    # (#complete!, #fail!, #throw_bpmn_error!) before its GRPC. after_job
+    # (#complete!, #fail!, #throw_bpmn_error!) before its GRPC. after_perform
     # firing happens uniformly post-perform in Worker.perform_job's ensure,
     # not here.
     def resolve!(status)

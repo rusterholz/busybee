@@ -630,13 +630,13 @@ RSpec.describe Busybee::Runner do
         expect(captured.status).to eq(:error)
       end
 
-      it "receives the same Job as before_job (it's the same Job object)" do
-        before_job_arg = nil
+      it "receives the same Job as before_perform (it's the same Job object)" do
+        before_perform_arg = nil
         executed_job_arg = nil
-        Busybee.before_job { |j| before_job_arg = j }
+        Busybee.before_perform { |j| before_perform_arg = j }
         Busybee.on_job_executed { |j| executed_job_arg = j }
         runner.send(:execute_job, job)
-        expect(executed_job_arg).to be(before_job_arg)
+        expect(executed_job_arg).to be(before_perform_arg)
       end
 
       it "propagates Shutdown errors from the hook" do

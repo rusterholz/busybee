@@ -465,8 +465,8 @@ Job hooks receive the `Busybee::Job` itself:
 
 ```ruby
 Busybee.configure do |c|
-  c.before_job { |job| job.context[:span] = tracer.start_span(job.type) }
-  c.after_job(status: :failed) { |job| Sentry.capture_exception(job.error) }
+  c.before_perform { |job| job.context[:span] = tracer.start_span(job.type) }
+  c.after_perform(status: :failed) { |job| Sentry.capture_exception(job.error) }
 end
 ```
 
@@ -502,13 +502,15 @@ Per-moment readers are forwarded on Job (`job.activated_at`, `job.executed_at`, 
 
 ### Hook Registration
 
+The hook names encode which of the Job carrier's two lifecycles a hook belongs to: **`perform` in the name means the usercode lifecycle** (`before_perform` / `around_perform` / `after_perform` — tightly scoped to the worker's `perform` method), while **`job` in the name means the job's system lifecycle** (`on_job_activated` / `on_job_executed` / `around_job_execution` — the distributed-system view: activation, buffering, validation, the response back to the engine). This mirrors the `perform_*` vs `execution_*` timestamp families. One firing quirk to know: `after_perform` fires at perform-envelope exit only when the job reached a settled outcome (`job.resolved?`) — a hook that must fire on every exit path is `on_job_executed`.
+
 Hooks are registered via `Busybee.configure`, which delegates to `Busybee::Hooks` (one registration method per `HOOK_TYPES` entry):
 
 ```ruby
 Busybee.configure do |c|
-  c.before_job { |job| ... }
-  c.after_job(status: :failed) { |job| Sentry.capture_exception(job.error) }
-  c.around_job { |job, perform| Datadog::Tracing.trace(job.type) { perform.call } }
+  c.before_perform { |job| ... }
+  c.after_perform(status: :failed) { |job| Sentry.capture_exception(job.error) }
+  c.around_perform { |job, perform| Datadog::Tracing.trace(job.type) { perform.call } }
 end
 ```
 
@@ -529,10 +531,10 @@ Because filters resolve by sending the key name to the target, every filter key 
 
 ### Hook Invocation
 
-- **`Busybee::Hooks.run(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_job`); `safe: true` logs and continues to the next hook (observing hooks like `after_job` and the `on_*` family). `Busybee::Worker::Shutdown` always propagates regardless, and errors matching the target's `shutdown_on` classes (worker config + gem-level) are wrapped in `Shutdown` and propagated.
+- **`Busybee::Hooks.run(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_perform`); `safe: true` logs and continues to the next hook (observing hooks like `after_perform` and the `on_*` family). `Busybee::Worker::Shutdown` always propagates regardless, and errors matching the target's `shutdown_on` classes (worker config + gem-level) are wrapped in `Shutdown` and propagated.
 - **`Busybee::Hooks.run_chain(type, target, safe:, &core)`** — builds a nested lambda chain from matching around hooks (via `Busybee::Hooks::Chain`) and wraps the core block. First-registered hook is outermost. The core's return value is harvested into the Job's `Resolution`, so middleware can't "forget" the result — it's always read back from the Job, never from the chain's return value. Zero matching hooks calls the core directly.
 
-Worker and Runner call these directly at each job lifecycle moment (e.g. `Hooks.run(:after_job, job, safe: true)`); see the flows doc below for which hook fires where.
+Worker and Runner call these directly at each job lifecycle moment (e.g. `Hooks.run(:after_perform, job, safe: true)`); see the flows doc below for which hook fires where.
 
 ### Job execution flows
 
@@ -551,7 +553,7 @@ A `Client::Call` correlates itself to the executing Job and the runner's `Worker
 
 The carriers seed with deliberately different **window widths**:
 
-- **`job` — narrow (the perform-only crutch).** `Worker.perform_job` wraps its whole body in `Call.with_job(job)`, so `before/around/after_job`, `perform`, and autofail/autocomplete — everything that "runs as part of perform" — correlate to the job. It is deliberately *not* seeded for the runner-level `around_job_execution` middleware, which sit *outside* `perform_job` and already hold the Job as their carrier.
+- **`job` — narrow (the perform-only crutch).** `Worker.perform_job` wraps its whole body in `Call.with_job(job)`, so `before/around/after_perform`, `perform`, and autofail/autocomplete — everything that "runs as part of perform" — correlate to the job. It is deliberately *not* seeded for the runner-level `around_job_execution` middleware, which sit *outside* `perform_job` and already hold the Job as their carrier.
 - **`worker_status` — wide (every job-in-scope window).** Nothing but `job.worker_status` reaches the runner's snapshot, so each per-job window seeds it through `Runner#with_fresh_worker_status(job)`: stamp a fresh point-in-time `Worker::Status` onto the job, then `Call.with_worker_status(job.worker_status)` — one object in both places. It runs at activation, at execution (wrapping the `around_job_execution` chain and `perform`), again around `on_job_executed` (a fresh re-stamp, so completion-time gauges are reported rather than the possibly long-ago start), and on the shutdown-fail path. A job-less **fetch scope** (`Call.with_worker_status(worker_status)` around polling `with_each_job`, stream open, hybrid drain) attributes the `ActivateJobs`/stream-open Call to the worker before any job exists.
 
 A Call folds a **curated** correlation subset — not the carriers' full `context_tags`/`logging_context` (those stay right for logging the Job and Worker *directly*). It takes worker identity (`worker_class`, `job_type`, `worker_mode`; `worker_name` logging-only, since it can be per-run-unique) and job identity (`bpmn_process_id`, `source`; `job_key` / `process_instance_key` / `element_id` logging-only), and deliberately excludes lifecycle telemetry — job timestamps, worker gauges, and `retries` (which reads like the call's `attempts` but means the engine's retry budget). The composition lives in `Call#{worker,job}_correlation_{tags,logging}`.

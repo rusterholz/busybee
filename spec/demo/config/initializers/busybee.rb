@@ -24,15 +24,15 @@ Busybee.configure do |config|
   # Wrap these jobs' perform in a domain transaction. Not the async sim jobs (perform
   # returns before the work runs) nor complete_driver_delivery (publishes a message a
   # transaction can't undo).
-  config.around_job(job_type: "update_order_status") do |_job, perform|
+  config.around_perform(job_type: "update_order_status") do |_job, perform|
     Oms::Record.transaction { perform.call }
   end
 
-  config.around_job(job_type: %w[create_shipment update_shipment_status]) do |_job, perform|
+  config.around_perform(job_type: %w[create_shipment update_shipment_status]) do |_job, perform|
     Logistics::Record.transaction { perform.call }
   end
 
-  config.around_job(job_type: "assign_driver") do |_job, perform|
+  config.around_perform(job_type: "assign_driver") do |_job, perform|
     Delivery::Record.transaction { perform.call }
   end
 
@@ -41,7 +41,7 @@ Busybee.configure do |config|
   # raises Sim::Rollover — a declared shutdown error → graceful :unhealthy
   # shutdown; restart: unless-stopped (compose) then returns the container as a
   # fresh incarnation. Sim's async workers are exempt.
-  config.around_job do |job, perform|
+  config.around_perform do |job, perform|
     # Rolling *before* perform (not from on_job_executed) also fails the pending job —
     # so this one hook simulates two production behaviours at once: a rollout, and an
     # ordinary transient job failure that the engine's retry budget then recovers.

@@ -77,12 +77,12 @@ module Busybee
           # Defensive: ensure the status-change flag is cleared on every exit
           # path, including non-StandardError exceptions that escape the rescue.
           job._allow_status_changes!
-          # Conditional on resolved?: after_job marks the moment the lifecycle
+          # Conditional on resolved?: after_perform marks the moment the lifecycle
           # reached a settled outcome the engine has on file. When the engine
           # didn't learn (autofail disabled, any GRPC fail mid-resolution), the
           # job will be re-yielded; per-attempt observability belongs to
           # on_job_executed (runner-level, unconditional).
-          Hooks.run(:after_job, job, safe: true) if job.resolved?
+          Hooks.run(:after_perform, job, safe: true) if job.resolved?
         end
       end
 
@@ -121,7 +121,7 @@ module Busybee
 
       def handle_perform_exception(job, exception)
         job._allow_status_changes!
-        # Capture early so after_job hooks see the error attached to Job even
+        # Capture early so after_perform hooks see the error attached to Job even
         # when autofail is disabled (fail_job_on_error: false) or autofail's
         # GRPC fails. fail!'s own set_error during autofail no-ops harmlessly.
         job.send(:resolution).set_error(Shutdown.unwrap(exception))
@@ -136,12 +136,12 @@ module Busybee
         job = instance.job
         validate_inputs!(instance, configuration)
         job._prevent_status_changes!
-        Hooks.run(:before_job, job)
-        result = Hooks.run_chain(:around_job, job) do
+        Hooks.run(:before_perform, job)
+        result = Hooks.run_chain(:around_perform, job) do
           job._allow_status_changes!
           timed_perform(instance)
         ensure
-          # Re-engage the flag so around_job middleware's after-yield region
+          # Re-engage the flag so around_perform middleware's after-yield region
           # can't resolve the job. The core block here is parsed as part of
           # run_chain's block argument, so this ensure runs as the
           # block exits — before middleware unwinds. Cleared again below
@@ -183,7 +183,7 @@ module Busybee
         begin
           job.complete!(new_vars)
         rescue StandardError => e
-          # Capture the failure on Resolution's error axis so after_job and
+          # Capture the failure on Resolution's error axis so after_perform and
           # on_job_executed hooks see why complete! failed, even though the
           # error is logged-and-swallowed here. Symmetry with G2's early
           # capture in handle_perform_exception.
