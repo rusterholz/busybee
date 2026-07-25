@@ -32,6 +32,15 @@ module Busybee
 
         exception.cause || exception
       end
+
+      # Whether an error is one the worker (or the gem config) declared fatal —
+      # the shutdown_on classification, shared by the worker's perform rescue
+      # and the hook layer's safe-run rescue. worker_class may be nil or
+      # configuration-less (a bare hook target); only gem-level classes apply then.
+      def self.triggered_by?(error, worker_class)
+        per_worker = worker_class.respond_to?(:configuration) ? worker_class.configuration.shutdown_on : []
+        (per_worker + Busybee.shutdown_on_errors).any? { |klass| error.is_a?(klass) }
+      end
     end
   end
 end

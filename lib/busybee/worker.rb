@@ -127,7 +127,7 @@ module Busybee
         job.send(:resolution).set_error(Shutdown.unwrap(exception))
         handle_failure(job, exception, configuration)
         raise if exception.is_a?(Shutdown) || exception.is_a?(Busybee::StatusChangeOutsidePerform)
-        raise Shutdown.new(worker_class: self) if shutdown_error?(exception, configuration)
+        raise Shutdown.new(worker_class: self) if Shutdown.triggered_by?(exception, self)
 
         log_unhandled_error(job, exception) unless configuration.fail_job_on_error
       end
@@ -216,10 +216,6 @@ module Busybee
         job.fail!(Shutdown.unwrap(error), backoff: config.backoff)
       rescue StandardError => e
         Busybee.logger&.warn("Failed to fail job #{job.key}: #{e.message}. Job will timeout and retry.")
-      end
-
-      def shutdown_error?(error, config)
-        (config.shutdown_on + Busybee.shutdown_on_errors).any? { |klass| error.is_a?(klass) }
       end
 
       def log_unhandled_error(job, error)

@@ -712,6 +712,34 @@ RSpec.describe Busybee::Worker do
       error = described_class.new("Custom shutdown reason", worker_class: String)
       expect(error.message).to start_with("Custom shutdown reason")
     end
+
+    describe ".triggered_by?" do
+      let(:fatal_worker) do
+        stub_const("FatalRuntimeWorker", Class.new(Busybee::Worker) do
+          shutdown_on RuntimeError
+        end)
+      end
+
+      it "matches an error the worker class declared via shutdown_on" do
+        expect(described_class.triggered_by?(RuntimeError.new("db gone"), fatal_worker)).to be true
+        expect(described_class.triggered_by?(ArgumentError.new("nope"), fatal_worker)).to be false
+      end
+
+      it "matches an error declared in gem-level shutdown_on_errors" do
+        original = Busybee.shutdown_on_errors
+        begin
+          Busybee.shutdown_on_errors = [IOError]
+          expect(described_class.triggered_by?(IOError.new("pipe"), nil)).to be true
+        ensure
+          Busybee.shutdown_on_errors = original
+        end
+      end
+
+      it "tolerates a nil or configuration-less worker class" do
+        expect(described_class.triggered_by?(RuntimeError.new("x"), nil)).to be false
+        expect(described_class.triggered_by?(RuntimeError.new("x"), Object)).to be false
+      end
+    end
   end
 
   describe "#perform" do

@@ -149,9 +149,8 @@ module Busybee
         rescue Busybee::Worker::Shutdown
           raise
         rescue StandardError => e
-          if shutdown_error?(e, target)
-            raise Busybee::Worker::Shutdown.new(worker_class: attribute(target, :worker_class))
-          end
+          worker_class = attribute(target, :worker_class)
+          raise Busybee::Worker::Shutdown.new(worker_class: worker_class) if shutdown_triggered?(e, worker_class)
           raise unless safe
 
           log_swallowed_error(e)
@@ -255,11 +254,9 @@ module Busybee
         target.respond_to?(key) ? target.public_send(key) : nil
       end
 
-      # Check if an error matches shutdown_on classes from the worker or gem config.
-      def shutdown_error?(error, target)
-        worker_class = attribute(target, :worker_class)
-        per_worker = worker_class.respond_to?(:configuration) ? worker_class.configuration.shutdown_on : []
-        (per_worker + Busybee.shutdown_on_errors).any? { |klass| error.is_a?(klass) }
+      # The shutdown_on classification, shared with the worker's perform rescue.
+      def shutdown_triggered?(error, worker_class)
+        Busybee::Worker::Shutdown.triggered_by?(error, worker_class)
       end
     end
 
