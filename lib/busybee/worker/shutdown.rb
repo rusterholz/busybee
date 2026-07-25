@@ -10,8 +10,8 @@ module Busybee
     class Shutdown < Busybee::Error
       attr_reader :worker_class
 
-      def initialize(message = "Shutting down worker #{Busybee.worker_name}", worker:)
-        @worker_class = worker
+      def initialize(message = "Shutting down worker #{Busybee.worker_name}", worker_class:)
+        @worker_class = worker_class
         super(message)
       end
 

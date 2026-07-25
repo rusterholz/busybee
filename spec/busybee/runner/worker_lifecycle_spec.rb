@@ -241,7 +241,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       runner.test_run_loop = lambda do
         raise "underlying"
       rescue RuntimeError
-        raise Busybee::Worker::Shutdown.new(worker: LifecycleWorker)
+        raise Busybee::Worker::Shutdown.new(worker_class: LifecycleWorker)
       end
 
       expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)

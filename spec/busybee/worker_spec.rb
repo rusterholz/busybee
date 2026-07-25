@@ -301,7 +301,7 @@ RSpec.describe Busybee::Worker do
 
       it "re-raises Shutdown raised directly in perform" do
         worker = stub_const("DirectShutdownWorker", Class.new(described_class) do
-          define_method(:perform) { raise Busybee::Worker::Shutdown.new(worker: self.class) }
+          define_method(:perform) { raise Busybee::Worker::Shutdown.new(worker_class: self.class) }
         end)
 
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
@@ -312,7 +312,7 @@ RSpec.describe Busybee::Worker do
           define_method(:perform) do
             raise "root cause"
           rescue StandardError
-            raise Busybee::Worker::Shutdown.new(worker: self.class)
+            raise Busybee::Worker::Shutdown.new(worker_class: self.class)
           end
         end)
 
@@ -325,7 +325,7 @@ RSpec.describe Busybee::Worker do
           define_method(:perform) do
             raise "root cause"
           rescue StandardError
-            raise Busybee::Worker::Shutdown.new(worker: self.class)
+            raise Busybee::Worker::Shutdown.new(worker_class: self.class)
           end
         end)
 
@@ -687,7 +687,7 @@ RSpec.describe Busybee::Worker do
     end
 
     it "builds a message from worker class and cause" do
-      error = raise_with_cause(RuntimeError, "connection lost", worker: String) rescue $! # rubocop:disable Style/RescueModifier
+      error = raise_with_cause(RuntimeError, "connection lost", worker_class: String) rescue $! # rubocop:disable Style/RescueModifier
 
       expect(error.message).to include("Shutting down worker")
       expect(error.message).to include("RuntimeError")
@@ -698,18 +698,18 @@ RSpec.describe Busybee::Worker do
     end
 
     it "handles missing cause gracefully" do
-      error = described_class.new(worker: String)
+      error = described_class.new(worker_class: String)
       expect(error.message).to include("due to error")
       expect(error.message).to include("String")
     end
 
     it "handles anonymous worker class" do
-      error = described_class.new(worker: Class.new)
+      error = described_class.new(worker_class: Class.new)
       expect(error.message).not_to include(" in ")
     end
 
     it "accepts a custom base message" do
-      error = described_class.new("Custom shutdown reason", worker: String)
+      error = described_class.new("Custom shutdown reason", worker_class: String)
       expect(error.message).to start_with("Custom shutdown reason")
     end
   end

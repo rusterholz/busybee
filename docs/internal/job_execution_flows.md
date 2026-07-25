@@ -249,7 +249,7 @@ C12. `attempt_auto_fail(job, error, configuration)` → `job.fail!(underlying_er
 
 C13. Continuing `handle_perform_exception`:
   - Re-raises if exception is `Busybee::Worker::Shutdown` or `Busybee::StatusChangeOutsidePerform` (both are special-cased to propagate past `perform_job`).
-  - Wraps in `Shutdown.new(worker: self)` and raises if exception matches `shutdown_on` (per-worker or gem-level shutdown classes).
+  - Wraps in `Shutdown.new(worker_class: self)` and raises if exception matches `shutdown_on` (per-worker or gem-level shutdown classes).
   - Otherwise: if `fail_job_on_error` is off, `log_unhandled_error(job, exception)` (this is where the early-return from C11's first case surfaces — the original error is recorded in the log).
 
 C14. Continuing `Worker.perform_job(job)`:
@@ -400,8 +400,8 @@ The three origin sites converge on E1's "rescued by `perform_job`'s `rescue Stan
 
 Wrap site depends on origin:
 
-  - **From perform or any unsafe hook surface** that propagates to `perform_job`'s rescue: `handle_perform_exception` runs as in C10–C13. After `handle_failure` runs autofail (the original error is not yet Shutdown — regular StandardError path), `shutdown_error?(exception, configuration)` matches, and `raise Shutdown.new(worker: self)` fires (Ruby sets `cause` to the original). From here, **the trace continues as E1** from "MIDDLEWARE: `around_job_execution` finish".
-  - **From a safe hook** (`on_job_activated`, `after_perform`, `on_job_executed`, `around_job_execution`): `Hooks.run`'s rescue checks `shutdown_error?` inline and raises `Shutdown.new(worker: nil)` directly. Hook iteration short-circuits. From here, **cross-link to E4** — propagation depends on hook site.
+  - **From perform or any unsafe hook surface** that propagates to `perform_job`'s rescue: `handle_perform_exception` runs as in C10–C13. After `handle_failure` runs autofail (the original error is not yet Shutdown — regular StandardError path), `shutdown_error?(exception, configuration)` matches, and `raise Shutdown.new(worker_class: self)` fires (Ruby sets `cause` to the original). From here, **the trace continues as E1** from "MIDDLEWARE: `around_job_execution` finish".
+  - **From a safe hook** (`on_job_activated`, `after_perform`, `on_job_executed`, `around_job_execution`): `Hooks.run`'s rescue checks `shutdown_error?` inline and raises `Shutdown.new(worker_class: <the target's worker_class>)` directly, so the message names the worker that declared the error fatal. Hook iteration short-circuits. From here, **cross-link to E4** — propagation depends on hook site.
 
 Important asymmetry: in the perform-side path, **autofail runs before the Shutdown wrap**, so the engine sees the underlying error via `fail_job` in addition to learning the worker is shutting down via the abandoned activation. In the safe-hook path, autofail does not run (it's only reachable from `perform_job`'s rescue).
 

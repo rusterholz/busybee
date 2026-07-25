@@ -149,7 +149,9 @@ module Busybee
         rescue Busybee::Worker::Shutdown
           raise
         rescue StandardError => e
-          raise Busybee::Worker::Shutdown.new(worker: nil) if shutdown_error?(e, target)
+          if shutdown_error?(e, target)
+            raise Busybee::Worker::Shutdown.new(worker_class: attribute(target, :worker_class))
+          end
           raise unless safe
 
           log_swallowed_error(e)

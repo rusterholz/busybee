@@ -386,7 +386,7 @@ RSpec.describe Busybee::Hooks do
       end
 
       it "always propagates Busybee::Worker::Shutdown" do
-        Busybee.after_perform { raise Busybee::Worker::Shutdown.new(worker: nil) }
+        Busybee.after_perform { raise Busybee::Worker::Shutdown.new(worker_class: nil) }
 
         expect do
           described_class.run(:after_perform, job, safe: true)
@@ -395,6 +395,7 @@ RSpec.describe Busybee::Hooks do
 
       it "propagates shutdown_on errors from worker class config" do
         worker_class = Class.new(Busybee::Worker) do
+          def self.name = "DbGoneWorker"
           shutdown_on RuntimeError
         end
         job.set_context(worker: worker_class.allocate)
@@ -402,7 +403,11 @@ RSpec.describe Busybee::Hooks do
 
         expect do
           described_class.run(:after_perform, job, safe: true)
-        end.to raise_error(Busybee::Worker::Shutdown)
+        end.to raise_error(Busybee::Worker::Shutdown) { |shutdown|
+          # The raised Shutdown names the worker whose config triggered it.
+          expect(shutdown.worker_class).to be(worker_class)
+          expect(shutdown.message).to include("DbGoneWorker")
+        }
       end
 
       it "propagates shutdown_on errors from gem-level config" do
@@ -602,7 +607,7 @@ RSpec.describe Busybee::Hooks do
       end
 
       it "always propagates Shutdown" do
-        Busybee.around_perform { |_job, _perform| raise Busybee::Worker::Shutdown.new(worker: nil) }
+        Busybee.around_perform { |_job, _perform| raise Busybee::Worker::Shutdown.new(worker_class: nil) }
 
         expect do
           described_class.run_chain(:around_perform, job, safe: true) { "core" }

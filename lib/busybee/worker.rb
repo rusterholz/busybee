@@ -127,7 +127,7 @@ module Busybee
         job.send(:resolution).set_error(Shutdown.unwrap(exception))
         handle_failure(job, exception, configuration)
         raise if exception.is_a?(Shutdown) || exception.is_a?(Busybee::StatusChangeOutsidePerform)
-        raise Shutdown.new(worker: self) if shutdown_error?(exception, configuration)
+        raise Shutdown.new(worker_class: self) if shutdown_error?(exception, configuration)
 
         log_unhandled_error(job, exception) unless configuration.fail_job_on_error
       end

@@ -266,7 +266,7 @@ RSpec.describe Busybee::Runner do
     end
 
     it "propagates Shutdown errors from hooks" do
-      Busybee.on_job_activated { raise Busybee::Worker::Shutdown.new(worker: nil) }
+      Busybee.on_job_activated { raise Busybee::Worker::Shutdown.new(worker_class: nil) }
       expect do
         runner.send(:activate_job, job, source: :poll)
       end.to raise_error(Busybee::Worker::Shutdown)
@@ -415,7 +415,7 @@ RSpec.describe Busybee::Runner do
 
     it "propagates Shutdown errors from hooks" do
       Busybee.around_job_execution do |_event, _process|
-        raise Busybee::Worker::Shutdown.new(worker: nil)
+        raise Busybee::Worker::Shutdown.new(worker_class: nil)
       end
       expect { runner.send(:execute_job, job) }.to raise_error(Busybee::Worker::Shutdown)
     end
@@ -640,7 +640,7 @@ RSpec.describe Busybee::Runner do
       end
 
       it "propagates Shutdown errors from the hook" do
-        Busybee.on_job_executed { raise Busybee::Worker::Shutdown.new(worker: nil) }
+        Busybee.on_job_executed { raise Busybee::Worker::Shutdown.new(worker_class: nil) }
         expect { runner.send(:execute_job, job) }.to raise_error(Busybee::Worker::Shutdown)
       end
 

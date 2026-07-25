@@ -222,7 +222,7 @@ RSpec.describe Busybee::Runner::Multi do
         first_runner, second_runner = multi.runners
         multi.runners.each { |r| allow(r).to receive(:stop!) }
         allow(first_runner).to receive(:run!).and_return(true)
-        allow(second_runner).to receive(:run!).and_raise(Busybee::Worker::Shutdown.new(worker: streaming_worker))
+        allow(second_runner).to receive(:run!).and_raise(Busybee::Worker::Shutdown.new(worker_class: streaming_worker))
 
         expect { multi.run! }.to raise_error(Busybee::Worker::Shutdown)
 
