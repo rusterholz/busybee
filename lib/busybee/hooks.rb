@@ -21,11 +21,13 @@ module Busybee
 
     # Allowed filter kwargs per noun. Each key is resolved against the carrier
     # via public_send at match time, so every key here must be a public reader
-    # on the noun's carrier (Worker::Status for :worker).
+    # on the noun's carrier (Worker::Status for :worker). :error — on every
+    # noun — is matched by its own semantic table (see error_match?), not the
+    # generic layers.
     FILTER_KEYS = {
       job: %i[job_type worker_class status bpmn_process_id source buffered error].freeze,
-      worker: %i[worker_class job_type worker_mode reason error error_class].freeze,
-      call: %i[rpc status grpc_status error_class].freeze
+      worker: %i[worker_class job_type worker_mode reason error].freeze,
+      call: %i[rpc status grpc_status error].freeze
     }.freeze
 
     # Map each hook type to its noun for filter validation. Explicit, not derived
@@ -67,6 +69,7 @@ module Busybee
       def register(type, callback, **filters)
         raise ArgumentError, "#{type} requires a block" unless callback
 
+        filters = filters.compact # a nil filter value means "don't filter on this key"
         validate_filters!(type, filters)
         hooks_for(type) << { callback: callback, filters: filters }
       end
@@ -115,7 +118,20 @@ module Busybee
       # @param target [Object] the noun (Busybee::Job for job hooks)
       # @return [Boolean]
       def matches?(hook, target)
-        hook[:filters].all? { |key, filter| match?(filter, attribute(target, key)) }
+        hook[:filters].all? { |key, filter| filter_match?(key, filter, attribute(target, key)) }
+      end
+
+      # The error: filter's semantics — the filter describes the error, or its
+      # absence. The absence and composition laws live here: with no error
+      # present only `false` matches, every other matcher requires one (Procs
+      # aren't even called on nil); an Array matches if any element does. The
+      # scalar presence table is below.
+      def error_match?(filter, error)
+        return error.nil? if filter == false
+        return false if error.nil?
+        return filter.any? { |element| error_match?(element, error) } if filter.is_a?(Array)
+
+        present_error_match?(filter, error)
       end
 
       # ====== Invocation ======
@@ -172,16 +188,57 @@ module Busybee
         resolution.set_result(raw_result) unless resolution.result_set?
       end
 
+      # Per-key matcher dispatch: :error gets its semantic table; every other
+      # key goes through the generic three-layer match.
+      def filter_match?(key, filter, value)
+        key == :error ? error_match?(filter, value) : match?(filter, value)
+      end
+
+      # The scalar half of the error: table. Name-domain matchers
+      # (String/Regexp) see only the error's own class name, never its
+      # ancestry — hierarchy (and mixin) matching takes the live Class/Module,
+      # mirroring rescue.
+      def present_error_match?(filter, error)
+        case filter
+        when true then true
+        when Module then error.is_a?(filter)
+        when String then error.class.name == filter # rubocop:disable Style/ClassEqualityComparison
+        when Regexp then filter.match?(error.class.name)
+        when Proc then !!filter.call(error)
+        else false
+        end
+      end
+
       def validate_filters!(type, filters)
         return if filters.empty?
 
         allowed = FILTER_KEYS[HOOK_NOUN[type]]
         unknown = filters.keys - allowed
-        return if unknown.empty?
+        unless unknown.empty?
+          raise ArgumentError,
+                "Unknown filter(s) for #{type}: #{unknown.join(', ')}. " \
+                "Allowed: #{allowed.join(', ')}"
+        end
 
-        raise ArgumentError,
-              "Unknown filter(s) for #{type}: #{unknown.join(', ')}. " \
-              "Allowed: #{allowed.join(', ')}"
+        validate_error_filter!(filters[:error]) if filters.key?(:error)
+      end
+
+      # Reject error: values outside the semantic table loudly at registration —
+      # under the old generic matching an implausible matcher (a Regexp against
+      # an exception instance) compiled fine and silently never fired.
+      def validate_error_filter!(filter)
+        case filter
+        when true, false, Module, String, Regexp, Proc then nil
+        when Array then filter.each { |element| validate_error_filter!(element) }
+        when nil
+          raise ArgumentError,
+                "error: does not accept nil inside an array — use `error: false` to match \"no error\""
+        else
+          raise ArgumentError,
+                "error: accepts true/false, an exception Class or Module, a String or Regexp " \
+                "(matched against the error's class name), a Proc, or an Array of these; " \
+                "got #{filter.inspect}"
+        end
       end
 
       def matching_hooks(type, target)

@@ -522,10 +522,26 @@ Storage is plain arrays (one per hook type). Each entry is `{ callback:, filters
 
 Filter kwargs are validated per-noun at registration time (`FILTER_KEYS`):
 - **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `source:`, `buffered:`, `error:`
-- **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `reason:`, `error:`, `error_class:`
-- **Call hooks:** `rpc:`, `status:`, `grpc_status:`, `error_class:`
+- **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `reason:`, `error:`
+- **Call hooks:** `rpc:`, `status:`, `grpc_status:`, `error:`
+
+A top-level `nil` filter value is dropped at registration — `nil` means "don't filter on this key," so programmatic composition (`reason: maybe_reason`) degrades to no-op rather than never-fire.
 
 At fire time, `Busybee::Hooks.matches?(hook, target)` reads each filter key off the target (`target.public_send(key)`, nil-safe) and applies `match?` — case equality (`===`) supporting Symbol/String (exact), Regexp (pattern), Class (`is_a?`), Proc (custom). Class values additionally match against their `.name` string, so `worker_class: "OrderWorker"` or `worker_class: /Order/` work regardless of load order. Empty filters match everything (vacuous truth). A filter value may also be an **array**, which matches if any element matches — `job_type: %w[create_shipment assign_driver]` fires for either, and the elements may mix matcher types.
+
+**`error:` is the one error filter, and it has its own semantic table** (`error_match?`, not the generic layers): the filter describes the error — or its absence. Uniform across all three nouns:
+
+| `error:` filter | matches when |
+|-----------------|--------------|
+| `false` | no error present |
+| `true` | any error present |
+| Class / Module | `error.is_a?(filter)` — hierarchy and mixin, like `rescue` |
+| String | the error's own class name, exactly |
+| Regexp | the error's own class name, by pattern |
+| Array | any element matches (mixed kinds fine; `nil` elements rejected at registration) |
+| Proc | `filter.call(error)` truthy |
+
+Name-domain matchers (String/Regexp) never see ancestry — hierarchy matching takes the live constant. With no error present, only `false` matches (Procs aren't even called). Values outside the table are rejected loudly at registration. The carriers' `error_class` *readers* still exist, but they serve the projections (`context_tags`' scalar label), not filtering.
 
 Because filters resolve by sending the key name to the target, every filter key must name a real reader on its noun's carrier (`Job`, `Worker::Status`, or `Client::Call`). Most line up directly; the exception is `job_type`, whose underlying protobuf field is `type` — `Job::Payload` aliases `job_type` to `type` (and `Job` delegates it) so `job_type:` filters resolve. A filter key that the target does not respond to reads as `nil` and silently never matches.
 
