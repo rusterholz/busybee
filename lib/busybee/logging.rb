@@ -2,6 +2,7 @@
 
 require "busybee"
 require "json"
+require "time"
 
 module Busybee
   # Centralized logging with prefixing and optional JSON formatting.
@@ -50,10 +51,13 @@ module Busybee
         formatted
       end
 
+      # time rides in the payload: the JSON line is emitted pre-formatted, so
+      # it can't rely on the host logger's formatter to stamp it.
       def format_json(level, message, **context)
         context.merge(
           message: "#{PREFIX} #{message}",
-          level: level.to_s
+          level: level.to_s,
+          time: Time.now.utc.iso8601(3)
         ).to_json
       end
     end

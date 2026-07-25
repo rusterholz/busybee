@@ -17,6 +17,8 @@
 
 - **gRPC Channel Keepalive** – HTTP/2 keepalive pings now guard the streaming worker's deadline-less job-activation stream, so a silently-dropped transport (a suspended host, a connection a proxy reset) surfaces as a recoverable gateway error instead of leaving the worker blocked forever. Tunable via `Busybee.grpc_keepalive_interval` (default 45s) and `Busybee.grpc_keepalive_timeout` (default 20s); set both to `false` to disable. Enabled by default
 
+- **Timestamped JSON Logs** – every JSON-format log line now carries a `time` field (ISO8601 UTC, millisecond precision), so structured logs stay self-ordering even where the host logger's formatter — which normally supplies the timestamp — is bypassed or absent
+
 - **Exposed Client on Job and Worker Delegation** – Easier access for other GRPC calls within your worker's `perform` method (like updating retries or publishing BPMN messages)
   - `client` in workers delegates to `job.client`, which returns the `Busybee::Client` instance that yielded the job
 
