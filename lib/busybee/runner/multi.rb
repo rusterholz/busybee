@@ -74,7 +74,7 @@ module Busybee
               "Error in runner for #{runner_worker_name(runner)}: " \
               "[#{e.class}] #{e.message}"
             )
-            stop!(reason: reason_for(e)) # container adopts the crash's reason (:crash/:gateway/:unhealthy)
+            stop!(reason: reason_for(e)) # container adopts the crash's reason (:crash/:gateway_error/:unhealthy)
           end
         end
       end

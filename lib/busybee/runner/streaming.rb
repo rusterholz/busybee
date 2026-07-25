@@ -151,14 +151,16 @@ module Busybee
         end
       rescue StandardError => e
         # Stream error: stash for the main thread to re-raise, and stop with its
-        # discerned reason (Shutdown→:unhealthy, gRPC→:gateway, else :crash) before
-        # the ensure's default can mislabel it. Clean closes are Cancelled + absorbed.
+        # discerned reason (Shutdown→:unhealthy, gRPC→:gateway_error, else :crash)
+        # before the ensure's default can mislabel it. Clean closes are Cancelled +
+        # absorbed.
         @shutdown_error.update { |prev| prev || e }
         stop!(reason: reason_for(e))
       ensure
         # Backstop unblocking the main thread's blocking pop. No-op behind any earlier
-        # stop!; reached live only by a clean server-side close, which :stream_ended names.
-        stop!(reason: :stream_ended)
+        # stop!; reached live only by the gateway closing the stream cleanly, which
+        # :gateway_closed names.
+        stop!(reason: :gateway_closed)
       end
 
       # Process jobs from the buffer.

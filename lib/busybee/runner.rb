@@ -168,14 +168,15 @@ module Busybee
     # Discern a stop reason from an exit error (never fabricated — the only
     # presumption is stop!'s :signal default). A Worker::Shutdown is the worker
     # declaring itself down (:unhealthy); an unrecovered gRPC failure means busybee
-    # couldn't reach the engine (:gateway); anything else is an internal defect
-    # (:crash). reason ⊥ error — this names the trigger; the exception rides the
-    # separate error axis. Shared by run!'s ensure, the streaming pump, and Multi's
-    # crash cascade.
+    # couldn't reach the engine (:gateway_error); anything else is an internal
+    # defect (:crash). reason ⊥ error — this names the trigger; the exception rides
+    # the separate error axis. Shared by run!'s ensure, the streaming pump, and
+    # Multi's crash cascade. The gateway_* prefix groups the engine-driven endings
+    # (with :gateway_closed) as a filterable family, like sig*.
     def reason_for(error)
       case error
       when Busybee::Worker::Shutdown then :unhealthy
-      when Busybee::GRPC::Error then :gateway
+      when Busybee::GRPC::Error then :gateway_error
       else :crash
       end
     end

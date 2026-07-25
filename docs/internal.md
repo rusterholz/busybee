@@ -316,13 +316,13 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 | `:signal` | a bare `stop!` — a graceful stop with no stated cause (the default) |
 | `:sigint` / `:sigterm` / `:sigquit` | the CLI signal handler (`STOP_SIGNALS`, mapped `sig` + lowercased name) |
 | `:unhealthy` | the worker declared itself down — a `shutdown_on` error surfaced as `Worker::Shutdown`, caught by a fetch/pump rescue |
-| `:gateway` | an unrecovered gRPC failure — busybee couldn't reach the engine |
+| `:gateway_error` | an unrecovered gRPC failure — busybee couldn't reach the engine |
+| `:gateway_closed` | the streaming pump's backstop — the gateway closed the stream cleanly on its own |
 | `:crash` | any other unhandled error |
-| `:stream_ended` | the streaming pump's backstop, when the stream closed cleanly on its own |
 | `:kill` | `kill!` (forced shutdown) |
 | *(app-supplied)* | any Symbol a caller passes, e.g. a demo's `:rollover` |
 
-`:signal` is **never fabricated** — it only ever arrives via `stop!`'s default param. For a run that exits *without* any `stop!` (a raw fetch-loop error), `run!`'s `ensure` fills the reason from the in-flight exception via `reason_for` (`Worker::Shutdown → :unhealthy`, `Busybee::GRPC::Error → :gateway`, else `:crash`), using `compare_and_set` so a caller-set reason survives a coexisting exit error. The `error` axis is the *unwrapped* triggering cause — `Worker::Shutdown.unwrap($!)` (the wrapped `cause`, or the Shutdown itself) — while the reason classifies the raw exception. The `sig*` values share a prefix by design: `on_worker_shutdown(reason: /\Asig/)` matches every signal-driven stop. Multi is transparent — a reasoned `stop!` cascades the reason to every child, and a child crash makes the container adopt `reason_for(error)`.
+`:signal` is **never fabricated** — it only ever arrives via `stop!`'s default param. For a run that exits *without* any `stop!` (a raw fetch-loop error), `run!`'s `ensure` fills the reason from the in-flight exception via `reason_for` (`Worker::Shutdown → :unhealthy`, `Busybee::GRPC::Error → :gateway_error`, else `:crash`), using `compare_and_set` so a caller-set reason survives a coexisting exit error. The `error` axis is the *unwrapped* triggering cause — `Worker::Shutdown.unwrap($!)` (the wrapped `cause`, or the Shutdown itself) — while the reason classifies the raw exception. Two families share a prefix by design: `on_worker_shutdown(reason: /\Asig/)` matches every signal-driven stop, and `reason: /\Agateway/` matches both engine-driven endings (errored vs. clean close). Multi is transparent — a reasoned `stop!` cascades the reason to every child, and a child crash makes the container adopt `reason_for(error)`.
 
 **Counters.** `execute_job` increments `@total_job_count` per attempt and `@failed_job_count` when `job.failed?` (`:failed` only — BPMN `:error` is a business outcome, not a worker fault). `handle_grpc_error` increments `@backpressure_count`. All three read into every `Worker::Status`. Multi is transparent — no process-wide rollup; operators sum by `worker_name`.
 

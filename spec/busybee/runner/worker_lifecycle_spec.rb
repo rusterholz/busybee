@@ -206,7 +206,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       end
     end
 
-    it "reports an unrecovered gRPC error as :gateway" do
+    it "reports an unrecovered gRPC error as :gateway_error" do
       captured = nil
       Busybee.on_worker_shutdown { |worker| captured = worker }
       grpc = Busybee::GRPC::Error.new("gateway down")
@@ -214,7 +214,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
       expect { runner.run! }.to raise_error(grpc)
       aggregate_failures do
-        expect(captured.reason).to eq(:gateway)
+        expect(captured.reason).to eq(:gateway_error)
         expect(captured.error).to be(grpc)
       end
     end
