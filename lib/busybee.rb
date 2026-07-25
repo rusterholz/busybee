@@ -3,6 +3,7 @@
 require "socket"
 require "busybee/version"
 require "busybee/defaults"
+require "busybee/durations"
 require "busybee/configure"
 require "busybee/credentials"
 require "busybee/logging"

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
+require "busybee/durations"
 require "busybee/serialization"
 require "busybee/job/activation"
 require "busybee/job/context"
@@ -210,7 +211,7 @@ module Busybee
     # @return [Object] Response from update_job_timeout operation
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_timeout(duration)
-      duration_seconds = duration.is_a?(ActiveSupport::Duration) ? duration.in_seconds : duration / 1000.0
+      duration_seconds = Busybee::Durations.seconds_from(duration)
       correlated { @client.update_job_timeout(key, duration) }.tap do
         @deadline_override = (Time.now.utc + duration_seconds).freeze
       end

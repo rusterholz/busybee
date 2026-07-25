@@ -19,6 +19,8 @@
 
 - **Timestamped JSON Logs** – every JSON-format log line now carries a `time` field (ISO8601 UTC, millisecond precision), so structured logs stay self-ordering even where the host logger's formatter — which normally supplies the timestamp — is bypassed or absent
 
+- **Uniform Duration Inputs** – every duration-accepting surface — client call arguments, gem-level configuration, the worker DSL, keepalive — now reads values through one contract: Integer milliseconds, an `ActiveSupport::Duration`, or a numeric String (handy for `ENV`-sourced config), with stray floats truncated with a warning rather than rejected. The worker DSL, previously stricter than the configuration surface it mirrors, now accepts the same shapes
+
 - **Exposed Client on Job and Worker Delegation** – Easier access for other GRPC calls within your worker's `perform` method (like updating retries or publishing BPMN messages)
   - `client` in workers delegates to `job.client`, which returns the `Busybee::Client` instance that yielded the job
 

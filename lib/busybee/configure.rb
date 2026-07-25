@@ -231,28 +231,9 @@ module Busybee
       validate_duration!(name, value)
     end
 
-    # Validates and coerces a duration config value.
-    # Returns the (possibly coerced) value to assign.
-    def validate_duration!(name, value) # rubocop:disable Metrics/AbcSize
-      return value if value.is_a?(Integer)
-      return value if defined?(ActiveSupport::Duration) && value.is_a?(ActiveSupport::Duration)
-
-      if value.is_a?(String)
-        return value.to_f.to_i if value.match?(/\A\d+(\.\d+)?\z/)
-
-        raise ArgumentError,
-              "#{name} accepts Integer, ActiveSupport::Duration, or numeric String, " \
-              "got non-numeric String #{value.inspect}"
-      end
-
-      if value.is_a?(Numeric)
-        Logging.warn("#{name}: coercing #{value.class} #{value.inspect} to Integer #{value.to_i}")
-        return value.to_i
-      end
-
-      raise ArgumentError,
-            "#{name} accepts Integer, ActiveSupport::Duration, or numeric String, got #{value.class}"
-    end
+    # Validates and coerces a duration config value; the contract lives in
+    # Durations (the gem-wide duration-input home).
+    def validate_duration!(name, value) = Busybee::Durations.validate!(name, value)
 
     def validate_boolean!(name, value)
       return if [true, false].include?(value)

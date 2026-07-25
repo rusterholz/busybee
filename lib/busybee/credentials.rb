@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "active_support/duration"
 require "busybee"
+require "busybee/durations"
 
 module Busybee
   # Base class for credentials. Defines interface for all credential types.
@@ -227,14 +227,10 @@ module Busybee
               "got interval=#{interval.inspect}, timeout=#{timeout.inspect}"
       end
 
-      { "grpc.keepalive_time_ms" => milliseconds_from(interval),
-        "grpc.keepalive_timeout_ms" => milliseconds_from(timeout),
+      { "grpc.keepalive_time_ms" => Busybee::Durations.milliseconds_from(interval),
+        "grpc.keepalive_timeout_ms" => Busybee::Durations.milliseconds_from(timeout),
         "grpc.keepalive_permit_without_calls" => KEEPALIVE_PERMIT_WITHOUT_CALLS,
         "grpc.http2.max_pings_without_data" => KEEPALIVE_MAX_PINGS_WITHOUT_DATA }
-    end
-
-    def milliseconds_from(value)
-      value.is_a?(ActiveSupport::Duration) ? value.in_milliseconds.to_i : value.to_i
     end
   end
 end
