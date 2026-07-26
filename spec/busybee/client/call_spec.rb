@@ -336,6 +336,19 @@ RSpec.describe Busybee::Client::Call do
       described_class.new(:complete_job).attempt { ran = true }
       expect(ran).to be(true)
     end
+
+    it "escalates a shutdown_on-declared middleware error to Shutdown instead of swallowing it" do
+      original = Busybee.shutdown_on_errors
+      begin
+        Busybee.shutdown_on_errors = [RuntimeError]
+        Busybee.around_call { |_call, _proceed| raise "db gone" }
+
+        expect { described_class.new(:complete_job).attempt { "ok" } }.
+          to raise_error(Busybee::Worker::Shutdown)
+      ensure
+        Busybee.shutdown_on_errors = original
+      end
+    end
   end
 
   describe ".with_hooks (logical bracket)" do

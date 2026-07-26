@@ -440,7 +440,7 @@ Every swallowed error is logged with its class, message, and origin, so a broken
 Two deliberate exceptions to the swallowing:
 
 - **`Busybee::Worker::Shutdown` always propagates**, from any hook — including the observing ones. Raising it is the supported way for a hook to declare the worker unhealthy.
-- **Errors matching `shutdown_on` escalate to a graceful shutdown** from every hook except the two observing `around_*` chains — a hook that detects a dead database connection gets the same treatment as a `perform` that does. (Inside `around_job_execution` or `around_call`, raise `Busybee::Worker::Shutdown` explicitly instead.) The demo app uses exactly this to simulate rolling restarts from an `around_perform` hook.
+- **Errors matching `shutdown_on` escalate to a graceful shutdown**, from any hook — a hook that detects a dead database connection gets the same treatment as a `perform` that does. The demo app uses exactly this to simulate rolling restarts from an `around_perform` hook.
 
 ## Hooks and Threads: Own What You Spawn
 

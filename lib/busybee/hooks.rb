@@ -138,24 +138,37 @@ module Busybee
       # ====== Invocation ======
 
       # Run all matching hooks for the given type. Callbacks receive the target
-      # (e.g. Busybee::Job for job-noun hooks).
-      #
-      # By default, errors propagate (for wrapping hooks like before_perform).
-      # With safe: true, errors are logged and iteration continues (for
-      # observing hooks like after_perform, on_job_executed). Shutdown errors
-      # always propagate regardless of the safe: flag.
+      # (e.g. Busybee::Job for job-noun hooks). Error semantics — propagate by
+      # default (wrapping hooks like before_perform), log-and-continue with
+      # safe: true (observing hooks), shutdown signals excepted — live in
+      # protect_allowing_shutdowns.
       def run(type, target, safe: false)
         matching_hooks(type, target).each do |hook|
-          hook[:callback].call(target)
-        rescue Busybee::Worker::Shutdown
-          raise
-        rescue StandardError => e
-          worker_class = attribute(target, :worker_class)
-          raise Busybee::Worker::Shutdown.new(worker_class: worker_class) if shutdown_triggered?(e, worker_class)
-          raise unless safe
-
-          log_swallowed_error(e)
+          protect_allowing_shutdowns(target, safe: safe) { hook[:callback].call(target) }
         end
+      end
+
+      # The one error policy for a firing hook. Every invocation site — the
+      # flat runs above, Chain's safe links — routes a raised error through
+      # here, so the policy can't drift between them: Shutdown always
+      # propagates; an error the target's worker (or the gem config) declared
+      # fatal escalates to Shutdown (cause = the original, set at raise); any
+      # other error propagates when unsafe, or is logged and swallowed when
+      # safe. Propagating chains (around_perform) bypass this by design —
+      # their errors classify later, at perform_job's rescue, so autofail runs
+      # before the Shutdown wrap.
+      def protect_allowing_shutdowns(target, safe:)
+        yield
+      rescue Busybee::Worker::Shutdown
+        raise
+      rescue StandardError => e
+        worker_class = attribute(target, :worker_class)
+        if Busybee::Worker::Shutdown.triggered_by?(e, worker_class)
+          raise Busybee::Worker::Shutdown.new(worker_class: worker_class)
+        end
+        raise unless safe
+
+        log_swallowed_error(e)
       end
 
       # Log a hook error that was swallowed (in safe-mode iteration or safe
@@ -253,11 +266,6 @@ module Busybee
       # is non-nil" without needing a separate predicate.
       def attribute(target, key)
         target.respond_to?(key) ? target.public_send(key) : nil
-      end
-
-      # The shutdown_on classification, shared with the worker's perform rescue.
-      def shutdown_triggered?(error, worker_class)
-        Busybee::Worker::Shutdown.triggered_by?(error, worker_class)
       end
     end
 
