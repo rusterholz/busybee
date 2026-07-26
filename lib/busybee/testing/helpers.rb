@@ -1,14 +1,13 @@
 # frozen_string_literal: true
 
-require "active_support"
-require "active_support/duration"
-require "base64"
-require "securerandom"
+require "grpc"
+
+require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 require "busybee/testing/activated_job"
-require "busybee/testing/helpers/support"
 require "busybee/testing/helpers/execution"
+require "busybee/testing/helpers/support"
 
 module Busybee
   module Testing
@@ -184,7 +183,7 @@ module Busybee
       # @param vars [Hash] message variables
       # @param ttl [Integer, ActiveSupport::Duration] time-to-live (integer ms or Duration)
       def publish_message(name, correlation_key:, vars: {}, ttl: 5000)
-        ttl_ms = ttl.is_a?(ActiveSupport::Duration) ? ttl.in_milliseconds.to_i : ttl.to_i
+        ttl_ms = Busybee::Durations.milliseconds_from(ttl)
         request = Busybee::GRPC::PublishMessageRequest.new(
           name: name,
           correlationKey: correlation_key,

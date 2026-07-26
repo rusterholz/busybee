@@ -5,6 +5,10 @@ require "busybee/job/payload"
 RSpec.describe Busybee::Job::Payload do
   subject(:payload) { described_class.new(raw_job) }
 
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) { payload }
+  end
+
   let(:raw_job) do
     # rubocop:disable RSpec/VerifiedDoubles
     double(

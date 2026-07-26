@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
-require "active_support"
-require "active_support/duration"
+require "busybee/defaults"
+require "busybee/durations"
 require "busybee/grpc"
+require "busybee/job"
+require "busybee/job_stream"
 require "busybee/serialization"
 
 module Busybee
@@ -50,8 +52,7 @@ module Busybee
       #   client.fail_job(123456, "Rate limited", backoff: 30.seconds)
       #
       def fail_job(job_key, error_message, retries: nil, backoff: nil)
-        backoff_ms = backoff || Busybee.default_fail_job_backoff
-        backoff_ms = backoff_ms.is_a?(ActiveSupport::Duration) ? backoff_ms.in_milliseconds.to_i : backoff_ms.to_i
+        backoff_ms = Busybee::Durations.milliseconds_from(backoff || Busybee.default_fail_job_backoff)
 
         request = Busybee::GRPC::FailJobRequest.new(
           jobKey: job_key.to_i,
@@ -121,7 +122,7 @@ module Busybee
       #   client.update_job_timeout(123456, 30.seconds)
       #
       def update_job_timeout(job_key, timeout)
-        timeout_ms = timeout.is_a?(ActiveSupport::Duration) ? timeout.in_milliseconds.to_i : timeout.to_i
+        timeout_ms = Busybee::Durations.milliseconds_from(timeout)
 
         request = Busybee::GRPC::UpdateJobTimeoutRequest.new(
           jobKey: job_key.to_i,
@@ -163,8 +164,8 @@ module Busybee
           type: job_type.to_s,
           worker: Busybee.worker_name,
           maxJobsToActivate: max_jobs.to_i,
-          timeout: milliseconds_from(job_timeout),
-          requestTimeout: milliseconds_from(request_timeout)
+          timeout: Busybee::Durations.milliseconds_from(job_timeout),
+          requestTimeout: Busybee::Durations.milliseconds_from(request_timeout)
         )
 
         count = 0
@@ -211,7 +212,7 @@ module Busybee
         request = Busybee::GRPC::StreamActivatedJobsRequest.new(
           type: job_type.to_s,
           worker: Busybee.worker_name,
-          timeout: milliseconds_from(job_timeout)
+          timeout: Busybee::Durations.milliseconds_from(job_timeout)
         )
 
         Busybee::JobStream.new(run_hooked(:stream_activated_jobs, request, return_op: true), client: self)

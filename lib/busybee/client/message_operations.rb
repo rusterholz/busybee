@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-require "active_support"
-require "active_support/duration"
+require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 
@@ -34,8 +33,7 @@ module Busybee
       def publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil)
         raise ArgumentError, "vars must be a Hash" unless vars.is_a?(Hash)
 
-        ttl ||= Busybee.default_message_ttl
-        ttl_ms = ttl.is_a?(ActiveSupport::Duration) ? ttl.in_milliseconds.to_i : ttl.to_i
+        ttl_ms = Busybee::Durations.milliseconds_from(ttl || Busybee.default_message_ttl)
 
         request = Busybee::GRPC::PublishMessageRequest.new(
           name: name.to_s,

@@ -1,14 +1,12 @@
 # frozen_string_literal: true
 
-require "active_support"
-require "active_support/duration"
-require "busybee/credentials"
 require "busybee/client/call"
 require "busybee/client/error_handling"
 require "busybee/client/job_operations"
 require "busybee/client/message_operations"
 require "busybee/client/process_operations"
 require "busybee/client/variable_operations"
+require "busybee/credentials"
 
 module Busybee
   # Ruby-idiomatic wrapper around Zeebe GRPC API.
@@ -86,13 +84,6 @@ module Busybee
       Call.with_hooks(rpc, request) do |call|
         with_retry { call.attempt { stub.public_send(rpc, request, **kwargs) } }
       end
-    end
-
-    # Ensures a value is in milliseconds.
-    # @param value [Integer, ActiveSupport::Duration] Value to convert
-    # @return [Integer] Value in milliseconds
-    def milliseconds_from(value)
-      value.is_a?(ActiveSupport::Duration) ? value.in_milliseconds.to_i : value.to_i
     end
   end
 end

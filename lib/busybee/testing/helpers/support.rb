@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-require "active_support"
-require "active_support/duration"
-require "json"
+require "grpc"
 require "securerandom"
+
+require "busybee/credentials"
+require "busybee/durations"
 require "busybee/grpc"
 
 module Busybee
@@ -44,11 +45,7 @@ module Busybee
           worker = "#{type}-#{SecureRandom.hex(4)}"
 
           request_timeout = timeout || Busybee.default_job_request_timeout
-          request_timeout_ms = if request_timeout.is_a?(ActiveSupport::Duration)
-                                 request_timeout.in_milliseconds.to_i
-                               else
-                                 request_timeout.to_i
-                               end
+          request_timeout_ms = Busybee::Durations.milliseconds_from(request_timeout)
 
           request = Busybee::GRPC::ActivateJobsRequest.new(
             type: type,
@@ -69,7 +66,6 @@ module Busybee
         # The actual public helper instance method delegates to this. It uses Busybee.credential_type
         # if set, and attempts to autodetect from env vars otherwise.
         def grpc_client
-          require "busybee/credentials"
           Busybee::Credentials.build.grpc_stub
         end
       end

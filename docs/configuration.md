@@ -228,6 +228,40 @@ Matching is by status *symbol* against the resolved call's gRPC status, so it is
 Busybee.backpressure_statuses = %i[resource_exhausted unavailable]
 ```
 
+### GRPC Keepalive
+
+HTTP/2 keepalive pings on the gRPC channel. Their purpose is the streaming worker's job-activation stream: it has no request deadline, so a transport that dies silently — a suspended host, a connection reset a proxy swallowed — would otherwise leave the worker blocked on the stream forever, healthy to a liveness probe but activating nothing. Keepalive pings detect the dead transport and raise it as a gateway error the runner recovers from. (Unary calls already recover on their own deadlines; keepalive is what protects the deadline-less stream.) Enabled by default.
+
+Both knobs accept an Integer (milliseconds) or an `ActiveSupport::Duration`; `nil` restores the default. Setting **both** to `false` disables keepalive; setting only one is an error.
+
+#### `grpc_keepalive_interval`
+
+The period between keepalive pings. Keep it above your gateway's minimum accepted ping interval (Zeebe's default is 30 seconds) — pinging more often than the gateway permits makes it close the connection.
+
+| | |
+|--|--|
+| **Type** | Integer (milliseconds), `ActiveSupport::Duration`, or `false` |
+| **Default** | `45_000` (45 seconds) |
+
+```ruby
+Busybee.grpc_keepalive_interval = 60.seconds
+```
+
+#### `grpc_keepalive_timeout`
+
+How long a ping waits for its acknowledgement before the transport is declared dead.
+
+| | |
+|--|--|
+| **Type** | Integer (milliseconds), `ActiveSupport::Duration`, or `false` |
+| **Default** | `20_000` (20 seconds) |
+
+```ruby
+# Disable keepalive entirely (both knobs must be false)
+Busybee.grpc_keepalive_interval = false
+Busybee.grpc_keepalive_timeout  = false
+```
+
 ### Operation Defaults
 
 #### `default_message_ttl`
@@ -363,6 +397,8 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.grpc_retry_enabled` | `Busybee.grpc_retry_enabled` |
 | `config.x.busybee.grpc_retry_delay_ms` | `Busybee.grpc_retry_delay_ms` |
 | `config.x.busybee.grpc_retry_errors` | `Busybee.grpc_retry_errors` |
+| `config.x.busybee.grpc_keepalive_interval` | `Busybee.grpc_keepalive_interval` |
+| `config.x.busybee.grpc_keepalive_timeout` | `Busybee.grpc_keepalive_timeout` |
 | `config.x.busybee.default_message_ttl` | `Busybee.default_message_ttl` |
 | `config.x.busybee.default_fail_job_backoff` | `Busybee.default_fail_job_backoff` |
 | `config.x.busybee.default_job_request_timeout` | `Busybee.default_job_request_timeout` |

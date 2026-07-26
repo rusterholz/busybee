@@ -81,9 +81,11 @@ cmd_test() {
   echo "Smoke test: ${count} orders at speed ${speed}"
   echo ""
 
-  # Start a clean stack at high speed for fast feedback
+  # Start a clean stack at high speed for fast feedback. Rollovers off: the smoke
+  # verifies the end-to-end pipeline, not the shadow orchestrator's recycling, and
+  # at this speed rollovers add nondeterministic churn (see Sim::RolloverPolicy).
   echo "Starting demo stack..."
-  DEMO_SPEED="$speed" docker compose up -d --build
+  DEMO_SPEED="$speed" DEMO_ROLLOVERS=false docker compose up -d --build
   echo ""
 
   # Wait for web to be healthy

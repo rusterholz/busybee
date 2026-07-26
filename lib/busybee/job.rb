@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
-require "busybee/serialization"
+
+require "busybee/client/call"
+require "busybee/durations"
+require "busybee/error"
 require "busybee/job/activation"
 require "busybee/job/context"
 require "busybee/job/error_formatting"
 require "busybee/job/payload"
 require "busybee/job/resolution"
 require "busybee/job/timestamps"
+require "busybee/serialization"
 
 module Busybee
   # Represents a job activated from Zeebe for processing by a worker.
@@ -210,7 +214,7 @@ module Busybee
     # @return [Object] Response from update_job_timeout operation
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_timeout(duration)
-      duration_seconds = duration.is_a?(ActiveSupport::Duration) ? duration.in_seconds : duration / 1000.0
+      duration_seconds = Busybee::Durations.seconds_from(duration)
       correlated { @client.update_job_timeout(key, duration) }.tap do
         @deadline_override = (Time.now.utc + duration_seconds).freeze
       end
@@ -243,7 +247,7 @@ module Busybee
     # Mark the job resolved: stamp resolved_at, advance the Resolution PORO
     # to the terminal status (fire-once enforced). Outcome data (result /
     # error trio) is captured separately by the calling lifecycle method
-    # (#complete!, #fail!, #throw_bpmn_error!) before its GRPC. after_job
+    # (#complete!, #fail!, #throw_bpmn_error!) before its GRPC. after_perform
     # firing happens uniformly post-perform in Worker.perform_job's ensure,
     # not here.
     def resolve!(status)

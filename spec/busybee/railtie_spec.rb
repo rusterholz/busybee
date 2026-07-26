@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-require "spec_helper"
-require "busybee/railtie" if defined?(Rails::Railtie)
 require "busybee/credentials/insecure"
+require "busybee/railtie" if defined?(Rails::Railtie)
 
 # All Busybee config instance variables that the Railtie may set
 def busybee_config_ivars
@@ -11,6 +10,7 @@ def busybee_config_ivars
     @default_job_lock_timeout @default_job_request_timeout @default_max_jobs
     @default_message_ttl @default_buffer @default_buffer_throttle
     @grpc_retry_delay_ms @grpc_retry_enabled @grpc_retry_errors
+    @grpc_keepalive_interval @grpc_keepalive_timeout
     @log_format @logger @default_backpressure_delay
     @worker_name
   ]
@@ -182,6 +182,26 @@ RSpec.describe "Busybee::Railtie", :rails do
       it "leaves nil when not configured (uses default)" do
         configure_and_initialize
         expect(Busybee.instance_variable_get(:@grpc_retry_errors)).to be_nil
+      end
+    end
+
+    describe "grpc keepalive" do
+      it "sets the keepalive interval and timeout when configured" do
+        configure_and_initialize(grpc_keepalive_interval: 30_000, grpc_keepalive_timeout: 5_000)
+        expect(Busybee.grpc_keepalive_interval).to eq(30_000)
+        expect(Busybee.grpc_keepalive_timeout).to eq(5_000)
+      end
+
+      it "applies false to disable keepalive (survives the presence guard)" do
+        configure_and_initialize(grpc_keepalive_interval: false, grpc_keepalive_timeout: false)
+        expect(Busybee.grpc_keepalive_interval).to be(false)
+        expect(Busybee.grpc_keepalive_timeout).to be(false)
+      end
+
+      it "leaves both nil when not configured (readers fall back to defaults)" do
+        configure_and_initialize
+        expect(Busybee.instance_variable_get(:@grpc_keepalive_interval)).to be_nil
+        expect(Busybee.grpc_keepalive_interval).to eq(Busybee::Defaults::DEFAULT_KEEPALIVE_INTERVAL_MS)
       end
     end
 

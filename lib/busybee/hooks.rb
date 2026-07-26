@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "busybee/hooks/chain"
+require "busybee/worker/shutdown"
 
 module Busybee
   # Central module for the hook/instrumentation system.
@@ -13,7 +14,7 @@ module Busybee
     # :call entries fire through the Client::Call seam. Each callback receives
     # its noun's carrier: Job, Worker::Status, or Client::Call.
     HOOK_TYPES = %i[
-      before_job around_job after_job
+      before_perform around_perform after_perform
       on_job_activated on_job_executed around_job_execution
       on_worker_started on_worker_stop_requested on_worker_stopping on_worker_shutdown
       before_call around_call after_call
@@ -21,22 +22,26 @@ module Busybee
 
     # Allowed filter kwargs per noun. Each key is resolved against the carrier
     # via public_send at match time, so every key here must be a public reader
-    # on the noun's carrier (Worker::Status for :worker).
+    # on the noun's carrier (Worker::Status for :worker). :error — on every
+    # noun — is matched by its own semantic table (see error_match?), not the
+    # generic layers.
     FILTER_KEYS = {
       job: %i[job_type worker_class status bpmn_process_id source buffered error].freeze,
-      worker: %i[worker_class job_type worker_mode reason error error_class].freeze,
-      call: %i[rpc status grpc_status error_class].freeze
+      worker: %i[worker_class job_type worker_mode reason error].freeze,
+      call: %i[rpc status grpc_status error].freeze
     }.freeze
 
-    # Map each hook type to its noun for filter validation
-    HOOK_NOUN = HOOK_TYPES.each_with_object({}) do |type, h|
-      noun = case type
-             when /job/ then :job
-             when /worker/ then :worker
-             when /call/ then :call
-             end
-      h[type] = noun
-    end.freeze
+    # Map each hook type to its noun for filter validation. Explicit, not derived
+    # from the name: the perform triple carries the usercode lifecycle's name
+    # ("perform" = wraps usercode; "job" = the system's job lifecycle), while its
+    # carrier — and so its filter noun — is still the Job.
+    HOOK_NOUN = {
+      before_perform: :job, around_perform: :job, after_perform: :job,
+      on_job_activated: :job, on_job_executed: :job, around_job_execution: :job,
+      on_worker_started: :worker, on_worker_stop_requested: :worker,
+      on_worker_stopping: :worker, on_worker_shutdown: :worker,
+      before_call: :call, around_call: :call, after_call: :call
+    }.freeze
 
     class << self
       # ====== Hook storage ======
@@ -65,6 +70,7 @@ module Busybee
       def register(type, callback, **filters)
         raise ArgumentError, "#{type} requires a block" unless callback
 
+        filters = filters.compact # a nil filter value means "don't filter on this key"
         validate_filters!(type, filters)
         hooks_for(type) << { callback: callback, filters: filters }
       end
@@ -113,7 +119,20 @@ module Busybee
       # @param target [Object] the noun (Busybee::Job for job hooks)
       # @return [Boolean]
       def matches?(hook, target)
-        hook[:filters].all? { |key, filter| match?(filter, attribute(target, key)) }
+        hook[:filters].all? { |key, filter| filter_match?(key, filter, attribute(target, key)) }
+      end
+
+      # The error: filter's semantics — the filter describes the error, or its
+      # absence. The absence and composition laws live here: with no error
+      # present only `false` matches, every other matcher requires one (Procs
+      # aren't even called on nil); an Array matches if any element does. The
+      # scalar presence table is below.
+      def error_match?(filter, error)
+        return error.nil? if filter == false
+        return false if error.nil?
+        return filter.any? { |element| error_match?(element, error) } if filter.is_a?(Array)
+
+        present_error_match?(filter, error)
       end
 
       # ====== Invocation ======
@@ -121,9 +140,9 @@ module Busybee
       # Run all matching hooks for the given type. Callbacks receive the target
       # (e.g. Busybee::Job for job-noun hooks).
       #
-      # By default, errors propagate (for wrapping hooks like before_job).
+      # By default, errors propagate (for wrapping hooks like before_perform).
       # With safe: true, errors are logged and iteration continues (for
-      # observing hooks like after_job, on_job_executed). Shutdown errors
+      # observing hooks like after_perform, on_job_executed). Shutdown errors
       # always propagate regardless of the safe: flag.
       def run(type, target, safe: false)
         matching_hooks(type, target).each do |hook|
@@ -131,7 +150,8 @@ module Busybee
         rescue Busybee::Worker::Shutdown
           raise
         rescue StandardError => e
-          raise Busybee::Worker::Shutdown.new(worker: nil) if shutdown_error?(e, target)
+          worker_class = attribute(target, :worker_class)
+          raise Busybee::Worker::Shutdown.new(worker_class: worker_class) if shutdown_triggered?(e, worker_class)
           raise unless safe
 
           log_swallowed_error(e)
@@ -170,16 +190,57 @@ module Busybee
         resolution.set_result(raw_result) unless resolution.result_set?
       end
 
+      # Per-key matcher dispatch: :error gets its semantic table; every other
+      # key goes through the generic three-layer match.
+      def filter_match?(key, filter, value)
+        key == :error ? error_match?(filter, value) : match?(filter, value)
+      end
+
+      # The scalar half of the error: table. Name-domain matchers
+      # (String/Regexp) see only the error's own class name, never its
+      # ancestry — hierarchy (and mixin) matching takes the live Class/Module,
+      # mirroring rescue.
+      def present_error_match?(filter, error)
+        case filter
+        when true then true
+        when Module then error.is_a?(filter)
+        when String then error.class.name == filter # rubocop:disable Style/ClassEqualityComparison
+        when Regexp then filter.match?(error.class.name)
+        when Proc then !!filter.call(error)
+        else false
+        end
+      end
+
       def validate_filters!(type, filters)
         return if filters.empty?
 
         allowed = FILTER_KEYS[HOOK_NOUN[type]]
         unknown = filters.keys - allowed
-        return if unknown.empty?
+        unless unknown.empty?
+          raise ArgumentError,
+                "Unknown filter(s) for #{type}: #{unknown.join(', ')}. " \
+                "Allowed: #{allowed.join(', ')}"
+        end
 
-        raise ArgumentError,
-              "Unknown filter(s) for #{type}: #{unknown.join(', ')}. " \
-              "Allowed: #{allowed.join(', ')}"
+        validate_error_filter!(filters[:error]) if filters.key?(:error)
+      end
+
+      # Reject error: values outside the semantic table loudly at registration —
+      # under the old generic matching an implausible matcher (a Regexp against
+      # an exception instance) compiled fine and silently never fired.
+      def validate_error_filter!(filter)
+        case filter
+        when true, false, Module, String, Regexp, Proc then nil
+        when Array then filter.each { |element| validate_error_filter!(element) }
+        when nil
+          raise ArgumentError,
+                "error: does not accept nil inside an array — use `error: false` to match \"no error\""
+        else
+          raise ArgumentError,
+                "error: accepts true/false, an exception Class or Module, a String or Regexp " \
+                "(matched against the error's class name), a Proc, or an Array of these; " \
+                "got #{filter.inspect}"
+        end
       end
 
       def matching_hooks(type, target)
@@ -194,11 +255,9 @@ module Busybee
         target.respond_to?(key) ? target.public_send(key) : nil
       end
 
-      # Check if an error matches shutdown_on classes from the worker or gem config.
-      def shutdown_error?(error, target)
-        worker_class = attribute(target, :worker_class)
-        per_worker = worker_class.respond_to?(:configuration) ? worker_class.configuration.shutdown_on : []
-        (per_worker + Busybee.shutdown_on_errors).any? { |klass| error.is_a?(klass) }
+      # The shutdown_on classification, shared with the worker's perform rescue.
+      def shutdown_triggered?(error, worker_class)
+        Busybee::Worker::Shutdown.triggered_by?(error, worker_class)
       end
     end
 

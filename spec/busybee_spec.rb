@@ -1,8 +1,22 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
 require "logger"
+require "open3"
+require "rbconfig"
 
 RSpec.describe Busybee do
+  describe "cold load" do
+    # A pristine subprocess (bundler load paths only, nothing required) is how
+    # CI first touches the gem. Guards Active Support's cherry-pick contract:
+    # active_support itself must load before any core_ext/duration piece, on
+    # every AS in the support matrix — not just whichever the dev lock holds.
+    it "loads standalone without a preloaded Active Support" do
+      _stdout, stderr, status = Open3.capture3(RbConfig.ruby, "-e", 'require "busybee"')
+      expect(status).to be_success, "cold require of busybee failed:\n#{stderr}"
+    end
+  end
+
   shared_examples "a duration config setter" do |setter, getter, default_const|
     around do |example|
       original = described_class.instance_variable_get(:"@#{getter}")
@@ -200,6 +214,40 @@ RSpec.describe Busybee do
   describe ".grpc_retry_delay_ms" do
     it_behaves_like "a duration config setter", :grpc_retry_delay_ms, :grpc_retry_delay_ms,
                     :DEFAULT_GRPC_RETRY_DELAY_MS
+  end
+
+  # The keepalive knobs are ordinary duration configs (nil resets to default) with
+  # one addition: an explicit false disables keepalive. false is deliberately NOT
+  # nil — nil keeps the sibling-wide "reset to default" meaning.
+  shared_examples "a keepalive duration config" do |setter|
+    around do |example|
+      original = described_class.instance_variable_get(:"@#{setter}")
+      example.run
+      described_class.instance_variable_set(:"@#{setter}", original)
+    end
+
+    it "accepts false to disable keepalive" do
+      described_class.public_send(:"#{setter}=", false)
+      expect(described_class.public_send(setter)).to be(false)
+    end
+
+    it "keeps false distinct from nil (nil still resets to the default)" do
+      described_class.public_send(:"#{setter}=", false)
+      described_class.public_send(:"#{setter}=", nil)
+      expect(described_class.public_send(setter)).to be_a(Integer)
+    end
+  end
+
+  describe ".grpc_keepalive_interval" do
+    it_behaves_like "a duration config setter", :grpc_keepalive_interval, :grpc_keepalive_interval,
+                    :DEFAULT_KEEPALIVE_INTERVAL_MS
+    it_behaves_like "a keepalive duration config", :grpc_keepalive_interval
+  end
+
+  describe ".grpc_keepalive_timeout" do
+    it_behaves_like "a duration config setter", :grpc_keepalive_timeout, :grpc_keepalive_timeout,
+                    :DEFAULT_KEEPALIVE_TIMEOUT_MS
+    it_behaves_like "a keepalive duration config", :grpc_keepalive_timeout
   end
 
   describe ".grpc_retry_errors" do

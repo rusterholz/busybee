@@ -5,6 +5,16 @@ require "busybee/job/resolution"
 RSpec.describe Busybee::Job::Resolution do
   subject(:resolution) { described_class.new }
 
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) do
+      described_class.new.tap do |r|
+        r.set_result(answer: 42)
+        r.set_error(error_message: "boom", error_code: "X")
+        r.resolve_to(:failed)
+      end
+    end
+  end
+
   describe "OWNED_KEYS" do
     it "lists the status + outcome-data keys reserved at the set_context boundary" do
       expect(described_class::OWNED_KEYS).to eq(%i[status result error error_message error_code])

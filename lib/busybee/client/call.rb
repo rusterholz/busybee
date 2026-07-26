@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
+
+require "busybee/client/call/correlation"
 require "busybee/client/call/timestamps"
 require "busybee/grpc/error"
 require "busybee/hooks"
@@ -22,10 +24,9 @@ module Busybee
       # also include ScriptError is tracked as a future mission.
       RECOVERABLE_ERRORS = [StandardError].freeze
 
-      # Thread-local keys for the call-correlation carriers (see .with_job /
-      # .with_worker_status).
-      JOB_KEY = :_busybee_call_job
-      WORKER_STATUS_KEY = :_busybee_call_worker_status
+      # Class-level correlation surface (with_job / with_worker_status /
+      # current_job / current_worker_status) — see Correlation.
+      extend Correlation
 
       # Wrap a logical client call: construct the carrier, fire the gating
       # before_call, run the operation (which records its per-attempt outcome onto
@@ -45,41 +46,6 @@ module Busybee
         ensure
           Busybee::Hooks.run(:after_call, call, safe: true) if call.resolved?
         end
-      end
-
-      # ===== Correlation context (class-level) =====
-      #
-      # The executing Job and the runner's Worker::Status are seeded on the thread
-      # so a Call built mid-operation attributes itself (see #initialize). Windows
-      # are single-carrier — a job window (worker's perform_job) or a worker window
-      # (the runner's fetch/lifecycle windows) — so each carrier has its own
-      # seeder/reader. Each is restored to its prior value on block exit.
-
-      def self.with_job(job)
-        previous = Thread.current[JOB_KEY]
-        Thread.current[JOB_KEY] = job
-        yield
-      ensure
-        Thread.current[JOB_KEY] = previous
-      end
-
-      def self.with_worker_status(worker_status)
-        previous = Thread.current[WORKER_STATUS_KEY]
-        Thread.current[WORKER_STATUS_KEY] = worker_status
-        yield
-      ensure
-        Thread.current[WORKER_STATUS_KEY] = previous
-      end
-
-      def self.current_job
-        Thread.current[JOB_KEY]
-      end
-
-      # Fall-through safety: a present job's own status wins over any separately-
-      # seeded one, so a Call's job and worker_status can never disagree.
-      def self.current_worker_status
-        job = current_job
-        job ? job.worker_status : Thread.current[WORKER_STATUS_KEY]
       end
 
       attr_reader :rpc, :request, :status, :result, :error, :attempts, :job, :worker_status

@@ -119,7 +119,7 @@ RSpec.describe "Job lifecycle hooks", :integration do
     it "records a failed job with the error attached" do
       run_one_job
 
-      expect(fired[:after_job]).not_to be_empty
+      expect(fired[:after_perform]).not_to be_empty
       executed = fired[:on_job_executed].first
       expect(executed[:status]).to eq(:failed)
       expect(executed[:resolved]).to be(true)
@@ -161,9 +161,9 @@ RSpec.describe "Job lifecycle hooks", :integration do
       fired[:matching_process]     = Concurrent::Array.new
       f = fired
 
-      Busybee.after_job(job_type: "process-order")    { |job| f[:matching_job_type] << job.key }
-      Busybee.after_job(job_type: "no-such-job-type") { |job| f[:nonmatching_job_type] << job.key }
-      Busybee.after_job(bpmn_process_id: "job-process") { |job| f[:matching_process] << job.key }
+      Busybee.after_perform(job_type: "process-order")    { |job| f[:matching_job_type] << job.key }
+      Busybee.after_perform(job_type: "no-such-job-type") { |job| f[:nonmatching_job_type] << job.key }
+      Busybee.after_perform(bpmn_process_id: "job-process") { |job| f[:matching_process] << job.key }
     end
 
     it "fires a hook whose job_type filter matches the job" do
@@ -188,19 +188,19 @@ RSpec.describe "Job lifecycle hooks", :integration do
   private
 
   def job_hook_types
-    %i[on_job_activated before_job around_job after_job on_job_executed around_job_execution]
+    %i[on_job_activated before_perform around_perform after_perform on_job_executed around_job_execution]
   end
 
   def register_lifecycle_hooks
     f = fired
-    %i[on_job_activated before_job after_job on_job_executed].each do |type|
+    %i[on_job_activated before_perform after_perform on_job_executed].each do |type|
       Busybee.public_send(type) { |job| f[type] << snapshot(job) }
     end
-    register_around_hook(:around_job)
+    register_around_hook(:around_perform)
     register_around_hook(:around_job_execution)
   end
 
-  # around_job / around_job_execution receive the continuation as a second
+  # around_perform / around_job_execution receive the continuation as a second
   # argument and must call it to run the wrapped work.
   def register_around_hook(type)
     f = fired

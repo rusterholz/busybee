@@ -2,6 +2,10 @@
 
 require "active_support/core_ext/string/inflections"
 
+require "busybee/defaults"
+require "busybee/durations"
+require "busybee/error"
+
 module Busybee
   class Worker
     # Stores all DSL-declared metadata for a Worker subclass.
@@ -88,18 +92,15 @@ module Busybee
       end
 
       def job_timeout=(value)
-        validate_duration!(:job_timeout, value)
-        @job_timeout = value
+        @job_timeout = validate_duration!(:job_timeout, value)
       end
 
       def backoff=(value)
-        validate_duration!(:backoff, value)
-        @backoff = value
+        @backoff = validate_duration!(:backoff, value)
       end
 
       def backpressure_delay=(value)
-        validate_duration!(:backpressure_delay, value)
-        @backpressure_delay = value
+        @backpressure_delay = validate_duration!(:backpressure_delay, value)
       end
 
       def complete_job_on_success=(value)
@@ -290,12 +291,12 @@ module Busybee
               "`buffer_throttle:` must be a non-negative Numeric, got #{value.inspect}"
       end
 
+      # The gem-wide duration contract (Durations), re-raised in the DSL's own
+      # error vocabulary. Returns the value to assign (numeric Strings coerce).
       def validate_duration!(attr, value)
-        return if value.is_a?(Integer)
-        return if defined?(ActiveSupport::Duration) && value.is_a?(ActiveSupport::Duration)
-
-        raise InvalidWorkerDefinition,
-              "`#{attr}` accepts Integer (milliseconds) or ActiveSupport::Duration, got #{value.class}"
+        Busybee::Durations.validate!(attr, value)
+      rescue ArgumentError => e
+        raise InvalidWorkerDefinition, e.message
       end
     end
   end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rspec/matchers"
+
 require "busybee/grpc"
 require "busybee/serialization"
 

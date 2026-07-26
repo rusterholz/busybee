@@ -402,10 +402,16 @@ RSpec.describe Busybee::Worker::Configuration do
       expect(config.backoff).to eq(30_000)
     end
 
-    it "raises on non-Integer, non-Duration" do
-      expect { config.backoff = 30.5 }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /backoff.*Integer.*ActiveSupport::Duration/
-      )
+    it "accepts a numeric String, coerced (the gem-wide duration contract)" do
+      config.backoff = "30000"
+      expect(config.backoff).to eq(30_000)
+    end
+
+    it "truncates a stray Numeric with a warning" do
+      allow(Busybee::Logging).to receive(:warn)
+      config.backoff = 30.5
+      expect(config.backoff).to eq(30)
+      expect(Busybee::Logging).to have_received(:warn).with(/backoff.*coercing Float/)
     end
   end
 

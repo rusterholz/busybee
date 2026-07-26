@@ -3,6 +3,16 @@
 require "busybee/client/call"
 
 RSpec.describe Busybee::Client::Call do
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) do
+      described_class.new(:complete_job).tap do |call|
+        call._begin_attempt
+        call._record_result(:ok)
+        call._resolve(status: :succeeded)
+      end
+    end
+  end
+
   describe "construction" do
     it "carries the rpc and starts pending with no attempts" do
       call = described_class.new(:complete_job)

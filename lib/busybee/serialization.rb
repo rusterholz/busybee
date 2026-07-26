@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-require "active_support"
 require "active_support/core_ext/hash/indifferent_access"
+require "active_support/core_ext/object/json"
 require "active_support/core_ext/string/inflections"
-require "active_support/json"
-require "busybee/error"
 require "json"
+
+require "busybee/error"
 
 module Busybee
   # Centralized JSON serialization and deserialization for GRPC communication.

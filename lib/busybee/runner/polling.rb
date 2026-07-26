@@ -1,5 +1,10 @@
 # frozen_string_literal: true
 
+require "busybee/client/call"
+require "busybee/grpc/error"
+require "busybee/runner"
+require "busybee/worker/shutdown"
+
 module Busybee
   class Runner
     # Polling runner — fetches jobs via client.with_each_job in a loop.

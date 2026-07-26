@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "tempfile"
+
 require "busybee/credentials/tls"
 
 RSpec.describe Busybee::Credentials::TLS do

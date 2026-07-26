@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
-require "busybee"
+require "busybee/durations"
+require "busybee/error"
+require "busybee/grpc"
 
 module Busybee
   # Base class for credentials. Defines interface for all credential types.
@@ -181,10 +183,9 @@ module Busybee
     #
     # @return [Busybee::GRPC::Gateway::Stub]
     def grpc_stub
-      @grpc_stub ||= begin
-        require "busybee/grpc"
-        Busybee::GRPC::Gateway::Stub.new(cluster_address, grpc_channel_credentials)
-      end
+      @grpc_stub ||= Busybee::GRPC::Gateway::Stub.new(
+        cluster_address, grpc_channel_credentials, channel_args: keepalive_channel_args
+      )
     end
 
     # Returns gRPC channel credentials for authentication.
@@ -195,6 +196,39 @@ module Busybee
     #   - GRPC::Core::ChannelCredentials for TLS/OAuth
     def grpc_channel_credentials
       raise NotImplementedError, "#{self.class} must implement #grpc_channel_credentials"
+    end
+
+    private
+
+    # Not user-tunable — pinned to the values keepalive needs to actually work.
+    # permit_without_calls lets pings flow with no RPC in flight (parity with other
+    # Zeebe clients; the open stream already counts as one). max_pings_without_data 0
+    # is load-bearing: its default (2) makes the core stop pinging after two pings
+    # with no data written — which is exactly an idle activation stream, so keepalive
+    # would silently disarm itself in the one scenario it exists for.
+    KEEPALIVE_PERMIT_WITHOUT_CALLS = 1
+    KEEPALIVE_MAX_PINGS_WITHOUT_DATA = 0
+    private_constant :KEEPALIVE_PERMIT_WITHOUT_CALLS, :KEEPALIVE_MAX_PINGS_WITHOUT_DATA
+
+    # HTTP/2 keepalive channel args from the gem-level knobs, or {} when disabled.
+    # Both knobs false disables it; exactly one false is an incoherent half-config
+    # and raises. Resolved here (stub-build time) rather than in the setters, which
+    # are assigned one at a time during configure and would cross-check too early.
+    def keepalive_channel_args
+      interval = Busybee.grpc_keepalive_interval
+      timeout = Busybee.grpc_keepalive_timeout
+      return {} if interval == false && timeout == false
+
+      if interval == false || timeout == false
+        raise ArgumentError,
+              "grpc_keepalive_interval and grpc_keepalive_timeout must both be set or both be false; " \
+              "got interval=#{interval.inspect}, timeout=#{timeout.inspect}"
+      end
+
+      { "grpc.keepalive_time_ms" => Busybee::Durations.milliseconds_from(interval),
+        "grpc.keepalive_timeout_ms" => Busybee::Durations.milliseconds_from(timeout),
+        "grpc.keepalive_permit_without_calls" => KEEPALIVE_PERMIT_WITHOUT_CALLS,
+        "grpc.http2.max_pings_without_data" => KEEPALIVE_MAX_PINGS_WITHOUT_DATA }
     end
   end
 end

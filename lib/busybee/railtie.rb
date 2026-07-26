@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-require "rails"
+require "active_support"
 require "active_support/core_ext/object/blank"
+require "rails"
 require "busybee"
 
 module Busybee
@@ -49,10 +50,8 @@ module Busybee
         # Credentials: explicit object, or build from type + params
         Busybee::Railtie.configure_credentials(config, busybee_conf)
 
-        # GRPC retry configuration
-        config.grpc_retry_enabled = !!busybee_conf.grpc_retry_enabled unless busybee_conf.grpc_retry_enabled.nil?
-        config.grpc_retry_delay_ms = busybee_conf.grpc_retry_delay_ms if busybee_conf.grpc_retry_delay_ms.presence
-        config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors) if busybee_conf.grpc_retry_errors.presence
+        # GRPC transport: retry + channel keepalive
+        Busybee::Railtie.configure_grpc(config, busybee_conf)
 
         # Client API method defaults
         %i[default_message_ttl default_fail_job_backoff
@@ -64,6 +63,21 @@ module Busybee
         # Worker defaults
         Busybee::Railtie.configure_worker_defaults(config, busybee_conf)
       end
+    end
+
+    # @api private
+    def self.configure_grpc(config, busybee_conf) # rubocop:disable Metrics/AbcSize
+      config.grpc_retry_enabled = !!busybee_conf.grpc_retry_enabled unless busybee_conf.grpc_retry_enabled.nil?
+      config.grpc_retry_delay_ms = busybee_conf.grpc_retry_delay_ms if busybee_conf.grpc_retry_delay_ms.presence
+      config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors) if busybee_conf.grpc_retry_errors.presence
+
+      # Keepalive guards on nil, not presence: false is a real value (disable).
+      unless busybee_conf.grpc_keepalive_interval.nil?
+        config.grpc_keepalive_interval = busybee_conf.grpc_keepalive_interval
+      end
+      return if busybee_conf.grpc_keepalive_timeout.nil?
+
+      config.grpc_keepalive_timeout = busybee_conf.grpc_keepalive_timeout
     end
 
     # @api private

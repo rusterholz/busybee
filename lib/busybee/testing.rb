@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "busybee/grpc"
+require "busybee"
 
 module Busybee
   # Testing support for BPMN workflows and workers with RSpec.

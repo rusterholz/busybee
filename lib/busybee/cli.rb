@@ -2,6 +2,13 @@
 
 require "optparse"
 
+require "busybee/client"
+require "busybee/error"
+require "busybee/runner"
+require "busybee/runtime_config"
+require "busybee/version"
+require "busybee/worker"
+
 module Busybee
   class CLI
     attr_reader :runtime_config, :worker_class_names, :worker_classes

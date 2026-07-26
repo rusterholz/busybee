@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "busybee/testing/matchers/have_received_headers"
 require "busybee/testing/activated_job"
+require "busybee/testing/matchers/have_received_headers"
 
 RSpec.describe "have_received_headers matcher" do
   # Using plain double since protobuf generates accessors dynamically

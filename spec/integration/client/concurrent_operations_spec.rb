@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/numeric/time"
+require "securerandom"
 
 # Tests that a single Busybee::Client (and its underlying GRPC stub) can handle
 # multiple concurrent operations via HTTP/2 multiplexing:

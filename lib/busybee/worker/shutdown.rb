@@ -10,8 +10,8 @@ module Busybee
     class Shutdown < Busybee::Error
       attr_reader :worker_class
 
-      def initialize(message = "Shutting down worker #{Busybee.worker_name}", worker:)
-        @worker_class = worker
+      def initialize(message = "Shutting down worker #{Busybee.worker_name}", worker_class:)
+        @worker_class = worker_class
         super(message)
       end
 
@@ -31,6 +31,15 @@ module Busybee
         return exception unless exception.is_a?(self)
 
         exception.cause || exception
+      end
+
+      # Whether an error is one the worker (or the gem config) declared fatal —
+      # the shutdown_on classification, shared by the worker's perform rescue
+      # and the hook layer's safe-run rescue. worker_class may be nil or
+      # configuration-less (a bare hook target); only gem-level classes apply then.
+      def self.triggered_by?(error, worker_class)
+        per_worker = worker_class.respond_to?(:configuration) ? worker_class.configuration.shutdown_on : []
+        (per_worker + Busybee.shutdown_on_errors).any? { |klass| error.is_a?(klass) }
       end
     end
   end

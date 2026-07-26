@@ -143,7 +143,7 @@ RSpec.describe Busybee::Runner::Polling do
 
     context "when worker raises Busybee::Worker::Shutdown" do
       let(:cause) { RuntimeError.new("DB connection lost") }
-      let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: worker_class) }
+      let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: worker_class) }
 
       after { Busybee::Hooks.reset! }
 

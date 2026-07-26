@@ -61,6 +61,9 @@ RSpec.describe Busybee::Logging do
   end
 
   context "when in json mode" do
+    # ISO8601 UTC with millisecond precision — the time field's wire shape.
+    let(:time_rx) { /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\z/ }
+
     let(:logger) do
       Logger.new(log_output).tap do |l|
         l.formatter = proc { |_severity, _datetime, _progname, msg| "#{msg}\n" }
@@ -69,15 +72,22 @@ RSpec.describe Busybee::Logging do
 
     before { Busybee.log_format = :json }
 
+    it "stamps each line with the current UTC time" do
+      described_class.info("stamped")
+      json = JSON.parse(log_output.string)
+      expect(Time.iso8601(json.fetch("time"))).to be_within(5).of(Time.now.utc)
+    end
+
     describe ".info" do
       it "logs as JSON with message, level, and context" do
         described_class.info("test message", job_key: 123)
         json = JSON.parse(log_output.string)
-        expect(json).to eq({
-                             "message" => "[busybee] test message",
-                             "level" => "info",
-                             "job_key" => 123
-                           })
+        expect(json).to match({
+                                "message" => "[busybee] test message",
+                                "level" => "info",
+                                "job_key" => 123,
+                                "time" => match(time_rx)
+                              })
       end
     end
 
@@ -85,10 +95,11 @@ RSpec.describe Busybee::Logging do
       it "logs as JSON with warn level" do
         described_class.warn("warning message")
         json = JSON.parse(log_output.string)
-        expect(json).to eq({
-                             "message" => "[busybee] warning message",
-                             "level" => "warn"
-                           })
+        expect(json).to match({
+                                "message" => "[busybee] warning message",
+                                "level" => "warn",
+                                "time" => match(time_rx)
+                              })
       end
     end
 
@@ -96,11 +107,12 @@ RSpec.describe Busybee::Logging do
       it "logs as JSON with error level" do
         described_class.error("error message", error_code: 500)
         json = JSON.parse(log_output.string)
-        expect(json).to eq({
-                             "message" => "[busybee] error message",
-                             "level" => "error",
-                             "error_code" => 500
-                           })
+        expect(json).to match({
+                                "message" => "[busybee] error message",
+                                "level" => "error",
+                                "error_code" => 500,
+                                "time" => match(time_rx)
+                              })
       end
     end
 
@@ -109,10 +121,11 @@ RSpec.describe Busybee::Logging do
         logger.level = Logger::DEBUG
         described_class.debug("debug message")
         json = JSON.parse(log_output.string)
-        expect(json).to eq({
-                             "message" => "[busybee] debug message",
-                             "level" => "debug"
-                           })
+        expect(json).to match({
+                                "message" => "[busybee] debug message",
+                                "level" => "debug",
+                                "time" => match(time_rx)
+                              })
       end
     end
   end

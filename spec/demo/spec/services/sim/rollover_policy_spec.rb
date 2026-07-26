@@ -13,10 +13,10 @@ RSpec.describe Sim::RolloverPolicy do
         to be > described_class.hazard(status(0), 1.0, 10.0)
     end
 
-    it "scales linearly with simulation speed" do
+    it "scales linearly with simulation speed below the cap" do
       at_1 = described_class.hazard(status(0), 1.0, 10.0)
-      at_10 = described_class.hazard(status(0), 10.0, 10.0)
-      expect(at_10).to be_within(1e-9).of(at_1 * 10)
+      at_3 = described_class.hazard(status(0), 3.0, 10.0)
+      expect(at_3).to be_within(1e-9).of(at_1 * 3)
     end
 
     it "scales linearly with the elapsed slice" do
@@ -32,6 +32,20 @@ RSpec.describe Sim::RolloverPolicy do
     it "depends only on sim-time (speed × wall quantities), so speed is impedance-matched" do
       expect(described_class.hazard(status(120), 2.0, 5.0)).
         to be_within(1e-9).of(described_class.hazard(status(240), 1.0, 10.0))
+    end
+
+    describe "wall-clock floor (rollovers can't outrun the fixed container reboot)" do
+      it "stops climbing with speed above the cap" do
+        at_cap = described_class.hazard(status(0), described_class::MAX_ROLL_SPEED, 1.0)
+        way_above = described_class.hazard(status(0), described_class::MAX_ROLL_SPEED * 8, 1.0)
+        expect(way_above).to eq(at_cap)
+      end
+
+      it "floors a fresh container's mean wall interval at MIN_ROLL_WALL_SECONDS" do
+        # At any speed, the fresh per-wall-second hazard tops out at 1 / floor.
+        rate_per_wall_second = described_class.hazard(status(0), 1000.0, 1.0)
+        expect(rate_per_wall_second).to be_within(1e-9).of(1.0 / described_class::MIN_ROLL_WALL_SECONDS)
+      end
     end
   end
 

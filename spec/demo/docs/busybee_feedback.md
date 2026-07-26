@@ -78,7 +78,7 @@ Non-bottlenecked workers confirmed this diagnosis:
 - **Saturation detection**: When a worker's inter-job idle time drops near zero, it's saturated — that's the bottleneck. A metric like `idle_fraction` per worker type would make bottlenecks immediately visible.
 - **Pipeline throughput view**: For BPMN processes with multiple steps, the ability to see throughput at each stage and identify where backpressure builds.
 
-An `around_job` or `on_job_complete` hook that receives timing metadata would let users build dashboards, emit StatsD metrics, or simply log structured data:
+An `around_perform` or `on_job_complete` hook that receives timing metadata would let users build dashboards, emit StatsD metrics, or simply log structured data:
 
 ```ruby
 # Hypothetical API
@@ -178,3 +178,48 @@ busybee --config config.yml --ready-file /tmp/busybee-ready
 Option 1 is simpler and sufficient for Docker Compose. Option 2 is better for Kubernetes. Both could coexist.
 
 **For the demo app:** We use `kill -0 1` with `start_period: 30s` as a rough healthcheck, and make clockwork depend on all workers being healthy. It works but can't distinguish "process alive" from "worker streaming."
+
+---
+
+## An `on_job_resolved` hook for asynchronous completion
+
+**Discovered during:** Mission 7.5 (demo control-center dogfooding)
+
+**Context:** The Monitoring recorder wants each job's *final outcome* (complete / failed / error). Today it reads status in `on_job_executed` — but that hook fires when `perform` returns, which for an async worker is *before* the work finishes. The Sim workers dispatch to a `Concurrent::Promises` future and resolve (`complete!`/`fail!`) from a background thread much later. No hook fires at that resolution, so every async job was recorded stuck in `ready`.
+
+**The need:** A lifecycle hook that fires when a job is actually resolved, regardless of which thread or how much later:
+
+```ruby
+# Hypothetical API
+Busybee.configure do |config|
+  config.on_job_resolved { |job| Metrics.record(job.status, job.key) }
+end
+```
+
+This is the missing member of the job-lifecycle set — `activated` and `executed` bracket the *synchronous dispatch*, but nothing observes the *deferred completion*. It becomes structurally necessary in the async worker era (v0.5): once `perform` routinely returns before the work is done, `on_job_executed` stops being a completion signal for anyone.
+
+**For the demo app:** We fold it ourselves — the recorder's `after_call` maps the resolution RPC (`complete_job` → `complete`, etc.) back onto the run, relying on the fact that a job's own engine calls self-correlate their `job_key` on any thread. It works, but it's inferring a lifecycle moment from a *call*, which is exactly the signal a first-class hook should provide.
+
+---
+
+## Hooks may be interrupted — spawned threads need an owner
+
+**Discovered during:** Mission 7.5 (the Multi shutdown wedge)
+
+**Context:** The recorder offloads writes to a `Concurrent::SingleThreadExecutor` spawned from hook code. When a worker container exits (here, a rollover), Ruby's shutdown runs `at_exit` handlers, then *kills* surviving threads, then runs finalizers. A writer thread killed mid-SQLite-write left the connection's native mutex locked, and the finalizer that closes the database deadlocked — the process became unkillable, passed its liveness check, and starved its whole domain until a hard restart.
+
+**The observation:** `safe: true` protects busybee's control flow from a hook *raising*, but nothing protects the process from a hook's *threads*. A thread outlives the hook call that spawned it and eventually dies by VM kill, wherever it happens to be standing. That ownership gap is the app's to close, but busybee is the natural place to *teach* it.
+
+**The need:** Documentation, primarily — the hooks guide should state plainly that a hook that spawns background work owns that work's lifecycle, and show the drain pattern (an `at_exit` / `on_worker_shutdown` shutdown). Include the recognition signature of the failure (crash trace printed but the process still alive, SIGTERM inert, main thread parked in `pthread_mutex_lock` under `rb_objspace_call_finalizer`). Possibly, later, an affordance: a busybee-managed "run this on shutdown" registration so apps don't hand-roll the `at_exit`.
+
+**For the demo app:** `Recorder.shutdown!`, registered `at_exit`, drains and stops the writer before the thread-kill step; `Recorder.flush` on `on_worker_shutdown` holds the graceful path until the final row lands. The demo now models the correct pattern — which is the worked example the docs should point to.
+
+---
+
+## Channel keepalive for silently-dropped streams — RESOLVED
+
+**Discovered during:** Mission 7.5 (demo left running across host sleep/wake cycles)
+
+**Context:** After the host suspended and resumed, workers went idle while Zeebe held hundreds of activatable jobs. The job-activation stream has no request deadline, so when its transport died silently (the suspend killed the TCP with no RST) the worker blocked in the stream read forever — alive and healthy-looking, activating nothing. Unary calls recovered on their own deadlines; only the deadline-less stream hung.
+
+**Resolution:** Shipped as a gem feature this cycle — HTTP/2 channel keepalive (`grpc_keepalive_interval` / `grpc_keepalive_timeout`), so idle pings detect the dead transport and raise it as the gateway error the runner already recovers from. Left here for the record, as an example of the demo surfacing a real gem gap; no further action needed.

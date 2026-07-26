@@ -19,6 +19,13 @@ RSpec.describe Busybee::Worker::Status do
                         timestamps: timestamps, **overrides)
   end
 
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) do
+      timestamps.stamp!(:started_at).stamp!(:shutdown_at)
+      build_status(reason: :crash, error: RuntimeError.new("boom"), total_job_count: 3)
+    end
+  end
+
   describe "identity" do
     it "exposes the worker class" do
       expect(build_status.worker_class).to be(worker_class)

@@ -3,6 +3,15 @@
 require "active_support/core_ext/numeric/time"
 
 RSpec.describe Busybee::Job do
+  it_behaves_like "a two-cardinality projection" do
+    let(:projectable) do
+      described_class.new(raw_job, client: client).tap do |job|
+        job.timestamps.stamp!(:activated_at)
+        job.set_context(source: :poll, buffered: true, worker_class: String, note: "scratch")
+      end
+    end
+  end
+
   let(:client) { instance_double(Busybee::Client) }
 
   let(:raw_job) do
@@ -893,37 +902,37 @@ RSpec.describe Busybee::Job do
 
   describe "does not fire job lifecycle hooks" do
     # complete!/fail!/throw_bpmn_error! perform the gRPC call and update
-    # the Resolution PORO. Hook firing (including after_job) is a
+    # the Resolution PORO. Hook firing (including after_perform) is a
     # Worker.perform_job concern — one ensure block, post-perform. These
     # methods invoke no hook callbacks themselves, so they also cannot
     # raise Busybee::Worker::Shutdown even with a shutdown_on-classed
-    # after_job hook registered.
+    # after_perform hook registered.
     after { Busybee::Hooks.reset! }
 
-    it "#complete! does not fire after_job" do
+    it "#complete! does not fire after_perform" do
       allow(client).to receive(:complete_job)
       invocations = 0
-      Busybee.after_job { invocations += 1 }
+      Busybee.after_perform { invocations += 1 }
 
       job.complete!
 
       expect(invocations).to eq(0)
     end
 
-    it "#fail! does not fire after_job" do
+    it "#fail! does not fire after_perform" do
       allow(client).to receive(:fail_job)
       invocations = 0
-      Busybee.after_job { invocations += 1 }
+      Busybee.after_perform { invocations += 1 }
 
       job.fail!("boom")
 
       expect(invocations).to eq(0)
     end
 
-    it "#throw_bpmn_error! does not fire after_job" do
+    it "#throw_bpmn_error! does not fire after_perform" do
       allow(client).to receive(:throw_bpmn_error)
       invocations = 0
-      Busybee.after_job { invocations += 1 }
+      Busybee.after_perform { invocations += 1 }
 
       job.throw_bpmn_error!(:some_code)
 

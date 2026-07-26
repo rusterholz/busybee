@@ -164,7 +164,7 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     context "when worker raises Busybee::Worker::Shutdown" do
-      let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: worker_class) }
+      let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: worker_class) }
 
       after { Busybee::Hooks.reset! }
 
@@ -401,7 +401,7 @@ RSpec.describe Busybee::Runner::Streaming do
         expect(runner.running?).to be false
       end
 
-      it "reports an unrecovered pump stream error as :gateway, not a fabricated :signal" do
+      it "reports an unrecovered pump stream error as :gateway_error, not a fabricated :signal" do
         stream_error = Busybee::GRPC::Error.new("Job stream failed")
         captured = nil
         Busybee.on_worker_shutdown { |worker| captured = worker }
@@ -411,12 +411,12 @@ RSpec.describe Busybee::Runner::Streaming do
         end
 
         expect { runner.run! }.to raise_error(Busybee::GRPC::Error)
-        expect(captured.reason).to eq(:gateway)
+        expect(captured.reason).to eq(:gateway_error)
       ensure
         Busybee::Hooks.reset!
       end
 
-      it "reports :stream_ended when the stream closes cleanly on its own (pump backstop)" do
+      it "reports :gateway_closed when the stream closes cleanly on its own (pump backstop)" do
         captured = nil
         Busybee.on_worker_shutdown { |worker| captured = worker }
         allow(client).to receive(:open_job_stream) do
@@ -430,7 +430,7 @@ RSpec.describe Busybee::Runner::Streaming do
         aggregate_failures do
           expect(joined).not_to be_nil, "runner.run! hung — pump ensure did not unblock the main thread"
           expect(runner.running?).to be false
-          expect(captured.reason).to eq(:stream_ended)
+          expect(captured.reason).to eq(:gateway_closed)
         end
       ensure
         Busybee::Hooks.reset!
@@ -478,7 +478,7 @@ RSpec.describe Busybee::Runner::Streaming do
       end
 
       context "when worker raises Busybee::Worker::Shutdown" do
-        let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker: queue_worker_class) }
+        let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: queue_worker_class) }
 
         after { Busybee::Hooks.reset! }
 

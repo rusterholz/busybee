@@ -14,13 +14,10 @@ if ENV["TEST_RAILS_INTEGRATION"]
   require File.expand_path("demo/config/environment", __dir__)
 end
 
+require "webmock/rspec"
+
 require "busybee"
 require "busybee/testing"
-require "active_support/core_ext/numeric/time"
-require "base64"
-require "securerandom"
-require "tempfile"
-require "webmock/rspec"
 
 # Load support files
 Dir[File.join(__dir__, "support", "**", "*.rb")].each { |f| require f }

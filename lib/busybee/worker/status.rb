@@ -50,8 +50,10 @@ module Busybee
         freeze
       end
 
-      # The recorded error's class, or nil. Returns the Class (like worker_class),
-      # so a hook filter matches it by Class, name string, or Regexp uniformly.
+      # The recorded error's class, or nil. A projection convenience —
+      # context_tags renders its name as the low-cardinality error label.
+      # (Error *filtering* takes the error: kwarg, matched against the
+      # exception itself.)
       def error_class
         error&.class
       end

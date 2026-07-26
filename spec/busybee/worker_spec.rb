@@ -301,7 +301,7 @@ RSpec.describe Busybee::Worker do
 
       it "re-raises Shutdown raised directly in perform" do
         worker = stub_const("DirectShutdownWorker", Class.new(described_class) do
-          define_method(:perform) { raise Busybee::Worker::Shutdown.new(worker: self.class) }
+          define_method(:perform) { raise Busybee::Worker::Shutdown.new(worker_class: self.class) }
         end)
 
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
@@ -312,7 +312,7 @@ RSpec.describe Busybee::Worker do
           define_method(:perform) do
             raise "root cause"
           rescue StandardError
-            raise Busybee::Worker::Shutdown.new(worker: self.class)
+            raise Busybee::Worker::Shutdown.new(worker_class: self.class)
           end
         end)
 
@@ -325,7 +325,7 @@ RSpec.describe Busybee::Worker do
           define_method(:perform) do
             raise "root cause"
           rescue StandardError
-            raise Busybee::Worker::Shutdown.new(worker: self.class)
+            raise Busybee::Worker::Shutdown.new(worker_class: self.class)
           end
         end)
 
@@ -666,9 +666,9 @@ RSpec.describe Busybee::Worker do
       expect(captured_call.job).to be(job)
     end
 
-    it "seeds the job for part-of-perform hooks (a Call in after_job folds it)" do
+    it "seeds the job for part-of-perform hooks (a Call in after_perform folds it)" do
       captured_call = nil
-      Busybee.after_job { captured_call = Busybee::Client::Call.new(:complete_job) }
+      Busybee.after_perform { captured_call = Busybee::Client::Call.new(:complete_job) }
       performing_worker.perform_job(job)
       expect(captured_call.job).to be(job)
     end
@@ -687,7 +687,7 @@ RSpec.describe Busybee::Worker do
     end
 
     it "builds a message from worker class and cause" do
-      error = raise_with_cause(RuntimeError, "connection lost", worker: String) rescue $! # rubocop:disable Style/RescueModifier
+      error = raise_with_cause(RuntimeError, "connection lost", worker_class: String) rescue $! # rubocop:disable Style/RescueModifier
 
       expect(error.message).to include("Shutting down worker")
       expect(error.message).to include("RuntimeError")
@@ -698,19 +698,47 @@ RSpec.describe Busybee::Worker do
     end
 
     it "handles missing cause gracefully" do
-      error = described_class.new(worker: String)
+      error = described_class.new(worker_class: String)
       expect(error.message).to include("due to error")
       expect(error.message).to include("String")
     end
 
     it "handles anonymous worker class" do
-      error = described_class.new(worker: Class.new)
+      error = described_class.new(worker_class: Class.new)
       expect(error.message).not_to include(" in ")
     end
 
     it "accepts a custom base message" do
-      error = described_class.new("Custom shutdown reason", worker: String)
+      error = described_class.new("Custom shutdown reason", worker_class: String)
       expect(error.message).to start_with("Custom shutdown reason")
+    end
+
+    describe ".triggered_by?" do
+      let(:fatal_worker) do
+        stub_const("FatalRuntimeWorker", Class.new(Busybee::Worker) do
+          shutdown_on RuntimeError
+        end)
+      end
+
+      it "matches an error the worker class declared via shutdown_on" do
+        expect(described_class.triggered_by?(RuntimeError.new("db gone"), fatal_worker)).to be true
+        expect(described_class.triggered_by?(ArgumentError.new("nope"), fatal_worker)).to be false
+      end
+
+      it "matches an error declared in gem-level shutdown_on_errors" do
+        original = Busybee.shutdown_on_errors
+        begin
+          Busybee.shutdown_on_errors = [IOError]
+          expect(described_class.triggered_by?(IOError.new("pipe"), nil)).to be true
+        ensure
+          Busybee.shutdown_on_errors = original
+        end
+      end
+
+      it "tolerates a nil or configuration-less worker class" do
+        expect(described_class.triggered_by?(RuntimeError.new("x"), nil)).to be false
+        expect(described_class.triggered_by?(RuntimeError.new("x"), Object)).to be false
+      end
     end
   end
 
@@ -875,9 +903,9 @@ RSpec.describe Busybee::Worker do
         expect(job.resolved_at).to be_a(Time)
       end
 
-      it "stamps perform timestamps inside the around_job chain (after middleware preamble)" do
+      it "stamps perform timestamps inside the around_perform chain (after middleware preamble)" do
         middleware_timestamp = nil
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           middleware_timestamp = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           perform.call
         end
@@ -887,10 +915,10 @@ RSpec.describe Busybee::Worker do
       end
     end
 
-    describe "before_job hooks" do
+    describe "before_perform hooks" do
       it "fires before perform with the Job in :ready status" do
         captured_status = nil
-        Busybee.before_job do |job|
+        Busybee.before_perform do |job|
           captured_status = job.status
         end
 
@@ -901,7 +929,7 @@ RSpec.describe Busybee::Worker do
 
       it "passes the Job with its identity keys reachable" do
         received_job = nil
-        Busybee.before_job { |job| received_job = job }
+        Busybee.before_perform { |job| received_job = job }
 
         performing_worker.perform_job(job)
 
@@ -918,7 +946,7 @@ RSpec.describe Busybee::Worker do
 
       it "fires before perform (ordering)" do
         sequence = []
-        Busybee.before_job { sequence << :hook }
+        Busybee.before_perform { sequence << :hook }
         worker = stub_const("SequenceWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) do
@@ -933,28 +961,28 @@ RSpec.describe Busybee::Worker do
 
       it "exposes the worker instance on the Job" do
         received_worker = nil
-        Busybee.before_job { |job| received_worker = job.worker }
+        Busybee.before_perform { |job| received_worker = job.worker }
 
         performing_worker.perform_job(job)
         expect(received_worker).to be_a(performing_worker)
       end
 
       it "propagates errors to perform_job rescue (triggers autofail)" do
-        Busybee.before_job { raise "hook boom" }
+        Busybee.before_perform { raise "hook boom" }
 
         performing_worker.perform_job(job)
         expect(client).to have_received(:fail_job).with(123456, /hook boom/, retries: 2, backoff: nil)
       end
 
-      it "prevents status changes during before_job hooks" do
-        Busybee.before_job { |job| job.complete!({ early: true }) }
+      it "prevents status changes during before_perform hooks" do
+        Busybee.before_perform { |job| job.complete!({ early: true }) }
 
         expect { performing_worker.perform_job(job) }.to raise_error(Busybee::StatusChangeOutsidePerform)
         expect(job).to be_failed
       end
 
       it "clears flag on rescue entry so autofail works after hook error" do
-        Busybee.before_job { raise "hook boom" }
+        Busybee.before_perform { raise "hook boom" }
 
         performing_worker.perform_job(job)
         expect(job).to be_failed
@@ -966,25 +994,25 @@ RSpec.describe Busybee::Worker do
           strict_outputs false
           define_method(:perform) { { done: true } }
         end)
-        Busybee.before_job { raise "db gone" }
+        Busybee.before_perform { raise "db gone" }
 
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
       end
 
       it "respects prefiltering" do
         results = []
-        Busybee.before_job(worker_class: /Nonexistent/) { results << :filtered }
-        Busybee.before_job { results << :unfiltered }
+        Busybee.before_perform(worker_class: /Nonexistent/) { results << :filtered }
+        Busybee.before_perform { results << :unfiltered }
 
         performing_worker.perform_job(job)
         expect(results).to eq([:unfiltered])
       end
     end
 
-    describe "around_job hooks" do
+    describe "around_perform hooks" do
       it "wraps perform (before/core/after ordering)" do
         sequence = []
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           sequence << :before
           perform.call
           sequence << :after
@@ -1003,7 +1031,7 @@ RSpec.describe Busybee::Worker do
 
       it "captures perform return value onto job.result by the time around-yield returns" do
         captured_result = nil
-        Busybee.around_job do |job, perform|
+        Busybee.around_perform do |job, perform|
           perform.call
           captured_result = job.result
         end
@@ -1014,7 +1042,7 @@ RSpec.describe Busybee::Worker do
 
       it "does not overwrite result when perform calls complete! manually" do
         captured_result = nil
-        Busybee.around_job do |job, perform|
+        Busybee.around_perform do |job, perform|
           perform.call
           captured_result = job.result
         end
@@ -1031,7 +1059,7 @@ RSpec.describe Busybee::Worker do
       end
 
       it "works even when middleware forgets to return result" do
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           perform.call
           "forgot to return result"
         end
@@ -1040,12 +1068,12 @@ RSpec.describe Busybee::Worker do
         expect(client).to have_received(:complete_job).with(123456, vars: { "processed" => true })
       end
 
-      it "prevents status changes during around_job preamble (before perform.call)" do
+      it "prevents status changes during around_perform preamble (before perform.call)" do
         worker = stub_const("PrematureCompleteWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) { { done: true } }
         end)
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           job.complete!({ early: true }) # should raise
           perform.call
         end
@@ -1054,12 +1082,12 @@ RSpec.describe Busybee::Worker do
         expect(job).to be_failed
       end
 
-      it "prevents status changes during around_job after-yield (after perform.call)" do
+      it "prevents status changes during around_perform after-yield (after perform.call)" do
         worker = stub_const("LateCompleteWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) { { done: true } }
         end)
-        Busybee.around_job do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           perform.call
           job.complete!({ late: true }) # should raise — flag re-engages after perform
         end
@@ -1081,10 +1109,10 @@ RSpec.describe Busybee::Worker do
       end
     end
 
-    describe "after_job hooks" do
+    describe "after_perform hooks" do
       it "fires after auto-complete with status :complete" do
         received_job = nil
-        Busybee.after_job { |job| received_job = job }
+        Busybee.after_perform { |job| received_job = job }
 
         performing_worker.perform_job(job)
 
@@ -1094,7 +1122,7 @@ RSpec.describe Busybee::Worker do
 
       it "fires after manual complete inside perform" do
         received_job = nil
-        Busybee.after_job { |job| received_job = job }
+        Busybee.after_perform { |job| received_job = job }
         worker = stub_const("ManualAfterWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) { complete!({ manual: true }) }
@@ -1104,19 +1132,19 @@ RSpec.describe Busybee::Worker do
         expect(received_job.status).to eq(:complete)
       end
 
-      it "receives the same Job as before_job (it's the same Job object)" do
-        before_job_arg = nil
-        after_job_arg = nil
-        Busybee.before_job { |j| before_job_arg = j }
-        Busybee.after_job { |j| after_job_arg = j }
+      it "receives the same Job as before_perform (it's the same Job object)" do
+        before_perform_arg = nil
+        after_perform_arg = nil
+        Busybee.before_perform { |j| before_perform_arg = j }
+        Busybee.after_perform { |j| after_perform_arg = j }
 
         performing_worker.perform_job(job)
-        expect(after_job_arg).to be(before_job_arg)
+        expect(after_perform_arg).to be(before_perform_arg)
       end
 
       it "includes result from complete! vars" do
         received_result = nil
-        Busybee.after_job { |job| received_result = job.result }
+        Busybee.after_perform { |job| received_result = job.result }
 
         performing_worker.perform_job(job)
         expect(received_result).to eq("processed" => true)
@@ -1124,7 +1152,7 @@ RSpec.describe Busybee::Worker do
 
       it "exposes timestamps on the Job" do
         received_job = nil
-        Busybee.after_job { |job| received_job = job }
+        Busybee.after_perform { |job| received_job = job }
 
         performing_worker.perform_job(job)
         expect(received_job.execution_started_at(:monotonic)).to be_a(Float)
@@ -1133,7 +1161,7 @@ RSpec.describe Busybee::Worker do
 
       it "fires after auto-fail with status :failed and error" do
         received_job = nil
-        Busybee.after_job { |job| received_job = job }
+        Busybee.after_perform { |job| received_job = job }
         worker = stub_const("FailingAfterWorker", Class.new(Busybee::Worker) do
           define_method(:perform) { raise "boom" }
         end)
@@ -1148,7 +1176,7 @@ RSpec.describe Busybee::Worker do
 
       it "fires after fail! with string error message" do
         received_job = nil
-        Busybee.after_job { |job| received_job = job }
+        Busybee.after_perform { |job| received_job = job }
         worker = stub_const("StringFailWorker", Class.new(Busybee::Worker) do
           define_method(:perform) { fail!("custom message") }
         end)
@@ -1159,10 +1187,10 @@ RSpec.describe Busybee::Worker do
         expect(received_job.error_message).to eq("custom message")
       end
 
-      it "swallows errors in after_job hooks and logs them" do
+      it "swallows errors in after_perform hooks and logs them" do
         logger = instance_double(Logger, error: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
-        Busybee.after_job { raise "hook boom" }
+        Busybee.after_perform { raise "hook boom" }
 
         expect { performing_worker.perform_job(job) }.not_to raise_error
         expect(job).to be_complete
@@ -1170,29 +1198,29 @@ RSpec.describe Busybee::Worker do
           with(%r{\[busybee\] Error in hooks \(ignored\): \[RuntimeError\] hook boom \(at .+/worker_spec\.rb:\d+})
       end
 
-      it "propagates shutdown_on errors from after_job hooks" do
+      it "propagates shutdown_on errors from after_perform hooks" do
         worker = stub_const("ShutdownAfterWorker", Class.new(Busybee::Worker) do
           shutdown_on RuntimeError
           strict_outputs false
           define_method(:perform) { { done: true } }
         end)
-        Busybee.after_job { raise "db gone" }
+        Busybee.after_perform { raise "db gone" }
 
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
       end
 
-      it "prefilters by status — after_job(status: :failed) skips completed jobs" do
+      it "prefilters by status — after_perform(status: :failed) skips completed jobs" do
         results = []
-        Busybee.after_job(status: :failed) { results << :failed_only }
-        Busybee.after_job { results << :all }
+        Busybee.after_perform(status: :failed) { results << :failed_only }
+        Busybee.after_perform { results << :all }
 
         performing_worker.perform_job(job)
         expect(results).to eq([:all])
       end
 
-      it "prefilters by status — after_job(status: :failed) fires for failed jobs" do
+      it "prefilters by status — after_perform(status: :failed) fires for failed jobs" do
         results = []
-        Busybee.after_job(status: :failed) { results << :failed_only }
+        Busybee.after_perform(status: :failed) { results << :failed_only }
         worker = stub_const("PrefilterFailWorker", Class.new(Busybee::Worker) do
           define_method(:perform) { raise "boom" }
         end)
@@ -1203,7 +1231,7 @@ RSpec.describe Busybee::Worker do
 
       it "fires after throw_bpmn_error! with error code" do
         received_job = nil
-        Busybee.after_job { |job| received_job = job }
+        Busybee.after_perform { |job| received_job = job }
         worker = stub_const("BpmnAfterWorker", Class.new(Busybee::Worker) do
           define_method(:perform) { throw_bpmn_error!(:not_found, "missing") }
         end)
@@ -1219,7 +1247,7 @@ RSpec.describe Busybee::Worker do
       it "does not fire when the job remains :ready (fail_job_on_error: false)" do
         allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
         received = []
-        Busybee.after_job { |j| received << j }
+        Busybee.after_perform { |j| received << j }
         worker = stub_const("AfterUnresolvedWorker", Class.new(Busybee::Worker) do
           fail_job_on_error false
           define_method(:perform) { raise "boom" }
@@ -1236,7 +1264,7 @@ RSpec.describe Busybee::Worker do
         allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
         allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
         received = []
-        Busybee.after_job { |j| received << j }
+        Busybee.after_perform { |j| received << j }
         worker = stub_const("AfterFailingGrpcWorker", Class.new(Busybee::Worker) do
           define_method(:perform) { raise "boom" }
         end)
@@ -1250,7 +1278,7 @@ RSpec.describe Busybee::Worker do
 
       it "sees both result and error in Variant D (manual fail then return a partial-payload hash)" do
         received_job = nil
-        Busybee.after_job { |j| received_job = j }
+        Busybee.after_perform { |j| received_job = j }
         worker = stub_const("FailThenReturnWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) do
@@ -1301,11 +1329,11 @@ RSpec.describe Busybee::Worker do
       end
     end
 
-    describe "around_job hooks (continued)" do
-      it "fires before_job before around_job" do
+    describe "around_perform hooks (continued)" do
+      it "fires before_perform before around_perform" do
         sequence = []
-        Busybee.before_job { sequence << :before }
-        Busybee.around_job do |_job, perform|
+        Busybee.before_perform { sequence << :before }
+        Busybee.around_perform do |_job, perform|
           sequence << :around
           perform.call
         end

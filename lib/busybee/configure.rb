@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require "busybee/credentials"
+require "busybee/durations"
+require "busybee/logging"
+
 module Busybee
   # Validated setters for gem-level configuration.
   # Included into Busybee's singleton class; readers live in busybee.rb.
@@ -108,6 +112,17 @@ module Busybee
       @default_backpressure_delay = value.nil? ? nil : validate_duration!(:default_backpressure_delay, value)
     end
 
+    # Keepalive durations carry one extra state beyond the usual nil-resets-to-default:
+    # an explicit false disables keepalive. false is stored verbatim (not routed through
+    # validate_duration!, which rejects it); nil and everything else behave as normal.
+    def grpc_keepalive_interval=(value)
+      @grpc_keepalive_interval = keepalive_duration(:grpc_keepalive_interval, value)
+    end
+
+    def grpc_keepalive_timeout=(value)
+      @grpc_keepalive_timeout = keepalive_duration(:grpc_keepalive_timeout, value)
+    end
+
     # --- Buffer throttle (three-state: false/nil = off, true → 0, Numeric = ms) ---
 
     def default_buffer_throttle=(value)
@@ -212,28 +227,17 @@ module Busybee
 
     private
 
-    # Validates and coerces a duration config value.
-    # Returns the (possibly coerced) value to assign.
-    def validate_duration!(name, value) # rubocop:disable Metrics/AbcSize
-      return value if value.is_a?(Integer)
-      return value if defined?(ActiveSupport::Duration) && value.is_a?(ActiveSupport::Duration)
+    # nil (reset to default) and false (disable) pass through untouched; anything
+    # else is a normal duration.
+    def keepalive_duration(name, value)
+      return value if value.nil? || value == false
 
-      if value.is_a?(String)
-        return value.to_f.to_i if value.match?(/\A\d+(\.\d+)?\z/)
-
-        raise ArgumentError,
-              "#{name} accepts Integer, ActiveSupport::Duration, or numeric String, " \
-              "got non-numeric String #{value.inspect}"
-      end
-
-      if value.is_a?(Numeric)
-        Logging.warn("#{name}: coercing #{value.class} #{value.inspect} to Integer #{value.to_i}")
-        return value.to_i
-      end
-
-      raise ArgumentError,
-            "#{name} accepts Integer, ActiveSupport::Duration, or numeric String, got #{value.class}"
+      validate_duration!(name, value)
     end
+
+    # Validates and coerces a duration config value; the contract lives in
+    # Durations (the gem-wide duration-input home).
+    def validate_duration!(name, value) = Busybee::Durations.validate!(name, value)
 
     def validate_boolean!(name, value)
       return if [true, false].include?(value)

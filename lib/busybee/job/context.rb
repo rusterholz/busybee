@@ -7,7 +7,7 @@ module Busybee
     # Arbitrary key/value scratch for cross-hook state — the catch-all into
     # which any Job#set_context keys not claimed by Activation or Resolution
     # land. Hook authors use this to pass info between hooks (e.g. a tracing
-    # span started in before_job and finished in after_job).
+    # span started in before_perform and finished in after_perform).
     #
     # Contributes nothing to Job#context_tags (the framework reserves that
     # surface for keys it knows are low-cardinality). Contributes to

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "securerandom"
 
 RSpec.describe "GRPC Publish Message" do
   # This test verifies that we can publish messages to process instances
