@@ -216,7 +216,7 @@ You can also configure shutdown errors globally for all workers in your applicat
 
 `shutdown_on` accepts only `StandardError` subclasses. Classes outside that hierarchy (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise an error at class-definition time, because the per-job rescue that consults `shutdown_on` is `StandardError`-scoped — a non-`StandardError` would never reach the check at runtime. Signal-class errors are handled separately via the CLI's signal traps; there's nothing to configure here.
 
-When a shutdown is triggered, the worker process stops requesting new jobs, fails any in-flight jobs (preserving their retry count so they'll be picked up by another worker), and exits.
+When a shutdown is triggered, the worker process stops requesting new jobs, fails any in-flight jobs (preserving their retry count so they'll be picked up by another worker), and exits. [Worker lifecycle hooks](hooks.md#worker-hooks) observe the whole sequence, with the closing snapshot reporting [`reason: :unhealthy`](hooks.md#stop-reasons).
 
 #### Direct Job Access
 
@@ -392,7 +392,7 @@ The `type:` option is a documentation hint that describes what kind of value to 
 
 Note that, while JSON and FEEL support array and object types, this version of busybee does not yet provide that support. If you have array- or object-shaped inputs or outputs, either omit the `type:` option, or set it to `null` (which will not be enforced anywhere).
 
-> A future busybee version will provide runtime instrumentation hooks for when workers start up or shut down, which will receive input/output types and descriptions among their metadata. This will allow you to register this metadata in your own tracking / auditing systems.
+> Worker lifecycle hooks receive these declarations at runtime: each `on_worker_*` hook's `Busybee::Worker::Status` exposes `inputs`, `outputs`, and `description`, so you can register worker metadata in your own tracking / auditing systems. See [Hooks](hooks.md#worker-hooks).
 
 ### Advanced DSL Options
 
@@ -427,7 +427,7 @@ Set to `false` when you want to handle all errors yourself. Note that if the job
 
 #### `description`
 
-A human-readable description of what the worker does. Used for documentation (will be passed to instrumentation hooks in a future version):
+A human-readable description of what the worker does. Used for documentation, and exposed to [worker lifecycle hooks](hooks.md#worker-hooks) via `Worker::Status#description`:
 
 ```ruby
 description "Calculates distance between two geographic points using a configurable algorithm"
@@ -659,7 +659,7 @@ streaming buffer: true, buffer_throttle: 5.0  # 5ms delay between accepting each
 
 Note that `buffer_throttle` is not a panacea. If your system is generating jobs at a faster rate than your worker can process them, enabling throttling **alone** will only make the problem worse. If the stream for your worker is [marked `not-ready` by the gRPC gateway due to being too slow](https://docs.camunda.io/docs/components/concepts/job-workers/#backpressure), some future jobs will not be routed to it and will end up "hidden" in the workflow engine's buffer, where they will never be sent to a stream (and must be polled for). The _true_ solution to the problem of having too many jobs is to add additional capacity by scaling your worker either horizontally (adding more replicas) or vertically (adding more CPU or memory). In such a situation, using `buffer_throttle` lets you ensure that any one replica never gets overloaded and runs out of memory.
 
-> Worker-lifecycle hooks (`on_worker_*`) surface live buffer depth for exactly this: each receives a `Busybee::Worker::Status` carrying `current_buffer_size` and `peak_buffer_size`, so you can monitor buffer growth and detect when a worker needs additional capacity. The same `Worker::Status` is also stamped onto each job (`job.worker_status`) at activation and execution, so job hooks can sample buffer depth *continuously* as work flows, rather than only at the four worker-lifecycle moments.
+> Worker-lifecycle hooks (`on_worker_*`) surface live buffer depth for exactly this: each receives a `Busybee::Worker::Status` carrying `current_buffer_size` and `peak_buffer_size`, so you can monitor buffer growth and detect when a worker needs additional capacity. The same `Worker::Status` is also stamped onto each job (`job.worker_status`) at activation and execution, so job hooks can sample buffer depth *continuously* as work flows, rather than only at the four worker-lifecycle moments. See [Hooks](hooks.md#worker-hooks).
 
 **Sleep Granularity:** Ruby's `Kernel#sleep` delegates to `nanosleep(2)` on POSIX systems. Values down to 0.1ms (100 microseconds) work reliably on modern Linux and macOS. Below that, OS scheduler and GVL overhead dominate, so sub-0.1ms values are unlikely to behave meaningfully. Therefore, the maximum *stable and reliable* rate cap you can get is close to 10k jobs/sec, which you get from `buffer_throttle: 0.1`.
 

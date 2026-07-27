@@ -57,6 +57,8 @@ Busybee.configure do |config|
 end
 ```
 
+The same block is where you register [lifecycle hooks](hooks.md) — `config.around_perform { ... }`, `config.after_call { ... }`, and friends live alongside the settings above.
+
 ### Direct Assignment
 
 Configuration attributes can also be set directly:

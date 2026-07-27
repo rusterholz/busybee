@@ -8,6 +8,7 @@ Busybee provides everything you need to work with Camunda Platform or self-hoste
 
 - **Worker Pattern Framework** - Define job handlers as classes with a clean DSL. Busybee handles polling, execution, and lifecycle.
 - **Idiomatic Zeebe Client** - Ruby-native interface with keyword arguments, sensible defaults, and proper exception handling.
+- **Instrumentation Hooks** - Lifecycle hooks across jobs, workers, and gRPC calls, for middleware (transactions, tracing) and observation (metrics, logging, error reporting).
 - **RSpec Testing Integration** - Deploy BPMNs, activate jobs, and assert on workflow behavior in your test suite.
 - **Deployment Tools** - CI/CD tooling for deploying BPMN files to your clusters.
 - **Low-Level GRPC Access** - Direct access to Zeebe's protocol buffer API when you need it.
@@ -126,6 +127,38 @@ Capabilities:
 - GRPC error wrapping with configurable retry
 
 **[Full client documentation →](docs/client.md)**
+
+### Instrumentation Hooks (new in v0.4!)
+
+Attach your own code to the lifecycle moments of a worker process — jobs, worker runs, and every gRPC call to the engine. Hooks serve as middleware (transactions, tracing spans) and observation (metrics, structured logs, error reporting):
+
+```ruby
+Busybee.configure do |config|
+  # Wrap every perform in a database transaction
+  config.around_perform do |job, perform|
+    ApplicationRecord.transaction { perform.call }
+  end
+
+  # Report failed jobs with full structured context
+  config.after_perform(status: :failed) do |job|
+    Sentry.capture_exception(job.error, extra: job.logging_context)
+  end
+
+  # Time every gRPC call, tagged for your metrics backend
+  config.after_call do |call|
+    StatsD.distribution("zeebe.call_ms", call.network_ms, tags: call.context_tags)
+  end
+end
+```
+
+Capabilities:
+
+- Thirteen hooks across three subjects: the job lifecycle (both the system's view and around your `perform`), the worker lifecycle, and per-call gRPC instrumentation
+- Rich carrier objects with ready-made metric labels (`context_tags`) and structured log fields (`logging_context`)
+- Registration-time filters — by job type, worker class, outcome, stop reason, rpc, or error — validated loudly at boot
+- Machine-readable stop reasons, so your alerts know *why* a worker went down
+
+**[Full hooks documentation →](docs/hooks.md)**
 
 ### RSpec Testing Integration (available now!)
 

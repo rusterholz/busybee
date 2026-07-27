@@ -184,7 +184,7 @@ RSpec.describe Monitoring::Recorder do
       expect(recorded(600).status).to eq("complete")
     end
 
-    it "maps fail_job and throw_bpmn_error to their run outcomes" do
+    it "maps fail_job and throw_error to their run outcomes" do
       [601, 602].each do |key|
         job = build_test_job(key: key)
         allow(job).to receive_messages(status: "ready", executed_at: Time.current)
@@ -192,7 +192,7 @@ RSpec.describe Monitoring::Recorder do
       end
 
       described_class.record_call(resolution_call("fail_job", job_key: 601))
-      described_class.record_call(resolution_call("throw_bpmn_error", job_key: 602))
+      described_class.record_call(resolution_call("throw_error", job_key: 602))
 
       expect(recorded(601).status).to eq("failed")
       expect(recorded(602).status).to eq("error")

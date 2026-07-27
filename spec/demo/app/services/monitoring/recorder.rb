@@ -21,9 +21,10 @@ module Monitoring
     # guard advances through (running never supersedes shutdown, however it lands).
     WORKER_PHASES = { running: 0, stop_requested: 1, stopping: 2, shutdown: 3 }.freeze
 
-    # The run outcome each resolution RPC implies.
+    # The run outcome each resolution RPC implies (keyed by gRPC rpc name —
+    # the BPMN-error RPC is throw_error on the wire, not throw_bpmn_error).
     RESOLUTION_STATUSES = { "complete_job" => "complete", "fail_job" => "failed",
-                            "throw_bpmn_error" => "error" }.freeze
+                            "throw_error" => "error" }.freeze
 
     class << self
       def record_activation(job)
