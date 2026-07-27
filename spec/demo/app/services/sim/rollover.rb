@@ -6,5 +6,5 @@ module Sim
   # so raising it during perform shuts the worker down gracefully (reason
   # :unhealthy); `restart: unless-stopped` then brings the container back as a
   # fresh incarnation. See Sim::RolloverPolicy for when it fires.
-  class Rollover < StandardError; end
+  Rollover = Class.new(StandardError)
 end

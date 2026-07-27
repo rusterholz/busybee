@@ -97,9 +97,8 @@ Style/DoubleNegation:
   Enabled: false
 
 Style/EmptyClassDefinition:
-  # The error hierarchy is deliberately defined with the compact
-  # `Foo = Class.new(Error)` form (see lib/busybee/error.rb).
-  Enabled: false
+  # Compact error/marker classes: Foo = Class.new(Error).
+  EnforcedStyle: class_new
 
 Style/ModuleFunction:
   Enabled: false

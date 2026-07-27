@@ -3,7 +3,7 @@
 require "busybee/testing"
 
 # Error class for testing exception-based BPMN errors
-class OrderNotFoundError < StandardError; end
+OrderNotFoundError = Class.new(StandardError)
 
 RSpec.describe "throw_bpmn_error_on matcher" do
   let(:bpmn_error_worker) do

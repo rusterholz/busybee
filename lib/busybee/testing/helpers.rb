@@ -12,7 +12,7 @@ require "busybee/testing/helpers/support"
 module Busybee
   module Testing
     # Raised when no job is available for activation
-    class NoJobAvailable < StandardError; end
+    NoJobAvailable = Class.new(StandardError)
 
     # RSpec helper methods for testing BPMN workflows against Zeebe.
     module Helpers
