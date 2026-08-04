@@ -8,10 +8,9 @@ module Busybee
     # Each hook receives (target, perform); calling perform descends one
     # step. The core block sits at the chain's center.
     #
-    # In :safe mode (used by around_job_execution and other observation
-    # contexts), an outer hook raising must not prevent inner hooks and the
-    # core from running. Errors are logged and downstream execution continues
-    # via the called-flag pattern. Shutdown errors always propagate.
+    # Chain owns only composition — nesting, the called-flag, the forced
+    # continuation. What happens when a link raises is Hooks'
+    # protect_allowing_shutdowns policy, shared with the flat hook runs.
     module Chain
       class << self
         # @param hooks [Array<Hash>] matching hooks, each with :callback
@@ -29,12 +28,21 @@ module Busybee
 
         private
 
+        # No rescue here by design: a propagating chain (around_perform) hands
+        # errors raw to perform_job's rescue, which must run autofail before
+        # any Shutdown wrap — don't route these links through
+        # protect_allowing_shutdowns.
         def build_propagating(hooks, target, core)
           hooks.reverse.inject(core) do |next_link, hook|
             -> { hook[:callback].call(target, next_link) }
           end
         end
 
+        # Observing links: an outer hook raising must not prevent inner hooks
+        # and the core from running (nor may a hook cancel the work by not
+        # yielding — forced continuation, with a warning). Errors route through
+        # the shared policy; `called` set first keeps a raising forced
+        # continuation from being re-run by the swallow tail below.
         def build_safe(hooks, target, core)
           hooks.reverse.inject(core) do |next_link, hook|
             lambda do
@@ -43,22 +51,16 @@ module Busybee
                 called = true
                 next_link.call
               }
-              hook[:callback].call(target, wrapped)
-              # Clean return without yielding: an observing middleware must not
-              # be able to silently cancel the wrapped work, so force the
-              # continuation and warn. This sits on the normal-return path (not
-              # an ensure) so a Shutdown signal still stops the chain below.
-              # Setting `called` first keeps the rescue from re-running it if the
-              # forced continuation raises.
-              unless called
-                log_forgotten_yield(hook[:callback])
-                called = true
-                next_link.call
+              Hooks.protect_allowing_shutdowns(target, safe: true) do
+                hook[:callback].call(target, wrapped)
+                unless called
+                  log_forgotten_yield(hook[:callback])
+                  called = true
+                  next_link.call
+                end
               end
-            rescue Busybee::Worker::Shutdown
-              raise
-            rescue StandardError => e
-              Hooks.log_swallowed_error(e)
+              # A swallowed pre-yield error lands here with the work still
+              # undone — a swallow must not cancel downstream.
               next_link.call unless called
             end
           end

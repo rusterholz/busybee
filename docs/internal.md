@@ -551,8 +551,9 @@ Because filters resolve by sending the key name to the target, every filter key 
 
 ### Hook Invocation
 
-- **`Busybee::Hooks.run(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_perform`); `safe: true` logs and continues to the next hook (observing hooks like `after_perform` and the `on_*` family). `Busybee::Worker::Shutdown` always propagates regardless, and errors matching the target's `shutdown_on` classes (worker config + gem-level) are wrapped in `Shutdown` and propagated.
+- **`Busybee::Hooks.run(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_perform`); `safe: true` logs and continues to the next hook (observing hooks like `after_perform` and the `on_*` family).
 - **`Busybee::Hooks.run_chain(type, target, safe:, &core)`** — builds a nested lambda chain from matching around hooks (via `Busybee::Hooks::Chain`) and wraps the core block. First-registered hook is outermost. The core's return value is harvested into the Job's `Resolution`, so middleware can't "forget" the result — it's always read back from the Job, never from the chain's return value. Zero matching hooks calls the core directly.
+- **`Busybee::Hooks.protect_allowing_shutdowns(target, safe:, &block)`** — the single hook-error policy, shared by `run` and the safe chain links so the two can't drift: `Busybee::Worker::Shutdown` always propagates; an error matching the target's `shutdown_on` classes (worker config + gem-level) is wrapped in `Shutdown` and propagated; anything else propagates when `safe: false` and is logged-and-swallowed when `safe: true`. Propagating chains (`around_perform`) deliberately bypass it: their errors classify later, at `perform_job`'s rescue, so autofail runs before the Shutdown wrap (the E3 ordering in the flows doc).
 
 Worker and Runner call these directly at each job lifecycle moment (e.g. `Hooks.run(:after_perform, job, safe: true)`); see the flows doc below for which hook fires where.
 

@@ -413,6 +413,21 @@ RSpec.describe Busybee::Runner do
       expect { runner.send(:execute_job, job) }.not_to raise_error
     end
 
+    it "escalates a shutdown_on-declared hook error to Shutdown instead of swallowing it" do
+      original = Busybee.shutdown_on_errors
+      begin
+        Busybee.shutdown_on_errors = [RuntimeError]
+        Busybee.around_job_execution { |_job, _process| raise "db gone" }
+
+        expect { runner.send(:execute_job, job) }.to raise_error(Busybee::Worker::Shutdown)
+        # Raised pre-yield, so the job is never dispatched — the engine re-delivers
+        # it after the activation timeout, same as a hook raising Shutdown directly.
+        expect(worker_class).not_to have_received(:perform_job)
+      ensure
+        Busybee.shutdown_on_errors = original
+      end
+    end
+
     it "propagates Shutdown errors from hooks" do
       Busybee.around_job_execution do |_event, _process|
         raise Busybee::Worker::Shutdown.new(worker_class: nil)

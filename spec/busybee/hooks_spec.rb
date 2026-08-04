@@ -655,6 +655,53 @@ RSpec.describe Busybee::Hooks do
         end
         expect(call_count).to eq(1)
       end
+
+      it "escalates shutdown_on errors from worker class config to Shutdown" do
+        worker_class = Class.new(Busybee::Worker) do
+          def self.name = "DbGoneWorker"
+          shutdown_on RuntimeError
+        end
+        job.set_context(worker: worker_class.allocate)
+        Busybee.around_perform { |_job, _perform| raise "db gone" }
+
+        expect do
+          described_class.run_chain(:around_perform, job, safe: true) { "core" }
+        end.to raise_error(Busybee::Worker::Shutdown) { |shutdown|
+          expect(shutdown.worker_class).to be(worker_class)
+          expect(shutdown.cause).to be_a(RuntimeError)
+        }
+      end
+
+      it "escalates shutdown_on errors from gem-level config to Shutdown" do
+        original = Busybee.shutdown_on_errors
+        begin
+          Busybee.shutdown_on_errors = [RuntimeError]
+          Busybee.around_perform { |_job, _perform| raise "db gone" }
+
+          expect do
+            described_class.run_chain(:around_perform, job, safe: true) { "core" }
+          end.to raise_error(Busybee::Worker::Shutdown)
+        ensure
+          Busybee.shutdown_on_errors = original
+        end
+      end
+
+      it "does not run the core when a pre-yield hook error escalates" do
+        results = []
+        worker_class = Class.new(Busybee::Worker) do
+          def self.name = "DbGoneWorker"
+          shutdown_on RuntimeError
+        end
+        job.set_context(worker: worker_class.allocate)
+        Busybee.around_perform { |_job, _perform| raise "db gone before yield" }
+
+        expect do
+          described_class.run_chain(:around_perform, job, safe: true) { results << :core }
+        end.to raise_error(Busybee::Worker::Shutdown)
+        # A declared-fatal error stops the work — unlike an ordinary swallow,
+        # which force-runs the core so an observer can't cancel it.
+        expect(results).to eq([])
+      end
     end
   end
 end
