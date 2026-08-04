@@ -44,6 +44,54 @@ rake zeebe:stop
 
 Integration tests will automatically skip if Zeebe is not running, so you can safely run the full test suite without having Zeebe started. The tests use the generated GRPC classes directly to verify that the protocol buffer bindings work correctly against a real Zeebe cluster.
 
+### Testing Error Paths with the Fault-Injection Gateway
+
+Some of busybee's most consequential behavior only appears when the broker misbehaves: a `RESOURCE_EXHAUSTED` during job activation, a stream that dies mid-delivery, a status that arrives while a response enumerator is being read. Those paths are easy to get wrong in a test by stubbing the client, because a stub encodes what you *believe* the gateway does. When the belief is wrong, the test passes and the system is broken.
+
+`spec/support/fault_injection_gateway.rb` removes the belief. It runs a real gRPC server implementing the Zeebe Gateway service, in-process on an ephemeral loopback port, and lets a spec program what each RPC does. Everything else — credentials, channel, stub, client, runner — is the real thing.
+
+Tag an example group `:gateway` and it gets a fresh, started gateway, torn down afterwards:
+
+```ruby
+RSpec.describe "a worker meeting backpressure", :gateway do
+  it "keeps running" do
+    gateway.on(:activate_jobs) { raise GRPC::ResourceExhausted, "broker under pressure" }
+
+    runner = Busybee::Runner::Polling.new(worker_class, runtime_config: config, client: gateway.client)
+    runner.run!
+  end
+end
+```
+
+**The block is the gRPC handler**, so it keeps grpc-ruby's own contract: return a response message for `OK`, raise a `GRPC::BadStatus` subclass for that status, raise anything else for `UNKNOWN`. There is no separate vocabulary to learn, and no success-side helper — returning a message *is* success.
+
+**Streaming responses stay lazy.** A server-streaming handler returns an Enumerable that is never materialized, so partial delivery followed by a failure is expressible directly, and errors surface during enumeration exactly as they do in production:
+
+```ruby
+gateway.on(:activate_jobs) do
+  Enumerator.new do |yielder|
+    yielder << Busybee::GRPC::ActivateJobsResponse.new(jobs: [job])
+    raise GRPC::Unavailable, "broker went away mid-stream"
+  end
+end
+```
+
+The same property covers a stream that simply ends (let the enumerator finish) and one that hangs past a deadline (`sleep` in the block).
+
+**Every request is recorded**, for every RPC, whether or not a behavior was programmed — so "did what I built actually reach the wire?" is answerable without programming a response first:
+
+```ruby
+expect(gateway.received(:publish_message).map(&:name)).to eq(["order-shipped"])
+```
+
+**Job payloads need real protos.** `FaultInjectionGateway.activated_job(type:, variables:, ...)` builds a genuine `Busybee::GRPC::ActivatedJob`. The Testing module's `build_test_job` cannot be used here — it fabricates the job with an RSpec double, which will not serialize.
+
+**Transport.** The gateway binds `127.0.0.1:0` and reports what it bound as `gateway.address`. Loopback is the assumption the wider Ruby testing ecosystem already makes, and binding the loopback interface specifically (rather than `0.0.0.0`) avoids the macOS firewall prompt. If an environment cannot bind loopback, pass `bind:` to redirect — a bind failure raises an error naming that knob rather than surfacing later as a confusing connection error.
+
+The gateway is **not** tagged `:integration`. That tag carries `skip_unless_zeebe_available`, so adopting it would skip these specs precisely when local Zeebe is down, which is the opposite of what a self-contained gateway is for. Boot and teardown cost a couple of milliseconds, so a fresh gateway per example is affordable.
+
+**Scope.** This is maintainer-facing test infrastructure. It lives in `spec/support/` and is not part of the public `Busybee::Testing` module documented in [testing.md](testing.md); adopters testing their own workers use the helpers described there.
+
 ### CLI Integration Tests
 
 The CLI integration tests (`spec/integration/cli/cli_spec.rb`) verify the full CLI stack by spawning `busybee` as a subprocess against a live Zeebe instance. They test end-to-end job processing, YAML configuration loading, graceful shutdown via signals, and error scenarios.
