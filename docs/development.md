@@ -411,13 +411,15 @@ Combining `TEST_RAILS_INTEGRATION=1` with the full suite will cause spurious fai
 
 ## Updating Platform Lockfiles
 
-After touching Gemfile, Appraisals, or gemspec, ensure all platform variants are present:
+Two lockfiles are committed — the gem's own `Gemfile.lock` and the demo's — and both have to resolve on every platform CI runs on. Bundler operations tend to quietly drop platforms from a lockfile, so after touching `Gemfile`, `Appraisals`, the gemspec, or the demo's `Gemfile`:
 
 ```bash
 bundle exec rake gemfile:platforms
 ```
 
-This adds `ruby`, `x86_64-darwin`, `arm64-darwin`, and `x86_64-linux` platforms to all lockfiles.
+That re-adds `ruby`, `x86_64-darwin`, `arm64-darwin`, and `x86_64-linux` to both, idempotently.
+
+**The Appraisal lockfiles are not committed.** `gemfiles/*.gemfile.lock` is gitignored: Appraisal resolves those per machine, and CI runs `bundle exec appraisal install` before every matrix run, so a checked-in resolution would be stale the moment anyone else's platform or Ruby differed. Run `bundle exec appraisal install` yourself after changing `Appraisals` or the gemspec — see [Running the Appraisal Matrix](#running-the-appraisal-matrix).
 
 ## Gem File Contents
 
