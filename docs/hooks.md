@@ -30,6 +30,7 @@ You register hooks once at boot, typically in the same `Busybee.configure` block
   - [Stop Reasons](#stop-reasons)
 - [Call Hooks](#call-hooks)
   - [Reading the Call](#reading-the-call)
+  - [Fetching Is Observed at Dispatch](#fetching-is-observed-at-dispatch)
 - [When Hooks Raise](#when-hooks-raise)
 - [Hooks and Threads: Own What You Spawn](#hooks-and-threads-own-what-you-spawn)
 - [Observing Deferred Resolutions](#observing-deferred-resolutions)
@@ -382,7 +383,7 @@ end
 
 ## Call Hooks
 
-Every gRPC operation the client performs — fetching jobs, completing them, publishing messages, deploying processes — runs through the call seam:
+The client's gRPC operations — fetching jobs, completing them, publishing messages, deploying processes — run through the call seam:
 
 | Hook | Fires | Character |
 |------|-------|-----------|
@@ -424,6 +425,14 @@ The `rpc` values mirror the engine's gateway API:
 | Variables & incidents | `:set_variables`, `:resolve_incident` |
 
 Correlation is automatic: a call made during `perform` (including automatic completion/failure, and `job.complete!` from any thread) carries its `call.job`, and any call made inside a running worker carries `call.worker_status`. A fetch call that precedes any job carries only the worker. The call's own `context_tags`/`logging_context` fold in a curated slice of both identities, so tagging a metric with `call.context_tags` already says which worker and job type produced it.
+
+### Fetching Is Observed at Dispatch
+
+Job fetching is the one place where the seam currently sees less than the whole story, and it's worth knowing before you build a dashboard on it.
+
+`:activate_jobs` and `:stream_activated_jobs` are server-streaming RPCs, and the call resolves when the stream **opens** — before a single job has arrived. The hooks all fire, and `before_call` can inspect or annotate the request as usual, but what `after_call` reports is the dispatch: a `network_ms` near zero, a live enumerator as `result`, and `:succeeded` even when the broker goes on to report a failure while jobs are being read.
+
+The gap is in the telemetry, not in the behavior. A fetch failure still reaches your worker as a `Busybee::GRPC::Error` with `grpc_status` intact; backpressure is still backed off and retried; the ending still arrives at `on_worker_shutdown` as `:gateway_error`. What you can't do today is watch a fetch fail *through `after_call`* — so alert on worker shutdown reasons rather than on fetch-call outcomes. Per-attempt fetch telemetry lands with the async work in v0.5.
 
 ## When Hooks Raise
 

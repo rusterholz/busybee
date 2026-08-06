@@ -187,9 +187,12 @@ RSpec.describe Busybee::Runner::Polling do
     end
 
     context "when GRPC backpressure errors occur" do
-      # The client wraps raw gRPC errors as Busybee::GRPC::Error before they
-      # reach the runner, so backpressure arrives wrapped (grpc_status
-      # :resource_exhausted), not as the raw ::GRPC::ResourceExhausted.
+      # These examples double the client to isolate the runner's own backoff
+      # decision, so the wrapped arrival is a premise here rather than a finding.
+      # It went unchallenged for a feature's lifetime while the fetch path was in
+      # fact delivering raw statuses that matched no rescue below. What keeps the
+      # premise honest now is backpressure_corridor_spec.rb, which drives this
+      # same path against a real gateway with nothing doubled.
       it "backs off on a wrapped ResourceExhausted (gateway backpressure)" do
         call_count = 0
         allow(client).to receive(:with_each_job) do |_type, **_opts, &_block|
