@@ -152,25 +152,19 @@ module Busybee
       #     job.complete!
       #   end
       #
-      def with_each_job(job_type, max_jobs: Busybee::Defaults::DEFAULT_MAX_JOBS, # rubocop:disable Metrics/AbcSize
+      def with_each_job(job_type, max_jobs: Busybee::Defaults::DEFAULT_MAX_JOBS,
                         job_timeout: nil,
                         request_timeout: nil)
         raise ArgumentError, "block required" unless block_given?
 
-        job_timeout ||= Busybee.default_job_lock_timeout
-        request_timeout ||= Busybee.default_job_request_timeout
-
-        request = Busybee::GRPC::ActivateJobsRequest.new(
-          type: job_type.to_s,
-          worker: Busybee.worker_name,
-          maxJobsToActivate: max_jobs.to_i,
-          timeout: Busybee::Durations.milliseconds_from(job_timeout),
-          requestTimeout: Busybee::Durations.milliseconds_from(request_timeout)
-        )
-
         count = 0
-        responses = run_hooked(:activate_jobs, request)
+        responses = run_hooked(:activate_jobs, activate_jobs_request(job_type, max_jobs, job_timeout, request_timeout))
 
+        # grpc's server_streamer sends eagerly but hands back a *lazy* enumerator,
+        # so a status error — backpressure included — raises here, on read, not at
+        # the dispatch above. That is outside run_hooked, where nothing translates
+        # it, hence the rescue below: without it the raw error escapes every
+        # Busybee::GRPC::Error handler between here and the top of the worker.
         responses.each do |response|
           response.jobs.each do |raw_job|
             job = Busybee::Job.new(raw_job, client: self)
@@ -180,6 +174,8 @@ module Busybee
         end
 
         count
+      rescue ::GRPC::BadStatus => e
+        raise Busybee::GRPC::Error.wrap(e, "Job activation failed")
       end
 
       # Open a long-lived stream for job activation.
@@ -216,6 +212,18 @@ module Busybee
         )
 
         Busybee::JobStream.new(run_hooked(:stream_activated_jobs, request, return_op: true), client: self)
+      end
+
+      private
+
+      def activate_jobs_request(job_type, max_jobs, job_timeout, request_timeout)
+        Busybee::GRPC::ActivateJobsRequest.new(
+          type: job_type.to_s,
+          worker: Busybee.worker_name,
+          maxJobsToActivate: max_jobs.to_i,
+          timeout: Busybee::Durations.milliseconds_from(job_timeout || Busybee.default_job_lock_timeout),
+          requestTimeout: Busybee::Durations.milliseconds_from(request_timeout || Busybee.default_job_request_timeout)
+        )
       end
     end
   end

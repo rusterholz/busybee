@@ -77,27 +77,22 @@ RSpec.describe FaultInjectionGateway do
 
       seen = []
       expect { gateway.client.with_each_job("send-email") { |job| seen << job } }.
-        to raise_error(GRPC::BadStatus)
+        to raise_error(Busybee::GRPC::Error)
 
       expect(seen.size).to eq(1)
     end
 
-    # A status error on a server-streaming RPC arrives raw, while the same status
-    # on a unary RPC arrives wrapped as Busybee::GRPC::Error. The asymmetry is
-    # real, and it decides whether the fetch loops' rescue clauses match at all.
-    it "surfaces a streaming status error during enumeration, unwrapped" do
+    # Asserted at the raw stub rather than through the client, because this is a
+    # property of grpc itself: the send is eager, the enumerator is not, so a
+    # status surfaces on read. Every fetch-path error contract downstream rests on
+    # it, and a grpc bump is the change most likely to move it.
+    it "raises a streaming status during enumeration rather than at dispatch" do
       gateway.on(:activate_jobs) { raise GRPC::ResourceExhausted, "broker under pressure" }
+      stub = Busybee::Credentials::Insecure.new(cluster_address: gateway.address).grpc_stub
 
-      raised = nil
-      begin
-        gateway.client.with_each_job("send-email") { |_job| nil }
-      rescue StandardError => e
-        raised = e
-      end
+      responses = stub.activate_jobs(Busybee::GRPC::ActivateJobsRequest.new(type: "send-email"))
 
-      expect(raised).to be_a(GRPC::BadStatus)
-      expect(raised.code).to eq(GRPC::Core::StatusCodes::RESOURCE_EXHAUSTED)
-      expect(raised).not_to be_a(Busybee::GRPC::Error)
+      expect { responses.each { |_response| nil } }.to raise_error(GRPC::BadStatus)
     end
 
     it "delivers jobs through the long-lived stream RPC" do
