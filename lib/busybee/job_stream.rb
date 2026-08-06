@@ -61,8 +61,8 @@ module Busybee
     rescue ::GRPC::Cancelled
       # Expected when stream is closed via #close - exit gracefully
       nil
-    rescue ::GRPC::BadStatus
-      raise Busybee::GRPC::Error, "Job stream failed"
+    rescue ::GRPC::BadStatus => e
+      raise Busybee::GRPC::Error.wrap(e, "Job stream failed")
     end
 
     # Close the stream.
