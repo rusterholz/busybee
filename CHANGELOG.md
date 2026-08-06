@@ -32,6 +32,11 @@
 
 - **Improved Test Job Helper** – `Busybee::Testing::Helpers#build_test_job` now accepts an optional `key:` keyword argument for tests that need a stable, known job key (e.g., correlating the same job across multiple assertions). Defaults to a random integer when omitted
 
+### Bug Fixes:
+
+- **Workers Survive Gateway Backpressure** – a gateway reporting `RESOURCE_EXHAUSTED` to a polling or hybrid worker used to crash it, and in a multi-worker process took every sibling worker down with it — so a fleet-wide broker slowdown became a fleet-wide outage. Job activation is a server-streaming call whose status arrives while responses are being read, and that error was escaping untranslated past the very rescue meant to catch it. It now reaches the worker as a `Busybee::GRPC::Error` with `grpc_status` intact, so the documented backoff-and-retry runs and the process stays up
+  - `Client#with_each_job` now keeps the `Busybee::GRPC::Error` contract its documentation promises, whatever status the gateway returns
+
 ### Breaking Changes:
 
 - **Testing helper `publish_message` parameters renamed** – `variables:` is now `vars:` and `ttl_ms:` is now `ttl:` to match `Client#publish_message` naming. `ttl:` now accepts both Integer (milliseconds) and `ActiveSupport::Duration`

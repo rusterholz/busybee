@@ -282,6 +282,8 @@ RSpec.describe Busybee::Runner::Hybrid do
         expect(process_order).to eq([10, 20])
       end
 
+      # Doubled client, so the wrapped arrival is a premise — the real drain
+      # corridor is pinned in backpressure_corridor_spec.rb.
       it "backs off on a wrapped ResourceExhausted during drain (gateway backpressure)" do
         call_count = 0
         allow(client).to receive(:open_job_stream).and_return(stream)
