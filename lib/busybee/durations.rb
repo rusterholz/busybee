@@ -19,8 +19,10 @@ module Busybee
       end
 
       # Seconds from a duration-ish value (Integer input read as milliseconds).
+      # to_f, not in_seconds — the latter truncates, so 0.25.seconds would arrive
+      # as "don't wait at all".
       def seconds_from(value)
-        value.is_a?(ActiveSupport::Duration) ? value.in_seconds : value / 1000.0
+        value.is_a?(ActiveSupport::Duration) ? value.to_f : value / 1000.0
       end
 
       # Validating form for config surfaces: returns the value to assign,

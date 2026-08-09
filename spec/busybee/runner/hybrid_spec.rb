@@ -300,7 +300,9 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         runner.run!
 
-        expect(runner).to have_received(:sleep).with(runtime_config.backpressure_delay) # rubocop:disable RSpec/SubjectStub
+        # 2_000 ms configured, and sleep takes seconds. See polling_spec for why
+        # asserting the configured value instead is what hid the missing conversion.
+        expect(runner).to have_received(:sleep).with(2.0) # rubocop:disable RSpec/SubjectStub
         expect(call_count).to eq(2)
       end
     end
@@ -375,7 +377,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       end
 
       it "uses the worker's configured backoff during shutdown" do
-        worker_class.backoff 30_000
+        worker_class.fail_job_backoff 30_000
         leftover = build_test_job(key: 1, retries: 3)
         allow(leftover).to receive(:fail!)
 

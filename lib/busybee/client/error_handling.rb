@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "busybee/durations"
 require "busybee/grpc/error"
 require "busybee/logging"
 
@@ -25,9 +26,10 @@ module Busybee
         rescue Busybee::GRPC::Error => e
           raise unless attempts < max_attempts && retryable?(e)
 
-          Busybee::Logging.warn("GRPC call failed, retrying in #{Busybee.grpc_retry_delay_ms}ms",
+          delay = Busybee::Durations.seconds_from(Busybee.grpc_retry_delay)
+          Busybee::Logging.warn("GRPC call failed, retrying in #{delay}s",
                                 error_class: e.cause&.class&.name)
-          sleep(Busybee.grpc_retry_delay_ms / 1000.0)
+          sleep(delay)
           retry
         end
       end
