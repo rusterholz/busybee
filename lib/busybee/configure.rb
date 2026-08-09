@@ -92,20 +92,20 @@ module Busybee
       @default_fail_job_backoff = value.nil? ? nil : validate_duration!(:default_fail_job_backoff, value)
     end
 
-    def default_job_lock_timeout=(value)
-      @default_job_lock_timeout = value.nil? ? nil : validate_duration!(:default_job_lock_timeout, value)
+    def default_job_timeout=(value)
+      @default_job_timeout = value.nil? ? nil : validate_duration!(:default_job_timeout, value)
     end
 
-    def default_job_request_timeout=(value)
-      @default_job_request_timeout = value.nil? ? nil : validate_duration!(:default_job_request_timeout, value)
+    def default_polling_request_timeout=(value)
+      @default_polling_request_timeout = value.nil? ? nil : validate_duration!(:default_polling_request_timeout, value)
     end
 
     def default_message_ttl=(value)
       @default_message_ttl = value.nil? ? nil : validate_duration!(:default_message_ttl, value)
     end
 
-    def grpc_retry_delay_ms=(value)
-      @grpc_retry_delay_ms = value.nil? ? nil : validate_duration!(:grpc_retry_delay_ms, value)
+    def grpc_retry_delay=(value)
+      @grpc_retry_delay = value.nil? ? nil : validate_duration!(:grpc_retry_delay, value)
     end
 
     def default_backpressure_delay=(value)
@@ -269,26 +269,17 @@ module Busybee
       raise ArgumentError, "#{name} accepts String or Symbol, got #{value.inspect} (#{value.class})"
     end
 
-    # Validates and coerces a buffer throttle value.
-    # Returns the (possibly coerced) value to assign.
+    # Three-state on top of the gem-wide duration contract: false means "no
+    # throttle", true means "yield without waiting", and anything else is a
+    # duration read like every other one.
     def validate_buffer_throttle!(name, value)
       return 0 if value == true
       return false if value == false
 
-      if value.is_a?(Numeric)
-        raise ArgumentError, "#{name} must be non-negative, got #{value.inspect}" if value.negative?
+      throttle = validate_duration!(name, value)
+      raise ArgumentError, "#{name} must be non-negative, got #{value.inspect}" if throttle.negative?
 
-        return value
-      end
-
-      if value.is_a?(String)
-        return value.to_f if value.match?(/\A\d+(\.\d+)?\z/)
-
-        raise ArgumentError,
-              "#{name} accepts Numeric, boolean, or numeric String, got non-numeric String #{value.inspect}"
-      end
-
-      raise ArgumentError, "#{name} accepts Numeric, boolean, or numeric String, got #{value.inspect} (#{value.class})"
+      throttle
     end
 
     def validate_worker_mode!(name, value)
