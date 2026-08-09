@@ -342,12 +342,12 @@ RSpec.describe Busybee::Worker::DSL do
       expect(worker.configuration.buffer_throttle).to eq(2)
     end
 
-    it "raises on non-Numeric buffer_throttle at load time" do
+    it "raises on a non-duration buffer_throttle at load time" do
       expect do
         stub_const("BadPumpDelayWorker", Class.new(Busybee::Worker) do
-          streaming buffer_throttle: "5"
+          streaming buffer_throttle: "fast"
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /buffer_throttle:.*non-negative Numeric/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /buffer_throttle.*non-numeric String/)
     end
   end
 
@@ -361,13 +361,13 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
-  describe ".backoff" do
-    it "sets backoff" do
+  describe ".fail_job_backoff" do
+    it "sets fail_job_backoff" do
       worker = stub_const("BackoffWorker", Class.new(Busybee::Worker) do
-        backoff 30_000
+        fail_job_backoff 30_000
       end)
 
-      expect(worker.configuration.backoff).to eq(30_000)
+      expect(worker.configuration.fail_job_backoff).to eq(30_000)
     end
   end
 
@@ -524,15 +524,15 @@ RSpec.describe Busybee::Worker::DSL do
         stub_const("BadTimeoutWorker", Class.new(Busybee::Worker) do
           job_timeout "5 minutes"
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /job_timeout.*Integer.*ActiveSupport::Duration/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /job_timeout.*number.*ActiveSupport::Duration/)
     end
 
-    it "raises on backoff with invalid type" do
+    it "raises on fail_job_backoff with invalid type" do
       expect do
         stub_const("BadBackoffWorker", Class.new(Busybee::Worker) do
-          backoff "30 seconds"
+          fail_job_backoff "30 seconds"
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /backoff.*Integer.*ActiveSupport::Duration/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /fail_job_backoff.*number.*ActiveSupport::Duration/)
     end
 
     it "raises on backpressure_delay with invalid type" do
@@ -540,7 +540,7 @@ RSpec.describe Busybee::Worker::DSL do
         stub_const("BadBPDelayWorker", Class.new(Busybee::Worker) do
           backpressure_delay "5 seconds"
         end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /backpressure_delay.*Integer.*ActiveSupport::Duration/)
+      end.to raise_error(Busybee::InvalidWorkerDefinition, /backpressure_delay.*number.*ActiveSupport::Duration/)
     end
 
     it "deduplicates sources silently" do

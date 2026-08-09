@@ -218,6 +218,29 @@ RSpec.describe Busybee::Worker::Configuration do
         Busybee::InvalidWorkerDefinition, /Unknown polling config.*:batch_size/
       )
     end
+
+    # This one reached milliseconds_from with nothing checking it on the way, so
+    # it was the single duration input in the gem accepting any shape at all.
+    it "reads request_timeout: on the shared duration contract" do
+      config.polling_config = { request_timeout: 30.seconds }
+      expect(config.polling_config[:request_timeout]).to eq(30.seconds)
+
+      config.polling_config = { request_timeout: "30000" }
+      expect(config.polling_config[:request_timeout]).to eq(30_000)
+    end
+
+    it "raises on a request_timeout: that is not a duration" do
+      expect { config.polling_config = { request_timeout: "5 minutes" } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /request_timeout.*non-numeric String/
+      )
+    end
+
+    # -1 is Zeebe's "answer immediately, don't long-poll", and the hybrid drain
+    # relies on it, so negative is a legal duration here.
+    it "leaves the long-poll-disabling sentinel alone" do
+      config.polling_config = { request_timeout: -1 }
+      expect(config.polling_config[:request_timeout]).to eq(-1)
+    end
   end
 
   describe "#streaming_config=" do
@@ -283,13 +306,24 @@ RSpec.describe Busybee::Worker::Configuration do
 
     it "raises when buffer_throttle: is negative" do
       expect { config.streaming_config = { buffer_throttle: -1 } }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /`buffer_throttle:` must be a non-negative Numeric/
+        Busybee::InvalidWorkerDefinition, /`buffer_throttle:` must be non-negative/
       )
     end
 
-    it "raises when buffer_throttle: is non-Numeric" do
-      expect { config.streaming_config = { buffer_throttle: "5" } }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /`buffer_throttle:` must be a non-negative Numeric/
+    # The DSL used to demand a Numeric here while the gem-level setter of the
+    # same knob took numeric Strings — two contracts for one name. Both now read
+    # it the way every other duration is read.
+    it "reads buffer_throttle: on the shared duration contract" do
+      config.streaming_config = { buffer_throttle: "5" }
+      expect(config.streaming_config[:buffer_throttle]).to eq(5)
+
+      config.streaming_config = { buffer_throttle: 0.25.seconds }
+      expect(config.streaming_config[:buffer_throttle]).to eq(0.25.seconds)
+    end
+
+    it "raises when buffer_throttle: is not a duration at all" do
+      expect { config.streaming_config = { buffer_throttle: "fast" } }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /buffer_throttle.*non-numeric String/
       )
     end
   end
@@ -341,8 +375,8 @@ RSpec.describe Busybee::Worker::Configuration do
     it "returns gem defaults when no DSL config is set" do
       opts = config.polling_options
       expect(opts[:max_jobs]).to eq(Busybee::Defaults::DEFAULT_MAX_JOBS)
-      expect(opts[:request_timeout]).to eq(Busybee.default_job_request_timeout)
-      expect(opts[:job_timeout]).to eq(Busybee.default_job_lock_timeout)
+      expect(opts[:request_timeout]).to eq(Busybee.default_polling_request_timeout)
+      expect(opts[:job_timeout]).to eq(Busybee.default_job_timeout)
     end
 
     it "uses DSL polling_config values when set" do
@@ -361,8 +395,8 @@ RSpec.describe Busybee::Worker::Configuration do
       config.polling_config = { max_jobs: 5 }
       opts = config.polling_options
       expect(opts[:max_jobs]).to eq(5)
-      expect(opts[:request_timeout]).to eq(Busybee.default_job_request_timeout)
-      expect(opts[:job_timeout]).to eq(Busybee.default_job_lock_timeout)
+      expect(opts[:request_timeout]).to eq(Busybee.default_polling_request_timeout)
+      expect(opts[:job_timeout]).to eq(Busybee.default_job_timeout)
     end
   end
 
@@ -370,7 +404,7 @@ RSpec.describe Busybee::Worker::Configuration do
     let(:config) { configuration_for("TestWorker") }
 
     it "returns gem default job_timeout when no DSL config is set" do
-      expect(config.streaming_options).to eq(job_timeout: Busybee.default_job_lock_timeout)
+      expect(config.streaming_options).to eq(job_timeout: Busybee.default_job_timeout)
     end
 
     it "uses DSL job_timeout when set" do
@@ -389,29 +423,27 @@ RSpec.describe Busybee::Worker::Configuration do
 
     it "raises on non-Integer, non-Duration" do
       expect { config.job_timeout = "5 minutes" }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /job_timeout.*Integer.*ActiveSupport::Duration/
+        Busybee::InvalidWorkerDefinition, /job_timeout.*number.*ActiveSupport::Duration/
       )
     end
   end
 
-  describe "#backoff=" do
+  describe "#fail_job_backoff=" do
     let(:config) { configuration_for("TestWorker") }
 
     it "accepts an Integer" do
-      config.backoff = 30_000
-      expect(config.backoff).to eq(30_000)
+      config.fail_job_backoff = 30_000
+      expect(config.fail_job_backoff).to eq(30_000)
     end
 
     it "accepts a numeric String, coerced (the gem-wide duration contract)" do
-      config.backoff = "30000"
-      expect(config.backoff).to eq(30_000)
+      config.fail_job_backoff = "30000"
+      expect(config.fail_job_backoff).to eq(30_000)
     end
 
-    it "truncates a stray Numeric with a warning" do
-      allow(Busybee::Logging).to receive(:warn)
-      config.backoff = 30.5
-      expect(config.backoff).to eq(30)
-      expect(Busybee::Logging).to have_received(:warn).with(/backoff.*coercing Float/)
+    it "keeps a fractional value as given" do
+      config.fail_job_backoff = 30.5
+      expect(config.fail_job_backoff).to eq(30.5)
     end
   end
 
@@ -429,7 +461,7 @@ RSpec.describe Busybee::Worker::Configuration do
 
     it "raises on non-Integer, non-Duration" do
       expect { config.backpressure_delay = "5 seconds" }.to raise_error(
-        Busybee::InvalidWorkerDefinition, /backpressure_delay.*Integer.*ActiveSupport::Duration/
+        Busybee::InvalidWorkerDefinition, /backpressure_delay.*number.*ActiveSupport::Duration/
       )
     end
   end
@@ -502,7 +534,7 @@ RSpec.describe Busybee::Worker::Configuration do
         c.worker_mode = :polling
         c.polling_config = { max_jobs: 10 }
         c.job_timeout = 300_000
-        c.backoff = 30_000
+        c.fail_job_backoff = 30_000
         c.backpressure_delay = 10_000
       end
     end
@@ -521,7 +553,7 @@ RSpec.describe Busybee::Worker::Configuration do
       expect(result[:polling_config]).to eq(max_jobs: 10)
       expect(result[:streaming_config]).to eq({})
       expect(result[:job_timeout]).to eq(300_000)
-      expect(result[:backoff]).to eq(30_000)
+      expect(result[:fail_job_backoff]).to eq(30_000)
       expect(result[:backpressure_delay]).to eq(10_000)
     end
 

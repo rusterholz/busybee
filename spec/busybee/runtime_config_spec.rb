@@ -70,7 +70,7 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer: nil,
         buffer_throttle: nil,
         job_timeout: nil,
-        backoff: nil,
+        fail_job_backoff: nil,
         log_format: nil,
         worker_name: nil,
         cluster_address: nil
@@ -259,7 +259,7 @@ RSpec.describe Busybee::RuntimeConfig do
       it "falls back to gem default" do
         config = described_class.new
         expect(config.resolve_for(worker_class).request_timeout).to eq(
-          Busybee.default_job_request_timeout
+          Busybee.default_polling_request_timeout
         )
       end
     end
@@ -295,7 +295,7 @@ RSpec.describe Busybee::RuntimeConfig do
       it "falls back to gem default" do
         config = described_class.new
         expect(config.resolve_for(worker_class).job_timeout).to eq(
-          Busybee::Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS
+          Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS
         )
       end
 
@@ -308,25 +308,25 @@ RSpec.describe Busybee::RuntimeConfig do
       end
     end
 
-    context "with backoff precedence" do
+    context "with fail_job_backoff precedence" do
       it "uses per-worker override" do
-        worker_class.backoff 60_000
+        worker_class.fail_job_backoff 60_000
         config = described_class.new(
-          backoff: 30_000,
-          workers: { "TestWorker" => { backoff: 10_000 } }
+          fail_job_backoff: 30_000,
+          workers: { "TestWorker" => { fail_job_backoff: 10_000 } }
         )
-        expect(config.resolve_for(worker_class).backoff).to eq(10_000)
+        expect(config.resolve_for(worker_class).fail_job_backoff).to eq(10_000)
       end
 
       it "falls back to worker DSL" do
-        worker_class.backoff 60_000
+        worker_class.fail_job_backoff 60_000
         config = described_class.new
-        expect(config.resolve_for(worker_class).backoff).to eq(60_000)
+        expect(config.resolve_for(worker_class).fail_job_backoff).to eq(60_000)
       end
 
       it "falls back to gem default" do
         config = described_class.new
-        expect(config.resolve_for(worker_class).backoff).to eq(
+        expect(config.resolve_for(worker_class).fail_job_backoff).to eq(
           Busybee.default_fail_job_backoff
         )
       end
@@ -453,7 +453,7 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer: true
         buffer_throttle: 500
         job_timeout: 90000
-        backoff: 15000
+        fail_job_backoff: 15000
       YAML
       result = described_class.parse_yaml(path)
       expect(result).to include(
@@ -464,7 +464,7 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer: true,
         buffer_throttle: 500,
         job_timeout: 90_000,
-        backoff: 15_000
+        fail_job_backoff: 15_000
       )
     end
 
@@ -645,8 +645,8 @@ RSpec.describe Busybee::RuntimeConfig do
       resolved = config.resolve_for(worker_class)
       expect(resolved.polling_options).to eq(
         max_jobs: Busybee.default_max_jobs,
-        request_timeout: Busybee.default_job_request_timeout,
-        job_timeout: Busybee.default_job_lock_timeout
+        request_timeout: Busybee.default_polling_request_timeout,
+        job_timeout: Busybee.default_job_timeout
       )
     end
   end

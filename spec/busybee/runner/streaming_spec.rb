@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
 require "concurrent"
 
 RSpec.describe Busybee::Runner::Streaming do
@@ -134,7 +135,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
     it "passes gem default job_timeout when worker has no override" do
       allow(client).to receive(:open_job_stream) do |_type, **opts|
-        expect(opts[:job_timeout]).to eq(Busybee.default_job_lock_timeout)
+        expect(opts[:job_timeout]).to eq(Busybee.default_job_timeout)
         allow(stream).to receive(:each)
         stream
       end
@@ -254,7 +255,7 @@ RSpec.describe Busybee::Runner::Streaming do
       end
 
       it "uses the worker's configured backoff during shutdown" do # rubocop:disable RSpec/ExampleLength
-        worker_class.backoff 30_000
+        worker_class.fail_job_backoff 30_000
         job_to_fail = build_test_job(key: 1, retries: 3)
         allow(job_to_fail).to receive(:fail!)
 
@@ -545,9 +546,10 @@ RSpec.describe Busybee::Runner::Streaming do
 
         let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(throttled_worker_class) }
         let(:throttled_worker_class) do
+          throttle = configured_throttle
           Class.new(Busybee::Worker) do
             job_type "test_worker"
-            streaming buffer_throttle: 5
+            streaming buffer_throttle: throttle
             def perform; end
           end
         end
@@ -557,36 +559,49 @@ RSpec.describe Busybee::Runner::Streaming do
           allow(stream).to receive(:close) { stream_gate.set }
         end
 
-        it "sleeps between stream reads" do # rubocop:disable RSpec/ExampleLength
-          jobs = [
-            build_test_job(key: 1, retries: 1),
-            build_test_job(key: 2, retries: 1)
-          ]
+        # Milliseconds and a Duration are two spellings of one throttle, so they
+        # have to reach sleep as the same number of seconds. Only the millisecond
+        # spelling was ever exercised, which is how the pump kept its own
+        # hand-rolled conversion — correct for Integers, off by 1000× otherwise.
+        {
+          "integer milliseconds" => [5, 0.005],
+          "a sub-second Duration" => [0.25.seconds, 0.25]
+        }.each do |shape, (configured, expected_seconds)|
+          context "when configured with #{shape}" do
+            let(:configured_throttle) { configured }
 
-          allow(client).to receive(:open_job_stream) do
-            allow(stream).to receive(:each) do |&block|
-              block.call(jobs[0])
-              block.call(jobs[1])
-              stream_gate.wait
+            it "sleeps #{expected_seconds}s between stream reads" do # rubocop:disable RSpec/ExampleLength
+              jobs = [
+                build_test_job(key: 1, retries: 1),
+                build_test_job(key: 2, retries: 1)
+              ]
+
+              allow(client).to receive(:open_job_stream) do
+                allow(stream).to receive(:each) do |&block|
+                  block.call(jobs[0])
+                  block.call(jobs[1])
+                  stream_gate.wait
+                end
+                stream
+              end
+
+              call_count = 0
+              allow(throttled_worker_class).to receive(:perform_job) do
+                call_count += 1
+                runner.stop! if call_count >= 2
+              end
+
+              sleep_calls = []
+              allow_any_instance_of(described_class).to receive(:sleep) do |_instance, duration| # rubocop:disable RSpec/AnyInstance
+                sleep_calls << duration
+              end
+
+              runner.run!
+
+              expect(sleep_calls.length).to be >= 1
+              expect(sleep_calls).to all(eq(expected_seconds))
             end
-            stream
           end
-
-          call_count = 0
-          allow(throttled_worker_class).to receive(:perform_job) do
-            call_count += 1
-            runner.stop! if call_count >= 2
-          end
-
-          sleep_calls = []
-          allow_any_instance_of(described_class).to receive(:sleep) do |_instance, duration| # rubocop:disable RSpec/AnyInstance
-            sleep_calls << duration
-          end
-
-          runner.run!
-
-          expect(sleep_calls.length).to be >= 1
-          expect(sleep_calls).to all(eq(0.005)) # 5ms = 0.005s
         end
       end
 

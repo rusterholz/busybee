@@ -3,6 +3,7 @@
 require "concurrent"
 
 require "busybee/client/call"
+require "busybee/durations"
 require "busybee/runner"
 require "busybee/worker/shutdown"
 
@@ -153,7 +154,7 @@ module Busybee
 
           activate_job(job, source: :stream, buffered: true)
           buffer_job(job)
-          sleep(delay.to_f / 1000) if delay
+          sleep(Busybee::Durations.seconds_from(delay)) if delay
         end
       rescue StandardError => e
         # Stream error: stash for the main thread to re-raise, and stop with its

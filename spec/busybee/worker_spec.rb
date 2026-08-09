@@ -133,7 +133,7 @@ RSpec.describe Busybee::Worker do
 
       it "uses configured backoff" do
         worker = stub_const("BackoffWorker", Class.new(described_class) do
-          backoff 30_000
+          fail_job_backoff 30_000
           define_method(:perform) { raise "boom" }
         end)
 

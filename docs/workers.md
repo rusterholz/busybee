@@ -119,7 +119,7 @@ class ProcessPaymentWorker < Busybee::Worker
 
   output :charged, type: :boolean
 
-  backoff 30_000  # wait 30 seconds before the workflow engine makes this job available again
+  fail_job_backoff 30_000  # wait 30 seconds before the workflow engine makes this job available again
 
   def perform
     order = Order.find(order_id)   # may raise ActiveRecord::RecordNotFound
@@ -444,15 +444,15 @@ job_timeout 120_000    # 2 minutes
 job_timeout 2.minutes  # same, with ActiveSupport
 ```
 
-Default: `60_000` ms (1 minute), configurable via [`Busybee.default_job_lock_timeout`](configuration.md).
+Default: `60_000` ms (1 minute), configurable via [`Busybee.default_job_timeout`](configuration.md).
 
-#### `backoff`
+#### `fail_job_backoff`
 
 How long the workflow engine should wait before making a failed job available for retry. Accepts an Integer (milliseconds) or `ActiveSupport::Duration`:
 
 ```ruby
-backoff 30_000     # 30 seconds
-backoff 30.seconds # same, with ActiveSupport
+fail_job_backoff 30_000     # 30 seconds
+fail_job_backoff 30.seconds # same, with ActiveSupport
 ```
 
 Default: `5_000` ms (5 seconds), configurable via [`Busybee.default_fail_job_backoff`](configuration.md).
@@ -496,9 +496,9 @@ See [Worker Modes](#worker-modes) for what these options mean and when to use ea
 | `worker_mode` | Symbol | `:hybrid` | `:polling`, `:streaming`, or `:hybrid` |
 | `polling` | `max_jobs:`, `request_timeout:` | `25`, `60_000` | Polling mode options |
 | `streaming` | `buffer:`, `buffer_throttle:` | `true`, `false` | Streaming mode options |
-| `job_timeout` | Integer or Duration | `60_000` | Job lock timeout (ms) |
-| `backoff` | Integer or Duration | `5_000` | Retry backoff delay (ms) |
-| `backpressure_delay` | Integer or Duration | `2_000` | Delay after backpressure error (ms) |
+| `job_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | `60_000` | Job lock timeout (ms) |
+| `fail_job_backoff` | A [duration](configuration.md#how-busybee-reads-durations) | `5_000` | Retry backoff delay (ms) |
+| `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | `2_000` | Delay after backpressure error (ms) |
 | `complete_job_on_success` | Boolean | `true` | Auto-complete on success |
 | `fail_job_on_error` | Boolean | `true` | Auto-fail on exception |
 | `shutdown_on` | Exception class(es) | `[]` | Exceptions that trigger shutdown |
@@ -703,7 +703,7 @@ For repeatable deployments, define your worker configuration in a YAML file:
 # config/busybee.yml
 worker_mode: hybrid
 job_timeout: 120000
-backoff: 10000
+fail_job_backoff: 10000
 
 workers:
   - ProcessOrderWorker
@@ -742,12 +742,12 @@ workers:
 |-----|------|-------------|
 | `worker_mode` | String | `polling`, `streaming`, or `hybrid` |
 | `max_jobs` | Integer | Max jobs per polling request |
-| `request_timeout` | Integer | Long-poll timeout (ms) |
-| `job_timeout` | Integer | Job lock timeout (ms) |
-| `backoff` | Integer | Retry backoff (ms) |
-| `backpressure_delay` | Integer | Delay after backpressure error (ms) |
+| `request_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | Long-poll timeout (ms) |
+| `job_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | Job lock timeout (ms) |
+| `fail_job_backoff` | A [duration](configuration.md#how-busybee-reads-durations) | Retry backoff (ms) |
+| `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | Delay after backpressure error (ms) |
 | `buffer` | Boolean | Enable job buffering in streaming mode |
-| `buffer_throttle` | Integer/Boolean | Job buffer delay (ms). `false` to disable |
+| `buffer_throttle` | A [duration](configuration.md#how-busybee-reads-durations), or Boolean | Job buffer delay (ms). `false` to disable |
 | `workers` | Array | Worker class names, with optional per-worker overrides |
 
 **Process-wide settings** (`log_format`, `worker_name`, `cluster_address`) are CLI-only and cannot be set in YAML. Use the corresponding CLI flags alongside `--config`:
@@ -774,7 +774,7 @@ Gem Configuration & Defaults   (lowest priority)    `Busybee.default_max_jobs` (
 
 The first non-nil value wins. This means `0` and `false` are valid explicit values -- for example, `buffer_throttle: false` explicitly disables throttling even if a lower level sets it.
 
-The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
+The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
 **Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process. Also, they often take env vars as their inputs, so they are less useful in YAML.
 

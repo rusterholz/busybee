@@ -421,12 +421,12 @@ RSpec.describe Busybee::Client::JobOperations do
       client.with_each_job("test-job") { |_job| }
 
       expect(stub).to have_received(:activate_jobs).with(
-        having_attributes(timeout: Busybee::Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS)
+        having_attributes(timeout: Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS)
       )
     end
 
-    it "uses configured default_job_lock_timeout" do
-      Busybee.default_job_lock_timeout = 120_000
+    it "uses configured default_job_timeout" do
+      Busybee.default_job_timeout = 120_000
       allow(stub).to receive(:activate_jobs).and_return(responses)
 
       client.with_each_job("test-job") { |_job| }
@@ -435,11 +435,11 @@ RSpec.describe Busybee::Client::JobOperations do
         having_attributes(timeout: 120_000)
       )
     ensure
-      Busybee.default_job_lock_timeout = nil
+      Busybee.default_job_timeout = nil
     end
 
-    it "supports Duration objects as default_job_lock_timeout" do
-      Busybee.default_job_lock_timeout = 2.minutes
+    it "supports Duration objects as default_job_timeout" do
+      Busybee.default_job_timeout = 2.minutes
       allow(stub).to receive(:activate_jobs).and_return(responses)
 
       client.with_each_job("test-job") { |_job| }
@@ -448,11 +448,11 @@ RSpec.describe Busybee::Client::JobOperations do
         having_attributes(timeout: 120_000)
       )
     ensure
-      Busybee.default_job_lock_timeout = nil
+      Busybee.default_job_timeout = nil
     end
 
-    it "allows explicit job_timeout to override default_job_lock_timeout" do
-      Busybee.default_job_lock_timeout = 120_000
+    it "allows explicit job_timeout to override default_job_timeout" do
+      Busybee.default_job_timeout = 120_000
       allow(stub).to receive(:activate_jobs).and_return(responses)
 
       client.with_each_job("test-job", job_timeout: 30_000) { |_job| }
@@ -461,7 +461,7 @@ RSpec.describe Busybee::Client::JobOperations do
         having_attributes(timeout: 30_000)
       )
     ensure
-      Busybee.default_job_lock_timeout = nil
+      Busybee.default_job_timeout = nil
     end
 
     it "accepts custom job_timeout parameter" do
@@ -490,12 +490,12 @@ RSpec.describe Busybee::Client::JobOperations do
       client.with_each_job("test-job") { |_job| }
 
       expect(stub).to have_received(:activate_jobs).with(
-        having_attributes(requestTimeout: Busybee::Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS)
+        having_attributes(requestTimeout: Busybee::Defaults::DEFAULT_POLLING_REQUEST_TIMEOUT_MS)
       )
     end
 
-    it "uses configured default_job_request_timeout" do
-      Busybee.default_job_request_timeout = 30_000
+    it "uses configured default_polling_request_timeout" do
+      Busybee.default_polling_request_timeout = 30_000
       allow(stub).to receive(:activate_jobs).and_return(responses)
 
       client.with_each_job("test-job") { |_job| }
@@ -504,11 +504,11 @@ RSpec.describe Busybee::Client::JobOperations do
         having_attributes(requestTimeout: 30_000)
       )
     ensure
-      Busybee.default_job_request_timeout = nil
+      Busybee.default_polling_request_timeout = nil
     end
 
-    it "supports Duration objects as default_job_request_timeout" do
-      Busybee.default_job_request_timeout = 30.seconds
+    it "supports Duration objects as default_polling_request_timeout" do
+      Busybee.default_polling_request_timeout = 30.seconds
       allow(stub).to receive(:activate_jobs).and_return(responses)
 
       client.with_each_job("test-job") { |_job| }
@@ -517,11 +517,11 @@ RSpec.describe Busybee::Client::JobOperations do
         having_attributes(requestTimeout: 30_000)
       )
     ensure
-      Busybee.default_job_request_timeout = nil
+      Busybee.default_polling_request_timeout = nil
     end
 
-    it "allows explicit request_timeout to override default_job_request_timeout" do
-      Busybee.default_job_request_timeout = 30_000
+    it "allows explicit request_timeout to override default_polling_request_timeout" do
+      Busybee.default_polling_request_timeout = 30_000
       allow(stub).to receive(:activate_jobs).and_return(responses)
 
       client.with_each_job("test-job", request_timeout: 120_000) { |_job| }
@@ -530,7 +530,7 @@ RSpec.describe Busybee::Client::JobOperations do
         having_attributes(requestTimeout: 120_000)
       )
     ensure
-      Busybee.default_job_request_timeout = nil
+      Busybee.default_polling_request_timeout = nil
     end
 
     it "accepts custom request_timeout parameter" do
@@ -622,13 +622,13 @@ RSpec.describe Busybee::Client::JobOperations do
       client.open_job_stream("test-job")
 
       expect(stub).to have_received(:stream_activated_jobs).with(
-        having_attributes(timeout: Busybee::Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS),
+        having_attributes(timeout: Busybee::Defaults::DEFAULT_JOB_TIMEOUT_MS),
         return_op: true
       )
     end
 
-    it "uses configured default_job_lock_timeout" do
-      Busybee.default_job_lock_timeout = 120_000
+    it "uses configured default_job_timeout" do
+      Busybee.default_job_timeout = 120_000
       allow(stub).to receive(:stream_activated_jobs).and_return(operation)
 
       client.open_job_stream("test-job")
@@ -638,11 +638,11 @@ RSpec.describe Busybee::Client::JobOperations do
         return_op: true
       )
     ensure
-      Busybee.default_job_lock_timeout = nil
+      Busybee.default_job_timeout = nil
     end
 
-    it "supports Duration objects as default_job_lock_timeout" do
-      Busybee.default_job_lock_timeout = 2.minutes
+    it "supports Duration objects as default_job_timeout" do
+      Busybee.default_job_timeout = 2.minutes
       allow(stub).to receive(:stream_activated_jobs).and_return(operation)
 
       client.open_job_stream("test-job")
@@ -652,11 +652,11 @@ RSpec.describe Busybee::Client::JobOperations do
         return_op: true
       )
     ensure
-      Busybee.default_job_lock_timeout = nil
+      Busybee.default_job_timeout = nil
     end
 
-    it "allows explicit job_timeout to override default_job_lock_timeout" do
-      Busybee.default_job_lock_timeout = 120_000
+    it "allows explicit job_timeout to override default_job_timeout" do
+      Busybee.default_job_timeout = 120_000
       allow(stub).to receive(:stream_activated_jobs).and_return(operation)
 
       client.open_job_stream("test-job", job_timeout: 30_000)
@@ -666,7 +666,7 @@ RSpec.describe Busybee::Client::JobOperations do
         return_op: true
       )
     ensure
-      Busybee.default_job_lock_timeout = nil
+      Busybee.default_job_timeout = nil
     end
 
     it "accepts custom job_timeout parameter" do

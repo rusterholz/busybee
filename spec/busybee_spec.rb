@@ -46,15 +46,18 @@ RSpec.describe Busybee do
       expect(described_class.public_send(getter)).to eq(5000)
     end
 
-    it "coerces a decimal String to Integer (truncates)" do
+    # Fractions used to be rounded off here, with a warning, on the theory that
+    # every duration ends up an integer on the wire. They do — but that is the
+    # wire's business, and rounding at the setter meant the one knob whose
+    # sub-millisecond values matter had to opt out of this contract entirely.
+    it "keeps the fraction of a decimal String" do
       described_class.public_send(:"#{setter}=", "5000.7")
-      expect(described_class.public_send(getter)).to eq(5000)
+      expect(described_class.public_send(getter)).to eq(5000.7)
     end
 
-    it "coerces a Float to Integer with a logged warning" do
-      expect(Busybee::Logging).to receive(:warn).with(/coercing Float.*to Integer/) # rubocop:disable RSpec/MessageSpies
+    it "accepts a Float as given" do
       described_class.public_send(:"#{setter}=", 5000.5)
-      expect(described_class.public_send(getter)).to eq(5000)
+      expect(described_class.public_send(getter)).to eq(5000.5)
     end
 
     it "rejects a non-numeric String" do
@@ -211,8 +214,8 @@ RSpec.describe Busybee do
     end
   end
 
-  describe ".grpc_retry_delay_ms" do
-    it_behaves_like "a duration config setter", :grpc_retry_delay_ms, :grpc_retry_delay_ms,
+  describe ".grpc_retry_delay" do
+    it_behaves_like "a duration config setter", :grpc_retry_delay, :grpc_retry_delay,
                     :DEFAULT_GRPC_RETRY_DELAY_MS
   end
 
@@ -338,14 +341,14 @@ RSpec.describe Busybee do
                     :DEFAULT_FAIL_JOB_BACKOFF_MS
   end
 
-  describe ".default_job_request_timeout" do
-    it_behaves_like "a duration config setter", :default_job_request_timeout, :default_job_request_timeout,
-                    :DEFAULT_JOB_REQUEST_TIMEOUT_MS
+  describe ".default_polling_request_timeout" do
+    it_behaves_like "a duration config setter", :default_polling_request_timeout, :default_polling_request_timeout,
+                    :DEFAULT_POLLING_REQUEST_TIMEOUT_MS
   end
 
-  describe ".default_job_lock_timeout" do
-    it_behaves_like "a duration config setter", :default_job_lock_timeout, :default_job_lock_timeout,
-                    :DEFAULT_JOB_LOCK_TIMEOUT_MS
+  describe ".default_job_timeout" do
+    it_behaves_like "a duration config setter", :default_job_timeout, :default_job_timeout,
+                    :DEFAULT_JOB_TIMEOUT_MS
   end
 
   describe ".default_backpressure_delay" do

@@ -3,6 +3,7 @@
 require "concurrent"
 
 require "busybee/client"
+require "busybee/durations"
 require "busybee/grpc/error"
 require "busybee/hooks"
 require "busybee/runtime_config"
@@ -163,13 +164,14 @@ module Busybee
     # Handle a wrapped gRPC error raised by a fetch loop. The *outcome* is matched
     # by status symbol (grpc_status) against Busybee.backpressure_statuses —
     # independent of which gRPC exception class the gateway raised. A backpressure
-    # outcome backs off (sleeps the configured delay) and returns, so the loop
-    # retries the fetch; any other gRPC error re-raises and propagates.
+    # outcome backs off and returns, so the loop retries the fetch; any other gRPC
+    # error re-raises and propagates. The delay is configured in milliseconds and
+    # Kernel#sleep takes seconds, so it converts here — the one place it is read.
     def handle_grpc_error(error)
       raise error unless Busybee.backpressure_statuses.include?(error.grpc_status)
 
       @backpressure_count.increment
-      sleep @runtime_config.backpressure_delay
+      sleep Busybee::Durations.seconds_from(@runtime_config.backpressure_delay)
     end
 
     # Discern a stop reason from an exit error (never fabricated — the only
@@ -229,13 +231,13 @@ module Busybee
     def drain_on_shutdown; end
 
     # Fails a job during graceful shutdown, preserving its retry count.
-    # Uses the worker's configured backoff (or gem default).
+    # Uses the worker's configured fail_job_backoff (or gem default).
     def handle_shutdown_job(job)
       with_fresh_worker_status(job) do
         job.fail!(
           "Worker shutting down",
           retries: job.retries,
-          backoff: @runtime_config.backoff
+          backoff: @runtime_config.fail_job_backoff
         )
       end
     rescue StandardError => e

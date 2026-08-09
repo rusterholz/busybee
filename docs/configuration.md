@@ -187,17 +187,18 @@ Whether to retry failed GRPC calls.
 Busybee.grpc_retry_enabled = true
 ```
 
-#### `grpc_retry_delay_ms`
+#### `grpc_retry_delay`
 
-Delay in milliseconds before retrying a failed GRPC call.
+How long to wait before retrying a failed GRPC call.
 
 | | |
 |--|--|
-| **Type** | Integer |
-| **Default** | `500` |
+| **Type** | A [duration](#how-busybee-reads-durations) |
+| **Default** | `500` (half a second) |
 
 ```ruby
-Busybee.grpc_retry_delay_ms = 1000
+Busybee.grpc_retry_delay = 1000
+Busybee.grpc_retry_delay = 1.second  # same
 ```
 
 #### `grpc_retry_errors`
@@ -234,7 +235,7 @@ Busybee.backpressure_statuses = %i[resource_exhausted unavailable]
 
 HTTP/2 keepalive pings on the gRPC channel. Their purpose is the streaming worker's job-activation stream: it has no request deadline, so a transport that dies silently — a suspended host, a connection reset a proxy swallowed — would otherwise leave the worker blocked on the stream forever, healthy to a liveness probe but activating nothing. Keepalive pings detect the dead transport and raise it as a gateway error the runner recovers from. (Unary calls already recover on their own deadlines; keepalive is what protects the deadline-less stream.) Enabled by default.
 
-Both knobs accept an Integer (milliseconds) or an `ActiveSupport::Duration`; `nil` restores the default. Setting **both** to `false` disables keepalive; setting only one is an error.
+Both knobs take a [duration](#how-busybee-reads-durations); `nil` restores the default. Setting **both** to `false` disables keepalive; setting only one is an error.
 
 #### `grpc_keepalive_interval`
 
@@ -242,7 +243,7 @@ The period between keepalive pings. Keep it above your gateway's minimum accepte
 
 | | |
 |--|--|
-| **Type** | Integer (milliseconds), `ActiveSupport::Duration`, or `false` |
+| **Type** | A [duration](#how-busybee-reads-durations), or `false` to disable |
 | **Default** | `45_000` (45 seconds) |
 
 ```ruby
@@ -255,7 +256,7 @@ How long a ping waits for its acknowledgement before the transport is declared d
 
 | | |
 |--|--|
-| **Type** | Integer (milliseconds), `ActiveSupport::Duration`, or `false` |
+| **Type** | A [duration](#how-busybee-reads-durations), or `false` to disable |
 | **Default** | `20_000` (20 seconds) |
 
 ```ruby
@@ -266,13 +267,35 @@ Busybee.grpc_keepalive_timeout  = false
 
 ### Operation Defaults
 
+#### How Busybee Reads Durations
+
+Every setting that takes a length of time — here, in the [worker DSL](workers.md#mode-configuration-in-the-dsl), in YAML, and as an argument to a client call — reads its value the same way:
+
+| You write | Busybee reads |
+|--|--|
+| `2_000` | 2,000 milliseconds |
+| `2.seconds` | an `ActiveSupport::Duration`, in whatever unit you spell it |
+| `"2000"` | 2,000 milliseconds — handy for values arriving from `ENV` |
+| `0.5` | half a millisecond; fractions are kept, and rounded only when the value reaches the wire |
+
+**A bare number always means milliseconds.** That is the one thing to remember, and it is also the one thing that is easy to get wrong: `default_message_ttl = 30` is a message that expires in thirty *milliseconds*. Busybee watches for that mistake and says so:
+
+```
+[busybee] default_message_ttl: 30ms seems unusually small for this setting. Durations here are
+milliseconds — if you meant 30 seconds, use 30000 or 30.seconds
+```
+
+The value is still applied — the warning advises, it doesn't override you — and it only appears for settings where a sub-second value is almost certainly a slip. Deliberately tiny values are left alone: `0` means "no delay", `-1` is Zeebe's "answer immediately" for [`request_timeout`](workers.md#polling), and [`buffer_throttle`](workers.md#buffer-throttle) is exempt entirely, since sub-millisecond values are exactly what it exists for.
+
+Per-call arguments never warn. `publish_message(name, correlation_key: key, ttl: 50)` is a deliberate one-off, not a misconfiguration.
+
 #### `default_message_ttl`
 
 Default time-to-live for published messages, in milliseconds. Individual `publish_message` calls can override this.
 
 | | |
 |--|--|
-| **Type** | Integer (milliseconds) |
+| **Type** | A [duration](#how-busybee-reads-durations) |
 | **Default** | `10_000` (10 seconds) |
 
 ```ruby
@@ -285,39 +308,39 @@ Default backoff time when failing a job, in milliseconds. Individual `fail_job` 
 
 | | |
 |--|--|
-| **Type** | Integer (milliseconds) |
+| **Type** | A [duration](#how-busybee-reads-durations) |
 | **Default** | `5_000` (5 seconds) |
 
 ```ruby
 Busybee.default_fail_job_backoff = 10_000  # 10 seconds
 ```
 
-#### `default_job_request_timeout`
+#### `default_polling_request_timeout`
 
 Default timeout for job activation requests, in milliseconds. This controls how long the Zeebe gateway waits for jobs to become available before returning an empty response. Individual `with_each_job` and `activate_job` calls can override this.
 
 | | |
 |--|--|
-| **Type** | Integer (milliseconds) or ActiveSupport::Duration |
+| **Type** | A [duration](#how-busybee-reads-durations) |
 | **Default** | `60_000` (60 seconds) |
 
 ```ruby
-Busybee.default_job_request_timeout = 30_000   # 30 seconds
-Busybee.default_job_request_timeout = 30.seconds
+Busybee.default_polling_request_timeout = 30_000   # 30 seconds
+Busybee.default_polling_request_timeout = 30.seconds
 ```
 
-#### `default_job_lock_timeout`
+#### `default_job_timeout`
 
 Default lock timeout for activated jobs, in milliseconds. This controls how long a worker has to process a job before the lock expires and the job becomes available to other workers. Individual `with_each_job` and `open_job_stream` calls can override this.
 
 | | |
 |--|--|
-| **Type** | Integer (milliseconds) or ActiveSupport::Duration |
+| **Type** | A [duration](#how-busybee-reads-durations) |
 | **Default** | `60_000` (60 seconds) |
 
 ```ruby
-Busybee.default_job_lock_timeout = 120_000   # 2 minutes
-Busybee.default_job_lock_timeout = 2.minutes
+Busybee.default_job_timeout = 120_000   # 2 minutes
+Busybee.default_job_timeout = 2.minutes
 ```
 
 #### `worker_name`
@@ -397,14 +420,14 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.credentials` | `Busybee.credentials` |
 | `config.x.busybee.worker_name` | `Busybee.worker_name` |
 | `config.x.busybee.grpc_retry_enabled` | `Busybee.grpc_retry_enabled` |
-| `config.x.busybee.grpc_retry_delay_ms` | `Busybee.grpc_retry_delay_ms` |
+| `config.x.busybee.grpc_retry_delay` | `Busybee.grpc_retry_delay` |
 | `config.x.busybee.grpc_retry_errors` | `Busybee.grpc_retry_errors` |
 | `config.x.busybee.grpc_keepalive_interval` | `Busybee.grpc_keepalive_interval` |
 | `config.x.busybee.grpc_keepalive_timeout` | `Busybee.grpc_keepalive_timeout` |
 | `config.x.busybee.default_message_ttl` | `Busybee.default_message_ttl` |
 | `config.x.busybee.default_fail_job_backoff` | `Busybee.default_fail_job_backoff` |
-| `config.x.busybee.default_job_request_timeout` | `Busybee.default_job_request_timeout` |
-| `config.x.busybee.default_job_lock_timeout` | `Busybee.default_job_lock_timeout` |
+| `config.x.busybee.default_polling_request_timeout` | `Busybee.default_polling_request_timeout` |
+| `config.x.busybee.default_job_timeout` | `Busybee.default_job_timeout` |
 | `config.x.busybee.default_worker_mode` | `Busybee.default_worker_mode` |
 | `config.x.busybee.default_max_jobs` | `Busybee.default_max_jobs` |
 | `config.x.busybee.default_buffer` | `Busybee.default_buffer` |
@@ -540,7 +563,7 @@ Default throttle delay for the job buffer in streaming or hybrid modes.
 
 | | |
 |--|--|
-| **Type** | Numeric (milliseconds), Boolean, or `nil` |
+| **Type** | A [duration](#how-busybee-reads-durations), or a Boolean (see below) |
 | **Default** | `false` (no throttling) |
 
 `false` disables throttling. `true` coerces to `0` (minimal throttle). A positive number sets the delay in milliseconds (sub-millisecond Floats accepted).
@@ -557,7 +580,7 @@ How long to wait after a backpressure error (`GRPC::ResourceExhausted`) before r
 
 | | |
 |--|--|
-| **Type** | Integer (milliseconds) or ActiveSupport::Duration |
+| **Type** | A [duration](#how-busybee-reads-durations) |
 | **Default** | `2_000` (2 seconds) |
 
 ```ruby

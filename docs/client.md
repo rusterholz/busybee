@@ -161,7 +161,7 @@ Busybee can automatically retry GRPC calls that fail due to transient errors. Th
 ```ruby
 Busybee.configure do |config|
   config.grpc_retry_enabled = true           # Enable retry (default: false)
-  config.grpc_retry_delay_ms = 500           # Delay between attempts (default: 500ms)
+  config.grpc_retry_delay = 500           # Delay between attempts (default: 500ms)
   config.grpc_retry_errors = [               # Which errors trigger retry (default below)
     GRPC::Unavailable,
     GRPC::DeadlineExceeded,

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
+
 require "busybee/client/error_handling"
 
 RSpec.describe Busybee::Client::ErrorHandling do
@@ -39,12 +41,56 @@ RSpec.describe Busybee::Client::ErrorHandling do
     context "when retry is enabled" do
       before do
         Busybee.grpc_retry_enabled = true
-        Busybee.grpc_retry_delay_ms = 1 # Fast for tests
+        Busybee.grpc_retry_delay = 0 # Retry immediately; the delay has its own examples below
       end
 
       after do
         Busybee.grpc_retry_enabled = nil
-        Busybee.grpc_retry_delay_ms = nil
+        Busybee.grpc_retry_delay = nil
+      end
+
+      # Both spellings of one delay have to reach sleep as the same number of
+      # seconds. Nothing asserted the sleep at all before — the examples around
+      # this one just set the delay small enough not to notice.
+      {
+        "integer milliseconds" => [500, 0.5],
+        "a whole-second Duration" => [2.seconds, 2.0],
+        "a sub-second Duration" => [0.5.seconds, 0.5]
+      }.each do |shape, (configured, expected_seconds)|
+        it "waits #{expected_seconds}s between attempts when configured with #{shape}" do
+          Busybee.grpc_retry_delay = configured
+          allow(instance).to receive(:sleep)
+
+          call_count = 0
+          instance.with_retry do
+            call_count += 1
+            raise wrapped(GRPC::Unavailable.new("temporary")) if call_count == 1
+
+            "success"
+          end
+
+          expect(instance).to have_received(:sleep).with(expected_seconds)
+        end
+      end
+
+      # The examples above stub sleep to read its argument. This one lets it run,
+      # because "converts the value" and "actually waits that long" are different
+      # claims and the second is the one an operator feels. Kept small because a
+      # regression sleeps this number as seconds, uninterruptibly.
+      it "really waits, at the magnitude configured" do
+        Busybee.grpc_retry_delay = 200
+        call_count = 0
+
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        instance.with_retry do
+          call_count += 1
+          raise wrapped(GRPC::Unavailable.new("temporary")) if call_count == 1
+
+          "success"
+        end
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+        expect(elapsed).to be_between(0.15, 2.0)
       end
 
       it "retries once on a retryable error" do

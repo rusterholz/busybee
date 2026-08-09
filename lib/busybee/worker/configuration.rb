@@ -26,7 +26,7 @@ module Busybee
 
       attr_accessor :description
       attr_reader :inputs, :outputs, :worker_mode, :polling_config, :streaming_config,
-                  :job_timeout, :backoff, :backpressure_delay,
+                  :job_timeout, :fail_job_backoff, :backpressure_delay,
                   :complete_job_on_success, :fail_job_on_error, :strict_outputs, :shutdown_on
 
       def initialize(worker_class)
@@ -39,7 +39,7 @@ module Busybee
         @polling_config = {}
         @streaming_config = {}
         @job_timeout = nil
-        @backoff = nil
+        @fail_job_backoff = nil
         @backpressure_delay = nil
         @complete_job_on_success = true
         @fail_job_on_error = true
@@ -73,6 +73,10 @@ module Busybee
                 "Valid: #{VALID_POLLING_KWARGS.map(&:inspect).join(', ')}"
         end
 
+        # Negative is legal: -1 is Zeebe's "answer immediately, don't long-poll".
+        timeout = kwargs[:request_timeout]
+        kwargs[:request_timeout] = validate_duration!(:request_timeout, timeout) unless timeout.nil?
+
         @polling_config = kwargs
       end
 
@@ -95,8 +99,8 @@ module Busybee
         @job_timeout = validate_duration!(:job_timeout, value)
       end
 
-      def backoff=(value)
-        @backoff = validate_duration!(:backoff, value)
+      def fail_job_backoff=(value)
+        @fail_job_backoff = validate_duration!(:fail_job_backoff, value)
       end
 
       def backpressure_delay=(value)
@@ -178,14 +182,14 @@ module Busybee
       def polling_options
         {
           max_jobs: polling_config[:max_jobs] || Busybee::Defaults::DEFAULT_MAX_JOBS,
-          request_timeout: polling_config[:request_timeout] || Busybee.default_job_request_timeout,
-          job_timeout: job_timeout || Busybee.default_job_lock_timeout
+          request_timeout: polling_config[:request_timeout] || Busybee.default_polling_request_timeout,
+          job_timeout: job_timeout || Busybee.default_job_timeout
         }
       end
 
       # Returns resolved streaming options for client.open_job_stream.
       def streaming_options
-        { job_timeout: job_timeout || Busybee.default_job_lock_timeout }
+        { job_timeout: job_timeout || Busybee.default_job_timeout }
       end
 
       def to_h
@@ -198,7 +202,7 @@ module Busybee
           polling_config: polling_config,
           streaming_config: streaming_config,
           job_timeout: job_timeout,
-          backoff: backoff,
+          fail_job_backoff: fail_job_backoff,
           backpressure_delay: backpressure_delay,
           complete_job_on_success: complete_job_on_success,
           fail_job_on_error: fail_job_on_error,
@@ -285,10 +289,16 @@ module Busybee
 
         value = kwargs[:buffer_throttle]
         return if value == false
-        return if value.is_a?(Numeric) && value >= 0
 
-        raise InvalidWorkerDefinition,
-              "`buffer_throttle:` must be a non-negative Numeric, got #{value.inspect}"
+        # Read on the gem-wide duration contract like every other knob, so a
+        # Duration works here too and the accepted shapes don't fork.
+        throttle = validate_duration!(:buffer_throttle, value)
+        if throttle.negative?
+          raise InvalidWorkerDefinition,
+                "`buffer_throttle:` must be non-negative, got #{value.inspect}"
+        end
+
+        kwargs[:buffer_throttle] = throttle
       end
 
       # The gem-wide duration contract (Durations), re-raised in the DSL's own

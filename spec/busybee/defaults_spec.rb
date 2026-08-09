@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 RSpec.describe Busybee::Defaults do
-  it "defines DEFAULT_JOB_LOCK_TIMEOUT_MS as 60 seconds" do
-    expect(described_class::DEFAULT_JOB_LOCK_TIMEOUT_MS).to eq(60_000)
+  it "defines DEFAULT_JOB_TIMEOUT_MS as 60 seconds" do
+    expect(described_class::DEFAULT_JOB_TIMEOUT_MS).to eq(60_000)
   end
 
-  it "defines DEFAULT_JOB_REQUEST_TIMEOUT_MS as 60 seconds" do
-    expect(described_class::DEFAULT_JOB_REQUEST_TIMEOUT_MS).to eq(60_000)
+  it "defines DEFAULT_POLLING_REQUEST_TIMEOUT_MS as 60 seconds" do
+    expect(described_class::DEFAULT_POLLING_REQUEST_TIMEOUT_MS).to eq(60_000)
   end
 
   it "defines DEFAULT_MAX_JOBS as 25" do

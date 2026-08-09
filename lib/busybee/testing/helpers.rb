@@ -139,11 +139,14 @@ module Busybee
       # This method attempts to connect to Zeebe and call the topology endpoint
       # to verify the service is running and healthy.
       #
-      # @param timeout [Integer] timeout in seconds for the connection check
+      # @param wait [Numeric] seconds to allow for the connection check. Seconds,
+      #   because it is spelled `wait:` — the gem's one seconds-grained parameter
+      #   name, reserved for local waits in a test process. Every other duration
+      #   input, including the ones on these helpers, is milliseconds.
       # @return [Boolean] true if Zeebe is available, false otherwise
-      def zeebe_available?(timeout: 5)
+      def zeebe_available?(wait: 5)
         request = Busybee::GRPC::TopologyRequest.new
-        grpc_client.topology(request, deadline: Time.now + timeout)
+        grpc_client.topology(request, deadline: Time.now + wait)
         true
       rescue ::GRPC::Unavailable, ::GRPC::DeadlineExceeded, ::GRPC::Core::CallError, ::GRPC::Unauthenticated
         false
@@ -152,7 +155,8 @@ module Busybee
       # Activate a single job of the given type.
       #
       # @param type [String] job type
-      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee.default_job_request_timeout)
+      # @param timeout [Integer, nil] request timeout in milliseconds
+      #   (defaults to Busybee.default_polling_request_timeout)
       # @return [ActivatedJob]
       # @raise [NoJobAvailable] if no job is available
       def activate_job(type, timeout: nil)
@@ -166,7 +170,8 @@ module Busybee
       #
       # @param type [String] job type
       # @param max_jobs [Integer] maximum number of jobs to activate
-      # @param timeout [Integer, nil] request timeout in milliseconds (defaults to Busybee.default_job_request_timeout)
+      # @param timeout [Integer, nil] request timeout in milliseconds
+      #   (defaults to Busybee.default_polling_request_timeout)
       # @return [Enumerator<ActivatedJob>]
       def activate_jobs(type, max_jobs:, timeout: nil)
         Enumerator.new do |yielder|
@@ -209,7 +214,8 @@ module Busybee
 
       # Assert that the current process instance has completed.
       #
-      # @param wait [Float] seconds to wait before checking
+      # @param wait [Numeric] seconds to wait before checking (see zeebe_available?
+      #   for why `wait:` is the one parameter name that means seconds)
       # @raise [RuntimeError] if process is still running
       def assert_process_completed!(wait: 0.25)
         sleep(wait) if wait.positive?

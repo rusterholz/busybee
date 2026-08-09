@@ -137,9 +137,9 @@ module Busybee
       # @param job_type [String] The job type to activate
       # @param max_jobs [Integer] Maximum number of jobs to activate
       # @param job_timeout [Integer, ActiveSupport::Duration, nil] Job lock timeout in milliseconds
-      #   (defaults to Busybee.default_job_lock_timeout)
+      #   (defaults to Busybee.default_job_timeout)
       # @param request_timeout [Integer, ActiveSupport::Duration, nil] Request timeout in milliseconds
-      #   (defaults to Busybee.default_job_request_timeout)
+      #   (defaults to Busybee.default_polling_request_timeout)
       # @yield [job] Yields each activated job to the block
       # @yieldparam job [Busybee::Job] The activated job
       # @return [Integer] Count of jobs processed
@@ -189,7 +189,7 @@ module Busybee
       #
       # @param job_type [String] The job type to activate
       # @param job_timeout [Integer, ActiveSupport::Duration, nil] Job lock timeout in milliseconds
-      #   (defaults to Busybee.default_job_lock_timeout)
+      #   (defaults to Busybee.default_job_timeout)
       # @return [Busybee::JobStream] Stream of activated jobs
       # @raise [Busybee::GRPC::Error] if stream creation fails
       #
@@ -203,7 +203,7 @@ module Busybee
       #   end
       #
       def open_job_stream(job_type, job_timeout: nil)
-        job_timeout ||= Busybee.default_job_lock_timeout
+        job_timeout ||= Busybee.default_job_timeout
 
         request = Busybee::GRPC::StreamActivatedJobsRequest.new(
           type: job_type.to_s,
@@ -217,12 +217,14 @@ module Busybee
       private
 
       def activate_jobs_request(job_type, max_jobs, job_timeout, request_timeout)
+        poll_for = request_timeout || Busybee.default_polling_request_timeout
+
         Busybee::GRPC::ActivateJobsRequest.new(
           type: job_type.to_s,
           worker: Busybee.worker_name,
           maxJobsToActivate: max_jobs.to_i,
-          timeout: Busybee::Durations.milliseconds_from(job_timeout || Busybee.default_job_lock_timeout),
-          requestTimeout: Busybee::Durations.milliseconds_from(request_timeout || Busybee.default_job_request_timeout)
+          timeout: Busybee::Durations.milliseconds_from(job_timeout || Busybee.default_job_timeout),
+          requestTimeout: Busybee::Durations.milliseconds_from(poll_for)
         )
       end
     end

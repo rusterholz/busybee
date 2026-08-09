@@ -10,12 +10,10 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
     Class.new(Busybee::Worker) do
       job_type "corridor_worker"
 
-      # One millisecond, so the backoff these examples exercise costs the suite
-      # nothing measurable. The runner sleeps this value raw, as seconds rather
-      # than milliseconds; correcting that conversion is separate work, and what
-      # these examples pin is the error's type and classification, not the
-      # sleep's magnitude.
-      backpressure_delay 1
+      # No delay at all, so the backoff costs the suite nothing: what these
+      # examples pin is the error's type and its classification. The magnitude is
+      # a separate claim with its own example, which pays for a real pause.
+      backpressure_delay 0
 
       def perform; end
     end
@@ -71,6 +69,48 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
         expect(shutdown_status_from { run_to_completion }.reason).to eq(:gateway_error)
       end
     end
+
+    # The only example here that pays for a real backoff. Every other one
+    # configures no delay at all; this one times an actual pause, because "backs
+    # off" and "backs off for the right length of time" are separate claims and
+    # until now only the first had anything holding it.
+    #
+    # 250ms rather than the 2_000ms default, deliberately. A regression here
+    # sleeps the configured number as *seconds*, and nothing can interrupt it —
+    # kill! doesn't reach a sleeping thread — so the value chosen is also the
+    # number of seconds a broken build hangs after this example has already
+    # failed. The default's own magnitude is cheap to pin without waiting for
+    # it, and is pinned in durations_spec.rb.
+    context "with a backpressure_delay long enough to measure" do
+      let(:worker_class) do
+        Class.new(Busybee::Worker) do
+          job_type "corridor_worker"
+          worker_mode :polling
+          backpressure_delay 250
+
+          def perform; end
+        end
+      end
+
+      before do
+        polls = 0
+        gateway.on(:activate_jobs) do
+          polls += 1
+          raise GRPC::ResourceExhausted, "broker under pressure" if polls == 1
+
+          runner.stop!
+          []
+        end
+      end
+
+      it "pauses for a quarter second, not a quarter thousand" do
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        run_to_completion
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+        expect(elapsed).to be_between(0.2, 3.0)
+      end
+    end
   end
 
   # Hybrid meets the same gateway on the same fetch call, through its own loop:
@@ -82,7 +122,7 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
       Class.new(Busybee::Worker) do
         job_type "corridor_worker"
         worker_mode :hybrid
-        backpressure_delay 1
+        backpressure_delay 0
 
         def perform; end
       end
@@ -132,7 +172,7 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
       Class.new(Busybee::Worker) do
         job_type "corridor_pressured"
         worker_mode :polling
-        backpressure_delay 1
+        backpressure_delay 0
 
         def perform; end
       end

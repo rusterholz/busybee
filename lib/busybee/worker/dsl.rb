@@ -95,8 +95,8 @@ module Busybee
         configuration.job_timeout = value
       end
 
-      def backoff(value)
-        configuration.backoff = value
+      def fail_job_backoff(value)
+        configuration.fail_job_backoff = value
       end
 
       def backpressure_delay(value = nil)
