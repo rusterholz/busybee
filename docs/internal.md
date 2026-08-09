@@ -30,6 +30,7 @@ lib/busybee/
 │   ├── oauth.rb             # Generic OAuth2 client credentials
 │   └── tls.rb               # TLS with optional client cert
 ├── defaults.rb              # Default values (timeouts, retry delays, etc.)
+├── durations.rb             # The one home for reading duration input + converting at consumption
 ├── error.rb                 # Base error class and subclasses
 ├── grpc.rb                  # GRPC module entry point
 ├── grpc/                    # Generated protocol buffer classes
@@ -138,6 +139,21 @@ The Railtie passes Rails config values through these setters. It pre-coerces boo
 
 `Busybee::Logging` provides prefixed log output in text or JSON format. A mutex serializes the format + write path so concurrent threads (e.g., multiple Worker runners) cannot interleave within a single log line. The nil-logger guard runs outside the mutex to avoid unnecessary lock acquisition.
 
+## Durations Module
+
+`Busybee::Durations` is the one place that interprets duration-ish input, and the discipline it exists to enforce is **convert exactly once, at the point of consumption**.
+
+`validate!` runs at config boundaries (gem setters, the worker DSL). It is deliberately non-normalizing: an Integer, a Float, and an `ActiveSupport::Duration` are all stored as written. Rounding a value at the setter is what previously forced `buffer_throttle` — whose sub-millisecond values are a feature — to maintain a parallel validator with a subtly different contract, so truncation happens only where a value must become an integer, which is the wire.
+
+Consumers then convert for their own destination:
+
+- `milliseconds_from` — every protobuf duration field. Truncates, because those fields are `int64` milliseconds.
+- `seconds_from` — every `Kernel#sleep` (`Runner#handle_grpc_error`, `ErrorHandling#with_retry`, the streaming pump's throttle) and `Job#update_timeout`'s deadline arithmetic. Returns a Float; it must, since `0.25.seconds` truncated to `0` is the difference between waiting and not.
+
+Each of those sleep sites once hand-rolled its own conversion, and each was wrong for a shape the config layer accepted: the backpressure sleep took milliseconds as seconds, while the retry and throttle sleeps divided an `ActiveSupport::Duration` that was already in seconds. The lesson worth keeping is that the bug lived at the *consumption* end while every spec exercised the *input* end, and each site's coverage asserted the value it had just passed in.
+
+`IMPLAUSIBLE_BELOW_MS` maps knob names to the floor below which a configured value warns. Both spellings of a knob (`backpressure_delay`, `default_backpressure_delay`) are listed rather than derived — the table is documentation, and deriving it would hide `default_polling_request_timeout`/`request_timeout`, which do not share a stem. Zero and negatives are exempt as sentinels; `buffer_throttle` has no floor.
+
 ## Worker Module
 
 `Busybee::Worker` is the base class for user-defined job workers. A Worker subclass declares its metadata via a class-level DSL and implements `perform` to handle jobs.
@@ -200,13 +216,13 @@ RuntimeConfig fields are divided into two categories:
 
 **Worker-scoped** — participate in the full 4-level precedence chain (per-worker RC → global RC → worker DSL → gem default). Only `worker_mode` has a CLI flag (`-m`); the rest are YAML-only:
 - `worker_mode` — `:polling`, `:streaming`, or `:hybrid`
-- `backpressure_delay` — ms to sleep on `GRPC::ResourceExhausted`
+- `backpressure_delay` — how long to sleep on a backpressure status (see Durations Module)
 - `max_jobs` — max jobs per poll request
 - `request_timeout` — long-poll timeout in ms
 - `buffer` — whether the streaming pump+buffer is used (`true` by default)
 - `buffer_throttle` — pump thread delay in ms (`false` = no throttle)
 - `job_timeout` — job lock timeout in ms
-- `backoff` — fail-job backoff in ms
+- `fail_job_backoff` — fail-job backoff in ms
 
 **Process-wide** — apply globally, no per-worker overrides (global RC → gem default):
 - `log_format` — `:text` or `:json`
@@ -241,7 +257,7 @@ Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit va
 
 `RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `worker_mode`).
 
-**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `buffer`, `buffer_throttle`, `job_timeout`, `backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
+**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `buffer`, `buffer_throttle`, `job_timeout`, `fail_job_backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
 
 **Workers format:** The `workers` key is a YAML list. Each entry is either a bare string (worker class name, no overrides) or a mapping with the worker name as key and overrides nested beneath it:
 
@@ -334,7 +350,7 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 
 From the Runner's perspective, `perform_job` has a simple two-outcome contract (returns or raises `Shutdown`). All other exceptions are handled inside `perform_job`. In the fetch loop:
 
-- **Backpressure** — a wrapped `Busybee::GRPC::Error` whose `grpc_status` is in `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) is handled by the shared `handle_grpc_error`: increment `@backpressure_count`, sleep `backpressure_delay`, retry the fetch. Matched by status *symbol*, so it catches the backpressure outcome however the gateway raised it; any other gRPC error re-raises. Fetch needs *two* translation points rather than one: the dispatch runs through the call seam, but `ActivateJobs` is server-streaming, and grpc hands back a lazy enumerator whose status error surfaces while the responses are read — after the seam has closed. So `with_each_job` rescues `::GRPC::BadStatus` around the enumeration itself. Without that second point the raw status matches neither fetch loop's rescue, and backpressure reads as a crash.
+- **Backpressure** — a wrapped `Busybee::GRPC::Error` whose `grpc_status` is in `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) is handled by the shared `handle_grpc_error`: increment `@backpressure_count`, sleep `backpressure_delay` (converted to seconds at the sleep), retry the fetch. Matched by status *symbol*, so it catches the backpressure outcome however the gateway raised it; any other gRPC error re-raises. Fetch needs *two* translation points rather than one: the dispatch runs through the call seam, but `ActivateJobs` is server-streaming, and grpc hands back a lazy enumerator whose status error surfaces while the responses are read — after the seam has closed. So `with_each_job` rescues `::GRPC::BadStatus` around the enumeration itself. Without that second point the raw status matches neither fetch loop's rescue, and backpressure reads as a crash.
 - **`Worker::Shutdown`** → the fetch/pump rescue stops with `reason: :unhealthy` and stashes it, then re-raises into `run!`'s `ensure`, where `error` is recorded as its unwrapped cause (see Stop reason).
 - **Other errors** → propagate up (to Multi/CLI). Likely fatal (auth, config).
 
@@ -390,7 +406,7 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 
 ### CLI Flags
 
-The CLI exposes 5 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
+The CLI exposes 5 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
 
 - `--config` / `-c` — YAML configuration file path
 - `--worker-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`

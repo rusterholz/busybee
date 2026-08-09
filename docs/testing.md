@@ -45,7 +45,7 @@ Busybee.configure do |config|
 end
 ```
 
-Job activation timeouts used by the testing helpers default to `Busybee.default_job_request_timeout` (see [Configuration](configuration.md)). You can override per-call or globally:
+Job activation timeouts used by the testing helpers default to `Busybee.default_polling_request_timeout` (see [Configuration](configuration.md)). You can override per-call or globally:
 
 ```ruby
 # Per-call: pass timeout directly to the helper
@@ -54,11 +54,17 @@ jobs = activate_jobs("my-task", max_jobs: 5, timeout: 2000)
 
 # Globally: configure a shorter default for your test environment
 Busybee.configure do |config|
-  config.default_job_request_timeout = 2000 # milliseconds, default: 60_000
+  config.default_polling_request_timeout = 2000 # milliseconds, default: 60_000
 end
 ```
 
 For authenticated cluster connections (TLS, OAuth, Camunda Cloud), configure credentials via `Busybee.configure` in your Rails `config/environments/test.rb` or equivalent. See [Providing Credentials](client.md#providing-credentials) for details.
+
+### A note on units
+
+One parameter name in Busybee means seconds: **`wait:`**. It appears only on the helpers that pause your test process — [`assert_process_completed!`](#assert_process_completedwait-025) and [`zeebe_available?`](#zeebe_availablewait-5) — where seconds are the grain you actually think in, because the difference that matters is half a second versus ten, not 500ms versus 10,000ms.
+
+Everything else, here and throughout the gem, is a [duration](configuration.md#how-busybee-reads-durations): a bare number means milliseconds, and an `ActiveSupport::Duration` works anywhere. That includes the helpers sitting right next to those two — `activate_job(timeout:)` and `publish_message(ttl:)` both set real Zeebe duration fields, so they read like every other duration in the gem.
 
 ## Helper Methods
 
@@ -188,7 +194,7 @@ Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAva
 
 **Parameters:**
 - `type` (String) - Job type to activate
-- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee.default_job_request_timeout` (60,000ms)
+- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee.default_polling_request_timeout` (60,000ms)
 
 **Returns:** `ActivatedJob` instance
 
@@ -212,7 +218,7 @@ Activates multiple jobs of the specified type.
 **Parameters:**
 - `type` (String) - Job type to activate
 - `max_jobs` (Integer) - Maximum number of jobs to activate
-- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee.default_job_request_timeout` (60,000ms)
+- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee.default_polling_request_timeout` (60,000ms)
 
 **Returns:** Enumerator of `ActivatedJob` instances
 
@@ -282,7 +288,7 @@ end
 Asserts that the current process instance has completed. Useful for verifying end-to-end workflow execution.
 
 **Parameters:**
-- `wait` (Float) - Seconds to wait before checking (default: `0.25`)
+- `wait` (Numeric) - Seconds to wait before checking (default: `0.25`). See [A note on units](#a-note-on-units)
 
 **Raises:** RuntimeError if process is still running
 
@@ -299,12 +305,12 @@ end
 
 ### Zeebe Availability
 
-#### `zeebe_available?(timeout: 5)`
+#### `zeebe_available?(wait: 5)`
 
 Checks if Zeebe is available and responsive.
 
 **Parameters:**
-- `timeout` (Integer) - Timeout in seconds (default: `5`)
+- `wait` (Numeric) - Seconds to allow for the check (default: `5`). See [A note on units](#a-note-on-units)
 
 **Returns:** Boolean
 
