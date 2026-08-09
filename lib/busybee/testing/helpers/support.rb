@@ -44,7 +44,7 @@ module Busybee
         def activate_jobs_raw(type, max_jobs:, timeout: nil)
           worker = "#{type}-#{SecureRandom.hex(4)}"
 
-          request_timeout = timeout || Busybee.default_job_request_timeout
+          request_timeout = timeout || Busybee.default_polling_request_timeout
           request_timeout_ms = Busybee::Durations.milliseconds_from(request_timeout)
 
           request = Busybee::GRPC::ActivateJobsRequest.new(

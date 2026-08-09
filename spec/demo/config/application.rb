@@ -37,11 +37,11 @@ module Demo
     config.x.busybee.credential_type = :tls
     config.x.busybee.worker_name = "dummy-test-worker"
     config.x.busybee.grpc_retry_enabled = true
-    config.x.busybee.grpc_retry_delay_ms = 250
+    config.x.busybee.grpc_retry_delay = 250
     config.x.busybee.default_message_ttl = 30_000
     config.x.busybee.default_fail_job_backoff = 10_000
-    config.x.busybee.default_job_request_timeout = 30_000
-    config.x.busybee.default_job_lock_timeout = 120_000
+    config.x.busybee.default_polling_request_timeout = 30_000
+    config.x.busybee.default_job_timeout = 120_000
     config.x.busybee.log_format = :json
   end
 end

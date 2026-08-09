@@ -23,7 +23,7 @@ module Busybee
 
     # Top-level keys allowed in YAML config (worker-scoped fields + workers).
     WORKER_SCOPED_KEYS = %i[worker_mode backpressure_delay max_jobs request_timeout
-                            buffer buffer_throttle job_timeout backoff].freeze
+                            buffer buffer_throttle job_timeout fail_job_backoff].freeze
     VALID_YAML_KEYS = (WORKER_SCOPED_KEYS + %i[workers]).freeze
     PROCESS_WIDE_KEYS = %i[log_format worker_name cluster_address].freeze
 
@@ -98,14 +98,14 @@ module Busybee
 
     # Worker-scoped fields (CLI: worker_mode only; all configurable via YAML)
     attr_reader :worker_mode, :backpressure_delay, :max_jobs, :request_timeout,
-                :buffer, :buffer_throttle, :job_timeout, :backoff
+                :buffer, :buffer_throttle, :job_timeout, :fail_job_backoff
 
     # Process-wide fields
     attr_reader :log_format, :worker_name, :cluster_address
 
     def initialize(worker_mode: nil, backpressure_delay: nil, max_jobs: nil, # rubocop:disable Metrics/AbcSize,Metrics/ParameterLists
                    request_timeout: nil, buffer: nil, buffer_throttle: nil,
-                   job_timeout: nil, backoff: nil,
+                   job_timeout: nil, fail_job_backoff: nil,
                    log_format: nil, worker_name: nil, cluster_address: nil,
                    workers: {})
       @worker_mode = coerce_symbol!(worker_mode, VALID_WORKER_MODES, "worker mode") if worker_mode
@@ -115,7 +115,7 @@ module Busybee
       @buffer = buffer
       @buffer_throttle = buffer_throttle
       @job_timeout = job_timeout
-      @backoff = backoff
+      @fail_job_backoff = fail_job_backoff
       @log_format = coerce_symbol!(log_format, VALID_LOG_FORMATS, "log format") if log_format
       @worker_name = worker_name
       @cluster_address = cluster_address
@@ -149,11 +149,11 @@ module Busybee
         worker_mode:        first_non_nil(wo[:worker_mode], @worker_mode, dsl.worker_mode, Busybee.default_worker_mode),
         backpressure_delay: first_non_nil(wo[:backpressure_delay], @backpressure_delay, dsl.backpressure_delay, Busybee.default_backpressure_delay),
         max_jobs:           first_non_nil(wo[:max_jobs], @max_jobs, dsl.polling_config[:max_jobs], Busybee.default_max_jobs),
-        request_timeout:    first_non_nil(wo[:request_timeout], @request_timeout, dsl.polling_config[:request_timeout], Busybee.default_job_request_timeout),
+        request_timeout:    first_non_nil(wo[:request_timeout], @request_timeout, dsl.polling_config[:request_timeout], Busybee.default_polling_request_timeout),
         buffer:     first_non_nil(wo[:buffer], @buffer, dsl.streaming_config[:buffer], Busybee.default_buffer),
         buffer_throttle:    first_non_nil(wo[:buffer_throttle], @buffer_throttle, dsl.streaming_config[:buffer_throttle], Busybee.default_buffer_throttle),
-        job_timeout:        first_non_nil(wo[:job_timeout], @job_timeout, dsl.job_timeout, Busybee.default_job_lock_timeout),
-        backoff:            first_non_nil(wo[:backoff], @backoff, dsl.backoff, Busybee.default_fail_job_backoff),
+        job_timeout:        first_non_nil(wo[:job_timeout], @job_timeout, dsl.job_timeout, Busybee.default_job_timeout),
+        fail_job_backoff:            first_non_nil(wo[:fail_job_backoff], @fail_job_backoff, dsl.fail_job_backoff, Busybee.default_fail_job_backoff),
         log_format:         first_non_nil(@log_format, Busybee.log_format),
         worker_name:        first_non_nil(@worker_name, Busybee.worker_name),
         cluster_address:    first_non_nil(@cluster_address, Busybee.cluster_address)

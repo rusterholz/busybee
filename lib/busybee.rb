@@ -76,12 +76,12 @@ module Busybee
       @default_input_required.nil? ? Defaults::DEFAULT_INPUT_REQUIRED : @default_input_required
     end
 
-    def default_job_lock_timeout
-      @default_job_lock_timeout || Defaults::DEFAULT_JOB_LOCK_TIMEOUT_MS
+    def default_job_timeout
+      @default_job_timeout || Defaults::DEFAULT_JOB_TIMEOUT_MS
     end
 
-    def default_job_request_timeout
-      @default_job_request_timeout || Defaults::DEFAULT_JOB_REQUEST_TIMEOUT_MS
+    def default_polling_request_timeout
+      @default_polling_request_timeout || Defaults::DEFAULT_POLLING_REQUEST_TIMEOUT_MS
     end
 
     def default_message_ttl
@@ -108,8 +108,8 @@ module Busybee
       @default_worker_mode || Defaults::DEFAULT_WORKER_MODE
     end
 
-    def grpc_retry_delay_ms
-      @grpc_retry_delay_ms || Defaults::DEFAULT_GRPC_RETRY_DELAY_MS
+    def grpc_retry_delay
+      @grpc_retry_delay || Defaults::DEFAULT_GRPC_RETRY_DELAY_MS
     end
 
     def grpc_retry_enabled

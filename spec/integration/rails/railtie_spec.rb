@@ -46,8 +46,8 @@ RSpec.describe "Railtie integration with demo Rails app", :rails do
       expect(Busybee.grpc_retry_enabled).to be true
     end
 
-    it "sets grpc_retry_delay_ms from config" do
-      expect(Busybee.grpc_retry_delay_ms).to eq(250)
+    it "sets grpc_retry_delay from config" do
+      expect(Busybee.grpc_retry_delay).to eq(250)
     end
 
     it "sets default_message_ttl from config" do
@@ -58,12 +58,12 @@ RSpec.describe "Railtie integration with demo Rails app", :rails do
       expect(Busybee.default_fail_job_backoff).to eq(10_000)
     end
 
-    it "sets default_job_request_timeout from config" do
-      expect(Busybee.default_job_request_timeout).to eq(30_000)
+    it "sets default_polling_request_timeout from config" do
+      expect(Busybee.default_polling_request_timeout).to eq(30_000)
     end
 
-    it "sets default_job_lock_timeout from config" do
-      expect(Busybee.default_job_lock_timeout).to eq(120_000)
+    it "sets default_job_timeout from config" do
+      expect(Busybee.default_job_timeout).to eq(120_000)
     end
 
     it "sets log_format from config" do

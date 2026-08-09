@@ -217,7 +217,7 @@ module Busybee
       end
 
       def attempt_auto_fail(job, error, config)
-        job.fail!(Shutdown.unwrap(error), backoff: config.backoff)
+        job.fail!(Shutdown.unwrap(error), backoff: config.fail_job_backoff)
       rescue StandardError => e
         Busybee.logger&.warn("Failed to fail job #{job.key}: #{e.message}. Job will timeout and retry.")
       end

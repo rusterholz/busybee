@@ -55,7 +55,7 @@ module Busybee
 
         # Client API method defaults
         %i[default_message_ttl default_fail_job_backoff
-           default_job_request_timeout default_job_lock_timeout].each do |attr|
+           default_polling_request_timeout default_job_timeout].each do |attr|
           value = busybee_conf.public_send(attr)
           config.public_send(:"#{attr}=", value) if value.presence
         end
@@ -68,7 +68,7 @@ module Busybee
     # @api private
     def self.configure_grpc(config, busybee_conf) # rubocop:disable Metrics/AbcSize
       config.grpc_retry_enabled = !!busybee_conf.grpc_retry_enabled unless busybee_conf.grpc_retry_enabled.nil?
-      config.grpc_retry_delay_ms = busybee_conf.grpc_retry_delay_ms if busybee_conf.grpc_retry_delay_ms.presence
+      config.grpc_retry_delay = busybee_conf.grpc_retry_delay if busybee_conf.grpc_retry_delay.presence
       config.grpc_retry_errors = Array(busybee_conf.grpc_retry_errors) if busybee_conf.grpc_retry_errors.presence
 
       # Keepalive guards on nil, not presence: false is a real value (disable).
