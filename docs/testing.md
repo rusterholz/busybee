@@ -630,7 +630,7 @@ RSpec.describe "Order Fulfillment Workflow" do
         publish_message(
           "shipment-approved",
           correlation_key: correlation_key,
-          variables: { approved_by: "manager@example.com", approved_at: Time.now.iso8601 }
+          vars: { approved_by: "manager@example.com", approved_at: Time.now.iso8601 }
         )
 
         # Verify shipment proceeds

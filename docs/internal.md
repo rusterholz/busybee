@@ -477,7 +477,7 @@ All Client operation modules, Job, and Testing helpers route through this module
 
 ## Hooks Module
 
-`Busybee::Hooks` is the instrumentation system — lifecycle hooks enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting). Hooks fire around three nouns, each with its own carrier: **jobs** (`Busybee::Job`), **workers** (`Busybee::Worker::Status`), and **calls** (`Busybee::Client::Call`). Job hooks are the richest (wrapping + observing); worker and call hooks are observation-only. Each carrier exposes `context_tags` (low-cardinality metric labels) and `logging_context` (high-cardinality log fields) — the uniform projection a hook reads to emit metrics or structured logs.
+`Busybee::Hooks` is the instrumentation system — lifecycle hooks enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting). Hooks fire around three nouns, each with its own carrier: **jobs** (`Busybee::Job`), **workers** (`Busybee::Worker::Status`), and **calls** (`Busybee::Client::Call`). Job hooks are the richest (wrapping + observing); worker hooks are observation-only; call hooks observe as well, except `before_call`, which propagates and can therefore stop a call from reaching the wire. Each carrier exposes `context_tags` (low-cardinality metric labels) and `logging_context` (high-cardinality log fields) — the uniform projection a hook reads to emit metrics or structured logs.
 
 ### Job as the hook target
 
@@ -579,10 +579,10 @@ For receive-to-runner-return walkthroughs of the typical and edge-case lifecycle
 
 ### Worker and call hooks
 
-Worker- and call-level hooks fire observation-only, each with its own carrier:
+Worker- and call-level hooks are observing rather than wrapping, each with its own carrier — with one gate among them, noted below:
 
 - **Worker hooks** (`on_worker_started`, `on_worker_stop_requested`, `on_worker_stopping`, `on_worker_shutdown`) fire from `Runner#run!` / `#stop!` at the four lifecycle moments, each with a fresh frozen `Worker::Status` snapshot. See [Runner Module](#runner-module) for the run lifecycle and where each fires.
-- **Call hooks** (`before_call`, `around_call`, `after_call`) fire through the `Client::Call` seam: `before_call`/`after_call` bracket the logical operation, `around_call` wraps each attempt. Each receives the `Client::Call` carrying the rpc, resolved status, gRPC status, attempt count, and durations.
+- **Call hooks** (`before_call`, `around_call`, `after_call`) fire through the `Client::Call` seam: `before_call`/`after_call` bracket the logical operation, `around_call` wraps each attempt. Each receives the `Client::Call` carrying the rpc, resolved status, gRPC status, attempt count, and durations. `before_call` runs propagating (`Hooks.run` without `safe:`) — that is the gate: an error raised there aborts the call before any attempt, and the caller sees it. `around_call` and `after_call` are safe chains, so an error in either is logged and swallowed while the call proceeds.
 
 **Retries stay busybee-owned (decided 2026-07, revisited and declined: gRPC-native retries).** gRPC's service-config retry policy (`grpc.enable_retries` + a retry-policy JSON) was considered and rejected as a replacement for `with_retry`: retries performed inside the gRPC core are invisible to the `Call` carrier, so `attempts` would undercount and `backoff_ms` would lie — and per-attempt observability ("how many attempts, and why") is the point of the call seam. Every retry busybee performs runs through `Call#attempt`, wrapped by `around_call`, counted on the carrier. If retry needs grow, extend the visible layer (e.g. a retry-count knob on `with_retry`, today hardcoded to a single retry when `grpc_retry_enabled`) rather than delegating to the invisible one.
 

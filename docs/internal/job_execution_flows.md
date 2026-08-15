@@ -99,7 +99,7 @@ A9. Continuing `run_hooked_perform`:
   - HOOKS: Continuing `around_perform` middleware, portions after yield (unsafe — errors propagate, jump to Variant C, and fail the job).
   - FLAG CLEARED: `Job#_allow_status_changes!` — required because `handle_success` is about to call `job.complete!`.
 
-A10. `handle_success(job, result, configuration)`:
+A10. `handle_success(job, result, config)`:
   - Exits early if `complete_job_on_success` is off or the job is no longer `ready?` (the latter can't happen in Variant A, but the guard exists for unified handling across variants).
   - VALIDATION: required outputs (errors propagate, jump to Variant C, fail the job).
   - VALIDATION: undeclared outputs (errors propagate, jump to Variant C, fail the job).
@@ -176,7 +176,7 @@ B11. Continuing the `around_perform` middleware chain core:
 B12. Continuing `run_hooked_perform`:
   - HOOKS: Continuing `around_perform` middleware, portions after yield (safe in this variant because the job is already complete — errors propagate to `perform_job`'s rescue, get logged as post-resolution, and the lifecycle continues at B13 below).
   - FLAG CLEARED: `Job#_allow_status_changes!`.
-  - `handle_success(job, result, configuration)` exits early (no-op) because `!job.ready?`.
+  - `handle_success(job, result, config)` exits early (no-op) because `!job.ready?`.
 
 B13. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
@@ -230,16 +230,16 @@ C10. Continuing `Worker.perform_job(job)`:
   - The error is rescued by `perform_job`'s `rescue StandardError`.
   - `handle_perform_exception(job, exception)`:
     - FLAG CLEARED: `Job#_allow_status_changes!` (necessary because we're about to autofail the job).
-    - EARLY ERROR CAPTURE: `resolution.set_error(underlying_error(exception))` — records the error on the error axis of Resolution before autofail runs, so `after_perform` sees the error attached to the Job even when autofail is disabled (C11) or its GRPC fails (C12). `underlying_error` unwraps a `Shutdown` to its `cause` when applicable.
-    - Calls `handle_failure(job, exception, configuration)`.
+    - EARLY ERROR CAPTURE: `resolution.set_error(Shutdown.unwrap(exception))` — records the error on the error axis of Resolution before autofail runs, so `after_perform` sees the error attached to the Job even when autofail is disabled (C11) or its GRPC fails (C12). `Shutdown.unwrap` reduces a `Shutdown` to its `cause`; every other error passes through untouched.
+    - Calls `handle_failure(job, exception, config)`.
 
-C11. `handle_failure(job, error, configuration)`:
+C11. `handle_failure(job, error, config)`:
   - Exits early (no-op) if `fail_job_on_error` is off (autofail disabled — the original error surfaces in C13 via `log_unhandled_error`).
   - Exits early if the job is no longer `ready?` — reachable from the multi-variant interactions where Variant B's `complete!` or Variant D's `fail!`/`throw_bpmn_error!` succeeded before `instance.perform` raised. Logs inline via `log_post_resolution_error` and returns (no surfacing in C13 for this case).
-  - Otherwise calls `attempt_auto_fail(job, error, configuration)`.
+  - Otherwise calls `attempt_auto_fail(job, error, config)`.
 
-C12. `attempt_auto_fail(job, error, configuration)` → `job.fail!(underlying_error(error), backoff: configuration.backoff)`:
-  - `underlying_error` extracts a Shutdown's `cause` (or returns the error itself) so the engine sees the real failure cause, not the Shutdown wrapper. See **E5** for the full unwrap callout and **E3** for the inverse direction (where the Shutdown wrap is created in the first place).
+C12. `attempt_auto_fail(job, error, config)` → `job.fail!(Shutdown.unwrap(error), backoff: config.fail_job_backoff)`:
+  - `Shutdown.unwrap` extracts a Shutdown's `cause` (or returns the error itself) so the engine sees the real failure cause, not the Shutdown wrapper. See **E5** for the full unwrap callout and **E3** for the inverse direction (where the Shutdown wrap is created in the first place).
   - Inside `fail!`: `resolution.set_error({error: ...})` — no-op (set-once on the error axis; already set by C10's early capture).
   - GRPC CALL: `client.fail_job(key, message, retries: <count - 1>, backoff: backoff)` — a bare fail sends one less than the current retry count (see the Retries accounting callout in Category G). **Workflow engine now sees the job as failed, with one retry drained.**
   - `resolve!(:failed)`:
@@ -255,7 +255,7 @@ C13. Continuing `handle_perform_exception`:
 C14. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
     - FLAG CLEARED: `Job#_allow_status_changes!` (defensive, in case a non-StandardError exception escaped past `rescue StandardError`).
-    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires when `job.resolved?` — true if `attempt_auto_fail` succeeded, false if autofail was skipped (C11) or its GRPC also failed (C12). When `:ready`, the Job still carries the error captured in C10; per-attempt observability for the unresolved case is `on_job_executed` at C15 (runner-level, unconditional). after_perform's contract is "the lifecycle reached a settled outcome the engine has on file."
+    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires when `job.resolved?` — true if `attempt_auto_fail` succeeded, false if autofail was skipped (C11) or its GRPC also failed (C12). When `:ready`, the Job still carries the error captured in C10; per-attempt observability for the unresolved case is `on_job_executed` at C15 (runner-level; fires for every job that reached `execute_job`, on all of its exit paths — but not for one the shutdown drain fails without running, see the Shutdown-path gap below). after_perform's contract is "the lifecycle reached a settled outcome the engine has on file."
 
 C15. Continuing `Runner#execute_job(job)`:
   - If `perform_job` re-raised (or wrapped) a `Shutdown` in C13, it propagates through the `around_job_execution` chain. The chain is `safe: true`, but `Chain.build_safe` re-raises `Shutdown` specifically (per chain.rb:45–46), so the Shutdown bubbles out of `Runner#execute_job` after the ensure block completes.
@@ -317,7 +317,7 @@ D10. Continuing the `around_perform` middleware chain core:
 D11. Continuing `run_hooked_perform`:
   - HOOKS: Continuing `around_perform` middleware, portions after yield (safe in this variant because the job is already failed — errors propagate to `perform_job`'s rescue, get logged as post-resolution, and the lifecycle continues at D12 below).
   - FLAG CLEARED: `Job#_allow_status_changes!`.
-  - `handle_success(job, result, configuration)` exits early (no-op) because `!job.ready?`.
+  - `handle_success(job, result, config)` exits early (no-op) because `!job.ready?`.
 
 D12. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
@@ -337,6 +337,8 @@ Runner continues to the next job.
 
 The categories below trace what happens at the boundaries of the four typical-lifecycle variants. Sub-variants that differ only by originating site cross-link to a shared trace rather than duplicating prose — same convention as Variants A–D's "errors jump to Variant C" / "errors come in at C10 from A/B" cross-links.
 
+**The Shutdown-path gap (not yet traced).** Every variant above enters through `Runner#execute_job`, whose ensure stamps `executed_at` and fires `on_job_executed`. A job that is activated but never executed skips both, and there is no trace here for that shape yet. Two routes reach it: `handle_shutdown_job`, which fails an in-hand job outright when `stopping?` (the polling loop, the inline stream, the buffer consumer, the hybrid drain, and the shutdown buffer sweep all call it); and `Streaming#kill!`, which clears the buffer, so those jobs are neither failed nor observed — they simply wait out their activation timeout engine-side. Both fire `on_job_activated` first, so **`on_job_activated` does not imply a matching `on_job_executed`** — a gauge paired across the two leaks by the in-hand count on every stop. Tracing these paths properly, and deciding whether the pairing should instead be made to hold, is open work.
+
 ### E. `Busybee::Worker::Shutdown` propagation
 
 `Busybee::Worker::Shutdown` (a `Busybee::Error` < `StandardError`) signals that the worker process is unhealthy and must terminate. It propagates past every safe layer — both `Hooks.run(safe:)` and `Chain.build_safe` rescue Shutdown specifically and re-raise it (`hooks/chain.rb:45–46`; the explicit `rescue Busybee::Worker::Shutdown; raise` in `Hooks.run`). Once Shutdown leaves `Runner#execute_job`, it bubbles to the Runner's run loop and terminates the runner thread.
@@ -351,7 +353,7 @@ TIMESTAMP: perform_finished_at
 -- status changes prevented --
 -- around_perform middleware post-yield NOT run (unsafe — Shutdown propagates) --
 -- status changes allowed --
--- error captured to Job (early, via underlying_error unwrap of Shutdown.cause) --
+-- error captured to Job (early, via Shutdown.unwrap -> Shutdown.cause) --
 -- autofail attempted (if fail_job_on_error and ready?) --
 GRPC: job failed (engine sees Shutdown.cause)
 TIMESTAMP: resolved_at
@@ -372,8 +374,8 @@ HOOK: on_job_executed (safe)
   - The error is rescued by `perform_job`'s `rescue StandardError` (Shutdown < StandardError).
   - `handle_perform_exception(job, shutdown)`:
     - FLAG CLEARED: `Job#_allow_status_changes!`.
-    - EARLY ERROR CAPTURE: `resolution.set_error(underlying_error(shutdown))` — captures `shutdown.cause` (not the wrapper). See E5.
-    - `handle_failure` → `attempt_auto_fail` → `job.fail!(underlying_error(shutdown), backoff: configuration.backoff)` (when `fail_job_on_error` and `job.ready?`):
+    - EARLY ERROR CAPTURE: `resolution.set_error(Shutdown.unwrap(shutdown))` — captures `shutdown.cause` (not the wrapper). See E5.
+    - `handle_failure` → `attempt_auto_fail` → `job.fail!(Shutdown.unwrap(shutdown), backoff: config.fail_job_backoff)` (when `fail_job_on_error` and `job.ready?`):
       - GRPC CALL: `client.fail_job(key, message, retries: <count - 1>, backoff: backoff)`. **Workflow engine now sees the job as failed with the Shutdown's underlying cause, one retry drained.**
       - TIMESTAMP: `resolved_at`.
       - STATUS CHANGE: `Resolution#resolve_to(:failed)` → `@status = :failed`.
@@ -414,13 +416,13 @@ Important asymmetry: in the perform-side path, **autofail runs before the Shutdo
   - `on_job_executed`: raised inside `Runner#execute_job`'s ensure, after the runner-level safe around chain already completed. `executed_at` and the counter/status updates both happened before this point. Shutdown propagates past the receive path into the Runner's run loop.
   - `around_job_execution`: raised inside the runner-level safe around chain. `Chain.build_safe` re-raises Shutdown. Same downstream as E1's tail (Shutdown exits `Runner#execute_job` after the ensure runs).
 
-**E5 (callout on C12).** `underlying_error`'s Shutdown unwrap.
+**E5 (callout on C12).** What `Shutdown.unwrap` hands the engine.
 
-  When `attempt_auto_fail` (or `handle_perform_exception`'s early-capture step) is called with a Shutdown wrapping a cause, `underlying_error(shutdown)` returns `shutdown.cause` (or the Shutdown itself if no cause is set). This is what `fail_job` sends to the engine and what `set_error` captures on Resolution. The Shutdown wrapper is the framework's internal signal for "tear down the worker"; the engine and Resolution see the underlying cause. (See E3 for the inverse direction: the wrap site that creates the Shutdown in the first place.)
+  When `attempt_auto_fail` (or `handle_perform_exception`'s early-capture step) is called with a Shutdown wrapping a cause, `Shutdown.unwrap(shutdown)` returns `shutdown.cause` (or the Shutdown itself if no cause is set). This is what `fail_job` sends to the engine and what `set_error` captures on Resolution. The Shutdown wrapper is the framework's internal signal for "tear down the worker"; the engine and Resolution see the underlying cause. (See E3 for the inverse direction: the wrap site that creates the Shutdown in the first place.)
 
 ### F. `Busybee::StatusChangeOutsidePerform` flag-catch
 
-`Busybee::StatusChangeOutsidePerform` (a `Busybee::Error` < `StandardError`) is raised by `Job#check_status_change_allowed!` when `complete!` / `fail!` / `throw_bpmn_error!` is called while `Job#_status_changes_prevented` is set — i.e., from a hook surface that shouldn't be resolving the job. Like Shutdown, it's caught by `perform_job`'s `rescue StandardError` and explicitly re-raised past `handle_perform_exception` (C13's `raise if exception.is_a?(Busybee::StatusChangeOutsidePerform)`). Unlike Shutdown, the runner-level `Chain.build_safe` does NOT specifically re-raise it — `StatusChangeOutsidePerform` falls into the generic `rescue StandardError` branch and is logged-and-swallowed there. The runner continues to the next job; the worker process is not terminated.
+`Busybee::StatusChangeOutsidePerform` (a `Busybee::Error` < `StandardError`) is raised by `Job#check_status_change_allowed!` when `complete!` / `fail!` / `throw_bpmn_error!` is called while the prevention flag is set (`Job#_prevent_status_changes!` sets it, `Job#_allow_status_changes!` clears it) — i.e., from a hook surface that shouldn't be resolving the job. Like Shutdown, it's caught by `perform_job`'s `rescue StandardError` and explicitly re-raised past `handle_perform_exception` (C13's `raise if exception.is_a?(Busybee::StatusChangeOutsidePerform)`). Unlike Shutdown, the runner-level `Chain.build_safe` does NOT specifically re-raise it — `StatusChangeOutsidePerform` falls into the generic `rescue StandardError` branch and is logged-and-swallowed there. The runner continues to the next job; the worker process is not terminated.
 
 The flag's state across the lifecycle:
 
@@ -460,7 +462,7 @@ HOOK: on_job_executed (safe)
   - `handle_perform_exception(job, scop)`:
     - FLAG CLEARED: `Job#_allow_status_changes!`.
     - EARLY ERROR CAPTURE: `resolution.set_error(scop)` (no Shutdown unwrap; SCOP is not Shutdown-class).
-    - `handle_failure` → `attempt_auto_fail` → `job.fail!(scop, backoff: configuration.backoff)` (when `fail_job_on_error` and `job.ready?` — true here, since no perform-side resolution ran):
+    - `handle_failure` → `attempt_auto_fail` → `job.fail!(scop, backoff: config.fail_job_backoff)` (when `fail_job_on_error` and `job.ready?` — true here, since no perform-side resolution ran):
       - GRPC CALL: `client.fail_job(key, "[Busybee::StatusChangeOutsidePerform] <message>", retries: <count - 1>, backoff: backoff)`. **Workflow engine now sees the misuse as the failure reason, one retry drained.**
       - TIMESTAMP: `resolved_at`.
       - STATUS CHANGE: `Resolution#resolve_to(:failed)` → `@status = :failed`.
@@ -604,8 +606,8 @@ Begins as B8–B9 and ends as C10–C15; what's distinctive is the state carried
     - GRPC CALL: `client.complete_job(key, vars: ...)` raises `Busybee::GRPC::Error`. Engine still sees the job as activated; `resolve!(:complete)` never runs; the job remains `:ready`.
   - The GRPC::Error raises out of `complete!` at its perform call site, aborting the remainder of `instance.perform`. From here **the trace continues as Variant C from C8** ("instance.perform raises StandardError" — here, the GRPC::Error): `perform_finished_at` stamps, the flag re-sets, `around_perform` post-yield middleware does NOT run, and the error lands at C10.
   - Distinctive state at C10 (vs. plain Variant C):
-    - EARLY ERROR CAPTURE: `resolution.set_error(grpc_error)` — captures the *GRPC error* (`underlying_error` passes non-Shutdown errors through). **Both axes are now set: the result perform intended to deliver, and the error that blocked delivery.** `after_perform` hooks can read both.
-    - `handle_failure`: the job is still `ready?` (the manual complete never resolved), so `attempt_auto_fail` runs — `job.fail!(grpc_error, backoff: configuration.backoff)`:
+    - EARLY ERROR CAPTURE: `resolution.set_error(grpc_error)` — captures the *GRPC error* (`Shutdown.unwrap` passes non-Shutdown errors through). **Both axes are now set: the result perform intended to deliver, and the error that blocked delivery.** `after_perform` hooks can read both.
+    - `handle_failure`: the job is still `ready?` (the manual complete never resolved), so `attempt_auto_fail` runs — `job.fail!(grpc_error, backoff: config.fail_job_backoff)`:
       - Inside `fail!`: `resolution.set_error(...)` — silent no-op (set-once on the error axis).
       - GRPC CALL: `client.fail_job(key, "[Busybee::GRPC::Error] ...", retries: <count - 1>, backoff: backoff)`.
       - **Isolated transient** (this `fail_job` succeeds): the engine records the failure — one retry drained — and re-yields the job after the backoff. The engine never learns the result hash, so the completed work is retried wholesale (an idempotency point for perform authors); the worker-side Job carries both result and error. `resolved_at` stamps; STATUS CHANGE: → `:failed` (worker-side); `after_perform` fires at C14. An incident arises only once the retry budget exhausts.
@@ -626,8 +628,8 @@ Same shape as G2 with fail-side specifics. Begins at D8: `resolution.set_error(e
 Distinctive state at C10 (contrast G2):
 
   - EARLY ERROR CAPTURE: `resolution.set_error(grpc_error)` — **silent no-op.** The error axis already carries the user's intended error data from D8 (set-once). The Job permanently records what the worker meant to signal, not the transport failure that blocked it.
-  - `attempt_auto_fail` retries the fail with the *GRPC error*: `job.fail!(grpc_error, backoff: configuration.backoff)` — its internal `set_error` no-ops again.
-  - **Isolated transient** (this `fail_job` succeeds): the engine records the failure — one retry drained — and re-yields after the backoff. The engine's failure message is the GRPC error's (`"[Busybee::GRPC::Error] ..."`) — the engine recording the transport failure is intentional signal for external monitoring, not noise — while the Job's error axis carries the user's original `fail!` data. The user's original `retries:`/`backoff:` arguments are silently dropped on autofail recovery (they live nowhere on the Job; autofail substitutes `configuration.backoff` and the standard decrement).
+  - `attempt_auto_fail` retries the fail with the *GRPC error*: `job.fail!(grpc_error, backoff: config.fail_job_backoff)` — its internal `set_error` no-ops again.
+  - **Isolated transient** (this `fail_job` succeeds): the engine records the failure — one retry drained — and re-yields after the backoff. The engine's failure message is the GRPC error's (`"[Busybee::GRPC::Error] ..."`) — the engine recording the transport failure is intentional signal for external monitoring, not noise — while the Job's error axis carries the user's original `fail!` data. The user's original `retries:`/`backoff:` arguments are silently dropped on autofail recovery (they live nowhere on the Job; autofail substitutes `config.fail_job_backoff` and the standard decrement).
   - **Correlated outage** (this `fail_job` also fails): same tail as G3 — `:ready`, `after_perform` silent, activation timeout, engine re-yields with retries intact.
   - Result axis: unset. Perform aborted at the `fail!` call site, so — unlike a successful Variant D — there is no D10 partial-payload capture (`capture_chain_result` is bypassed by the propagating error).
   - C13 `shutdown_on` interaction: same as G2.

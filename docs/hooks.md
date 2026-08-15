@@ -232,7 +232,7 @@ on_job_executed             # the runner finished with the job — every exit pa
 | `before_perform` | after input validation, just before `perform` | `job` |
 | `around_perform` | wrapped immediately around `perform` | `job, perform` |
 | `after_perform` | when the perform envelope exits **with a settled outcome** | `job` |
-| `on_job_executed` | when the runner finishes with the job — unconditionally | `job` |
+| `on_job_executed` | when the runner finishes with a job it ran — on every exit path ([except a shutdown](#watching-the-system-lifecycle)) | `job` |
 
 **The `after_perform` firing condition is worth reading twice.** It fires only when the job actually resolved — completed, failed, or BPMN-errored, with the engine informed. If automatic failure is disabled, or the resolution gRPC call itself failed, the perform envelope exits *without* a settled outcome, `after_perform` stays silent, and the engine will eventually re-deliver the job. A hook that must observe every exit path belongs on `on_job_executed`.
 
@@ -269,7 +269,11 @@ config.on_job_activated { |job| Monitoring.job_arrived(job) }
 config.on_job_executed  { |job| Monitoring.job_finished(job) }
 ```
 
-`on_job_activated` fires before any buffer wait, so on a streaming worker the gap between the two is visible as `job.buffer_latency_ms`. `on_job_executed` fires on every exit path — success, failure, even a shutdown mid-drain — making it the reliable "this job is done occupying this worker" signal.
+`on_job_activated` fires before any buffer wait, so on a streaming worker the gap between the two is visible as `job.buffer_latency_ms`. `on_job_executed` then fires for every job the worker actually ran, on every exit path — completed, failed, or left unresolved because the resolution call itself failed.
+
+**The bracket doesn't close across a shutdown.** A job that was activated but never ran gets no `on_job_executed`: the drain fails those still in flight, and `kill!` discards whatever is still sitting in the buffer. So a gauge you increment on activation and decrement on execution leaks on every deploy, by however many jobs were in hand when the signal arrived. Reconcile from `on_worker_shutdown` — which does fire on every exit path — rather than relying on the pair.
+
+Whenever a job is buffered — the default on streaming and hybrid workers — the two fire on **different threads**. `on_job_activated` runs on the pump thread pulling jobs off the stream; every later hook runs on the thread that picks that job back out of the buffer. Anything thread-affine — a thread-local, an open span you meant to close, a connection checked out of a pool — will not survive the crossing. Hang it on [`job.context`](#reading-the-job) instead, which travels with the job. (Polling workers, and streaming workers configured `buffer: false`, activate and execute on one thread; `job.buffered?` tells you which case you're in.)
 
 ### Reading the Job
 
@@ -446,10 +450,14 @@ What happens when a hook itself raises an error depends on the hook's character:
 
 Every swallowed error is logged with its class, message, and origin, so a broken hook is visible without being fatal.
 
+The swallow covers `StandardError`, which is every error you would normally raise or rescue. It deliberately does not cover the rest of Ruby's exception hierarchy: a `NoMemoryError` or a `SystemStackError` from an observation hook propagates like any other, because a process in that condition should not have its symptoms suppressed by a metrics call.
+
 Two deliberate exceptions to the swallowing:
 
 - **`Busybee::Worker::Shutdown` always propagates**, from any hook — including the observing ones. Raising it is the supported way for a hook to declare the worker unhealthy.
 - **Errors matching `shutdown_on` escalate to a graceful shutdown**, from any hook — a hook that detects a dead database connection gets the same treatment as a `perform` that does. The demo app uses exactly this to simulate rolling restarts from an `around_perform` hook.
+
+  Escalation reads the *worker's* `shutdown_on` list plus the gem-wide [`Busybee.shutdown_on_errors`](configuration.md#shutdown_on_errors). Call hooks have no worker to read — a client call can be made from a web request or a background job, where "shut this worker down" means nothing — so only the gem-wide list escalates from `before_call`, `around_call`, and `after_call`. Put an error class in `Busybee.shutdown_on_errors` if you want it to escalate from anywhere.
 
 ## Hooks and Threads: Own What You Spawn
 
