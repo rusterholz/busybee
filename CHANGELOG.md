@@ -54,6 +54,8 @@
   - `grpc_retry_delay` and `buffer_throttle` had the opposite fault, and only when set with an `ActiveSupport::Duration`: `grpc_retry_delay = 0.5.seconds` retried after half a *millisecond*. Both now honour a `Duration` exactly as they honour a number
   - A sub-second `Duration` no longer rounds to zero on its way to a wait, so `0.25.seconds` means a quarter second rather than no pause at all
 
+- **Extending a Job's Lock in a Test Accepts a Duration** – the testing module's `update_timeout` read an `ActiveSupport::Duration` as a bare number, so `job.update_timeout(5.minutes)` asked the engine for 300 *milliseconds* and the lock lapsed immediately. It now reads a length of time the way everything else in the gem does
+
 ### Breaking Changes:
 
 - **Testing helper `publish_message` parameters renamed** – `variables:` is now `vars:` and `ttl_ms:` is now `ttl:` to match `Client#publish_message` naming. `ttl:` now accepts both Integer (milliseconds) and `ActiveSupport::Duration`
@@ -64,6 +66,7 @@
   - The worker DSL's `backoff` → `fail_job_backoff`, matching `Busybee.default_fail_job_backoff` and distinguishing it from `backpressure_delay`, which is also a backoff and means something else entirely. The YAML key moves with it; `fail_job(backoff:)` and `job.fail!(backoff:)` are unchanged
 - **Testing helper `zeebe_available?(timeout:)` is now `zeebe_available?(wait:)`** – `wait:` is the one parameter name in Busybee that means seconds, and it is reserved for the test helpers that pause your own process. Everything else, including `activate_job(timeout:)` and `publish_message(ttl:)` alongside it, is milliseconds
 - **Strict output validation enabled by default** – Workers with `complete_job_on_success` or manual `complete!` calls will raise `Busybee::UndeclaredOutput` if `perform` returns keys not declared as `output`. Add `strict_outputs false` to workers that intentionally return ad-hoc keys
+- **Testing helpers keep their own timings instead of reading your configuration** – `activate_job` and `activate_jobs` waited for `Busybee.default_polling_request_timeout`, so a suite inherited whatever long-poll you had sized for production, and a spec looking for a job that was never coming sat through the whole minute. Waiting is now the harness's own call — `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5 seconds), alongside `ACTIVATE_JOB_LOCK_MS` (30 seconds) and `PUBLISH_MESSAGE_TTL_MS` (5 seconds) — so no test environment has to override production settings to get sensible test behavior. Every one is still overridable per call; pass `timeout:` where an example genuinely needs to wait longer
 
 ## v0.3.0 (2026-03-13)
 

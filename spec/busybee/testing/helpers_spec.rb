@@ -194,6 +194,38 @@ RSpec.describe Busybee::Testing::Helpers do
         helper.activate_job("missing-task")
       end.to raise_error(Busybee::Testing::NoJobAvailable, /No job of type 'missing-task' available/)
     end
+
+    # The harness owns its timings. A suite shouldn't inherit a production
+    # long-poll just because the initializer setting one is loaded in test.
+    it "polls for the harness default, not the configured production timeout" do
+      Busybee.default_polling_request_timeout = 45_000
+
+      helper.activate_job("my-task")
+
+      expect(mock_client).to have_received(:activate_jobs).with(
+        having_attributes(requestTimeout: 5_000)
+      )
+    ensure
+      Busybee.default_polling_request_timeout = nil
+    end
+
+    it "locks an activated job for the harness default, not the configured one" do
+      Busybee.default_job_timeout = 90_000
+
+      helper.activate_job("my-task")
+
+      expect(mock_client).to have_received(:activate_jobs).with(having_attributes(timeout: 30_000))
+    ensure
+      Busybee.default_job_timeout = nil
+    end
+
+    it "accepts an ActiveSupport::Duration as the request timeout" do
+      helper.activate_job("my-task", timeout: 2.seconds)
+
+      expect(mock_client).to have_received(:activate_jobs).with(
+        having_attributes(requestTimeout: 2_000)
+      )
+    end
   end
 
   describe "#activate_jobs" do

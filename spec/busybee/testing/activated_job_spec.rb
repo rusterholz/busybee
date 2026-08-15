@@ -234,5 +234,20 @@ RSpec.describe Busybee::Testing::ActivatedJob do
       )
       job.update_timeout(30_000)
     end
+
+    it "passes an Integer through as milliseconds" do
+      expect(client).to receive(:update_job_timeout).with( # rubocop:disable RSpec/MessageSpies
+        having_attributes(timeout: 30_000)
+      )
+      job.update_timeout(30_000)
+    end
+
+    # to_i on a Duration yields seconds, so this arrived a thousand times short.
+    it "converts an ActiveSupport::Duration to milliseconds" do
+      expect(client).to receive(:update_job_timeout).with( # rubocop:disable RSpec/MessageSpies
+        having_attributes(timeout: 300_000)
+      )
+      job.update_timeout(5.minutes)
+    end
   end
 end

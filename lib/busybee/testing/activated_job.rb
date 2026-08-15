@@ -2,6 +2,7 @@
 
 require "rspec/matchers"
 
+require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 
@@ -145,12 +146,12 @@ module Busybee
 
       # Update the job's timeout.
       #
-      # @param timeout [Integer] new timeout in milliseconds
+      # @param timeout [Integer, ActiveSupport::Duration] new timeout
       # @return [self]
       def update_timeout(timeout)
         request = Busybee::GRPC::UpdateJobTimeoutRequest.new(
           jobKey: key,
-          timeout: timeout.to_i
+          timeout: Busybee::Durations.milliseconds_from(timeout)
         )
         client.update_job_timeout(request)
         self

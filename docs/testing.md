@@ -45,18 +45,14 @@ Busybee.configure do |config|
 end
 ```
 
-Job activation timeouts used by the testing helpers default to `Busybee.default_polling_request_timeout` (see [Configuration](configuration.md)). You can override per-call or globally:
+Job activation waits default to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5 seconds) — the harness's own value, not your application's. Override it per call when an example wants something different:
 
 ```ruby
-# Per-call: pass timeout directly to the helper
 job = activate_job("my-task", timeout: 2000)
-jobs = activate_jobs("my-task", max_jobs: 5, timeout: 2000)
-
-# Globally: configure a shorter default for your test environment
-Busybee.configure do |config|
-  config.default_polling_request_timeout = 2000 # milliseconds, default: 60_000
-end
+jobs = activate_jobs("my-task", max_jobs: 5, timeout: 2.seconds)
 ```
+
+See [The harness picks its own timings](#the-harness-picks-its-own-timings) for why these helpers don't read your operational configuration.
 
 For authenticated cluster connections (TLS, OAuth, Camunda Cloud), configure credentials via `Busybee.configure` in your Rails `config/environments/test.rb` or equivalent. See [Providing Credentials](client.md#providing-credentials) for details.
 
@@ -65,6 +61,20 @@ For authenticated cluster connections (TLS, OAuth, Camunda Cloud), configure cre
 One parameter name in Busybee means seconds: **`wait:`**. It appears only on the helpers that pause your test process — [`assert_process_completed!`](#assert_process_completedwait-025) and [`zeebe_available?`](#zeebe_availablewait-5) — where seconds are the grain you actually think in, because the difference that matters is half a second versus ten, not 500ms versus 10,000ms.
 
 Everything else, here and throughout the gem, is a [duration](configuration.md#how-busybee-reads-durations): a bare number means milliseconds, and an `ActiveSupport::Duration` works anywhere. That includes the helpers sitting right next to those two — `activate_job(timeout:)` and `publish_message(ttl:)` both set real Zeebe duration fields, so they read like every other duration in the gem.
+
+### The harness picks its own timings
+
+Those durations have defaults, and the defaults belong to the harness rather than to your application's configuration:
+
+| Helper | Default | Constant |
+|--------|---------|----------|
+| `activate_job` / `activate_jobs` — `timeout:` | 5 s | `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` |
+| the lock an activated job holds | 30 s | `Busybee::Testing::ACTIVATE_JOB_LOCK_MS` |
+| `publish_message` — `ttl:` | 5 s | `Busybee::Testing::PUBLISH_MESSAGE_TTL_MS` |
+
+`Busybee.default_polling_request_timeout`, `Busybee.default_job_timeout`, and `Busybee.default_message_ttl` are operational settings — the ones you size for production load, in an initializer your test environment probably loads too. Inheriting them here would mean a suite that waits a full minute to find out a job was never coming, and would leave you to discover on your own that you need `Rails.env.test?` branches for reasons that have nothing to do with your app.
+
+Five seconds for a job is the razor behind these numbers: either you expect a job, and the engine produces it in well under a second, or you expect none and want to learn that promptly. A long poll serves neither. Pass `timeout:` or `ttl:` explicitly when a particular example needs something different.
 
 ## Helper Methods
 
@@ -194,7 +204,7 @@ Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAva
 
 **Parameters:**
 - `type` (String) - Job type to activate
-- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee.default_polling_request_timeout` (60,000ms)
+- `timeout` (Integer, ActiveSupport::Duration, optional) - How long to wait for a job. Defaults to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5,000ms) — see [The harness picks its own timings](#the-harness-picks-its-own-timings)
 
 **Returns:** `ActivatedJob` instance
 
@@ -218,7 +228,7 @@ Activates multiple jobs of the specified type.
 **Parameters:**
 - `type` (String) - Job type to activate
 - `max_jobs` (Integer) - Maximum number of jobs to activate
-- `timeout` (Integer, ActiveSupport::Duration, optional) - Request timeout in milliseconds. Defaults to `Busybee.default_polling_request_timeout` (60,000ms)
+- `timeout` (Integer, ActiveSupport::Duration, optional) - How long to wait for a job. Defaults to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5,000ms) — see [The harness picks its own timings](#the-harness-picks-its-own-timings)
 
 **Returns:** Enumerator of `ActivatedJob` instances
 
@@ -234,7 +244,7 @@ end
 
 ### Message Publishing
 
-#### `publish_message(name, correlation_key:, vars: {}, ttl: 5000)`
+#### `publish_message(name, correlation_key:, vars: {}, ttl: PUBLISH_MESSAGE_TTL_MS)`
 
 Publishes a message to Zeebe to trigger message intermediate catch events or message start events.
 
@@ -242,7 +252,7 @@ Publishes a message to Zeebe to trigger message intermediate catch events or mes
 - `name` (String) - Message name matching BPMN definition
 - `correlation_key` (String) - Key to correlate message with process instance
 - `vars` (Hash) - Message payload variables (optional, default: `{}`)
-- `ttl` (Integer, ActiveSupport::Duration) - Message time-to-live in milliseconds or as a Duration (optional, default: `5000`)
+- `ttl` (Integer, ActiveSupport::Duration) - Message time-to-live. Defaults to `Busybee::Testing::PUBLISH_MESSAGE_TTL_MS` (5,000ms) — see [The harness picks its own timings](#the-harness-picks-its-own-timings)
 
 **Example:**
 
@@ -630,7 +640,7 @@ RSpec.describe "Order Fulfillment Workflow" do
         publish_message(
           "shipment-approved",
           correlation_key: correlation_key,
-          variables: { approved_by: "manager@example.com", approved_at: Time.now.iso8601 }
+          vars: { approved_by: "manager@example.com", approved_at: Time.now.iso8601 }
         )
 
         # Verify shipment proceeds
