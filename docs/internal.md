@@ -66,6 +66,7 @@ lib/busybee/
 │   ├── helpers/
 │   │   ├── execution.rb     # build_test_job, execute_worker (unit testing workers)
 │   │   └── support.rb       # Private helper methods
+│   ├── timings.rb           # The harness's own duration defaults, not the gem's
 │   └── matchers/            # RSpec custom matchers
 │       ├── complete_job.rb  # expect(Worker).to complete_job(job).with_vars(...)
 │       ├── fail_job.rb      # expect(Worker).to fail_job(job).with_error(...)
@@ -607,6 +608,7 @@ A Call folds a **curated** correlation subset — not the carriers' full `contex
 - `testing/helpers.rb` — Integration test helpers (`deploy_process`, `with_process_instance`, `activate_job`, etc.) that talk to Zeebe via gRPC.
 - `testing/helpers/execution.rb` — Unit test helpers (`build_test_job`, `execute_worker`) that run the full `Worker.perform_job` lifecycle against stub doubles. Uses `instance_double(Busybee::Client)` for the stub client (verifiable) and plain `double` for the protobuf raw job (dynamic accessors prevent verification).
 - `testing/helpers/support.rb` — Private module-level helpers shared by integration test methods.
+- `testing/timings.rb` — The durations the harness defaults to, and the only place they are written down. Deliberately **not** `Busybee::Defaults`: those are operational settings an adopter sizes for production load, in an initializer the test environment usually loads too, so inheriting them would make a suite wait production lengths for nothing. Named after the helpers that read them (`ACTIVATE_JOB_TIMEOUT_MS`, not `DEFAULT_POLLING_REQUEST_TIMEOUT_MS`) to keep the two sets from being mistaken for each other.
 - `testing/matchers/` — Custom RSpec matchers for both integration and unit testing.
 
 ### Worker Unit Testing

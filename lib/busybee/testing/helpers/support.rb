@@ -6,6 +6,7 @@ require "securerandom"
 require "busybee/credentials"
 require "busybee/durations"
 require "busybee/grpc"
+require "busybee/testing/timings"
 
 module Busybee
   module Testing
@@ -44,13 +45,13 @@ module Busybee
         def activate_jobs_raw(type, max_jobs:, timeout: nil)
           worker = "#{type}-#{SecureRandom.hex(4)}"
 
-          request_timeout = timeout || Busybee.default_polling_request_timeout
+          request_timeout = timeout || Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS
           request_timeout_ms = Busybee::Durations.milliseconds_from(request_timeout)
 
           request = Busybee::GRPC::ActivateJobsRequest.new(
             type: type,
             worker: worker,
-            timeout: 30_000,
+            timeout: Busybee::Testing::ACTIVATE_JOB_LOCK_MS,
             maxJobsToActivate: max_jobs,
             requestTimeout: request_timeout_ms
           )

@@ -8,6 +8,7 @@ require "busybee/serialization"
 require "busybee/testing/activated_job"
 require "busybee/testing/helpers/execution"
 require "busybee/testing/helpers/support"
+require "busybee/testing/timings"
 
 module Busybee
   module Testing
@@ -155,8 +156,8 @@ module Busybee
       # Activate a single job of the given type.
       #
       # @param type [String] job type
-      # @param timeout [Integer, nil] request timeout in milliseconds
-      #   (defaults to Busybee.default_polling_request_timeout)
+      # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
+      #   for a job (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
       # @return [ActivatedJob]
       # @raise [NoJobAvailable] if no job is available
       def activate_job(type, timeout: nil)
@@ -170,8 +171,8 @@ module Busybee
       #
       # @param type [String] job type
       # @param max_jobs [Integer] maximum number of jobs to activate
-      # @param timeout [Integer, nil] request timeout in milliseconds
-      #   (defaults to Busybee.default_polling_request_timeout)
+      # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
+      #   for jobs (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
       # @return [Enumerator<ActivatedJob>]
       def activate_jobs(type, max_jobs:, timeout: nil)
         Enumerator.new do |yielder|
@@ -186,8 +187,9 @@ module Busybee
       # @param name [String] message name
       # @param correlation_key [String] correlation key
       # @param vars [Hash] message variables
-      # @param ttl [Integer, ActiveSupport::Duration] time-to-live (integer ms or Duration)
-      def publish_message(name, correlation_key:, vars: {}, ttl: 5000)
+      # @param ttl [Integer, ActiveSupport::Duration] time-to-live
+      #   (defaults to Testing::PUBLISH_MESSAGE_TTL_MS)
+      def publish_message(name, correlation_key:, vars: {}, ttl: PUBLISH_MESSAGE_TTL_MS)
         ttl_ms = Busybee::Durations.milliseconds_from(ttl)
         request = Busybee::GRPC::PublishMessageRequest.new(
           name: name,
