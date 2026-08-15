@@ -435,6 +435,7 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_backpressure_delay` | `Busybee.default_backpressure_delay` |
 | `config.x.busybee.default_input_required` | `Busybee.default_input_required` |
 | `config.x.busybee.default_output_required` | `Busybee.default_output_required` |
+| `config.x.busybee.default_strict_outputs` | `Busybee.default_strict_outputs` |
 | `config.x.busybee.shutdown_on_errors` | `Busybee.shutdown_on_errors` |
 
 **Credential configuration:**
@@ -612,6 +613,21 @@ Whether worker outputs are required by default.
 ```ruby
 Busybee.default_output_required = false
 ```
+
+#### `default_strict_outputs`
+
+Whether workers reject return keys they never declared as outputs. When enabled, a `perform` returning an undeclared key raises `Busybee::UndeclaredOutput` instead of writing an unexpected variable into the running process. Individual workers override with `strict_outputs true|false`; a worker that sets neither uses this value.
+
+| | |
+|--|--|
+| **Type** | Boolean |
+| **Default** | `true` |
+
+```ruby
+Busybee.default_strict_outputs = false  # undeclared return keys pass through to the engine
+```
+
+See [Strict Output Validation](workers.md#strict-output-validation) for what the check does and when it runs.
 
 #### `shutdown_on_errors`
 

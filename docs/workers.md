@@ -237,7 +237,7 @@ def perform
   job.headers                 # custom headers from BPMN definition, same format
 
   # Lifecycle (delegated — see Manual Lifecycle Control)
-  job.complete!(vars = {})    # mark job complete, with optional output variables
+  job.complete!(vars = {})    # mark job complete — skips output validation, see below
   job.fail!(error, retries: nil, backoff: nil)  # mark job failed
   job.throw_bpmn_error!(code, message = "")     # throw a BPMN error
   job.update_retries(count)   # change remaining retry count
@@ -261,6 +261,8 @@ job.variables["order_id"]         # hash access with string key
 job.variables.order_id            # method access
 job.variables.address.zip_code    # nested method access
 ```
+
+One asymmetry is worth knowing before you reach past the worker. `fail!` and `throw_bpmn_error!` are plain delegations, but `complete!` is not: the worker's own `complete!` checks your declared outputs first — required ones present, undeclared ones absent — and only then completes the job. `job.complete!` performs neither check and sends whatever you hand it. Prefer the worker's `complete!` unless you specifically want to bypass the contract; see [Strict Output Validation](#strict-output-validation).
 
 Most of the time, you won't need to reach for `job` directly — input accessors give you named, validated methods for reading data, and the lifecycle delegations (`complete!`, `fail!`, etc.) read more naturally without the `job.` prefix. But the job object is there when you need metadata, status checks, or raw data access.
 
@@ -374,6 +376,43 @@ Note that if `perform` returns nothing at all (or returns anything other than a 
 | `description:` | String | `nil` | Human-readable description |
 
 > \* The default value of `required` can be switched for your entire app if desired, allowing you to disable the raise-on-missing behavior. See the [configuration](./configuration.md) document.
+
+#### Strict Output Validation
+
+`MissingOutput` catches what your worker forgot to return. Strict output validation catches the opposite: keys it returned that nobody declared. It is **on by default**, so a `perform` that returns an undeclared key raises `Busybee::UndeclaredOutput` rather than quietly writing an unexpected variable into the running process:
+
+```ruby
+class CreateShipmentWorker < Busybee::Worker
+  output :shipment_id, type: :uuid
+
+  def perform
+    shipment = Shipment.create!(order_id: order_id)
+
+    { shipment_id: shipment.id, debug_info: shipment.inspect }
+  end
+end
+
+# Busybee::UndeclaredOutput: Undeclared outputs for create_shipment worker:
+# :debug_info. Declare with `output :name` or set `strict_outputs false`
+```
+
+The error message names your two options. Either the key belongs in the contract — declare it with `output` and the process can rely on it — or it doesn't, and it shouldn't be crossing the wire. The failure mode this prevents is a scratch value written into a process instance where a downstream FEEL expression or gateway condition can silently pick it up.
+
+Workers that deliberately return open-ended data can opt out:
+
+```ruby
+class ReportWorker < Busybee::Worker
+  strict_outputs false        # this worker returns whatever the report produced
+
+  def perform
+    { rows: 41, generated_at: Time.now.iso8601, elapsed_ms: 812 }
+  end
+end
+```
+
+To opt out everywhere, set [`Busybee.default_strict_outputs = false`](configuration.md#default_strict_outputs). A worker's own `strict_outputs` always wins over the gem-level default.
+
+Validation runs on automatic completion and on the worker's own `complete!`. Reaching past the worker to `job.complete!` bypasses both output checks — see [Direct Job Access](#direct-job-access).
 
 ### Input/Output Types
 
@@ -501,6 +540,7 @@ See [Worker Modes](#worker-modes) for what these options mean and when to use ea
 | `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | `2_000` | Delay after backpressure error (ms) |
 | `complete_job_on_success` | Boolean | `true` | Auto-complete on success |
 | `fail_job_on_error` | Boolean | `true` | Auto-fail on exception |
+| `strict_outputs` | Boolean | `Busybee.default_strict_outputs` (`true`) | Raise [`UndeclaredOutput`](#strict-output-validation) on undeclared return keys |
 | `shutdown_on` | Exception class(es) | `[]` | Exceptions that trigger shutdown |
 
 ---
