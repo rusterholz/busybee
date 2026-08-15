@@ -54,6 +54,8 @@
   - `grpc_retry_delay` and `buffer_throttle` had the opposite fault, and only when set with an `ActiveSupport::Duration`: `grpc_retry_delay = 0.5.seconds` retried after half a *millisecond*. Both now honour a `Duration` exactly as they honour a number
   - A sub-second `Duration` no longer rounds to zero on its way to a wait, so `0.25.seconds` means a quarter second rather than no pause at all
 
+- **Extending a Job's Lock in a Test Accepts a Duration** – the testing module's `update_timeout` read an `ActiveSupport::Duration` as a bare number, so `job.update_timeout(5.minutes)` asked the engine for 300 *milliseconds* and the lock lapsed immediately. It now reads a length of time the way everything else in the gem does
+
 ### Breaking Changes:
 
 - **Testing helper `publish_message` parameters renamed** – `variables:` is now `vars:` and `ttl_ms:` is now `ttl:` to match `Client#publish_message` naming. `ttl:` now accepts both Integer (milliseconds) and `ActiveSupport::Duration`
