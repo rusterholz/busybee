@@ -88,19 +88,13 @@ module Busybee
     end
 
     # True if stop! has been called.
-    def stopping?
-      !@stop_reason.get.nil?
-    end
+    def stopping? = !@stop_reason.get.nil?
 
     # True if run! is actively executing.
-    def running?
-      @running.true?
-    end
+    def running? = @running.true?
 
     # Force shutdown. Base: stop with :kill. Multi overrides to also kill the pool.
-    def kill!
-      stop!(reason: :kill)
-    end
+    def kill! = stop!(reason: :kill)
 
     class << self
       # Factory method. Resolves worker mode via RuntimeConfig and returns
@@ -295,16 +289,12 @@ module Busybee
     # Current depth of this runner's job buffer, or nil if the runner has no
     # buffer (Polling). Subclasses with a buffer override. The buffer-depth
     # gauge — read into Worker::Status for worker- and job-hook visibility.
-    def current_buffer_size
-      nil
-    end
+    def current_buffer_size = nil
 
     # Lifetime high-water mark of this runner's job buffer, or nil if the runner
     # has no buffer (Polling). Buffering subclasses override. Read into
     # Worker::Status alongside current_buffer_size.
-    def peak_buffer_size
-      nil
-    end
+    def peak_buffer_size = nil
   end
 end
 
