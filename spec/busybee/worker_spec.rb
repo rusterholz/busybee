@@ -53,8 +53,8 @@ RSpec.describe Busybee::Worker do
 
       expect { worker.perform_job(job) }.to raise_error(Exception, "weird")
 
-      # If the defensive _allow_status_changes! in perform_job's ensure didn't
-      # fire, this would raise Busybee::StatusChangeOutsidePerform.
+      # If the prevented region didn't restore on its way out, this would
+      # raise Busybee::StatusChangeOutsidePerform.
       expect { job.complete!(processed: true) }.not_to raise_error
     end
 
@@ -1130,6 +1130,23 @@ RSpec.describe Busybee::Worker do
 
         worker.perform_job(job)
         expect(received_job.status).to eq(:complete)
+      end
+
+      # after_perform only fires on a resolved job, so an attempt to resolve
+      # from here would trip the already-handled guard anyway. It is guarded
+      # explicitly regardless: the resolvedness is a property of today's
+      # firing condition, not a promise the guard should be leaning on.
+      it "prevents status changes, rather than leaning on the job being resolved already" do
+        raised = nil
+        Busybee.after_perform do |job|
+          job.complete!({ late: true })
+        rescue StandardError => e
+          raised = e
+        end
+
+        performing_worker.perform_job(job)
+
+        expect(raised).to be_a(Busybee::StatusChangeOutsidePerform)
       end
 
       it "receives the same Job as before_perform (it's the same Job object)" do

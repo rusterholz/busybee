@@ -451,6 +451,120 @@ RSpec.describe Busybee::Runner do
     end
   end
 
+  describe "resolve guard over the runner's job hooks (private)" do
+    let(:worker_class) do
+      Class.new do
+        def self.name
+          "TestWorker"
+        end
+
+        def self.perform_job(_job); end
+      end
+    end
+
+    before do
+      allow(worker_class).to receive(:perform_job)
+      allow(client).to receive(:complete_job)
+    end
+
+    after { Busybee::Hooks.reset! }
+
+    # These four sites fire safe:, so the guard's error is logged and swallowed
+    # like any other hook error — the claim that matters is that the engine was
+    # never told, not that the hook saw an exception.
+    it "prevents on_job_activated from resolving the job" do
+      Busybee.on_job_activated { |job| job.complete!(sneaky: true) }
+
+      runner.send(:activate_job, job, source: :poll)
+
+      aggregate_failures do
+        expect(job).to be_ready
+        expect(client).not_to have_received(:complete_job)
+      end
+    end
+
+    it "prevents around_job_execution from resolving the job before it yields" do
+      Busybee.around_job_execution do |job, process|
+        job.complete!(sneaky: true)
+        process.call
+      end
+
+      runner.send(:execute_job, job)
+
+      aggregate_failures do
+        expect(job).to be_ready
+        expect(client).not_to have_received(:complete_job)
+      end
+    end
+
+    it "prevents around_job_execution from resolving the job after it yields" do
+      Busybee.around_job_execution do |job, process|
+        process.call
+        job.complete!(sneaky: true)
+      end
+
+      runner.send(:execute_job, job)
+
+      aggregate_failures do
+        expect(job).to be_ready
+        expect(client).not_to have_received(:complete_job)
+      end
+    end
+
+    it "prevents on_job_executed from resolving the job" do
+      Busybee.on_job_executed { |job| job.complete!(sneaky: true) }
+
+      runner.send(:execute_job, job)
+
+      aggregate_failures do
+        expect(job).to be_ready
+        expect(client).not_to have_received(:complete_job)
+      end
+    end
+
+    it "stops the hook with StatusChangeOutsidePerform, which the safe-hook policy then swallows" do
+      raised = nil
+      Busybee.on_job_activated do |job|
+        job.complete!(sneaky: true)
+      rescue StandardError => e
+        raised = e
+      end
+
+      runner.send(:activate_job, job, source: :poll)
+
+      expect(raised).to be_a(Busybee::StatusChangeOutsidePerform)
+    end
+
+    it "leaves the job resolvable once the runner is done with it" do
+      runner.send(:execute_job, job)
+
+      expect { job.complete!(later: true) }.not_to raise_error
+    end
+
+    # A worker that returns from perform and resolves from a background thread
+    # is advanced but sanctioned. The guard must not reach that thread — even
+    # when it finishes while the runner is still inside its own bracket.
+    it "does not reach a thread perform handed the work to" do
+      outcome = nil
+      deferred = nil
+      allow(worker_class).to receive(:perform_job) do |activated|
+        deferred = Thread.new do
+          activated.complete!(deferred: true)
+          outcome = :resolved
+        rescue StandardError => e
+          outcome = e
+        end
+      end
+      # Joining from on_job_executed lands the deferred resolution squarely
+      # inside the runner's prevented region — the race, made deterministic.
+      Busybee.on_job_executed { deferred.join }
+
+      runner.send(:execute_job, job)
+
+      expect(outcome).to be(:resolved)
+    end
+  end
+
   describe "#execute_job ambient worker context (private)" do
     let(:worker_class) do
       Class.new do

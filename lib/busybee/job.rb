@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
+require "concurrent"
 
 require "busybee/client/call"
 require "busybee/durations"
@@ -71,7 +72,10 @@ module Busybee
       @resolution = Resolution.new
       @context = Context.new
       @timestamps = Timestamps.new
-      @status_changes_prevented = false
+      # Per-job AND per-thread: the guard is about what the thread holding the
+      # job is currently doing, so it follows the runner's thread through the
+      # hook fires and never reaches a thread perform handed work to.
+      @status_changes_prevented = Concurrent::ThreadLocalVar.new(false)
     end
 
     # Route a kwargs hash through the Job's typed POROs. Activation-owned
@@ -114,17 +118,17 @@ module Busybee
         merge(@context.logging_context)
     end
 
-    # Prevent status changes during hook execution.
+    # Run a region in which the job cannot be resolved — every hook fire.
+    # #bind saves and restores rather than setting and clearing, because the
+    # regions nest: the runner's bracket around around_job_execution contains
+    # the worker's bracket around the perform triple, which contains perform.
     # @api private
-    def _prevent_status_changes!
-      @status_changes_prevented = true
-    end
+    def _with_status_changes_prevented(&) = @status_changes_prevented.bind(true, &)
 
-    # Re-enable status changes (before perform, on rescue entry).
+    # Run a region in which the job may be resolved — perform, and the
+    # automatic resolution the worker performs on its behalf.
     # @api private
-    def _allow_status_changes!
-      @status_changes_prevented = false
-    end
+    def _with_status_changes_allowed(&) = @status_changes_prevented.bind(false, &)
 
     # Number of retries remaining. Layers an override from update_retries on
     # top of the protobuf value.
@@ -266,7 +270,7 @@ module Busybee
     end
 
     def check_status_change_allowed!(operation)
-      return unless @status_changes_prevented
+      return unless @status_changes_prevented.value
 
       raise Busybee::StatusChangeOutsidePerform,
             "Cannot #{operation} job #{key} outside perform — " \
