@@ -499,7 +499,7 @@ Job is the authoritative lifecycle object — there is no separate "event" mirro
 - **`Job::Timestamps`** — monotonic + UTC stamp pairs and the duration projections derived from them (see below).
 - **`Job::Context`** — an opaque key/value bag for cross-hook scratch (the tracing-span use case above).
 
-Hooks cannot mutate framework state through the Job: there are no public writers for status/result, and status changes are gated during hook execution — a `complete!`/`fail!` issued from inside a hook raises `Busybee::StatusChangeOutsidePerform`.
+Hooks cannot mutate framework state through the Job: there are no public writers for status/result, and resolution is gated for the duration of every job-hook fire — a `complete!`/`fail!`/`throw_bpmn_error!` issued from inside any job hook raises `Busybee::StatusChangeOutsidePerform`. The gate is a pair of save-and-restore regions on Job (`_with_status_changes_prevented` / `_with_status_changes_allowed`) rather than a set/clear flag, because the regions nest: the Runner's bracket around `around_job_execution` contains the Worker's bracket around the perform triple, which contains perform itself. The state behind them is per-job *and* per-thread (a `Concurrent::ThreadLocalVar`), so the guard follows the thread running the hook and never reaches a thread `perform` handed work to — deferred resolution from a background thread stays legal. It covers resolution only: `update_timeout` and `update_retries` stay legal from hooks by design.
 
 Two cardinality-aware projections aggregate state across the POROs for instrumentation:
 
