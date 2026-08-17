@@ -203,10 +203,15 @@
       <bpmn:outgoing>Flow_BranchDToJoin2</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:sequenceFlow id="Flow_BranchDToJoin2" sourceRef="complete_driver_delivery" targetRef="para_merge" />
-    <bpmn:parallelGateway id="para_merge">
-      <bpmn:incoming>Flow_BranchDToJoin2</bpmn:incoming>
+    <bpmn:exclusiveGateway id="order_merge">
       <bpmn:incoming>Flow_FulfilledToMerge</bpmn:incoming>
       <bpmn:incoming>Flow_NotAllDelivered</bpmn:incoming>
+      <bpmn:outgoing>Flow_OrderMergeToJoin</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_OrderMergeToJoin" sourceRef="order_merge" targetRef="para_merge" />
+    <bpmn:parallelGateway id="para_merge">
+      <bpmn:incoming>Flow_BranchDToJoin2</bpmn:incoming>
+      <bpmn:incoming>Flow_OrderMergeToJoin</bpmn:incoming>
       <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
     </bpmn:parallelGateway>
     <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="para_merge" targetRef="end" />
@@ -214,8 +219,8 @@
       <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
     </bpmn:endEvent>
     <bpmn:sequenceFlow id="Flow_ToTransitGw" sourceRef="mark_shipment_in_transit" targetRef="first_shipment_in_transit" />
-    <bpmn:sequenceFlow id="Flow_NotAllDelivered" name="No" sourceRef="all_shipments_delivered" targetRef="para_merge" />
-    <bpmn:sequenceFlow id="Flow_FulfilledToMerge" sourceRef="mark_order_fulfilled" targetRef="para_merge" />
+    <bpmn:sequenceFlow id="Flow_NotAllDelivered" name="No" sourceRef="all_shipments_delivered" targetRef="order_merge" />
+    <bpmn:sequenceFlow id="Flow_FulfilledToMerge" sourceRef="mark_order_fulfilled" targetRef="order_merge" />
   </bpmn:process>
   <bpmndi:BPMNDiagram id="BPMNDiagram_1">
     <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="deliver_shipment">
@@ -285,13 +290,16 @@
       <bpmndi:BPMNShape id="Task_CompleteDriverDelivery_di" bpmnElement="complete_driver_delivery">
         <dc:Bounds x="1320" y="190" width="100" height="80" />
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ExclusiveGw_OrderMerge_di" bpmnElement="order_merge" isMarkerVisible="true">
+        <dc:Bounds x="1445" y="315" width="50" height="50" />
+      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="ParallelJoin2_di" bpmnElement="para_merge">
-        <dc:Bounds x="1465" y="205" width="50" height="50" />
+        <dc:Bounds x="1545" y="205" width="50" height="50" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="EndEvent_di" bpmnElement="end">
-        <dc:Bounds x="1552" y="212" width="36" height="36" />
+        <dc:Bounds x="1632" y="212" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="1547" y="253" width="47" height="40" />
+          <dc:Bounds x="1627" y="253" width="47" height="40" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Task_MarkOrderShipping_di" bpmnElement="mark_order_shipping">
@@ -399,24 +407,28 @@
       <bpmndi:BPMNEdge id="Flow_NotAllDelivered_di" bpmnElement="Flow_NotAllDelivered">
         <di:waypoint x="1250" y="365" />
         <di:waypoint x="1250" y="410" />
-        <di:waypoint x="1490" y="410" />
-        <di:waypoint x="1490" y="255" />
+        <di:waypoint x="1470" y="410" />
+        <di:waypoint x="1470" y="365" />
         <bpmndi:BPMNLabel>
           <dc:Bounds x="1255" y="379" width="15" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_FulfilledToMerge_di" bpmnElement="Flow_FulfilledToMerge">
         <di:waypoint x="1420" y="340" />
-        <di:waypoint x="1490" y="340" />
-        <di:waypoint x="1490" y="255" />
+        <di:waypoint x="1445" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_OrderMergeToJoin_di" bpmnElement="Flow_OrderMergeToJoin">
+        <di:waypoint x="1495" y="340" />
+        <di:waypoint x="1570" y="340" />
+        <di:waypoint x="1570" y="255" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_BranchDToJoin2_di" bpmnElement="Flow_BranchDToJoin2">
         <di:waypoint x="1420" y="230" />
-        <di:waypoint x="1465" y="230" />
+        <di:waypoint x="1545" y="230" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_ToEnd_di" bpmnElement="Flow_ToEnd">
-        <di:waypoint x="1515" y="230" />
-        <di:waypoint x="1552" y="230" />
+        <di:waypoint x="1595" y="230" />
+        <di:waypoint x="1632" y="230" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
