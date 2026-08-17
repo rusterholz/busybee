@@ -850,12 +850,11 @@ RSpec.describe Busybee::Job do
   end
 
   describe "status-change prevention" do
-    describe "#_prevent_status_changes!" do
+    describe "#_with_status_changes_prevented" do
       it "causes #complete! to raise StatusChangeOutsidePerform" do
         allow(client).to receive(:complete_job)
-        job._prevent_status_changes!
 
-        expect { job.complete! }.to raise_error(
+        expect { job._with_status_changes_prevented { job.complete! } }.to raise_error(
           Busybee::StatusChangeOutsidePerform,
           /outside perform/i
         )
@@ -863,9 +862,8 @@ RSpec.describe Busybee::Job do
 
       it "causes #fail! to raise StatusChangeOutsidePerform" do
         allow(client).to receive(:fail_job)
-        job._prevent_status_changes!
 
-        expect { job.fail!("boom") }.to raise_error(
+        expect { job._with_status_changes_prevented { job.fail!("boom") } }.to raise_error(
           Busybee::StatusChangeOutsidePerform,
           /outside perform/i
         )
@@ -873,9 +871,8 @@ RSpec.describe Busybee::Job do
 
       it "causes #throw_bpmn_error! to raise StatusChangeOutsidePerform" do
         allow(client).to receive(:throw_bpmn_error)
-        job._prevent_status_changes!
 
-        expect { job.throw_bpmn_error!(:some_code) }.to raise_error(
+        expect { job._with_status_changes_prevented { job.throw_bpmn_error!(:some_code) } }.to raise_error(
           Busybee::StatusChangeOutsidePerform,
           /outside perform/i
         )
@@ -883,19 +880,87 @@ RSpec.describe Busybee::Job do
 
       it "does not change status when raising" do
         allow(client).to receive(:complete_job)
-        job._prevent_status_changes!
 
-        expect { job.complete! rescue nil }.not_to change(job, :status) # rubocop:disable Style/RescueModifier
+        expect do
+          job._with_status_changes_prevented { job.complete! } rescue nil # rubocop:disable Style/RescueModifier
+        end.not_to change(job, :status)
+      end
+
+      it "restores the previous state on the way out, so the job is resolvable again" do
+        allow(client).to receive(:complete_job)
+        job._with_status_changes_prevented { nil }
+
+        expect { job.complete! }.not_to raise_error
+      end
+
+      it "restores the previous state even when the block raises a non-StandardError" do
+        allow(client).to receive(:complete_job)
+        expect do
+          job._with_status_changes_prevented { raise Exception, "weird" } # rubocop:disable Lint/RaiseException
+        end.to raise_error(Exception, "weird")
+
+        expect { job.complete! }.not_to raise_error
       end
     end
 
-    describe "#_allow_status_changes!" do
-      it "re-enables status changes after prevention" do
+    describe "thread scope" do
+      # The guard exists to stop a hook from resolving the job out from under
+      # the worker. It has no business reaching a thread perform handed work to:
+      # deferred resolution is a sanctioned (if advanced) pattern, and a hook
+      # that spawns a thread to resolve from is not one we set out to catch.
+      it "prevents only on the thread that engaged it" do
         allow(client).to receive(:complete_job)
-        job._prevent_status_changes!
-        job._allow_status_changes!
+        outcome = nil
 
-        expect { job.complete! }.not_to raise_error
+        job._with_status_changes_prevented do
+          Thread.new do
+            job.complete!(async: true)
+            outcome = :resolved
+          rescue StandardError => e
+            outcome = e
+          end.join
+        end
+
+        expect(outcome).to be(:resolved)
+      end
+
+      it "keeps each thread's regions independent" do
+        allow(client).to receive(:complete_job)
+        outcome = nil
+
+        # One thread allowing does not un-guard another thread that is preventing.
+        job._with_status_changes_allowed do
+          Thread.new do
+            job._with_status_changes_prevented { job.complete!(async: true) }
+          rescue StandardError => e
+            outcome = e
+          end.join
+        end
+
+        expect(outcome).to be_a(Busybee::StatusChangeOutsidePerform)
+      end
+    end
+
+    describe "#_with_status_changes_allowed" do
+      it "re-enables status changes inside a prevented region" do
+        allow(client).to receive(:complete_job)
+
+        expect do
+          job._with_status_changes_prevented do
+            job._with_status_changes_allowed { job.complete! }
+          end
+        end.not_to raise_error
+      end
+
+      it "restores prevention when the allowed region exits" do
+        allow(client).to receive(:complete_job)
+
+        expect do
+          job._with_status_changes_prevented do
+            job._with_status_changes_allowed { nil }
+            job.complete!
+          end
+        end.to raise_error(Busybee::StatusChangeOutsidePerform)
       end
     end
   end

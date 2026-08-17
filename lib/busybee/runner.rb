@@ -88,19 +88,13 @@ module Busybee
     end
 
     # True if stop! has been called.
-    def stopping?
-      !@stop_reason.get.nil?
-    end
+    def stopping? = !@stop_reason.get.nil?
 
     # True if run! is actively executing.
-    def running?
-      @running.true?
-    end
+    def running? = @running.true?
 
     # Force shutdown. Base: stop with :kill. Multi overrides to also kill the pool.
-    def kill!
-      stop!(reason: :kill)
-    end
+    def kill! = stop!(reason: :kill)
 
     class << self
       # Factory method. Resolves worker mode via RuntimeConfig and returns
@@ -255,7 +249,7 @@ module Busybee
       job.timestamps.stamp!(:activated_at)
       job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
       with_fresh_worker_status(job) do
-        Hooks.run(:on_job_activated, job, safe: true)
+        job._with_status_changes_prevented { Hooks.run(:on_job_activated, job, safe: true) }
       end
     end
 
@@ -278,8 +272,14 @@ module Busybee
     # @param job [Busybee::Job]
     def execute_job(job)
       with_fresh_worker_status(job) do
-        Hooks.run_chain(:around_job_execution, job, safe: true) do
-          @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
+        # Middleware brackets the work; only the work resolves. perform_job runs
+        # allowed so its own perform, auto-complete and autofail stay legal.
+        job._with_status_changes_prevented do
+          Hooks.run_chain(:around_job_execution, job, safe: true) do
+            job._with_status_changes_allowed do
+              @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
+            end
+          end
         end
       ensure
         # Runs even under run_chain's Shutdown re-raise, so the final activation
@@ -288,23 +288,21 @@ module Busybee
         job.timestamps.stamp!(:executed_at)
         @total_job_count.increment
         @failed_job_count.increment if job.failed?
-        with_fresh_worker_status(job) { Hooks.run(:on_job_executed, job, safe: true) }
+        with_fresh_worker_status(job) do
+          job._with_status_changes_prevented { Hooks.run(:on_job_executed, job, safe: true) }
+        end
       end
     end
 
     # Current depth of this runner's job buffer, or nil if the runner has no
     # buffer (Polling). Subclasses with a buffer override. The buffer-depth
     # gauge — read into Worker::Status for worker- and job-hook visibility.
-    def current_buffer_size
-      nil
-    end
+    def current_buffer_size = nil
 
     # Lifetime high-water mark of this runner's job buffer, or nil if the runner
     # has no buffer (Polling). Buffering subclasses override. Read into
     # Worker::Status alongside current_buffer_size.
-    def peak_buffer_size
-      nil
-    end
+    def peak_buffer_size = nil
   end
 end
 

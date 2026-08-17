@@ -56,6 +56,9 @@
 
 - **Extending a Job's Lock in a Test Accepts a Duration** – the testing module's `update_timeout` read an `ActiveSupport::Duration` as a bare number, so `job.update_timeout(5.minutes)` asked the engine for 300 *milliseconds* and the lock lapsed immediately. It now reads a length of time the way everything else in the gem does
 
+- **Hooks Can't Resolve a Job Out From Under Your Worker** – the guard that keeps `complete!`, `fail!`, and `throw_bpmn_error!` inside `perform` reached only `before_perform` and `around_perform`. From `on_job_activated`, `around_job_execution`, or `on_job_executed`, a resolution call went all the way to the engine — and `perform` then ran anyway, doing its work against a job the engine already considered finished, with automatic completion silently skipped and the worker's own `complete!` rejected as a duplicate. Every job hook is now covered, so a stray resolution raises `Busybee::StatusChangeOutsidePerform` and leaves the job exactly as it was, which is what the hook documentation has described all along. Adjusting a job short of resolving it — `update_timeout`, `update_retries` — is still yours to do from any hook
+  - The rule applies to the thread running the hook, so a worker that returns from `perform` and completes the job from a background thread is unaffected, whenever that thread finishes
+
 ### Breaking Changes:
 
 - **Testing helper `publish_message` parameters renamed** – `variables:` is now `vars:` and `ttl_ms:` is now `ttl:` to match `Client#publish_message` naming. `ttl:` now accepts both Integer (milliseconds) and `ActiveSupport::Duration`

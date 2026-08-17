@@ -257,7 +257,8 @@ Which of the two you want follows from the naming rule: a transaction belongs ar
 Rules of the middleware road:
 
 - **The return value is safe.** Your worker's result is harvested from the job itself, not from the chain's return value — middleware can't lose it by returning something else.
-- **Hooks can't resolve the job.** `complete!`, `fail!`, and `throw_bpmn_error!` are legal only inside `perform`; called from a hook they raise `Busybee::StatusChangeOutsidePerform`. Middleware shapes the *environment* of the work; the work itself decides the outcome.
+- **Hooks can't resolve the job.** `complete!`, `fail!`, and `throw_bpmn_error!` are legal only inside `perform`. Called from *any* job hook — middleware or observer, before the work or after it — they raise `Busybee::StatusChangeOutsidePerform` and leave the job exactly as they found it. What becomes of that error is the ordinary hook-error policy ([When Hooks Raise](#when-hooks-raise)): from `before_perform` or `around_perform` it fails the job, and from the observing hooks it is logged and swallowed. Middleware shapes the *environment* of the work; the work itself decides the outcome.
+- **Adjusting the job is still yours to do.** The guard is about the *outcome*, not the job as a whole — `update_timeout` and `update_retries` remain legal from every hook, so middleware that knows the work ahead is slow can buy it more time before yielding.
 - **`around_job_execution` is observing.** Errors it raises are logged and swallowed, and if it returns without calling `perform.call`, busybee logs a warning and runs the rest of the chain anyway — an observer can't silently cancel a job. `around_perform` is the propagating one: errors it raises fail the job (see [When Hooks Raise](#when-hooks-raise)).
 
 ### Watching the System Lifecycle
@@ -520,6 +521,8 @@ end
 ```
 
 The demo app's recorder uses this exact fold to keep its per-job records accurate for asynchronously-resolved jobs. A first-class resolution hook is planned alongside broader async-worker support in a future version; until then, `after_call` on the three resolution RPCs is the reliable signal.
+
+**The resolve guard won't get in your way here.** The rule that hooks can't resolve a job is scoped to the thread running the hook, so it never reaches a thread your `perform` handed work to. Your background thread can complete the job whenever it finishes — including while the runner is still working through `on_job_executed` for that same job — and it will land. Nothing is traded away for that: in that same moment, hook code running on the runner's own thread still can't resolve the job.
 
 ## Test Isolation
 

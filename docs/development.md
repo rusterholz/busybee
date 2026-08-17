@@ -327,12 +327,29 @@ The test starts the Docker stack at speed 30 for fast feedback, creates orders, 
 
 **Note:** The demo stack uses ports 26500 and 9200, which conflict with the gem's own Zeebe dev environment. Stop `rake zeebe:stop` first if it's running.
 
+### The Demo App's Own Spec Suite
+
+Separate from the smoke test, the demo has a spec suite of its own. It covers what matters from the *app's* perspective rather than the gem's — that the simulation's speed scaling behaves, that each BPMN process routes through its gateways and reaches its end event, that the workers map their inputs and outputs as the models expect:
+
+```bash
+cd spec/demo && bundle exec rspec
+```
+
+Run it whenever you refactor the demo or change how it exercises the gem. The smoke test and this suite check different things and neither substitutes for the other: the smoke test drives the real stack and asserts on **application** state (orders reach `fulfilled`, shipments delivered, drivers released), while the BPMN specs are the only thing that asserts a **process instance actually completes**. A process that deadlocks after its last service task will pass the smoke test and fail here.
+
+**Mind the skip.** The BPMN specs are tagged `:zeebe` and skip silently when Zeebe isn't reachable, so a green line can mean "everything passed" or "17 examples never ran." Start Zeebe first (`rake zeebe:start`) and check the example count — with Zeebe up the suite is substantially larger than without.
+
+### Why Neither Runs in CI
+
+CI runs the gem's unit and integration suites, not the demo's. The demo needs its own container stack — its images built, a database with persistence, web and worker services, health checks and startup ordering — which is a materially different environment from the rest of CI. That remains a deliberate call rather than an oversight, and it is the reason the local runs above carry real weight: **they are the only place this code is exercised at all.** Treat the smoke test as a required step of every pull request rather than an optional extra.
+
 ### Maintaining the Demo App
 
 The demo app should be kept current as busybee evolves. When adding new features to the gem:
 
 - **Update the demo app** to use and showcase new features where appropriate
 - **Run the smoke test** to verify existing functionality isn't broken
+- **Run the demo's spec suite** when you have refactored it or changed how it exercises the gem
 - **Update demo docs** (`spec/demo/README.md` and `spec/demo/docs/internal.md`) if behavior changes
 
 ## Regenerating GRPC Classes

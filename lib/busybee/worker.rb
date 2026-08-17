@@ -78,15 +78,12 @@ module Busybee
         rescue StandardError => e
           handle_perform_exception(job, e)
         ensure
-          # Defensive: ensure the status-change flag is cleared on every exit
-          # path, including non-StandardError exceptions that escape the rescue.
-          job._allow_status_changes!
           # Conditional on resolved?: after_perform marks the moment the lifecycle
           # reached a settled outcome the engine has on file. When the engine
           # didn't learn (autofail disabled, any GRPC fail mid-resolution), the
           # job will be re-yielded; per-attempt observability belongs to
           # on_job_executed (runner-level, unconditional).
-          Hooks.run(:after_perform, job, safe: true) if job.resolved?
+          job._with_status_changes_prevented { Hooks.run(:after_perform, job, safe: true) } if job.resolved?
         end
       end
 
@@ -124,7 +121,8 @@ module Busybee
       private
 
       def handle_perform_exception(job, exception)
-        job._allow_status_changes!
+        # No explicit re-allow: the prevented region unwound as the exception
+        # left it, so autofail runs at the ambient level, as handle_success does.
         # Capture early so after_perform hooks see the error attached to Job even
         # when autofail is disabled (fail_job_on_error: false) or autofail's
         # GRPC fails. fail!'s own set_error during autofail no-ops harmlessly.
@@ -139,20 +137,16 @@ module Busybee
       def run_hooked_perform(instance)
         job = instance.job
         validate_inputs!(instance, configuration)
-        job._prevent_status_changes!
-        Hooks.run(:before_perform, job)
-        result = Hooks.run_chain(:around_perform, job) do
-          job._allow_status_changes!
-          timed_perform(instance)
-        ensure
-          # Re-engage the flag so around_perform middleware's after-yield region
-          # can't resolve the job. The core block here is parsed as part of
-          # run_chain's block argument, so this ensure runs as the
-          # block exits — before middleware unwinds. Cleared again below
-          # for handle_success.
-          job._prevent_status_changes!
+        # One prevented region covers before_perform and both sides of
+        # around_perform's yield; the allowed region inside it is perform. Auto-
+        # complete sits outside, where the runner's own bracket has already
+        # allowed resolution for the duration of the core block.
+        result = job._with_status_changes_prevented do
+          Hooks.run(:before_perform, job)
+          Hooks.run_chain(:around_perform, job) do
+            job._with_status_changes_allowed { timed_perform(instance) }
+          end
         end
-        job._allow_status_changes!
         handle_success(job, result, configuration)
         result
       end
