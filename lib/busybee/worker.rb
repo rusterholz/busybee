@@ -67,7 +67,6 @@ module Busybee
       # @return [Hash, nil] the result returned by perform (as a HashWithIndifferentAccess)
       #   on success, or nil on the rescue path
       # @raise [Busybee::Worker::Shutdown] if a shutdown_on exception is caught
-      # @raise [Busybee::StatusChangeOutsidePerform] if a hook calls complete!/fail!/throw_bpmn_error!
       def perform_job(job)
         Client::Call.with_job(job) do # job window spans the whole chain: hooks, perform, autofail all fold it
           job.timestamps.stamp!(:execution_started_at)
@@ -78,12 +77,14 @@ module Busybee
         rescue StandardError => e
           handle_perform_exception(job, e)
         ensure
-          # Conditional on resolved?: after_perform marks the moment the lifecycle
-          # reached a settled outcome the engine has on file. When the engine
-          # didn't learn (autofail disabled, any GRPC fail mid-resolution), the
-          # job will be re-yielded; per-attempt observability belongs to
-          # on_job_executed (runner-level, unconditional).
-          job._with_status_changes_prevented { Hooks.run(:after_perform, job, safe: true) } if job.resolved?
+          # We settled, and we actually tried. resolved? is the original half:
+          # after_perform marks a settled outcome the engine has on file, so a
+          # job that will be re-yielded (autofail disabled, GRPC fail
+          # mid-resolution) doesn't get it. perform_started_at is the half that
+          # keeps the triple symmetric — whatever skips around_perform skips
+          # this too, so a short-circuited or invalid job gets none of the three.
+          # Per-attempt observability belongs to on_job_executed either way.
+          Hooks.run(:after_perform, job, safe: true) if job.resolved? && job.timestamps.perform_started_at
         end
       end
 
@@ -121,34 +122,49 @@ module Busybee
       private
 
       def handle_perform_exception(job, exception)
-        # No explicit re-allow: the prevented region unwound as the exception
-        # left it, so autofail runs at the ambient level, as handle_success does.
         # Capture early so after_perform hooks see the error attached to Job even
         # when autofail is disabled (fail_job_on_error: false) or autofail's
         # GRPC fails. fail!'s own set_error during autofail no-ops harmlessly.
         job.send(:resolution).set_error(Shutdown.unwrap(exception))
         handle_failure(job, exception, configuration)
-        raise if exception.is_a?(Shutdown) || exception.is_a?(Busybee::StatusChangeOutsidePerform)
+        raise if exception.is_a?(Shutdown)
         raise Shutdown.new(worker_class: self) if Shutdown.triggered_by?(exception, self)
 
         log_unhandled_error(job, exception) unless configuration.fail_job_on_error
       end
 
+      # Per-line-item gating: every step asks whether work is still on the table
+      # at the moment it arrives, not once on the way in. A hook that resolves
+      # the job therefore stops everything downstream of it — including the
+      # middleware that would otherwise wrap work no longer going to happen.
+      # The perform-like moments fire exactly when perform is attempted; an
+      # invalid job and a short-circuited one both skip the lot, and the system
+      # lifecycle hooks carry the observation instead.
       def run_hooked_perform(instance)
         job = instance.job
-        validate_inputs!(instance, configuration)
-        # One prevented region covers before_perform and both sides of
-        # around_perform's yield; the allowed region inside it is perform. Auto-
-        # complete sits outside, where the runner's own bracket has already
-        # allowed resolution for the duration of the core block.
-        result = job._with_status_changes_prevented do
-          Hooks.run(:before_perform, job)
-          Hooks.run_chain(:around_perform, job) do
-            job._with_status_changes_allowed { timed_perform(instance) }
+        validate_inputs!(instance, configuration) if job.ready?
+        Hooks.run(:before_perform, job) if job.ready?
+        result =
+          if job.ready?
+            Hooks.run_chain(:around_perform, job) { timed_perform(instance) if job.ready? }
           end
-        end
+        log_short_circuit(job)
         handle_success(job, result, configuration)
         result
+      end
+
+      # A hook resolved the job before perform could run. Reported here rather
+      # than at whichever gate first noticed: the gates are temporal, and
+      # skipping the around_perform chain means perform's own gate is never
+      # evaluated, so no single gate sees every short-circuit. Sits on the
+      # non-raising path, which is what separates a deliberate short-circuit
+      # from an invalid job — that one leaves by way of MissingInput.
+      def log_short_circuit(job)
+        return unless job.resolved? && job.timestamps.perform_started_at.nil?
+
+        Busybee.logger&.info(
+          "[busybee] Job #{job.key} was resolved by a hook before perform ran; perform skipped"
+        )
       end
 
       def timed_perform(instance)

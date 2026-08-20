@@ -53,8 +53,8 @@ RSpec.describe Busybee::Worker do
 
       expect { worker.perform_job(job) }.to raise_error(Exception, "weird")
 
-      # If the prevented region didn't restore on its way out, this would
-      # raise Busybee::StatusChangeOutsidePerform.
+      # A non-StandardError escapes perform_job without resolving the job, so
+      # the engine never heard: it is still ours to settle afterwards.
       expect { job.complete!(processed: true) }.not_to raise_error
     end
 
@@ -974,11 +974,40 @@ RSpec.describe Busybee::Worker do
         expect(client).to have_received(:fail_job).with(123456, /hook boom/, retries: 2, backoff: nil)
       end
 
-      it "prevents status changes during before_perform hooks" do
+      it "lets a before_perform hook short-circuit the job, skipping perform" do
+        sequence = []
+        worker = stub_const("ShortCircuitWorker", Class.new(Busybee::Worker) do
+          strict_outputs false
+          define_method(:perform) { sequence << :perform }
+        end)
+        Busybee.before_perform do |job|
+          sequence << :hook
+          job.complete!({ early: true })
+        end
+
+        worker.perform_job(job)
+
+        expect(sequence).to eq([:hook])
+        expect(client).to have_received(:complete_job).with(123456, vars: { "early" => true }).once
+      end
+
+      it "reports the skipped perform at :info" do
+        logger = instance_double(Logger, info: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
         Busybee.before_perform { |job| job.complete!({ early: true }) }
 
-        expect { performing_worker.perform_job(job) }.to raise_error(Busybee::StatusChangeOutsidePerform)
-        expect(job).to be_failed
+        performing_worker.perform_job(job)
+
+        expect(logger).to have_received(:info).with(/resolved by a hook before perform ran/)
+      end
+
+      it "does not report a skipped perform when perform actually ran" do
+        logger = instance_double(Logger, info: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        performing_worker.perform_job(job)
+
+        expect(logger).not_to have_received(:info)
       end
 
       it "clears flag on rescue entry so autofail works after hook error" do
@@ -1068,35 +1097,88 @@ RSpec.describe Busybee::Worker do
         expect(client).to have_received(:complete_job).with(123456, vars: { "processed" => true })
       end
 
-      it "prevents status changes during around_perform preamble (before perform.call)" do
+      it "lets an around_perform hook short-circuit before yielding, skipping perform" do
+        sequence = []
         worker = stub_const("PrematureCompleteWorker", Class.new(Busybee::Worker) do
           strict_outputs false
-          define_method(:perform) { { done: true } }
+          define_method(:perform) { sequence << :perform }
         end)
-        Busybee.around_perform do |_job, perform|
-          job.complete!({ early: true }) # should raise
-          perform.call
+        Busybee.around_perform do |job, perform|
+          job.complete!({ early: true })
+          perform.call # forced continuation would run it anyway; the gate is what skips the work
         end
 
-        expect { worker.perform_job(job) }.to raise_error(Busybee::StatusChangeOutsidePerform)
-        expect(job).to be_failed
+        worker.perform_job(job)
+
+        expect(sequence).to be_empty
+        expect(client).to have_received(:complete_job).with(123456, vars: { "early" => true }).once
       end
 
-      it "prevents status changes during around_perform after-yield (after perform.call)" do
+      it "lets an around_perform hook resolve after yielding, and stands down from auto-complete" do
         worker = stub_const("LateCompleteWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) { { done: true } }
         end)
-        Busybee.around_perform do |_job, perform|
+        Busybee.around_perform do |job, perform|
           perform.call
-          job.complete!({ late: true }) # should raise — flag re-engages after perform
+          job.complete!({ late: true })
         end
 
-        expect { worker.perform_job(job) }.to raise_error(Busybee::StatusChangeOutsidePerform)
-        expect(job).to be_failed
+        worker.perform_job(job)
+
+        expect(job).to be_completed
+        # Set-once on the result axis: the chain's core already captured what
+        # perform returned, so the late complete! transmits that rather than its
+        # own vars — and handle_success then finds the job resolved and declines
+        # to complete it a second time.
+        expect(client).to have_received(:complete_job).with(123456, vars: { "done" => true }).once
       end
 
-      it "allows status changes inside perform (flag cleared)" do
+      it "warns that a late complete!'s variables were discarded" do
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        worker = stub_const("DiscardedVarsWorker", Class.new(Busybee::Worker) do
+          strict_outputs false
+          define_method(:perform) { { done: true } }
+        end)
+        Busybee.around_perform do |job, perform|
+          perform.call
+          job.complete!({ late: true })
+        end
+
+        worker.perform_job(job)
+
+        expect(logger).to have_received(:warn).with(/discarded/)
+      end
+
+      # The sanctioned shape: resolve, then yield anyway. The gate skips the
+      # work, so there is nothing to discard and nothing to warn about.
+      it "does not warn when a hook's complete! is the one that sets the result" do
+        logger = instance_double(Logger, warn: nil, info: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        Busybee.around_perform do |job, perform|
+          job.complete!({ early: true })
+          perform.call
+        end
+
+        performing_worker.perform_job(job)
+
+        expect(logger).not_to have_received(:warn)
+      end
+
+      it "does not overwrite a hook's result when the skipped core returns nil" do
+        worker = stub_const("SkippedCoreResultWorker", Class.new(Busybee::Worker) do
+          strict_outputs false
+          define_method(:perform) { { unreached: true } }
+        end)
+        Busybee.around_perform { |job, _perform| job.complete!({ early: true }) }
+
+        worker.perform_job(job)
+
+        expect(job.result).to eq("early" => true)
+      end
+
+      it "allows status changes inside perform" do
         worker = stub_const("ManualCompleteInPerform", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) do
@@ -1132,11 +1214,10 @@ RSpec.describe Busybee::Worker do
         expect(received_job.status).to eq(:complete)
       end
 
-      # after_perform only fires on a resolved job, so an attempt to resolve
-      # from here would trip the already-handled guard anyway. It is guarded
-      # explicitly regardless: the resolvedness is a property of today's
-      # firing condition, not a promise the guard should be leaning on.
-      it "prevents status changes, rather than leaning on the job being resolved already" do
+      # after_perform fires only on a resolved job, so resolving from here is
+      # asking to handle an already-handled job — and that is exactly what the
+      # error now says, instead of a bespoke rule about where resolution is legal.
+      it "reports an attempt to resolve from here as JobAlreadyHandled" do
         raised = nil
         Busybee.after_perform do |job|
           job.complete!({ late: true })
@@ -1146,7 +1227,31 @@ RSpec.describe Busybee::Worker do
 
         performing_worker.perform_job(job)
 
-        expect(raised).to be_a(Busybee::StatusChangeOutsidePerform)
+        expect(raised).to be_a(Busybee::JobAlreadyHandled)
+      end
+
+      it "does not fire for a job a hook short-circuited, since perform was never attempted" do
+        fired = false
+        Busybee.before_perform { |job| job.complete!({ early: true }) }
+        Busybee.after_perform { fired = true }
+
+        performing_worker.perform_job(job)
+
+        expect(fired).to be(false)
+      end
+
+      it "does not fire for a job that failed input validation" do
+        fired = false
+        worker = stub_const("RequiredInputWorker", Class.new(Busybee::Worker) do
+          input :missing_thing, source: :variable, required: true
+          define_method(:perform) { { done: true } }
+        end)
+        Busybee.after_perform { fired = true }
+
+        worker.perform_job(job)
+
+        expect(job).to be_failed
+        expect(fired).to be(false)
       end
 
       it "receives the same Job as before_perform (it's the same Job object)" do

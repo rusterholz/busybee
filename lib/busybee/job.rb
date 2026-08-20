@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
-require "concurrent"
 
 require "busybee/client/call"
 require "busybee/durations"
@@ -72,10 +71,6 @@ module Busybee
       @resolution = Resolution.new
       @context = Context.new
       @timestamps = Timestamps.new
-      # Per-job AND per-thread: the guard is about what the thread holding the
-      # job is currently doing, so it follows the runner's thread through the
-      # hook fires and never reaches a thread perform handed work to.
-      @status_changes_prevented = Concurrent::ThreadLocalVar.new(false)
     end
 
     # Route a kwargs hash through the Job's typed POROs. Activation-owned
@@ -118,18 +113,6 @@ module Busybee
         merge(@context.logging_context)
     end
 
-    # Run a region in which the job cannot be resolved — every hook fire.
-    # #bind saves and restores rather than setting and clearing, because the
-    # regions nest: the runner's bracket around around_job_execution contains
-    # the worker's bracket around the perform triple, which contains perform.
-    # @api private
-    def _with_status_changes_prevented(&) = @status_changes_prevented.bind(true, &)
-
-    # Run a region in which the job may be resolved — perform, and the
-    # automatic resolution the worker performs on its behalf.
-    # @api private
-    def _with_status_changes_allowed(&) = @status_changes_prevented.bind(false, &)
-
     # Number of retries remaining. Layers an override from update_retries on
     # top of the protobuf value.
     # @return [Integer]
@@ -150,8 +133,9 @@ module Busybee
     # @return [Object] Response from complete_job operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def complete!(vars = {})
-      ensure_resolvable!(:complete, "complete")
+      ensure_resolvable!("complete")
 
+      warn_discarded_result(vars) if resolution.result_set?
       resolution.set_result(vars)
       correlated { @client.complete_job(key, vars: resolution.result || {}) }.tap do
         resolve!(:complete)
@@ -166,7 +150,7 @@ module Busybee
     # @return [Object] Response from fail_job operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def fail!(message_or_exception, retries: nil, backoff: nil)
-      ensure_resolvable!(:fail, "fail")
+      ensure_resolvable!("fail")
 
       message = format_error_message(message_or_exception)
       error_data = if message_or_exception.is_a?(Exception)
@@ -190,7 +174,7 @@ module Busybee
     # @return [Object] Response from throw_bpmn_error operation
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def throw_bpmn_error!(code_or_exception, message = "")
-      ensure_resolvable!(:throw_bpmn_error, "throw BPMN error on")
+      ensure_resolvable!("throw BPMN error on")
 
       code = format_error_code(code_or_exception)
       message = code_or_exception.message if code_or_exception.is_a?(Exception) && message.empty?
@@ -234,8 +218,26 @@ module Busybee
     def correlated(&) = Client::Call.with_job(self, &)
 
     # Shared fire-once guard for the resolution ops.
-    def ensure_resolvable!(action, verb)
-      check_status_change_allowed!(action)
+    # The result axis is set-once, so a complete! arriving after perform's own
+    # return value was captured transmits that value and drops these vars. Only
+    # reachable since hooks were allowed to resolve — a post-yield resolution
+    # used to raise instead — and silently losing variables the caller handed us
+    # is worse than a surprising rule, so name it. Called only when the axis is
+    # already claimed; the equality escape is for the gem's own auto-complete,
+    # which hands back the very object it captured. Note that HWIA#== does not
+    # convert the other side's symbol keys, so this compares identity in
+    # practice and must stay on that path.
+    def warn_discarded_result(vars)
+      return unless vars.is_a?(Hash) && vars.any?
+      return if resolution.result == vars
+
+      Busybee.logger&.warn(
+        "[busybee] Variables passed to complete! on job #{key} were discarded: this job's result " \
+        "was already captured from perform's return value, and that is what the engine received"
+      )
+    end
+
+    def ensure_resolvable!(verb)
       return if ready?
 
       raise Busybee::JobAlreadyHandled, "Cannot #{verb} job #{key} because it is already #{status}"
@@ -267,14 +269,6 @@ module Busybee
           "use Job#complete!, #fail!, or #throw_bpmn_error! to capture outcome data."
         )
       end
-    end
-
-    def check_status_change_allowed!(operation)
-      return unless @status_changes_prevented.value
-
-      raise Busybee::StatusChangeOutsidePerform,
-            "Cannot #{operation} job #{key} outside perform — " \
-            "status changes are not allowed during hook execution"
     end
   end
 end
