@@ -559,6 +559,36 @@ RSpec.describe Busybee::Hooks do
       expect(results).to eq(%i[before rescued])
     end
 
+    # The chain always descends: there is one way to short-circuit a job, and
+    # it is to resolve it. A middleware that forgets to yield can't cancel the
+    # work — it just gets a warning and the work runs anyway.
+    it "force-runs the core when a propagating middleware returns without yielding" do
+      results = []
+      Busybee.around_perform { |_job, _perform| results << :hook } # never calls perform
+
+      described_class.run_chain(:around_perform, job) { results << :core }
+      expect(results).to eq(%i[hook core])
+    end
+
+    it "warns when a propagating middleware returns without yielding" do
+      logger = instance_double(Logger, warn: nil)
+      allow(Busybee).to receive(:logger).and_return(logger)
+      Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
+
+      described_class.run_chain(:around_perform, job) { "core" }
+      expect(logger).to have_received(:warn).with(/\[busybee\].*without yielding/)
+    end
+
+    it "still lets a propagating middleware abort by raising" do
+      results = []
+      Busybee.around_perform { |_job, _perform| raise "abort" }
+
+      expect do
+        described_class.run_chain(:around_perform, job) { results << :core }
+      end.to raise_error(RuntimeError, "abort")
+      expect(results).to eq([])
+    end
+
     context "with prefiltering" do
       it "excludes non-matching hooks from the chain" do
         results = []
