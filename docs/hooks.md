@@ -22,6 +22,7 @@ You register hooks once at boot, typically in the same `Busybee.configure` block
 - [Job Hooks](#job-hooks)
   - [Two Lifecycles, One Naming Rule](#two-lifecycles-one-naming-rule)
   - [Wrapping perform: Middleware](#wrapping-perform-middleware)
+  - [Short-Circuiting a Job](#short-circuiting-a-job)
   - [Watching the System Lifecycle](#watching-the-system-lifecycle)
   - [Reading the Job](#reading-the-job)
 - [Worker Hooks](#worker-hooks)
@@ -234,11 +235,11 @@ on_job_executed             # the runner finished with the job — every exit pa
 | `after_perform` | when the perform envelope exits **with a settled outcome** | `job` |
 | `on_job_executed` | when the runner finishes with a job it ran — on every exit path ([except a shutdown](#watching-the-system-lifecycle)) | `job` |
 
-**The `after_perform` firing condition is worth reading twice.** It fires only when the job actually resolved — completed, failed, or BPMN-errored, with the engine informed. If automatic failure is disabled, or the resolution gRPC call itself failed, the perform envelope exits *without* a settled outcome, `after_perform` stays silent, and the engine will eventually re-deliver the job. A hook that must observe every exit path belongs on `on_job_executed`.
+**The `after_perform` firing condition is worth reading twice.** It fires when two things are both true: the job actually resolved — completed, failed, or BPMN-errored, with the engine informed — *and* `perform` was actually attempted. If automatic failure is disabled, or the resolution gRPC call itself failed, the perform envelope exits without a settled outcome and `after_perform` stays silent while the engine eventually re-delivers the job. If a hook [short-circuited](#short-circuiting-a-job) the job, or a required input was missing, `perform` never ran and `after_perform` stays silent for the other reason. A hook that must observe every exit path belongs on `on_job_executed`.
 
 ### Wrapping perform: Middleware
 
-`around_perform` and `around_job_execution` receive `(job, perform)`; calling `perform.call` runs the rest of the chain. Call it exactly once.
+`around_perform` and `around_job_execution` receive `(job, perform)`; calling `perform.call` runs the rest of the chain. Call it exactly once — and always call it. **The chain always descends:** if your middleware returns without calling `perform.call`, busybee logs a warning and runs the rest of the chain anyway. Skipping the yield is not how you cancel a job; [resolving it](#short-circuiting-a-job) is.
 
 ```ruby
 # A transaction around the business logic only
@@ -257,9 +258,37 @@ Which of the two you want follows from the naming rule: a transaction belongs ar
 Rules of the middleware road:
 
 - **The return value is safe.** Your worker's result is harvested from the job itself, not from the chain's return value — middleware can't lose it by returning something else.
-- **Hooks can't resolve the job.** `complete!`, `fail!`, and `throw_bpmn_error!` are legal only inside `perform`. Called from *any* job hook — middleware or observer, before the work or after it — they raise `Busybee::StatusChangeOutsidePerform` and leave the job exactly as they found it. What becomes of that error is the ordinary hook-error policy ([When Hooks Raise](#when-hooks-raise)): from `before_perform` or `around_perform` it fails the job, and from the observing hooks it is logged and swallowed. Middleware shapes the *environment* of the work; the work itself decides the outcome.
-- **Adjusting the job is still yours to do.** The guard is about the *outcome*, not the job as a whole — `update_timeout` and `update_retries` remain legal from every hook, so middleware that knows the work ahead is slow can buy it more time before yielding.
-- **`around_job_execution` is observing.** Errors it raises are logged and swallowed, and if it returns without calling `perform.call`, busybee logs a warning and runs the rest of the chain anyway — an observer can't silently cancel a job. `around_perform` is the propagating one: errors it raises fail the job (see [When Hooks Raise](#when-hooks-raise)).
+- **A hook can resolve the job**, and that's how you [short-circuit](#short-circuiting-a-job) one. `complete!`, `fail!`, and `throw_bpmn_error!` are legal from any job hook.
+- **Adjusting the job short of resolving it is also yours.** `update_timeout` and `update_retries` are legal from every hook, so middleware that knows the work ahead is slow can buy it more time before yielding.
+- **`around_job_execution` is observing.** Errors it raises are logged and swallowed. `around_perform` is the propagating one: errors it raises fail the job (see [When Hooks Raise](#when-hooks-raise)).
+
+### Short-Circuiting a Job
+
+Sometimes the right answer is "don't do this work." The job's already been fulfilled by an earlier attempt; the downstream service is in a known outage and trying would just burn a retry; this tenant is paused for maintenance. **Resolve the job from a hook and busybee stands down:**
+
+```ruby
+config.around_perform(job_type: "ship_order") do |job, perform|
+  # Already shipped by a previous attempt — tell the engine and skip the work.
+  job.complete!(tracking_number: existing_shipment(job).tracking_number) if already_shipped?(job)
+
+  perform.call
+end
+```
+
+The rule is one line: **the chain always descends, and whether work happens is decided by whether the job is still unresolved.** So `perform.call` above is not a mistake — call it as you always would, and busybee skips the work for you because the job is settled. That keeps one habit for every middleware you write instead of two.
+
+Once a hook resolves the job:
+
+- **`perform` does not run**, and neither does input validation, automatic completion, or automatic failure. Nothing runs against a job the engine already considers finished.
+- **The perform-family hooks stand down too.** `before_perform`, `around_perform` and `after_perform` fire exactly when `perform` is attempted — so a hook that short-circuits from `on_job_activated` means none of the three fire at all, and one that short-circuits from `before_perform` means the `around_perform` chain is never entered. This is the naming rule doing its job: *perform* in the name means the hook belongs to your code's lifecycle.
+- **The system-lifecycle hooks still fire**, every time. `on_job_activated`, `around_job_execution` and `on_job_executed` bracket every job that reached your process, short-circuited or not. That is where you observe this.
+- **busybee logs it** at `info`: `Job <key> was resolved by a hook before perform ran; perform skipped`.
+
+Two things to know before you reach for this:
+
+**Scope your hook carefully.** A registration with no filters applies to every worker in the process, so a short-circuit meant for one job type will quietly skip all of them. Use the [filters](#filtering) — `job_type:`, `worker_class:` — and prefer the narrowest one that expresses the intent.
+
+**After `perform` has returned, its result wins.** A `complete!` from post-yield `around_perform` transmits the value `perform` returned, not the variables you pass, because the job's result is captured once and the work's own answer takes precedence. busybee warns when this discards variables you supplied, so you'll see it rather than wonder where they went.
 
 ### Watching the System Lifecycle
 
@@ -522,7 +551,7 @@ end
 
 The demo app's recorder uses this exact fold to keep its per-job records accurate for asynchronously-resolved jobs. A first-class resolution hook is planned alongside broader async-worker support in a future version; until then, `after_call` on the three resolution RPCs is the reliable signal.
 
-**The resolve guard won't get in your way here.** The rule that hooks can't resolve a job is scoped to the thread running the hook, so it never reaches a thread your `perform` handed work to. Your background thread can complete the job whenever it finishes — including while the runner is still working through `on_job_executed` for that same job — and it will land. Nothing is traded away for that: in that same moment, hook code running on the runner's own thread still can't resolve the job.
+**Nothing gets in your way here.** Your background thread can complete the job whenever it finishes — including while the runner is still working through `on_job_executed` for that same job — and it will land. Note the one consequence for the perform-family hooks: `perform` returned without resolving, so `after_perform` does not fire for this job. The settled outcome arrives later, on a thread busybee isn't watching. `on_job_executed` fires as always, at the moment the runner lets go — which may be before your resolution lands.
 
 ## Test Isolation
 

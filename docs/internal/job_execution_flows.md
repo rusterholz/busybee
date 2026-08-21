@@ -1,6 +1,6 @@
 # Job Execution Flows
 
-Maintainer-facing reference tracing every salient moment in a job's execution from gRPC receive to runner-return. The document is organized into two top-level sections: **Typical Lifecycle** covers the four normal-operation variants (auto-complete, manual complete, autofail, manual fail / BPMN error), and **Lifecycle Edge Cases** covers the unusual paths (`Busybee::Shutdown` propagation, `StatusChangeOutsidePerform` flag-catches, GRPC call failures, and serious non-StandardError exceptions). Each variant is presented in two paired formats: a condensed at-a-glance summary, followed by a step-by-step walkthrough.
+Maintainer-facing reference tracing every salient moment in a job's execution from gRPC receive to runner-return. The document is organized into two top-level sections: **Typical Lifecycle** covers the four normal-operation variants (auto-complete, manual complete, autofail, manual fail / BPMN error), and **Lifecycle Edge Cases** covers the unusual paths (`Busybee::Shutdown` propagation, short-circuiting by resolving from a hook, GRPC call failures, and serious non-StandardError exceptions). Each variant is presented in two paired formats: a condensed at-a-glance summary, followed by a step-by-step walkthrough.
 
 ## Notation
 
@@ -30,10 +30,8 @@ HOOK: on_job_activated (safe)
 MIDDLEWARE: around_job_execution start (safe)
 TIMESTAMP: execution_started_at
 VALIDATION: required inputs (unsafe)
--- status changes prevented --
 HOOK: before_perform (unsafe)
 MIDDLEWARE: around_perform start (unsafe)
--- status changes allowed --
 TIMESTAMP: perform_started_at
 -- instance.perform starts --
 ```
@@ -44,23 +42,23 @@ TIMESTAMP: perform_started_at
 2. `Runner#activate_job(job, source:, buffered:)`:
    - TIMESTAMP: `activated_at`.
    - `job.set_context(source:, buffered:, worker_class:)` — routes through Job's typed POROs; `source`/`buffered`/`worker_class` land on `Activation`. (Buffer *depth* isn't an Activation fact — it rides the `Worker::Status` stamped onto the job, as `current_buffer_size`.)
-   - GUARD: the hook fires inside `Job#_with_status_changes_prevented`. Any `complete!`/`fail!`/`throw_bpmn_error!` from it raises `StatusChangeOutsidePerform`.
-   - HOOKS: `on_job_activated` (safe — errors are logged and swallowed).
+   - HOOKS: `on_job_activated` (safe — errors are logged and swallowed). This hook may resolve the job; doing so short-circuits it, and the trace continues as **Variant F**.
 3. If the receive point is `Streaming#pump_stream_into_buffer`, the pump thread pushes the job onto `@job_buffer` and a consumer thread pops it. The Job carries all its state (POROs, timestamps, status) across the thread boundary.
 4. `Runner#execute_job(job)`:
-   - GUARD ENTERED: `Job#_with_status_changes_prevented` wraps the whole `around_job_execution` chain, so neither side of the middleware's yield can resolve the job.
    - HOOKS: `around_job_execution` middleware, portions before yield (safe — errors are logged and swallowed; downstream still runs via the called-flag pattern in `Chain.build_safe`).
+   - The chain descends unconditionally, even for a job step 2 already resolved: middleware brackets every job that was activated, and only the innermost gate decides whether work happens.
 5. `Worker.perform_job(job)` (inside the core of the `around_job_execution` chain):
-   - GUARD LIFTED: the chain's core block runs inside `Job#_with_status_changes_allowed`, so perform and the worker's automatic resolution are legal for its whole extent.
    - TIMESTAMP: `execution_started_at`.
    - `job.set_context(worker: instance)` — captures the worker instance on `Activation` so hooks can see it.
-6. `run_hooked_perform(instance)`:
+6. `run_hooked_perform(instance)` — **every step here is gated on `job.ready?`, asked afresh at each one.** The gates are what make the perform-like moments fire exactly when perform is attempted; a hook that resolves the job stops everything below it, and an invalid job stops at the first gate that follows validation.
+   - GATE: `job.ready?` — false only if step 2 or step 4 already resolved the job.
    - VALIDATION: required inputs (errors here propagate, jumping to Variant C and failing the job).
-   - GUARD ENTERED: a nested `Job#_with_status_changes_prevented` spanning `before_perform` and both sides of `around_perform`'s yield.
-   - HOOKS: `before_perform` (unsafe — errors propagate, jump to Variant C, and fail the job, as if they were from inside perform).
-   - HOOKS: `around_perform` middleware, portions before yield (unsafe — errors propagate, jump to Variant C, and fail the job).
+   - GATE: `job.ready?`.
+   - HOOKS: `before_perform` (unsafe — errors propagate, jump to Variant C, and fail the job, as if they were from inside perform). May resolve the job → **Variant F**.
+   - GATE: `job.ready?` — false if `before_perform` just resolved, in which case the `around_perform` chain is not entered at all.
+   - HOOKS: `around_perform` middleware, portions before yield (unsafe — errors propagate, jump to Variant C, and fail the job). May resolve the job → **Variant F**.
 7. Inside the `around_perform` middleware chain core:
-   - GUARD LIFTED: `Job#_with_status_changes_allowed` around `timed_perform`. Status changes are allowed during perform.
+   - GATE: `job.ready?` — false if pre-yield middleware just resolved. The chain still descends to the core (forced continuation, `Chain.build_propagating`); this gate is what skips the work.
    - `timed_perform(instance)`:
      - TIMESTAMP: `perform_started_at`.
      - `instance.perform` runs — **this is the branch point.**
@@ -74,10 +72,8 @@ At the branch point, `instance.perform` exits normally, returning a Hash (or any
 ```
 -- instance.perform returns --
 TIMESTAMP: perform_finished_at
--- status changes prevented --
 -- result captured to Job --
 MIDDLEWARE: around_perform finish (unsafe)
--- status changes allowed --
 VALIDATION: required outputs (unsafe)
 VALIDATION: undeclared outputs (unsafe)
 GRPC: job completed (engine sees it as completed)
@@ -94,13 +90,11 @@ HOOK: on_job_executed (safe)
 A8. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits — fires regardless of how perform exits, so this same step happens in every variant).
-  - GUARD RESTORED: the allowed region ends as the core block exits, so after-yield `around_perform` middleware cannot resolve the job (would raise `StatusChangeOutsidePerform`).
   - `capture_chain_result(target, raw_result)` (the innermost wrapper around the core block):
     - `resolution.set_result(raw_result)` — set-once, accepts only Hash values; coerces to a frozen `HashWithIndifferentAccess`. **Result is now set.** Non-Hash perform return values are silently rejected here and end up as `nil` on the Job (and `{}` in `handle_success`).
 
 A9. Continuing `run_hooked_perform`:
   - HOOKS: Continuing `around_perform` middleware, portions after yield (unsafe — errors propagate, jump to Variant C, and fail the job).
-  - GUARD RESTORED: the perform bracket exits, returning the job to the level `execute_job` set — allowed, which is what lets `handle_success` call `job.complete!`.
 
 A10. `handle_success(job, result, config)`:
   - Exits early if `complete_job_on_success` is off or the job is no longer `ready?` (the latter can't happen in Variant A, but the guard exists for unified handling across variants).
@@ -116,7 +110,7 @@ A11. `job.complete!(result)`:
 
 A12. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
-    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true.
+    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` and `perform_started_at` are both true — the job settled, and perform was actually attempted.
 
 A13. Continuing `Runner#execute_job(job)`:
   - HOOKS: Continuing `around_job_execution` middleware, portions after yield (safe — errors are logged and swallowed).
@@ -143,9 +137,7 @@ TIMESTAMP: resolved_at
 STATUS CHANGE: -> complete
 -- remainder of instance.perform runs; return value ignored (safe*) --
 TIMESTAMP: perform_finished_at
--- status changes prevented --
 MIDDLEWARE: around_perform finish (safe*)
--- status changes allowed --
 HOOK: after_perform (safe)
 MIDDLEWARE: around_job_execution finish (safe)
 TIMESTAMP: executed_at
@@ -172,18 +164,16 @@ B10. Continuing `instance.perform`:
 B11. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at`.
-  - GUARD RESTORED: the allowed region ends as the core block exits, re-engaging prevention for the rest of the perform bracket.
   - `capture_chain_result(target, raw_result)`:
     - `resolution.set_result(raw_result)` — silent no-op (set-once; already set in B9). The raw perform return value is discarded.
 
 B12. Continuing `run_hooked_perform`:
   - HOOKS: Continuing `around_perform` middleware, portions after yield (safe in this variant because the job is already complete — errors propagate to `perform_job`'s rescue, get logged as post-resolution, and the lifecycle continues at B13 below).
-  - GUARD RESTORED: the perform bracket exits.
   - `handle_success(job, result, config)` exits early (no-op) because `!job.ready?`.
 
 B13. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
-    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true.
+    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` and `perform_started_at` are both true — the job settled, and perform was actually attempted.
 
 B14. Continuing `Runner#execute_job(job)`:
   - HOOKS: Continuing `around_job_execution` middleware, portions after yield (safe — errors are logged and swallowed).
@@ -203,9 +193,7 @@ At the branch point, `instance.perform` raises some subclass of `StandardError`.
 ```
 -- instance.perform raises StandardError --
 TIMESTAMP: perform_finished_at
--- status changes prevented --
 -- around_perform middleware post-yield NOT run --
--- status changes allowed --
 -- error captured to Job (early in handle_perform_exception) --
 -- autofail attempted (if fail_job_on_error and ready?) --
 GRPC: job failed (engine sees it as failed)
@@ -222,7 +210,6 @@ HOOK: on_job_executed (safe)
 C8. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure regardless of how perform exited).
-  - GUARD RESTORED: the allowed region ends as the core block exits, re-engaging prevention for the rest of the perform bracket.
   - The error propagates past `capture_chain_result` (the innermost wrapper around the core block); no result is captured.
   - The error propagates through the chain: portions of `around_perform` middleware after yield **do not get run** (around_perform uses propagating semantics, not safe — errors short-circuit the rest of the chain).
 
@@ -232,7 +219,6 @@ C9. Continuing `run_hooked_perform`:
 C10. Continuing `Worker.perform_job(job)`:
   - The error is rescued by `perform_job`'s `rescue StandardError`.
   - `handle_perform_exception(job, exception)`:
-    - GUARD: no explicit re-allow — the perform bracket unwound as the exception left it, so autofail runs at the level `execute_job` set (allowed), exactly as `handle_success` does.
     - EARLY ERROR CAPTURE: `resolution.set_error(Shutdown.unwrap(exception))` — records the error on the error axis of Resolution before autofail runs, so `after_perform` sees the error attached to the Job even when autofail is disabled (C11) or its GRPC fails (C12). `Shutdown.unwrap` reduces a `Shutdown` to its `cause`; every other error passes through untouched.
     - Calls `handle_failure(job, exception, config)`.
 
@@ -251,14 +237,13 @@ C12. `attempt_auto_fail(job, error, config)` → `job.fail!(Shutdown.unwrap(erro
   - If `job.fail!` itself raises (e.g., the fail-job GRPC also fails), `attempt_auto_fail` catches and logs the warning; execution continues normally back into `handle_perform_exception`. The error is still attached to the Job via C10's early capture.
 
 C13. Continuing `handle_perform_exception`:
-  - Re-raises if exception is `Busybee::Worker::Shutdown` or `Busybee::StatusChangeOutsidePerform` (both are special-cased to propagate past `perform_job`).
+  - Re-raises if exception is `Busybee::Worker::Shutdown` (the one error special-cased to propagate past `perform_job`, since the worker declaring itself down outranks any per-job handling).
   - Wraps in `Shutdown.new(worker_class: self)` and raises if exception matches `shutdown_on` (per-worker or gem-level shutdown classes).
   - Otherwise: if `fail_job_on_error` is off, `log_unhandled_error(job, exception)` (this is where the early-return from C11's first case surfaces — the original error is recorded in the log).
 
 C14. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
-    - GUARD: the perform bracket unwound as the exception left it — on every exit path, including a non-StandardError that escaped past `rescue StandardError`. `after_perform` then fires inside its own prevented region.
-    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires when `job.resolved?` — true if `attempt_auto_fail` succeeded, false if autofail was skipped (C11) or its GRPC also failed (C12). When `:ready`, the Job still carries the error captured in C10; per-attempt observability for the unresolved case is `on_job_executed` at C15 (runner-level; fires for every job that reached `execute_job`, on all of its exit paths — but not for one the shutdown drain fails without running, see the Shutdown-path gap below). after_perform's contract is "the lifecycle reached a settled outcome the engine has on file."
+    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires when `job.resolved?` and `perform_started_at` are both true. Perform was attempted here, so resolvedness is the deciding half: true if `attempt_auto_fail` succeeded, false if autofail was skipped (C11) or its GRPC also failed (C12). When `:ready`, the Job still carries the error captured in C10; per-attempt observability for the unresolved case is `on_job_executed` at C15 (runner-level; fires for every job that reached `execute_job`, on all of its exit paths — but not for one the shutdown drain fails without running, see the Shutdown-path gap below). after_perform's contract is "the lifecycle reached a settled outcome the engine has on file."
 
 C15. Continuing `Runner#execute_job(job)`:
   - If `perform_job` re-raised (or wrapped) a `Shutdown` in C13, it propagates through the `around_job_execution` chain. The chain is `safe: true`, but `Chain.build_safe` re-raises `Shutdown` specifically (per chain.rb:45–46), so the Shutdown bubbles out of `Runner#execute_job` after the ensure block completes.
@@ -284,9 +269,7 @@ TIMESTAMP: resolved_at
 STATUS CHANGE: -> failed
 -- remainder of instance.perform runs; Hash return value captured to Job.result (safe*) --
 TIMESTAMP: perform_finished_at
--- status changes prevented --
 MIDDLEWARE: around_perform finish (safe*)
--- status changes allowed --
 HOOK: after_perform (safe)
 MIDDLEWARE: around_job_execution finish (safe)
 TIMESTAMP: executed_at
@@ -298,8 +281,7 @@ For the `throw_bpmn_error!` variant, substitute `GRPC: job error (throw_bpmn_err
 **Walkthrough:**
 
 D8. `job.fail!(error)`:
-  - `check_status_change_allowed!(:fail)` — passes (flag is cleared during perform).
-  - `ready?` check — passes.
+  - `ensure_resolvable!("fail")` — the `ready?` check passes; nothing has resolved this job yet.
   - `message = format_error_message(error)` (formats Exception → `"[ClassName] message (caused by: ...)"`; strings pass through).
   - `resolution.set_error(error_data)` — error_data is `{error: exception}` for Exception args or `{error_message: string}` for non-Exception args. **Captures the error to Resolution before the GRPC, so the data is on Job even if the GRPC fails.**
   - GRPC CALL: `client.fail_job(key, message, retries: <count - 1>, backoff: nil)` — a bare `fail!` sends one less than the current retry count (see the Retries accounting callout in Category G); the nil backoff falls to `Busybee.default_fail_job_backoff` inside `Client#fail_job`. **Workflow engine now sees the job as failed, with one retry drained.**
@@ -313,19 +295,16 @@ D9. Continuing `instance.perform`:
 D10. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at`.
-  - GUARD RESTORED: the allowed region ends as the core block exits, re-engaging prevention for the rest of the perform bracket.
   - `capture_chain_result(target, raw_result)`:
     - `resolution.set_result(raw_result)` — set-once on the result axis. `result_set?` is false at this point because D8 touched only the error axis (`@error_set`); the result axis is untouched. If perform happens to return a Hash, that Hash is captured as `job.result` alongside the error data captured in D8. Non-Hash returns silently no-op. **This is intentional under Resolution's orthogonal model — the result axis records "what perform returned" and the error axis records "what perform signaled," and Variant D legitimately lands both (manual fail then a partial-payload hash for telemetry/audit). `after_perform` hooks can read both.**
 
 D11. Continuing `run_hooked_perform`:
   - HOOKS: Continuing `around_perform` middleware, portions after yield (safe in this variant because the job is already failed — errors propagate to `perform_job`'s rescue, get logged as post-resolution, and the lifecycle continues at D12 below).
-  - GUARD RESTORED: the perform bracket exits.
   - `handle_success(job, result, config)` exits early (no-op) because `!job.ready?`.
 
 D12. Continuing `Worker.perform_job(job)`:
   - perform_job's ensure block:
-    - GUARD: the perform bracket unwound as the exception left it; `after_perform` then fires inside its own prevented region.
-    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` is true (the manual setter resolved the lifecycle in D8 before the partial-payload return at D10).
+    - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires because `job.resolved?` and `perform_started_at` are both true (the manual setter resolved the lifecycle in D8, and perform ran).
 
 D13. Continuing `Runner#execute_job(job)`:
   - HOOKS: Continuing `around_job_execution` middleware, portions after yield (safe — errors are logged and swallowed).
@@ -353,9 +332,7 @@ The categories below trace what happens at the boundaries of the four typical-li
 ```
 -- instance.perform raises Shutdown --
 TIMESTAMP: perform_finished_at
--- status changes prevented --
 -- around_perform middleware post-yield NOT run (unsafe — Shutdown propagates) --
--- status changes allowed --
 -- error captured to Job (early, via Shutdown.unwrap -> Shutdown.cause) --
 -- autofail attempted (if fail_job_on_error and ready?) --
 GRPC: job failed (engine sees Shutdown.cause)
@@ -372,11 +349,9 @@ HOOK: on_job_executed (safe)
 
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits, same as A8/B8/C8/D8).
-  - GUARD RESTORED: the allowed region ends as the core block exits, re-engaging prevention for the rest of the perform bracket.
   - MIDDLEWARE: `around_perform` finish (unsafe — Shutdown propagates through the chain; post-yield does NOT run).
   - The error is rescued by `perform_job`'s `rescue StandardError` (Shutdown < StandardError).
   - `handle_perform_exception(job, shutdown)`:
-    - GUARD: no explicit re-allow — the perform bracket unwound as the exception left it, so autofail runs at the level `execute_job` set.
     - EARLY ERROR CAPTURE: `resolution.set_error(Shutdown.unwrap(shutdown))` — captures `shutdown.cause` (not the wrapper). See E5.
     - `handle_failure` → `attempt_auto_fail` → `job.fail!(Shutdown.unwrap(shutdown), backoff: config.fail_job_backoff)` (when `fail_job_on_error` and `job.ready?`):
       - GRPC CALL: `client.fail_job(key, message, retries: <count - 1>, backoff: backoff)`. **Workflow engine now sees the job as failed with the Shutdown's underlying cause, one retry drained.**
@@ -384,7 +359,6 @@ HOOK: on_job_executed (safe)
       - STATUS CHANGE: `Resolution#resolve_to(:failed)` → `@status = :failed`.
     - Explicit `raise if exception.is_a?(Shutdown)` re-raises past `perform_job`.
   - `perform_job`'s ensure block:
-    - GUARD: the perform bracket unwound as the exception left it; `after_perform` then fires inside its own prevented region.
     - HOOK: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — fires only when `job.resolved?`, i.e. autofail succeeded). The Job carries the early-captured error either way.
   - MIDDLEWARE: `around_job_execution` finish (safe — `Chain.build_safe` re-raises Shutdown at `hooks/chain.rb:45–46`, so middleware post-yield does NOT run).
   - `execute_job`'s ensure block:
@@ -423,40 +397,36 @@ Important asymmetry: in the perform-side path, **autofail runs before the Shutdo
 
   When `attempt_auto_fail` (or `handle_perform_exception`'s early-capture step) is called with a Shutdown wrapping a cause, `Shutdown.unwrap(shutdown)` returns `shutdown.cause` (or the Shutdown itself if no cause is set). This is what `fail_job` sends to the engine and what `set_error` captures on Resolution. The Shutdown wrapper is the framework's internal signal for "tear down the worker"; the engine and Resolution see the underlying cause. (See E3 for the inverse direction: the wrap site that creates the Shutdown in the first place.)
 
-### F. `Busybee::StatusChangeOutsidePerform` flag-catch
+### F. Short-circuit: a hook resolves the job
 
-`Busybee::StatusChangeOutsidePerform` (a `Busybee::Error` < `StandardError`) is raised by `Job#check_status_change_allowed!` when `complete!` / `fail!` / `throw_bpmn_error!` is called while prevention is engaged — i.e., from a hook surface that shouldn't be resolving the job. Like Shutdown, it's caught by `perform_job`'s `rescue StandardError` and explicitly re-raised past `handle_perform_exception` (C13's `raise if exception.is_a?(Busybee::StatusChangeOutsidePerform)`). Unlike Shutdown, the runner-level `Chain.build_safe` does NOT specifically re-raise it — `StatusChangeOutsidePerform` falls into the generic `rescue StandardError` branch and is logged-and-swallowed there. The runner continues to the next job; the worker process is not terminated.
+A job hook may call `complete!` / `fail!` / `throw_bpmn_error!`. That is the supported way for a hook to short-circuit a job — an idempotency guard that finds the work already done, a circuit breaker that declines to try, a tenant paused for maintenance. The job resolves for real, on the wire, and everything downstream of the resolving hook that is *perform-like* stands down.
 
-**Coverage is every job-noun hook.** `Job#_with_status_changes_prevented` and its inverse `_with_status_changes_allowed` are save-and-restore regions rather than a set/clear pair, which is what lets the runner's bracket contain the worker's and the worker's contain perform. The regions also unwind on every exit path, so no exception — `StandardError` or not — can leave a job stuck unresolvable.
+**The rule in one line: the chain always descends, and `ready?` decides whether work happens.** The middleware chain is never skipped and never cancelled — a hook that returns without calling `perform.call` gets a forced continuation and a warning, in both `Chain.build_safe` and `Chain.build_propagating`. What a short-circuit changes is not the shape of the traversal but whether each gated step finds anything left to do.
 
-The guard's state across the lifecycle:
+**Which moments are gated, and why those.** `validate_inputs!`, `before_perform`, the `around_perform` chain, and `timed_perform` each ask `job.ready?` at the moment they arrive; `after_perform` asks `job.resolved? && perform_started_at`. Together these give one invariant: **perform-like hooks fire exactly when perform is attempted.** Input validation is a precondition of the work, not a member of the perform triple, so an invalid job doesn't get the triple either (see the note at the end of this section). The system-lifecycle hooks — `on_job_activated`, `around_job_execution`, `on_job_executed` — are ungated and fire for every job that was activated, whatever became of it. They are where a short-circuited job is observed.
 
-- Common 1–3: allowed (initial).
-- Common 2 (`activate_job`): PREVENTED around `on_job_activated` only.
-- Common 4 (`execute_job`): PREVENTED around the whole `around_job_execution` chain.
-- Common 5 (the chain's core block): ALLOWED for the extent of `Worker.perform_job` — perform, auto-complete and autofail all live here.
-- Common 6 (`run_hooked_perform` entry): PREVENTED again, spanning `before_perform` and both sides of `around_perform`'s yield.
-- Common 7 (inside the `around_perform` chain core): ALLOWED, around `timed_perform`.
-- A8 / B11 / C8 / D10 (core block exit): the allowed region ends; middleware unwinds prevented.
-- After the around chain in `run_hooked_perform`: the perform bracket ends; `handle_success` runs allowed.
-- `perform_job`'s ensure: PREVENTED around `after_perform`.
-- `execute_job`'s ensure: PREVENTED around `on_job_executed`, then the job is left allowed as the runner lets go of it.
+**Reporting.** `Worker.log_short_circuit` emits one `:info` line when the job settled without perform being attempted:
 
-**F1. Raised from a `before_perform` hook.**
+```
+[busybee] Job <key> was resolved by a hook before perform ran; perform skipped
+```
+
+It fires from `run_hooked_perform`'s non-raising path, which is what separates a deliberate short-circuit from an invalid job — the latter leaves by way of `MissingInput` and is reported as a failure instead. There is no single gate every short-circuit passes through (skipping the `around_perform` chain means perform's own gate is never evaluated), which is why the line lives at the end of the method rather than at a gate.
+
+**F1. From `before_perform`.**
 
 **At a glance:**
 
 ```
--- before_perform raises StatusChangeOutsidePerform (flag is set) --
--- around chain never starts --
--- status changes allowed --
--- error captured to Job (early in handle_perform_exception) --
--- autofail attempted (if fail_job_on_error and ready?) --
-GRPC: job failed (engine sees StatusChangeOutsidePerform as failure reason)
+HOOK: before_perform (unsafe) — calls job.complete!(vars)
+GRPC: job completed (engine sees it as completed)
 TIMESTAMP: resolved_at
-STATUS CHANGE: -> failed
-HOOK: after_perform (safe, conditional on resolved?)
-MIDDLEWARE: around_job_execution finish (safe — StatusChangeOutsidePerform logged and swallowed)
+STATUS CHANGE: -> complete
+-- around_perform chain not entered --
+-- perform not attempted; no perform_started_at --
+-- after_perform does not fire --
+LOG: info — perform skipped
+MIDDLEWARE: around_job_execution finish (safe)
 TIMESTAMP: executed_at
 HOOK: on_job_executed (safe)
 -- Runner continues to the next job --
@@ -464,53 +434,52 @@ HOOK: on_job_executed (safe)
 
 **Walkthrough:**
 
-  - The flag is set in Common 6 just before `before_perform` runs. A hook calling `complete!`/`fail!`/`throw_bpmn_error!` triggers `check_status_change_allowed!`, which raises `StatusChangeOutsidePerform`.
-  - HOOKS: `before_perform` (unsafe — `Hooks.run(safe: false)`'s rescue checks `Shutdown.triggered_by?` first, no match, then re-raises since `safe: false`).
-  - The error escapes `run_hooked_perform` past the around chain (which never started).
-  - The error is rescued by `perform_job`'s `rescue StandardError`.
-  - `handle_perform_exception(job, scop)`:
-    - GUARD: no explicit re-allow — the perform bracket unwound as the exception left it, so autofail runs at the level `execute_job` set.
-    - EARLY ERROR CAPTURE: `resolution.set_error(scop)` (no Shutdown unwrap; SCOP is not Shutdown-class).
-    - `handle_failure` → `attempt_auto_fail` → `job.fail!(scop, backoff: config.fail_job_backoff)` (when `fail_job_on_error` and `job.ready?` — true here, since no perform-side resolution ran):
-      - GRPC CALL: `client.fail_job(key, "[Busybee::StatusChangeOutsidePerform] <message>", retries: <count - 1>, backoff: backoff)`. **Workflow engine now sees the misuse as the failure reason, one retry drained.**
-      - TIMESTAMP: `resolved_at`.
-      - STATUS CHANGE: `Resolution#resolve_to(:failed)` → `@status = :failed`.
-    - Explicit `raise if exception.is_a?(Busybee::StatusChangeOutsidePerform)` re-raises past `perform_job`.
-  - `perform_job`'s ensure block:
-    - GUARD: the perform bracket unwound as the exception left it; `after_perform` then fires inside its own prevented region.
-    - HOOK: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — fires since `job.resolved?` is true from autofail).
-  - MIDDLEWARE: `around_job_execution` finish (safe — `Chain.build_safe`'s `rescue StandardError` matches, `log_swallowed_error` logs the misuse, `next_link.call unless called` is a no-op since `perform_job` already ran).
-  - `execute_job`'s ensure block:
-    - TIMESTAMP: `executed_at`.
-    - Job counters increment; fresh `Worker::Status` re-stamp.
-    - HOOK: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe).
-  - Runner continues to the next job.
+  - Common 6's first gate passes (`ready?`), so `validate_inputs!` runs normally.
+  - HOOKS: `before_perform`. The hook calls `job.complete!(vars)`; `ensure_resolvable!` finds the job `:ready` and permits it.
+    - `resolution.set_result(vars)` — the result axis is unclaimed, so the hook's variables are what the engine receives.
+    - GRPC CALL: `client.complete_job(key, vars:)`. TIMESTAMP: `resolved_at`. STATUS CHANGE: `-> complete`.
+  - GATE: `job.ready?` is now false, so the `around_perform` chain **is not entered at all** — no pre-yield middleware, no core, no post-yield middleware.
+  - `log_short_circuit(job)` fires: resolved, and `perform_started_at` is nil.
+  - `handle_success` returns immediately (`job.ready?` is false), so there is no second completion.
+  - `perform_job`'s ensure: `after_perform` does **not** fire — `perform_started_at` is nil, so perform was never attempted and no perform-like hook belongs here.
+  - MIDDLEWARE: `around_job_execution` finish (safe) — unaffected; it brackets every activated job.
+  - `execute_job`'s ensure: TIMESTAMP `executed_at`, counters, HOOK `on_job_executed` (safe).
+  - Runner continues to the next job. No retry was consumed and no error was recorded: this was a completion, not a failure.
 
-**F2. Raised from `around_perform` middleware pre-yield.**
+**F2. From `around_perform` pre-yield.**
 
-Same guard state as F1 (the perform bracket, entered in Common 6). Pre-yield middleware runs after `before_perform` but before the core block's allowed region. `Chain.build_propagating` has no rescues at the middleware layer — `StatusChangeOutsidePerform` propagates straight out. The around chain raises before entering its core block, so no allowed region was ever entered. From here, **the trace continues as F1** from "the error escapes `run_hooked_perform`".
+The chain **was** entered (the gate before it saw a ready job), so the resolving middleware's own pre-yield code ran. Everything after it stands down: inner middleware links still run (the chain descends), but the core's own gate finds the job resolved and skips `timed_perform`, so `perform_started_at` is never stamped. Post-yield halves of every link run as normal — they are ordinary Ruby returning through the stack.
 
-Distinguishing detail: `perform_started_at` and `perform_finished_at` are NOT stamped (perform never ran). The result and error axes on Resolution are untouched until the early-capture in `handle_perform_exception`.
+From here, **the trace continues as F1** from "`log_short_circuit(job)` fires".
 
-**F3. Raised from `around_perform` middleware post-yield.**
+Distinguishing detail: if the resolving hook returns *without* calling `perform.call`, the forced continuation runs the rest of the chain anyway and logs the "returned without yielding" warning. That warning is correct even though the short-circuit was deliberate — resolving is the idiom, skipping the yield is not, and the two are independent choices.
 
-The allowed region opened in Common 7 to let `perform` run, and closed as the core block exited (A8/B11/C8/D10), just before middleware unwinds. Post-yield middleware code is back inside the perform bracket; calling `complete!`/etc. raises. From here, **the trace continues as F1** from "the error escapes `run_hooked_perform`".
+**F3. From `around_perform` post-yield.**
 
-Distinguishing details: `perform_finished_at` IS stamped (perform completed before the offending hook fired). The result axis may carry whatever `perform` returned (captured by `capture_chain_result` in the core block).
+Perform ran and returned, so this is not a short-circuit at all — the work happened. Two things follow, and the second one surprises people.
 
-**F4. From `after_perform`.**
+  - `perform_started_at` **is** stamped, so `after_perform` fires normally and no `:info` line is emitted.
+  - The chain's core already captured perform's return value onto the result axis, and that axis is **set-once**. A `complete!(vars)` here therefore transmits *perform's* result, not `vars`. That is the intended precedence — the work's own answer wins over a wrapper's — but the variables are silently dropped, so `Job#warn_discarded_result` logs:
 
-`perform_job`'s ensure wraps the `after_perform` fire in its own prevented region, so `check_status_change_allowed!` trips first and raises `StatusChangeOutsidePerform`. Note what this displaces: `after_perform` fires only when `job.resolved?` is already true, so a misuse here would *also* hit the `unless ready?` guard inside the resolution methods and raise `Busybee::JobAlreadyHandled`. The guard is engaged anyway rather than leaning on that — resolvedness is a property of today's firing condition, not a promise the guard should rest on, and async worker support may well loosen it. `after_perform` is `safe:`, so the error is logged and swallowed; the lifecycle continues unchanged.
+    ```
+    [busybee] Variables passed to complete! on job <key> were discarded: this job's
+    result was already captured from perform's return value, and that is what the
+    engine received
+    ```
 
-**F5. From `on_job_activated`, `around_job_execution`, or `on_job_executed`.**
+    The gem's own auto-complete is exempt: it hands back the very object it captured, so there is nothing to discard.
 
-The three runner-level job hooks each fire inside a prevented region: `on_job_activated` inside `Runner#activate_job`, the whole `around_job_execution` chain (both sides of its yield) inside `Runner#execute_job`, and `on_job_executed` inside that method's ensure. A `complete!`/`fail!`/`throw_bpmn_error!` from any of them raises `StatusChangeOutsidePerform` before touching Resolution or the wire, so the job is left exactly as the hook found it.
+**F4. From `on_job_activated`, or `around_job_execution` pre-yield.**
 
-All three are `safe:`, so the error takes the ordinary observing-hook path — `log_swallowed_error` records it as "Error in hooks (ignored)" and the runner carries on. There is no autofail and no retry consumed: unlike F1–F3, the error never reaches `perform_job`'s rescue, because it was raised outside it. The distinction between these and F1–F3 is nothing specific to this guard; it is the standing propagate-vs-swallow split between busybee's middleware and observing hooks.
+The job is resolved before `Worker.perform_job` is ever called. `execute_job` still descends — the `around_job_execution` chain runs, `perform_job` runs — and every gate inside `run_hooked_perform` finds the job resolved, so **`validate_inputs!` does not run either**. That last part matters: without the gate, an invalid job that a hook had legitimately short-circuited would raise `MissingInput`, and `handle_perform_exception` sets the error axis unconditionally, so observers would see a failure that never happened.
 
-**A note on threads.** Prevention is per-job *and* per-thread — a `Concurrent::ThreadLocalVar` held by the Job, whose `#bind` provides the save-and-restore. A region therefore follows the thread that opened it and is invisible to every other thread holding the same job. Two consequences, both deliberate. A worker that returns from `perform` and resolves from a background thread is never blocked by the guard, even if that thread finishes while the runner is still inside its own bracket for that job (see [Observing Deferred Resolutions](../hooks.md#observing-deferred-resolutions)). Note what is *not* given up in that trade: throughout that same moment the bracket still binds the runner thread, so hook code running there still cannot resolve the job — the region was only ever scoped, never relaxed. The other consequence is that a hook which spawns a thread purely to resolve from it escapes the guard; that is a misuse we don't set out to catch, and catching it would cost the sanctioned case.
+From here, **the trace continues as F1** from "`log_short_circuit(job)` fires".
 
-It also removes a latent hazard rather than adding one: `on_job_activated` fires on the **pump thread** under buffered streaming while the rest of the lifecycle runs on the runner thread, so a job-global region would have had two threads writing one saved value.
+Thread note for `on_job_activated`: under buffered streaming this hook fires on the **pump thread**, so a resolution from it is a wire call from that thread. In practice the job then sits in the buffer before a runner thread takes it, so this is sequencing rather than a race; a hook that resolves *asynchronously* is a misuse we don't set out to catch.
+
+**F5. Not a short-circuit: the invalid job.**
+
+An invalid job (a required input absent) is not resolved by anyone — it raises `MissingInput` out of `validate_inputs!`, and the trace is **Variant C**, autofail. It appears here only because it shares the perform-like hooks' silence: `before_perform`, `around_perform` and `after_perform` all sit behind gates that a failed validation never reaches, so none of the three fires. That is the same invariant, not an exception to it — perform is not attempted, so nothing perform-like runs. The observation belongs to `around_job_execution` and `on_job_executed`, which fire as they do for every job, and to the engine, which learns of the failure through `fail_job`.
 
 ### G. GRPC call failures
 
@@ -550,10 +519,8 @@ Where each sub-variant lands:
 ```
 -- instance.perform returns --
 TIMESTAMP: perform_finished_at
--- status changes prevented --
 -- result captured to Job --
 MIDDLEWARE: around_perform finish (unsafe)
--- status changes allowed --
 VALIDATION: required outputs (unsafe)
 VALIDATION: undeclared outputs (unsafe)
 GRPC: complete_job FAILS (engine still sees the job as activated)
@@ -578,7 +545,6 @@ Follows Variant A unchanged through A10. G1 deviates at A11, inside `handle_succ
     - ERROR CAPTURE: `resolution.set_error(e)` — records the rescued `Busybee::GRPC::Error` on the error axis before swallowing. Symmetry with G2's early capture in `handle_perform_exception`: both telemetry surfaces (`after_perform`, `on_job_executed`) see *why* the completion failed.
     - Logged: `"Failed to complete job #{job.key}: ... Job will timeout and retry."` — and swallowed. `run_hooked_perform` returns normally; `perform_job`'s `rescue StandardError` is never involved.
   - `perform_job`'s ensure block:
-    - GUARD: the perform bracket unwound as the exception left it; `after_perform` then fires inside its own prevented region.
     - HOOK: `after_perform` NOT fired — `job.resolved?` is false. The job is `:ready` with **both** axes set: the canonical "result set does not imply success, and error set does not imply failure on the engine side" case under Resolution's orthogonal model.
   - MIDDLEWARE: `around_job_execution` finish (safe) — runs normally; nothing is propagating.
   - `execute_job`'s ensure block:
@@ -599,9 +565,7 @@ VALIDATION: undeclared outputs (unsafe)
 GRPC: complete_job FAILS (engine still sees the job as activated)
 -- GRPC::Error raises out of complete!, aborting the rest of instance.perform --
 TIMESTAMP: perform_finished_at
--- status changes prevented --
 -- around_perform middleware post-yield NOT run --
--- status changes allowed --
 -- error captured to Job (early in handle_perform_exception) --
 -- autofail attempted (if fail_job_on_error and ready?) --
 GRPC: autofail fail_job (engine sees it as failed, one retry drained)
@@ -682,11 +646,9 @@ Once a non-`StandardError` exits `Runner#execute_job`, it propagates past the ru
 ```
 -- instance.perform raises SyntaxError / LoadError / NoMemoryError / etc. --
 TIMESTAMP: perform_finished_at
--- status changes prevented --
 -- around_perform middleware post-yield NOT run (build_propagating has no rescues) --
 -- error NOT captured to Job (perform_job's rescue StandardError does NOT match) --
 -- autofail NOT attempted (handle_perform_exception did not run) --
--- status changes allowed (defensive clear in perform_job ensure) --
 HOOK: after_perform NOT fired (job not resolved)
 -- around_job_execution post-yield NOT run (build_safe's rescue is StandardError-only) --
 TIMESTAMP: executed_at
@@ -699,11 +661,9 @@ HOOK: on_job_executed (safe — its own StandardError errors swallowed; the orig
 
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits, same as A8/B8/C8/D8 — every variant stamps this).
-  - GUARD RESTORED: the allowed region ends as the core block exits, re-engaging prevention for the rest of the perform bracket.
   - MIDDLEWARE: `around_perform` finish — does NOT run. `Chain.build_propagating` (used for `:around_perform`) has no rescues at the middleware layer; non-`StandardError` propagates through the chain and after-yield code is skipped.
   - The error reaches `perform_job`'s `rescue StandardError` and **does NOT match**. EARLY ERROR CAPTURE does not run; `handle_failure` does not run; `attempt_auto_fail` does not run; the `Shutdown.triggered_by?` check at C13 is unreachable. The Job's error axis stays unset; the result axis stays unset (perform raised before capture_chain_result ran).
   - `perform_job`'s ensure block:
-    - GUARD: the perform bracket unwound as the exception left it — this is the case that makes save-and-restore worth having over a set-and-clear pair.
     - HOOK: `after_perform` NOT fired — `job.resolved?` is false.
   - MIDDLEWARE: `around_job_execution` finish (safe) — does NOT run. `Chain.build_safe`'s `rescue StandardError` does NOT match; non-`StandardError` propagates through.
   - `execute_job`'s ensure block (always runs):
@@ -728,7 +688,7 @@ Identical site list and rationale as E2; the divergence is at the catch sites fu
 The "safe" label is misleading for non-`StandardError`: `Hooks.run(safe: true)` and `Chain.build_safe` both rescue `StandardError` only. Non-`StandardError` propagates through every safe layer. Surface point depends on origin site:
 
   - `on_job_activated`: raised inside `Runner#activate_job`. Propagates past the activate step, past whichever receive path activated this job (`Polling`, `Streaming`, `Hybrid`), into the supervising process. The receive path's `executed_at` and `on_job_executed` for this job do NOT fire (`execute_job` was never reached).
-  - `after_perform`: raised inside `perform_job`'s ensure block during `Hooks.run(:after_perform, job, safe: true)`, which the ensure wraps in `Job#_with_status_changes_prevented`. Non-`StandardError` emerges from `perform_job`; **the trace continues as H1** from "MIDDLEWARE: `around_job_execution` finish".
+  - `after_perform`: raised inside `perform_job`'s ensure block during `Hooks.run(:after_perform, job, safe: true)`. Non-`StandardError` emerges from `perform_job`; **the trace continues as H1** from "MIDDLEWARE: `around_job_execution` finish".
   - `on_job_executed`: raised inside `Runner#execute_job`'s ensure, after `executed_at` and the counter/status updates already ran. Non-`StandardError` exits `Runner#execute_job` directly and propagates as in H1's tail.
   - `around_job_execution`: raised inside the runner-level safe around chain. `Chain.build_safe`'s `StandardError`-only rescue doesn't catch. Same downstream as H1's tail.
 
@@ -744,6 +704,6 @@ A closing sweep of interactions across E/F/G/H that don't fit neatly into any on
 
 **H-style escapes can originate from any GRPC call site, not just `perform`.** Category H's at-a-glance shows the non-`StandardError` originating from `instance.perform`, but the escape pattern is identical regardless of where it's raised, as long as it propagates past `perform_job`'s `rescue StandardError`. A `SystemExit` raised mid-`complete_job` (e.g., a callback in user code called `Kernel#exit`) acts like H1 — `handle_success`'s `rescue StandardError` doesn't match either, so the SystemExit propagates through unchanged. Same for any non-`StandardError` from `fail_job` (in autofail or in user code) or `throw_bpmn_error`. Practical implication: H's "every ensure block fires" consequence applies uniformly; the originating site only changes which timestamps have already stamped and which intermediate state was captured before the escape began.
 
-**`Busybee::StatusChangeOutsidePerform` in `shutdown_on` is silently a no-op (parallel to H4, different root cause).** Configuring `shutdown_on: [Busybee::StatusChangeOutsidePerform]` is structurally inert, but the H4 mechanism (the `rescue StandardError` boundary) isn't why — SCOP IS a `StandardError` subclass, and it does reach C13. The reason it's inert is the priority order in `handle_perform_exception`: the explicit `raise if exception.is_a?(Busybee::StatusChangeOutsidePerform)` at worker.rb:121 fires BEFORE the `Shutdown.triggered_by?` check at line 122, so SCOP always re-raises past the wrap site regardless of `shutdown_on` membership. Same logic applies to `Shutdown` itself (also `StandardError`, also special-cased on the same line). The setter currently accepts both because the validator only checks the `StandardError` boundary, not the priority-order interaction. Tightening the validator to reject SCOP and Shutdown would convert these silent no-ops into explicit configure-time errors, mirroring the H4 mitigation; not yet tracked — open question whether it's worth the setter complexity for two edge cases.
+**`Busybee::Worker::Shutdown` in `shutdown_on` is silently a no-op (parallel to H4, different root cause).** Configuring `shutdown_on: [Busybee::Worker::Shutdown]` is structurally inert, but the H4 mechanism (the `rescue StandardError` boundary) isn't why — `Shutdown` IS a `StandardError` subclass, and it does reach C13. The reason it's inert is the priority order in `handle_perform_exception`: the explicit `raise if exception.is_a?(Shutdown)` fires BEFORE the `Shutdown.triggered_by?` check on the following line, so a Shutdown always re-raises past the wrap site regardless of `shutdown_on` membership — which is harmless, since propagating is what it was going to do anyway. The setter accepts it because the validator only checks the `StandardError` boundary, not the priority-order interaction. Tightening the validator would convert this silent no-op into an explicit configure-time error, mirroring the H4 mitigation; not yet tracked — open question whether it's worth the setter complexity for one edge case.
 
 **Hook-raised Shutdown during an ensure-block tail replaces the in-flight non-`StandardError`.** Ruby's `raise`-in-`ensure` semantics: when an exception is already unwinding and an ensure-block raises a new one, the new one *replaces* the in-flight exception entirely. The original is lost — no `cause` link, no record. Concretely: if `instance.perform` raises `NoMemoryError` (H1) and during the H1 tail an `on_job_executed` hook raises `Shutdown` (because `Shutdown.triggered_by?` matched the hook's own underlying error), the Shutdown wins — the supervising process sees a `Busybee::Worker::Shutdown` propagating out of the runner, not the original `NoMemoryError`. The Job's error axis was never populated on the H1 path either (no early capture without C10), so the original `NoMemoryError` is fully invisible to postmortem investigation. Probably not worth fixing — `NoMemoryError` co-occurring with a Shutdown-class hook error is already a "this worker is going down hard" scenario — but worth knowing when reading a backtrace that ends in `Shutdown` and doesn't match anything you configured.

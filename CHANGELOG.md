@@ -44,6 +44,10 @@
 
 - **Improved Test Job Helper** – `Busybee::Testing::Helpers#build_test_job` now accepts an optional `key:` keyword argument for tests that need a stable, known job key (e.g., correlating the same job across multiple assertions). Defaults to a random integer when omitted
 
+- **Short-Circuit a Job From a Hook** – sometimes the right answer is "don't do this work": the job was already fulfilled by an earlier attempt, the downstream service is in a known outage, the tenant is paused for maintenance. Resolve the job from any job hook — `complete!`, `fail!`, `throw_bpmn_error!` — and busybee stands down. `perform` doesn't run, input validation doesn't run, and neither automatic completion nor automatic failure fires against a job the engine already considers finished. Keep calling `perform.call` from your middleware exactly as you always have: the chain always descends, and busybee skips the work for you
+  - The perform-family hooks stand down with it — `before_perform`, `around_perform` and `after_perform` fire exactly when `perform` is attempted — while `on_job_activated`, `around_job_execution` and `on_job_executed` bracket every job that reached your process, short-circuited or not, so your instrumentation still sees it happen
+  - A skipped `perform` is logged at `info`, and `complete!` now tells you when variables you passed were discarded in favour of a result `perform` had already returned
+
 ### Bug Fixes:
 
 - **Workers Survive Gateway Backpressure** – a gateway reporting `RESOURCE_EXHAUSTED` to a polling or hybrid worker used to crash it, and in a multi-worker process took every sibling worker down with it — so a fleet-wide broker slowdown became a fleet-wide outage. Job activation is a server-streaming call whose status arrives while responses are being read, and that error was escaping untranslated past the very rescue meant to catch it. It now reaches the worker as a `Busybee::GRPC::Error` with `grpc_status` intact, so the documented backoff-and-retry runs and the process stays up
@@ -56,11 +60,11 @@
 
 - **Extending a Job's Lock in a Test Accepts a Duration** – the testing module's `update_timeout` read an `ActiveSupport::Duration` as a bare number, so `job.update_timeout(5.minutes)` asked the engine for 300 *milliseconds* and the lock lapsed immediately. It now reads a length of time the way everything else in the gem does
 
-- **Hooks Can't Resolve a Job Out From Under Your Worker** – the guard that keeps `complete!`, `fail!`, and `throw_bpmn_error!` inside `perform` reached only `before_perform` and `around_perform`. From `on_job_activated`, `around_job_execution`, or `on_job_executed`, a resolution call went all the way to the engine — and `perform` then ran anyway, doing its work against a job the engine already considered finished, with automatic completion silently skipped and the worker's own `complete!` rejected as a duplicate. Every job hook is now covered, so a stray resolution raises `Busybee::StatusChangeOutsidePerform` and leaves the job exactly as it was, which is what the hook documentation has described all along. Adjusting a job short of resolving it — `update_timeout`, `update_retries` — is still yours to do from any hook
-  - The rule applies to the thread running the hook, so a worker that returns from `perform` and completes the job from a background thread is unaffected, whenever that thread finishes
-
 ### Breaking Changes:
 
+- **`Busybee::StatusChangeOutsidePerform` no longer exists** – resolving a job from a hook used to raise it. That is now a supported way to short-circuit a job (see Short-Circuit a Job From a Hook, above). Resolving a job that is *already* resolved still raises `Busybee::JobAlreadyHandled`, which was always the more accurate answer. Remove any `rescue Busybee::StatusChangeOutsidePerform` — the constant is gone, and code referencing it will raise `NameError`
+- **`after_perform` no longer fires when `perform` didn't run** – it now requires both that the job settled *and* that `perform` was attempted, so a job short-circuited by a hook or turned away by input validation no longer reaches it. This keeps the perform-family hooks honest to their name: they fire exactly when your code was given a chance to run. `on_job_executed` fires for every job that reached your process either way, and is where observation that must not miss one belongs
+- **Middleware can no longer cancel a job by skipping its yield** – an `around_perform` that returns without calling `perform.call` now runs the rest of the chain anyway and logs a warning, which is what `around_job_execution` has always done. Skipping the work is a decision worth making explicitly: resolve the job instead
 - **Testing helper `publish_message` parameters renamed** – `variables:` is now `vars:` and `ttl_ms:` is now `ttl:` to match `Client#publish_message` naming. `ttl:` now accepts both Integer (milliseconds) and `ActiveSupport::Duration`
 - **Duration settings renamed so each one names what it sets** – now that every duration reads the same way, they are named the same way too: a gem-level default is its per-worker setting with `default_` in front, and no name advertises a unit it shares with all the others
   - `Busybee.grpc_retry_delay_ms` → `Busybee.grpc_retry_delay`
@@ -126,8 +130,6 @@ Production-ready Client API with Rails integration.
 - **Rails Integration** - Automatic configuration from `config.x.busybee.*`, works seamlessly with Rails secrets
   - Defaults to using Rails logger
   - Structured logs with a `[busybee]` prefix, supporting text or JSON modes
-
-### Breaking Changes:
 
 - **Testing::Helpers:**
   - Now uses `Busybee.cluster_address` instead of `Busybee::Testing.address`, which has been removed
