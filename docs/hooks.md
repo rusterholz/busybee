@@ -33,6 +33,7 @@ You register hooks once at boot, typically in the same `Busybee.configure` block
   - [Reading the Call](#reading-the-call)
   - [Fetching Is Observed at Dispatch](#fetching-is-observed-at-dispatch)
 - [When Hooks Raise](#when-hooks-raise)
+  - [What the Swallow Doesn't Cover](#what-the-swallow-doesnt-cover)
 - [Hooks and Threads: Own What You Spawn](#hooks-and-threads-own-what-you-spawn)
 - [Observing Deferred Resolutions](#observing-deferred-resolutions)
 - [Test Isolation](#test-isolation)
@@ -488,6 +489,37 @@ Two deliberate exceptions to the swallowing:
 - **Errors matching `shutdown_on` escalate to a graceful shutdown**, from any hook — a hook that detects a dead database connection gets the same treatment as a `perform` that does. The demo app uses exactly this to simulate rolling restarts from an `around_perform` hook.
 
   Escalation reads the *worker's* `shutdown_on` list plus the gem-wide [`Busybee.shutdown_on_errors`](configuration.md#shutdown_on_errors). Call hooks have no worker to read — a client call can be made from a web request or a background job, where "shut this worker down" means nothing — so only the gem-wide list escalates from `before_call`, `around_call`, and `after_call`. Put an error class in `Busybee.shutdown_on_errors` if you want it to escalate from anywhere.
+
+### What the Swallow Doesn't Cover
+
+The table above is about errors raised **by a hook**. An error raised by the work a hook wrapped — your `perform`, or the client call underneath `around_call` — is a different animal, and the hook system has nothing to say about it. It travels on untouched, to whoever owns it: automatic failure for a job, the caller for a client call.
+
+That distinction is why a `rescue` around `perform.call` is the wrong place to notice failures:
+
+```ruby
+# Don't do this
+Busybee.around_job_execution do |job, perform|
+  perform.call
+rescue StandardError => e
+  Metrics.increment("job.failed")
+  raise
+end
+```
+
+By the time an error reaches that `rescue`, everything busybee handles has already been handled — a `perform` that raised was caught and the job failed while the chain was still descending. What is left is the narrow set busybee itself could not handle, and quietly swallowing one of those hides a bug in the gem.
+
+Read the outcome off the carrier instead. That is what its axes are for:
+
+```ruby
+Busybee.on_job_executed do |job|
+  Metrics.increment("job.finished", tags: ["outcome:#{job.status}"])
+  ErrorReporter.notify(job.error) if job.failed?
+end
+```
+
+`on_job_executed` fires for every activated job whatever became of it, and `job.status` and `job.error` say what that was — so you branch on the outcome rather than on catching something. The other nouns work the same way: `after_call` reads `call.status` and `call.error`, and the `on_worker_*` hooks read `status.reason` and `status.error`.
+
+None of this argues against rescuing inside a hook's *own* logic. If your telemetry client can fail, rescue it, report it, and re-raise — that is your code and your error. The rule is about rescuing the descent, not about rescuing in hooks.
 
 ## Hooks and Threads: Own What You Spawn
 

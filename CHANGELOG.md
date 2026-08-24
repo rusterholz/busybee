@@ -60,6 +60,11 @@
 
 - **Extending a Job's Lock in a Test Accepts a Duration** – the testing module's `update_timeout` read an `ActiveSupport::Duration` as a bare number, so `job.update_timeout(5.minutes)` asked the engine for 300 *milliseconds* and the lock lapsed immediately. It now reads a length of time the way everything else in the gem does
 
+- **Error Handling No Longer Depends on Who Happens to Be Listening** – whether an error was suppressed, raised, or escalated to a graceful shutdown could change depending on whether any hook was registered, because a chain assembled from no hooks carried no error policy at all:
+  - An error you named in `shutdown_on` that escaped the worker's own handling stopped the process as an unexplained crash — `reason: :crash` rather than the `:unhealthy` you declared — unless some unrelated hook happened to be registered to hold the policy open. (Errors raised by `perform` itself were always escalated correctly.) `shutdown_on` now holds wherever the error comes from
+  - An error busybee itself could not handle was swallowed and logged as `Error in hooks (ignored)`, blaming your instrumentation for a fault in the gem and pointing you at a source location in your worker. Such errors now travel, so a defect surfaces where it happened instead of being absorbed by the machinery that noticed it
+  - `safe:` describes what happens when a *hook* raises, and nothing more. What becomes of an error raised by the work a hook wrapped is the job's business, or the caller's — see "What the Swallow Doesn't Cover" in the hooks guide for reading an outcome off the carrier rather than rescuing around the call
+
 ### Breaking Changes:
 
 - **`Busybee::StatusChangeOutsidePerform` no longer exists** – resolving a job from a hook used to raise it. That is now a supported way to short-circuit a job (see Short-Circuit a Job From a Hook, above). Resolving a job that is *already* resolved still raises `Busybee::JobAlreadyHandled`, which was always the more accurate answer. Remove any `rescue Busybee::StatusChangeOutsidePerform` — the constant is gone, and code referencing it will raise `NameError`

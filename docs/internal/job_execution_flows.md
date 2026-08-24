@@ -246,7 +246,7 @@ C14. Continuing `Worker.perform_job(job)`:
     - HOOKS: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — errors are logged and swallowed). Fires when `job.resolved?` and `perform_started_at` are both true. Perform was attempted here, so resolvedness is the deciding half: true if `attempt_auto_fail` succeeded, false if autofail was skipped (C11) or its GRPC also failed (C12). When `:ready`, the Job still carries the error captured in C10; per-attempt observability for the unresolved case is `on_job_executed` at C15 (runner-level; fires for every job that reached `execute_job`, on all of its exit paths — but not for one the shutdown drain fails without running, see the Shutdown-path gap below). after_perform's contract is "the lifecycle reached a settled outcome the engine has on file."
 
 C15. Continuing `Runner#execute_job(job)`:
-  - If `perform_job` re-raised (or wrapped) a `Shutdown` in C13, it propagates through the `around_job_execution` chain. The chain is `safe: true`, but `Chain.build_safe` re-raises `Shutdown` specifically (per chain.rb:45–46), so the Shutdown bubbles out of `Runner#execute_job` after the ensure block completes.
+  - If `perform_job` re-raised (or wrapped) a `Shutdown` in C13, it propagates through the `around_job_execution` chain. The chain is `safe: true`, but `safe:` governs *hook* errors only — an error arriving from below a link is marked on the way up and re-raised untouched, and the shared policy re-raises `Shutdown` in any case. The Shutdown therefore bubbles out of `Runner#execute_job` after the ensure block completes, and so does anything else that escapes `perform_job`. The chain's innermost boundary still classifies what passes through it: an escaping error matching `shutdown_on` becomes a `Shutdown` there even when no hook is registered.
   - Otherwise: HOOKS: Continuing `around_job_execution` middleware, portions after yield (safe — errors are logged and swallowed).
   - execute_job's ensure block (runs regardless of whether Shutdown bubbled):
     - TIMESTAMP: `executed_at`.
@@ -323,7 +323,7 @@ The categories below trace what happens at the boundaries of the four typical-li
 
 ### E. `Busybee::Worker::Shutdown` propagation
 
-`Busybee::Worker::Shutdown` (a `Busybee::Error` < `StandardError`) signals that the worker process is unhealthy and must terminate. It propagates past every safe layer — both `Hooks.run(safe:)` and `Chain.build_safe` rescue Shutdown specifically and re-raise it (`hooks/chain.rb:45–46`; the explicit `rescue Busybee::Worker::Shutdown; raise` in `Hooks.run`). Once Shutdown leaves `Runner#execute_job`, it bubbles to the Runner's run loop and terminates the runner thread.
+`Busybee::Worker::Shutdown` (a `Busybee::Error` < `StandardError`) signals that the worker process is unhealthy and must terminate. It propagates past every safe layer: `Hooks.classify_hook_error` — the shared policy behind both `Hooks.run(safe:)` and the safe chain — re-raises it before considering anything else, and a Shutdown travelling up from below a chain link is re-raised untouched in any case. Once Shutdown leaves `Runner#execute_job`, it bubbles to the Runner's run loop and terminates the runner thread.
 
 **E1. Raised directly from `instance.perform`.**
 
@@ -360,7 +360,7 @@ HOOK: on_job_executed (safe)
     - Explicit `raise if exception.is_a?(Shutdown)` re-raises past `perform_job`.
   - `perform_job`'s ensure block:
     - HOOK: `after_perform` via `Hooks.run(:after_perform, job, safe: true)` (safe — fires only when `job.resolved?`, i.e. autofail succeeded). The Job carries the early-captured error either way.
-  - MIDDLEWARE: `around_job_execution` finish (safe — `Chain.build_safe` re-raises Shutdown at `hooks/chain.rb:45–46`, so middleware post-yield does NOT run).
+  - MIDDLEWARE: `around_job_execution` finish (safe — a Shutdown arriving from below is re-raised untouched, so middleware post-yield does NOT run).
   - `execute_job`'s ensure block:
     - TIMESTAMP: `executed_at`.
     - Job counters increment; fresh `Worker::Status` re-stamp.
