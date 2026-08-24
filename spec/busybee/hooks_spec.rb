@@ -702,6 +702,21 @@ RSpec.describe Busybee::Hooks do
         expect(call_count).to eq(1)
       end
 
+      # The classification boundary sits beneath the links, so it is there even
+      # when nothing registered one. Without it, a worker's own shutdown_on
+      # declaration held only while some unrelated hook happened to be listening.
+      it "escalates a shutdown_on error raised by the core, with no hooks registered" do
+        worker_class = Class.new(Busybee::Worker) do
+          def self.name = "CoreFatalWorker"
+          shutdown_on RuntimeError
+        end
+        job.set_context(worker: worker_class.allocate)
+
+        expect do
+          described_class.run_chain(:around_job_execution, job, safe: true) { raise "db gone" }
+        end.to raise_error(Busybee::Worker::Shutdown)
+      end
+
       it "escalates shutdown_on errors from worker class config to Shutdown" do
         worker_class = Class.new(Busybee::Worker) do
           def self.name = "DbGoneWorker"
