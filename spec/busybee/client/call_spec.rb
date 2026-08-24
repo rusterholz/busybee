@@ -13,6 +13,18 @@ RSpec.describe Busybee::Client::Call do
     end
   end
 
+  describe "error policy invariance (call lifecycle)" do
+    after { Busybee::Hooks.reset! }
+
+    def exercise(&work) = described_class.new(:complete_job).attempt(&work)
+
+    def register_observer = Busybee.around_call { |_call, proceed| proceed.call }
+
+    def register_raising_observer = Busybee.around_call { |_call, _proceed| raise "hook boom" }
+
+    it_behaves_like "a hook-count-invariant error policy"
+  end
+
   describe "construction" do
     it "carries the rpc and starts pending with no attempts" do
       call = described_class.new(:complete_job)

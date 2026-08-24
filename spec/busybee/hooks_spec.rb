@@ -559,6 +559,36 @@ RSpec.describe Busybee::Hooks do
       expect(results).to eq(%i[before rescued])
     end
 
+    # The chain always descends: there is one way to short-circuit a job, and
+    # it is to resolve it. A middleware that forgets to yield can't cancel the
+    # work — it just gets a warning and the work runs anyway.
+    it "force-runs the core when a propagating middleware returns without yielding" do
+      results = []
+      Busybee.around_perform { |_job, _perform| results << :hook } # never calls perform
+
+      described_class.run_chain(:around_perform, job) { results << :core }
+      expect(results).to eq(%i[hook core])
+    end
+
+    it "warns when a propagating middleware returns without yielding" do
+      logger = instance_double(Logger, warn: nil)
+      allow(Busybee).to receive(:logger).and_return(logger)
+      Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
+
+      described_class.run_chain(:around_perform, job) { "core" }
+      expect(logger).to have_received(:warn).with(/\[busybee\].*without yielding/)
+    end
+
+    it "still lets a propagating middleware abort by raising" do
+      results = []
+      Busybee.around_perform { |_job, _perform| raise "abort" }
+
+      expect do
+        described_class.run_chain(:around_perform, job) { results << :core }
+      end.to raise_error(RuntimeError, "abort")
+      expect(results).to eq([])
+    end
+
     context "with prefiltering" do
       it "excludes non-matching hooks from the chain" do
         results = []
@@ -606,6 +636,20 @@ RSpec.describe Busybee::Hooks do
           with(%r{\[busybee\] Error in hooks \(ignored\): \[RuntimeError\] broken \(at .+/hooks_spec\.rb:\d+})
       end
 
+      # safe: describes hook-error policy. An error raised by the work the hook
+      # descended into is not the hook engine's to judge — it travels on, and it
+      # is never reported as a hook's failure.
+      it "does not swallow or misattribute an error raised by the core" do
+        logger = instance_double(Logger, error: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        Busybee.around_perform { |_job, perform| perform.call }
+
+        expect do
+          described_class.run_chain(:around_perform, job, safe: true) { raise "core boom" }
+        end.to raise_error(RuntimeError, "core boom")
+        expect(logger).not_to have_received(:error).with(/Error in hooks/)
+      end
+
       it "always propagates Shutdown" do
         Busybee.around_perform { |_job, _perform| raise Busybee::Worker::Shutdown.new(worker_class: nil) }
 
@@ -649,11 +693,28 @@ RSpec.describe Busybee::Hooks do
         call_count = 0
         Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
 
-        described_class.run_chain(:around_perform, job, safe: true) do
-          call_count += 1
-          raise "core boom"
-        end
+        expect do
+          described_class.run_chain(:around_perform, job, safe: true) do
+            call_count += 1
+            raise "core boom"
+          end
+        end.to raise_error(RuntimeError, "core boom")
         expect(call_count).to eq(1)
+      end
+
+      # The classification boundary sits beneath the links, so it is there even
+      # when nothing registered one. Without it, a worker's own shutdown_on
+      # declaration held only while some unrelated hook happened to be listening.
+      it "escalates a shutdown_on error raised by the core, with no hooks registered" do
+        worker_class = Class.new(Busybee::Worker) do
+          def self.name = "CoreFatalWorker"
+          shutdown_on RuntimeError
+        end
+        job.set_context(worker: worker_class.allocate)
+
+        expect do
+          described_class.run_chain(:around_job_execution, job, safe: true) { raise "db gone" }
+        end.to raise_error(Busybee::Worker::Shutdown)
       end
 
       it "escalates shutdown_on errors from worker class config to Shutdown" do

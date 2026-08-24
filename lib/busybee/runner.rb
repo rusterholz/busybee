@@ -249,7 +249,7 @@ module Busybee
       job.timestamps.stamp!(:activated_at)
       job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
       with_fresh_worker_status(job) do
-        job._with_status_changes_prevented { Hooks.run(:on_job_activated, job, safe: true) }
+        Hooks.run(:on_job_activated, job, safe: true)
       end
     end
 
@@ -272,14 +272,11 @@ module Busybee
     # @param job [Busybee::Job]
     def execute_job(job)
       with_fresh_worker_status(job) do
-        # Middleware brackets the work; only the work resolves. perform_job runs
-        # allowed so its own perform, auto-complete and autofail stay legal.
-        job._with_status_changes_prevented do
-          Hooks.run_chain(:around_job_execution, job, safe: true) do
-            job._with_status_changes_allowed do
-              @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
-            end
-          end
+        # Always descends, even for a job an on_job_activated hook already
+        # resolved: middleware brackets every job that was activated, and only
+        # the innermost gate decides whether work happens.
+        Hooks.run_chain(:around_job_execution, job, safe: true) do
+          @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
         end
       ensure
         # Runs even under run_chain's Shutdown re-raise, so the final activation
@@ -289,7 +286,7 @@ module Busybee
         @total_job_count.increment
         @failed_job_count.increment if job.failed?
         with_fresh_worker_status(job) do
-          job._with_status_changes_prevented { Hooks.run(:on_job_executed, job, safe: true) }
+          Hooks.run(:on_job_executed, job, safe: true)
         end
       end
     end

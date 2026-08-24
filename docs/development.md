@@ -44,6 +44,18 @@ rake zeebe:stop
 
 Integration tests will automatically skip if Zeebe is not running, so you can safely run the full test suite without having Zeebe started. The tests use the generated GRPC classes directly to verify that the protocol buffer bindings work correctly against a real Zeebe cluster.
 
+### Gates vs. Filters
+
+Two different mechanisms decide what runs, and conflating them is how a checkpoint ends up quietly under-run while reporting green.
+
+**Environment variables gate eligibility.** `RUN_INTEGRATION_TESTS`, `RUN_CAMUNDA_CLOUD_TESTS` and `TEST_RAILS_INTEGRATION` each un-gate a group that is otherwise excluded before RSpec ever considers it. The gates are per-group and don't imply one another — setting one does nothing for the others. Each lives on its own line in `spec/spec_helper.rb`, which is the authority; an example invocation elsewhere in this document shows *a* way to run a group, not the definition of what enables it.
+
+`MULTITENANCY_ENABLED` is the odd one out. It doesn't un-gate anything — it *swaps* which of `:single_tenant_only` / `:multi_tenant_only` is excluded (`spec/support/integration_helper.rb`). Both modes always run; the variable chooses which half.
+
+**Tags select among what's already eligible.** `--tag integration` doesn't enable integration specs, it narrows the run to only them. `RUN_INTEGRATION_TESTS=1 bundle exec rspec` gives you unit *plus* integration; adding `--tag integration` gives you integration alone. Reach for a tag when you want a group's own count — not when you want a full checkpoint, where narrowing is the last thing you want.
+
+**An explicit `--tag` overrides an exclusion filter.** That's RSpec's precedence, not ours, and it means a tag can walk a group straight past its own gate: `--tag camunda_cloud` selects those specs whether or not `RUN_CAMUNDA_CLOUD_TESTS` is set. Under `--dry-run` that's harmless and yields an accurate count. Run for real, it isn't — the Camunda Cloud specs enable live network access and would then have no credentials to use it. The `rails:` tag has a `before` hook that converts the override into an explicit skip; no other group has that backstop. **Set a group's gate when you mean "is this green?" Use `--tag` to narrow, never to enable.**
+
 ### Testing Error Paths with the Fault-Injection Gateway
 
 Some of busybee's most consequential behavior only appears when the broker misbehaves: a `RESOURCE_EXHAUSTED` during job activation, a stream that dies mid-delivery, a status that arrives while a response enumerator is being read. Those paths are easy to get wrong in a test by stubbing the client, because a stub encodes what you *believe* the gateway does. When the belief is wrong, the test passes and the system is broken.
