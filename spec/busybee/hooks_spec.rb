@@ -636,6 +636,20 @@ RSpec.describe Busybee::Hooks do
           with(%r{\[busybee\] Error in hooks \(ignored\): \[RuntimeError\] broken \(at .+/hooks_spec\.rb:\d+})
       end
 
+      # safe: describes hook-error policy. An error raised by the work the hook
+      # descended into is not the hook engine's to judge — it travels on, and it
+      # is never reported as a hook's failure.
+      it "does not swallow or misattribute an error raised by the core" do
+        logger = instance_double(Logger, error: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        Busybee.around_perform { |_job, perform| perform.call }
+
+        expect do
+          described_class.run_chain(:around_perform, job, safe: true) { raise "core boom" }
+        end.to raise_error(RuntimeError, "core boom")
+        expect(logger).not_to have_received(:error).with(/Error in hooks/)
+      end
+
       it "always propagates Shutdown" do
         Busybee.around_perform { |_job, _perform| raise Busybee::Worker::Shutdown.new(worker_class: nil) }
 
@@ -679,10 +693,12 @@ RSpec.describe Busybee::Hooks do
         call_count = 0
         Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
 
-        described_class.run_chain(:around_perform, job, safe: true) do
-          call_count += 1
-          raise "core boom"
-        end
+        expect do
+          described_class.run_chain(:around_perform, job, safe: true) do
+            call_count += 1
+            raise "core boom"
+          end
+        end.to raise_error(RuntimeError, "core boom")
         expect(call_count).to eq(1)
       end
 
