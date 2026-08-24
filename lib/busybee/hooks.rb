@@ -148,27 +148,38 @@ module Busybee
         end
       end
 
-      # The one error policy for a firing hook. Every invocation site — the
-      # flat runs above, Chain's safe links — routes a raised error through
-      # here, so the policy can't drift between them: Shutdown always
-      # propagates; an error the target's worker (or the gem config) declared
-      # fatal escalates to Shutdown (cause = the original, set at raise); any
-      # other error propagates when unsafe, or is logged and swallowed when
-      # safe. Propagating chains (around_perform) bypass this by design —
-      # their errors classify later, at perform_job's rescue, so autofail runs
-      # before the Shutdown wrap.
+      # Catch-and-classify for a firing hook: whatever the block raises goes to
+      # the one policy below. Propagating chains (around_perform) bypass this by
+      # design — their errors classify later, at perform_job's rescue, so
+      # autofail runs before the Shutdown wrap.
       def protect_allowing_shutdowns(target, safe:)
         yield
-      rescue Busybee::Worker::Shutdown
-        raise
-      rescue StandardError => e
+      rescue StandardError
+        classify_hook_error(target, safe: safe)
+      end
+
+      # The one error policy, so it can't drift between invocation sites:
+      # Shutdown always propagates; an error the target's worker (or the gem
+      # config) declared fatal escalates to Shutdown (cause = the original, set
+      # at raise); anything else propagates when unsafe, or is logged and
+      # swallowed when safe.
+      #
+      # Split out from the catch above for callers that must catch *first* —
+      # Chain's safe links have to tell their own raise from one that merely
+      # passed through them, and that can't be decided from inside a wrapper.
+      # MUST be called from within a rescue: it reads the in-flight exception
+      # from $!, which is what makes the bare raises re-raise it and the
+      # Shutdown wrap pick it up as .cause.
+      def classify_hook_error(target, safe:)
+        error = $!
+        raise if error.is_a?(Busybee::Worker::Shutdown)
+
         worker_class = attribute(target, :worker_class)
-        if Busybee::Worker::Shutdown.triggered_by?(e, worker_class)
-          raise Busybee::Worker::Shutdown.new(worker_class: worker_class)
-        end
+        raise Busybee::Worker::Shutdown.new(worker_class: worker_class) if
+          Busybee::Worker::Shutdown.triggered_by?(error, worker_class)
         raise unless safe
 
-        log_swallowed_error(e)
+        log_swallowed_error(error)
       end
 
       # Log a hook error that was swallowed (in safe-mode iteration or safe
