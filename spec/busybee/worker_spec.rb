@@ -22,10 +22,6 @@ RSpec.describe Busybee::Worker do
 
   let(:job) { Busybee::Job.new(raw_job, client: client) }
 
-  let(:minimal_worker) do
-    stub_const("MinimalWorker", Class.new(described_class))
-  end
-
   let(:performing_worker) do
     stub_const("PerformingWorker", Class.new(described_class) do
       strict_outputs false
@@ -33,6 +29,30 @@ RSpec.describe Busybee::Worker do
         { processed: true }
       end
     end)
+  end
+  let(:minimal_worker) do
+    stub_const("MinimalWorker", Class.new(described_class))
+  end
+
+  describe "error policy invariance (perform lifecycle)" do
+    after { Busybee::Hooks.reset! }
+
+    # autofail off keeps the doubled client off the wire; the work's own error
+    # is the subject either way.
+    def exercise(&work)
+      Class.new(Busybee::Worker) do
+        def self.name = "InvarianceWorker"
+        job_type "invariance"
+        fail_job_on_error false
+        define_method(:perform) { work.call }
+      end.perform_job(job)
+    end
+
+    def register_observer = Busybee.around_perform { |_job, perform| perform.call }
+
+    def register_raising_observer = Busybee.around_perform { |_job, _perform| raise "hook boom" }
+
+    it_behaves_like "a hook-count-invariant error policy"
   end
 
   describe ".perform_job" do
@@ -46,7 +66,7 @@ RSpec.describe Busybee::Worker do
       expect { minimal_worker.perform_job(job) }.to raise_error(NotImplementedError, /perform/)
     end
 
-    it "clears the status-change-prevention flag even when a non-StandardError escapes" do
+    it "leaves the job unresolved and still settleable when a non-StandardError escapes" do
       worker = stub_const("NonStdErrorWorker", Class.new(described_class) do
         define_method(:perform) { raise Exception, "weird" } # rubocop:disable Lint/RaiseException
       end)

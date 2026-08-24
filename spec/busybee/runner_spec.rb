@@ -451,6 +451,95 @@ RSpec.describe Busybee::Runner do
     end
   end
 
+  describe "error policy invariance (job lifecycle)" do
+    let(:worker_class) do
+      Class.new do
+        def self.name = "TestWorker"
+        def self.perform_job(_job); end
+      end
+    end
+
+    after { Busybee::Hooks.reset! }
+
+    def exercise(&work)
+      allow(worker_class).to receive(:perform_job) { work.call }
+      runner.send(:execute_job, job)
+    end
+
+    def register_observer = Busybee.around_job_execution { |_job, perform| perform.call }
+
+    def register_raising_observer = Busybee.around_job_execution { |_job, _perform| raise "hook boom" }
+
+    it_behaves_like "a hook-count-invariant error policy"
+  end
+
+  describe "error policy invariance (worker lifecycle)" do
+    after { Busybee::Hooks.reset! }
+
+    # A fresh runner per turn: run! is single-use (the second call would take
+    # `return if stopping?` and never reach the work).
+    def exercise(&work)
+      described_class.new(worker_class, client: client).tap do |fresh|
+        allow(fresh).to receive(:run_loop) { work.call }
+      end.run!
+    end
+
+    def register_observer = Busybee.on_worker_started { |_status| nil }
+
+    def register_raising_observer = Busybee.on_worker_started { |_status| raise "hook boom" }
+
+    it_behaves_like "a hook-count-invariant error policy"
+  end
+
+  describe "an error escaping perform_job" do
+    let(:worker_class) do
+      Class.new(Busybee::Worker) do
+        def self.name = "CorridorWorker"
+        job_type "test_worker"
+        def perform; end
+      end
+    end
+
+    let(:attempted) { [] }
+
+    let(:polling_runner) do
+      described_class.for(worker_class, runtime_config: Busybee::RuntimeConfig.new(worker_mode: :polling),
+                                        client: client)
+    end
+
+    before do
+      allow(worker_class).to receive(:perform_job) do |activated|
+        attempted << activated.key
+        raise "busybee bug"
+      end
+      allow(client).to receive(:with_each_job) do |_type, **_opts, &yielder|
+        yielder.call(job)
+        yielder.call(job)
+        polling_runner.stop!
+      end
+    end
+
+    after { Busybee::Hooks.reset! }
+
+    # Two jobs is what makes this a corridor rather than a unit test: it
+    # distinguishes "ends that job" from "ends the worker". Nothing an adopter
+    # writes reaches here — work code, hook code and the gRPC seam are each
+    # contained upstream — so what escapes is a flaw in the gem, and a flaw in
+    # the gem is meant to fail loudly rather than be swallowed by its own
+    # instrumentation.
+    it "ends the worker rather than the job, with no hooks registered" do
+      expect { polling_runner.run! }.to raise_error(RuntimeError, "busybee bug")
+      expect(attempted.size).to eq(1)
+    end
+
+    it "ends the worker identically when a hook happens to be registered" do
+      Busybee.around_job_execution { |_job, perform| perform.call }
+
+      expect { polling_runner.run! }.to raise_error(RuntimeError, "busybee bug")
+      expect(attempted.size).to eq(1)
+    end
+  end
+
   describe "hook resolution over the runner's job hooks (private)" do
     let(:worker_class) do
       Class.new do
