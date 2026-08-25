@@ -34,12 +34,15 @@ RSpec.describe "fail_job matcher" do
     end
   end
 
-  let(:no_auto_fail_worker) do
+  # Raises, but the job is already settled by the time it does — so the worker
+  # did fail, and the job did not.
+  let(:completing_then_raising_worker) do
     Class.new(Busybee::Worker) do
-      job_type "no-auto-fail"
-      fail_job_on_error false
+      job_type "resolved-before-raising"
+      strict_outputs false
 
       def perform
+        complete!(done: true)
         raise StandardError, "kaboom"
       end
     end
@@ -124,13 +127,13 @@ RSpec.describe "fail_job matcher" do
     end
   end
 
-  describe "when fail_job_on_error is disabled" do
+  describe "when the worker raised but the job reached another outcome" do
     it "fails because the job is not marked as failed" do
       job = build_test_job
       expect do
-        expect(no_auto_fail_worker).to fail_job(job)
+        expect(completing_then_raising_worker).to fail_job(job)
       end.to raise_error(RSpec::Expectations::ExpectationNotMetError,
-                         /expected job to be failed, but was ready/)
+                         /expected job to be failed, but was complete/)
     end
   end
 

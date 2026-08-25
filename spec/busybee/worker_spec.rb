@@ -35,17 +35,19 @@ RSpec.describe Busybee::Worker do
   end
 
   describe "error policy invariance (perform lifecycle)" do
+    before { allow(client).to receive(:fail_job) }
+
     after { Busybee::Hooks.reset! }
 
-    # autofail off keeps the doubled client off the wire; the work's own error
-    # is the subject either way.
+    # A fresh job per turn. Autofail reports every escaping error now, so a
+    # shared job would arrive at the second turn already resolved and the two
+    # turns would stop comparing the same path.
     def exercise(&work)
       Class.new(Busybee::Worker) do
         def self.name = "InvarianceWorker"
         job_type "invariance"
-        fail_job_on_error false
         define_method(:perform) { work.call }
-      end.perform_job(job)
+      end.perform_job(Busybee::Job.new(raw_job, client: client))
     end
 
     def register_observer = Busybee.around_perform { |_job, perform| perform.call }
@@ -139,7 +141,7 @@ RSpec.describe Busybee::Worker do
       end
     end
 
-    context "with fail_job_on_error (default: true)" do
+    context "with automatic failure" do
       before { allow(client).to receive(:fail_job) }
 
       it "auto-fails the job when perform raises" do
@@ -159,19 +161,6 @@ RSpec.describe Busybee::Worker do
 
         worker.perform_job(job)
         expect(client).to have_received(:fail_job).with(123456, anything, retries: 2, backoff: 30_000)
-      end
-
-      it "does not auto-fail when disabled" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
-        worker = stub_const("NoAutoFailWorker", Class.new(described_class) do
-          fail_job_on_error false
-          define_method(:perform) { raise "boom" }
-        end)
-
-        expect { worker.perform_job(job) }.not_to raise_error
-        expect(client).not_to have_received(:fail_job)
       end
 
       it "skips auto-fail when job is already handled" do
@@ -221,20 +210,6 @@ RSpec.describe Busybee::Worker do
         expect { worker.perform_job(job) }.not_to raise_error
       end
 
-      it "captures the perform exception to Resolution even when fail_job_on_error is false" do
-        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
-
-        worker = stub_const("CaptureWithoutAutofailWorker", Class.new(described_class) do
-          fail_job_on_error false
-          define_method(:perform) { raise "boom" }
-        end)
-
-        worker.perform_job(job)
-
-        expect(job.error).to be_a(RuntimeError)
-        expect(job.error.message).to eq("boom")
-      end
-
       it "captures the perform exception to Resolution even when the auto-fail GRPC fails" do
         allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
         allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
@@ -248,24 +223,6 @@ RSpec.describe Busybee::Worker do
         expect(job.error).to be_a(RuntimeError)
         expect(job.error.message).to eq("boom")
         expect(job).to be_ready
-      end
-
-      it "swallows errors when fail_job_on_error is false and logs a warning" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
-        worker = stub_const("SwallowNoFailWorker", Class.new(described_class) do
-          fail_job_on_error false
-          define_method(:perform) { raise "unhandled" }
-        end)
-
-        expect { worker.perform_job(job) }.not_to raise_error
-        expect(job).to be_ready
-        expect(logger).to have_received(:warn).with(
-          Regexp.new("Unhandled error.*fail_job_on_error is off.*" \
-                     "\\[RuntimeError\\] unhandled \\(at .+/worker_spec\\.rb:\\d+.+" \
-                     "\\. Job will timeout and retry\\.")
-        )
       end
     end
 
@@ -621,23 +578,19 @@ RSpec.describe Busybee::Worker do
           with(123456, /MissingOutput.*:notification_id/, retries: 2, backoff: nil)
       end
 
-      it "re-raises validation error when fail_job_on_error is false" do
-        worker = stub_const("ManualNoFailWorker", Class.new(described_class) do
+      it "auto-fails instead of completing when a manual complete! passes an undeclared output" do
+        worker = stub_const("ManualUndeclaredWorker", Class.new(described_class) do
           complete_job_on_success false
-          fail_job_on_error false
           output :status, required: false
           define_method(:perform) do
             complete!(extra: "surprise")
           end
         end)
 
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
         expect { worker.perform_job(job) }.not_to raise_error
         expect(client).not_to have_received(:complete_job)
-        expect(client).not_to have_received(:fail_job)
-        expect(logger).to have_received(:warn).with(/fail_job_on_error is off.*UndeclaredOutput/)
+        expect(client).to have_received(:fail_job).
+          with(123456, /UndeclaredOutput.*:extra/, retries: 2, backoff: nil)
       end
 
       it "passes through when outputs are valid" do
@@ -1386,22 +1339,6 @@ RSpec.describe Busybee::Worker do
         expect(received_job.error_message).to eq("missing")
       end
 
-      it "does not fire when the job remains :ready (fail_job_on_error: false)" do
-        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
-        received = []
-        Busybee.after_perform { |j| received << j }
-        worker = stub_const("AfterUnresolvedWorker", Class.new(Busybee::Worker) do
-          fail_job_on_error false
-          define_method(:perform) { raise "boom" }
-        end)
-
-        worker.perform_job(job)
-
-        expect(received).to be_empty
-        expect(job).to be_ready
-        expect(job.error).to be_a(RuntimeError)
-      end
-
       it "does not fire when autofail's GRPC also failed" do
         allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
         allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
@@ -1454,11 +1391,13 @@ RSpec.describe Busybee::Worker do
           with(%r{already complete: \[RuntimeError\] post-complete error \(at .+/worker_spec\.rb:\d+})
       end
 
-      it "does not log the already-handled warning when fail_job_on_error is false" do
+      # The operator's next move depends on this sentence. A job the engine has
+      # already been told about is not coming back, and saying otherwise sends
+      # them looking for a redelivery that will never arrive.
+      it "never says a job that resolved before the raise will time out and retry" do
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
-        worker = stub_const("NoAutoFailLogWorker", Class.new(Busybee::Worker) do
-          fail_job_on_error false
+        worker = stub_const("ResolvedThenRaisingWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) do
             complete!({ done: true })
@@ -1467,7 +1406,9 @@ RSpec.describe Busybee::Worker do
         end)
 
         worker.perform_job(job)
-        expect(logger).not_to have_received(:warn).with(/already complete/)
+
+        expect(job.status).to eq(:complete)
+        expect(logger).not_to have_received(:warn).with(/timeout and retry/)
       end
     end
 

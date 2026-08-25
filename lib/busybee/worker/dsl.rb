@@ -115,14 +115,6 @@ module Busybee
         end
       end
 
-      def fail_job_on_error(value = nil)
-        if value.nil?
-          configuration.fail_job_on_error
-        else
-          configuration.fail_job_on_error = value
-        end
-      end
-
       def strict_outputs(value = nil)
         if value.nil?
           configuration.strict_outputs?
