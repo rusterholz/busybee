@@ -2,8 +2,8 @@
 #
 # These workers use semaphores to limit concurrency and sleep to simulate
 # real-world delays. The long job_timeout (5 minutes) covers semaphore
-# wait time; the DSL sets complete_job_on_success and fail_job_on_error
-# to false since these workers call complete!/fail! manually.
+# wait time; the DSL sets complete_job_on_success to false since these
+# workers complete the job from a background thread, not from perform.
 
 job_timeout: 300000
 

@@ -11,7 +11,6 @@ module Sim
     job_type "simulate_pick_and_pack"
     description "Simulates warehouse workers picking and packing items with realistic delays"
     complete_job_on_success false
-    fail_job_on_error false
     job_timeout 5.minutes
 
     variable :item_count, type: :integer, description: "Number of items to pick and pack"

@@ -16,7 +16,6 @@ module Sim
     job_type "simulate_delivery_run"
     description "Simulates a driver's delivery trip with distance-proportional delays"
     complete_job_on_success false
-    fail_job_on_error false
     job_timeout 5.minutes
 
     variable :distance, type: :decimal, description: "Distance to travel in grid units"
