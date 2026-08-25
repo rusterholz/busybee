@@ -236,7 +236,7 @@ on_job_executed             # the runner finished with the job — every exit pa
 | `after_perform` | when the perform envelope exits **with a settled outcome** | `job` |
 | `on_job_executed` | when the runner finishes with a job it ran — on every exit path ([except a shutdown](#watching-the-system-lifecycle)) | `job` |
 
-**The `after_perform` firing condition is worth reading twice.** It fires when two things are both true: the job actually resolved — completed, failed, or BPMN-errored, with the engine informed — *and* `perform` was actually attempted. If automatic failure is disabled, or the resolution gRPC call itself failed, the perform envelope exits without a settled outcome and `after_perform` stays silent while the engine eventually re-delivers the job. If a hook [short-circuited](#short-circuiting-a-job) the job, or a required input was missing, `perform` never ran and `after_perform` stays silent for the other reason. A hook that must observe every exit path belongs on `on_job_executed`.
+**The `after_perform` firing condition is worth reading twice.** It fires when two things are both true: the job actually resolved — completed, failed, or BPMN-errored, with the engine informed — *and* `perform` was actually attempted. If the resolution gRPC call itself failed, the perform envelope exits without a settled outcome and `after_perform` stays silent while the engine eventually re-delivers the job. If a hook [short-circuited](#short-circuiting-a-job) the job, or a required input was missing, `perform` never ran and `after_perform` stays silent for the other reason. A hook that must observe every exit path belongs on `on_job_executed`.
 
 ### Wrapping perform: Middleware
 

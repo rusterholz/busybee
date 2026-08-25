@@ -152,33 +152,6 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
       end
     end
 
-    context "with fail_job_on_error disabled" do
-      let(:no_auto_fail_worker) do
-        Class.new(Busybee::Worker) do
-          job_type "no-auto-fail"
-          fail_job_on_error false
-
-          def perform
-            raise StandardError, "kaboom"
-          end
-        end
-      end
-
-      it "re-raises the error" do
-        expect do
-          execute_worker(no_auto_fail_worker)
-        end.to raise_error(StandardError, "kaboom")
-      end
-
-      it "does not mark the job as failed" do
-        job = build_test_job
-        expect do
-          execute_worker(no_auto_fail_worker, job: job)
-        end.to raise_error(StandardError, "kaboom")
-        expect(job).to be_ready
-      end
-    end
-
     context "with complete_job_on_success disabled" do
       let(:no_autocomplete_worker) do
         Class.new(Busybee::Worker) do

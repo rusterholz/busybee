@@ -595,26 +595,14 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
-  describe ".fail_job_on_error" do
-    it "defaults to true" do
-      worker = stub_const("DefaultFailWorker", Class.new(Busybee::Worker))
-      expect(worker.fail_job_on_error).to be(true)
-    end
-
-    it "can be set to false" do
-      worker = stub_const("NoFailWorker", Class.new(Busybee::Worker) do
-        fail_job_on_error false
-      end)
-
-      expect(worker.configuration.fail_job_on_error).to be(false)
-    end
-
-    it "raises on non-boolean" do
+  describe "the retired autofail toggle" do
+    # Reporting a failure to the engine is no longer optional. A worker
+    # carrying the old declaration must fail loudly at definition time — the
+    # alternative is a setting that silently stops meaning anything.
+    it "raises rather than silently ignoring a `fail_job_on_error` declaration" do
       expect do
-        stub_const("BadFailWorker", Class.new(Busybee::Worker) do
-          fail_job_on_error "true"
-        end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /fail_job_on_error.*boolean/)
+        Class.new(Busybee::Worker) { fail_job_on_error false }
+      end.to raise_error(NoMethodError, /fail_job_on_error/)
     end
   end
 

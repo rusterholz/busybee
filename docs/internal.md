@@ -192,11 +192,11 @@ Steps:
 2. Validate required inputs (raises `MissingInput` listing all missing names)
 3. Call `instance.perform`
 4. **On success:** if `complete_job_on_success` and `job.ready?`, validate required outputs (`MissingOutput`), validate no undeclared outputs when `strict_outputs` is enabled (`UndeclaredOutput`), then call `job.complete!`. GRPC errors logged and swallowed.
-5. **On error:** if `fail_job_on_error` and `job.ready?`, call `job.fail!`. Then check `shutdown_on` — if matched, wrap as `Shutdown` and re-raise.
+5. **On error:** if `job.ready?`, call `job.fail!`; otherwise log that the error arrived after the job was already resolved. Then check `shutdown_on` — if matched, wrap as `Shutdown` and re-raise.
 
 The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform`.
 
-**Output validation on manual `complete!`:** Worker defines its own `complete!(vars = {})` (not delegated to Job) that runs `validate_required_outputs!` and `validate_undeclared_outputs!` before delegating to `job.complete!`. Validation errors raised inside `perform` flow through `perform_job`'s normal rescue path — auto-fail when `fail_job_on_error` is true, logged when false. Code that calls `job.complete!` directly bypasses output validation (this is intentional for edge cases but not the recommended pattern).
+**Output validation on manual `complete!`:** Worker defines its own `complete!(vars = {})` (not delegated to Job) that runs `validate_required_outputs!` and `validate_undeclared_outputs!` before delegating to `job.complete!`. Validation errors raised inside `perform` flow through `perform_job`'s normal rescue path and auto-fail the job. Code that calls `job.complete!` directly bypasses output validation (this is intentional for edge cases but not the recommended pattern).
 
 ### Job Execution Flows
 

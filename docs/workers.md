@@ -85,7 +85,7 @@ When a running busybee process receives a job, it uses your worker class to exec
 4. **On Success** - if `perform` returned successfully and `complete_job_on_success` is `true` (the default), then:
   - **Output Validation** - All `required: true` outputs are checked in the Hash returned from `perform`. If any are missing, `MissingOutput` is raised.
   - **Return Variables** - Busybee reports to the workflow engine that the job is complete, sending back any output values returned from `perform`.
-5. **On Failure** - if `perform` raises an exception and `fail_job_on_error` is `true` (the default), then:
+5. **On Failure** - if `perform` raises an exception, then:
   - **Error Reporting** - Busybee reports to the workflow engine that the job failed, sending back the error class and message and the configured backoff delay.
 
 This means that for most workers, you can just implement `perform`, return a Hash, and let Busybee handle the rest.
@@ -132,6 +132,37 @@ end
 ```
 
 **Important:** Because failed jobs are retried by default, you should try to make your `perform` method [idempotent](https://en.wikipedia.org/wiki/Idempotence) whenever possible. If a particular worker cannot safely be retried, set retries to `0` in the BPMN definition. Even then, **Zeebe does not guarantee exactly-once execution.** If you need that guarantee, your worker must implement it.
+
+#### Reporting Failures Your Own Way
+
+Automatic failure is not something you switch off. Every exception that escapes `perform` is reported to the workflow engine, and that is deliberate: an unreported failure leaves the job silently unresolved, and since a lease expiring doesn't consume a retry, the engine keeps handing the job back without ever raising an incident for anyone to notice. A job that fails the same way every time would loop indefinitely and never appear in Operate.
+
+What you can change is *what gets reported*. Rescue inside `perform` and resolve the job the way you want it resolved:
+
+```ruby
+class ProcessPaymentWorker < Busybee::Worker
+  variable :order_id, type: :uuid
+
+  output :charged, type: :boolean
+
+  def perform
+    order = Order.find(order_id)
+    PaymentGateway.charge(order)
+
+    { charged: true }
+  rescue PaymentGateway::Timeout => e
+    # An outage isn't this order's fault — come back without spending a retry
+    fail!(e, retries: job.retries, backoff: 60_000)
+  rescue PaymentGateway::CardDeclined => e
+    # A business outcome the process model has a path for
+    throw_bpmn_error!("CARD_DECLINED", e.message)
+  end
+end
+```
+
+Anything your rescue doesn't catch is still reported for you — which is the point. The errors you didn't anticipate are the ones most worth seeing.
+
+Two neighbouring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker — redacting sensitive text out of error messages, say — reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
 
 #### Manual Lifecycle Control
 
@@ -444,7 +475,6 @@ Set to `false` when your worker needs to manage the job lifecycle manually (for 
 ```ruby
 class PickAndPackWorker < Busybee::Worker
   complete_job_on_success false
-  fail_job_on_error false
 
   def perform
     delay = calculate_delay
@@ -458,11 +488,7 @@ end
 
 > See the [Dropship Co. demo app's simulation workers](../spec/demo/app/workers/sim/) for a full example of this pattern.
 
-#### `fail_job_on_error`
-
-Controls whether Busybee automatically fails the job when `perform` raises an exception. Default: `true`.
-
-Set to `false` when you want to handle all errors yourself. Note that if the job is neither completed nor failed, it will eventually time out and be retried by the workflow engine.
+Note that this switches off automatic *completion* only. If `perform` raises, the job is still failed and reported — which is what you want, because at that point nothing else is going to resolve it.
 
 #### `description`
 
@@ -539,7 +565,6 @@ See [Worker Modes](#worker-modes) for what these options mean and when to use ea
 | `fail_job_backoff` | A [duration](configuration.md#how-busybee-reads-durations) | `5_000` | Retry backoff delay (ms) |
 | `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | `2_000` | Delay after backpressure error (ms) |
 | `complete_job_on_success` | Boolean | `true` | Auto-complete on success |
-| `fail_job_on_error` | Boolean | `true` | Auto-fail on exception |
 | `strict_outputs` | Boolean | `Busybee.default_strict_outputs` (`true`) | Raise [`UndeclaredOutput`](#strict-output-validation) on undeclared return keys |
 | `shutdown_on` | Exception class(es) | `[]` | Exceptions that trigger shutdown |
 

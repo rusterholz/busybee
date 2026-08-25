@@ -79,10 +79,10 @@ module Busybee
         ensure
           # We settled, and we actually tried. resolved? is the original half:
           # after_perform marks a settled outcome the engine has on file, so a
-          # job that will be re-yielded (autofail disabled, GRPC fail
-          # mid-resolution) doesn't get it. perform_started_at is the half that
-          # keeps the triple symmetric — whatever skips around_perform skips
-          # this too, so a short-circuited or invalid job gets none of the three.
+          # job that will be re-yielded (a GRPC failure mid-resolution) doesn't
+          # get it. perform_started_at is the half that keeps the triple
+          # symmetric — whatever skips around_perform skips this too, so a
+          # short-circuited or invalid job gets none of the three.
           # Per-attempt observability belongs to on_job_executed either way.
           Hooks.run(:after_perform, job, safe: true) if job.resolved? && job.timestamps.perform_started_at
         end
@@ -123,14 +123,12 @@ module Busybee
 
       def handle_perform_exception(job, exception)
         # Capture early so after_perform hooks see the error attached to Job even
-        # when autofail is disabled (fail_job_on_error: false) or autofail's
-        # GRPC fails. fail!'s own set_error during autofail no-ops harmlessly.
+        # when autofail's GRPC fails. fail!'s own set_error during autofail
+        # no-ops harmlessly.
         job.send(:resolution).set_error(Shutdown.unwrap(exception))
         handle_failure(job, exception, configuration)
         raise if exception.is_a?(Shutdown)
         raise Shutdown.new(worker_class: self) if Shutdown.triggered_by?(exception, self)
-
-        log_unhandled_error(job, exception) unless configuration.fail_job_on_error
       end
 
       # Per-line-item gating: every step asks whether work is still on the table
@@ -206,9 +204,10 @@ module Busybee
         end
       end
 
+      # Reporting a failure to the engine is not optional. Every error escaping
+      # perform lands here, and the only question is whether the job is still
+      # the worker's to resolve.
       def handle_failure(job, error, config)
-        return unless config.fail_job_on_error
-
         unless job.ready?
           log_post_resolution_error(job, error)
           return
@@ -230,16 +229,6 @@ module Busybee
         job.fail!(Shutdown.unwrap(error), backoff: config.fail_job_backoff)
       rescue StandardError => e
         Busybee.logger&.warn("Failed to fail job #{job.key}: #{e.message}. Job will timeout and retry.")
-      end
-
-      def log_unhandled_error(job, error)
-        location = error.backtrace&.first
-        suffix = location ? " (at #{location})" : ""
-        Busybee.logger&.warn(
-          "Unhandled error in #{configuration.job_type} worker for job #{job.key} " \
-          "(fail_job_on_error is off): [#{error.class}] #{error.message}#{suffix}. " \
-          "Job will timeout and retry."
-        )
       end
     end
   end

@@ -27,7 +27,7 @@ module Busybee
       attr_accessor :description
       attr_reader :inputs, :outputs, :worker_mode, :polling_config, :streaming_config,
                   :job_timeout, :fail_job_backoff, :backpressure_delay,
-                  :complete_job_on_success, :fail_job_on_error, :strict_outputs, :shutdown_on
+                  :complete_job_on_success, :strict_outputs, :shutdown_on
 
       def initialize(worker_class)
         @worker_class = worker_class
@@ -42,7 +42,6 @@ module Busybee
         @fail_job_backoff = nil
         @backpressure_delay = nil
         @complete_job_on_success = true
-        @fail_job_on_error = true
         @strict_outputs = nil
         @shutdown_on = []
       end
@@ -113,14 +112,6 @@ module Busybee
         end
 
         @complete_job_on_success = value
-      end
-
-      def fail_job_on_error=(value)
-        unless [true, false].include?(value)
-          raise InvalidWorkerDefinition, "`fail_job_on_error` requires a boolean, got #{value.inspect}"
-        end
-
-        @fail_job_on_error = value
       end
 
       def strict_outputs=(value)
@@ -205,7 +196,6 @@ module Busybee
           fail_job_backoff: fail_job_backoff,
           backpressure_delay: backpressure_delay,
           complete_job_on_success: complete_job_on_success,
-          fail_job_on_error: fail_job_on_error,
           strict_outputs: strict_outputs?,
           shutdown_on: shutdown_on
         }
