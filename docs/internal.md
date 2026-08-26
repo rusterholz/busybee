@@ -193,10 +193,11 @@ Steps:
 3. Call `instance.perform`
 4. **On success:** if `complete_job_on_success` and `job.ready?`, validate required outputs (`MissingOutput`), validate no undeclared outputs when `strict_outputs` is enabled (`UndeclaredOutput`), then call `job.complete!`. GRPC errors logged and swallowed.
 5. **On error:** if `job.ready?`, call `job.fail!`; otherwise log that the error arrived after the job was already resolved. Then check `shutdown_on` — if matched, wrap as `Shutdown` and re-raise.
+6. **Always, if `perform` was attempted:** run `after_perform`. It is propagating, so an error there leaves the envelope and meets an outer rescue that sends it back through step 5 — failing the job if it is still unresolved, logging it against the job if it settled. A `Shutdown` passes that rescue untouched rather than being reported twice.
 
-The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform`.
+The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform` — and is what makes step 6's second pass safe.
 
-**Output validation on manual `complete!`:** Worker defines its own `complete!(vars = {})` (not delegated to Job) that runs `validate_required_outputs!` and `validate_undeclared_outputs!` before delegating to `job.complete!`. Validation errors raised inside `perform` flow through `perform_job`'s normal rescue path and auto-fail the job. Code that calls `job.complete!` directly bypasses output validation (this is intentional for edge cases but not the recommended pattern).
+**Output validation on manual `complete!`:** `Job#complete!` runs `validate_required_outputs!` and `validate_undeclared_outputs!` against the worker attached to the job, so validation applies exactly when there is a worker whose contract to apply — and a Job used outside a worker context has none. `Worker#complete!` keeps its own copy of the same two checks against `self.class`, deliberately rather than delegating: an instance built outside `perform_job` is not attached to its job, so the Job-side check would find no contract and silently pass. The two overlap harmlessly on the normal path, and between them no route to completion skips validation while a worker is in play. Validation errors raised inside `perform` flow through `perform_job`'s normal rescue path and auto-fail the job; raised from an `after_perform` hook, they take the same path via the outer rescue.
 
 ### Job Execution Flows
 
@@ -579,7 +580,7 @@ Because filters resolve by sending the key name to the target, every filter key 
 - **`Chain`'s classifying core** — `build_safe` seeds its fold with the core wrapped in the policy at `safe: false`, so the classification boundary exists even when no hook is registered. Without it, an error matching `shutdown_on` that escaped `perform_job` escalated to a graceful shutdown only when some unrelated hook happened to be listening, and otherwise reported the worker as crashed (`:crash` rather than `:unhealthy`).
 - **A safe link classifies only its own error.** Every descent through a link is marked on the way up, and an error carrying that mark is re-raised untouched rather than swallowed. `safe:` describes *hook*-error policy; what becomes of an error raised by the work was never the hook system's to decide, and swallowing one used to report it as `Error in hooks (ignored)` with a source location pointing into the worker.
 
-Worker and Runner call these directly at each job lifecycle moment (e.g. `Hooks.run(:after_perform, job, safe: true)`); see the flows doc below for which hook fires where.
+Worker and Runner call these directly at each job lifecycle moment (e.g. `Hooks.run(:on_job_executed, job, safe: true)`); see the flows doc below for which hook fires where, and which run safe.
 
 ### Job execution flows
 
