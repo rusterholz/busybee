@@ -1,6 +1,13 @@
+inherit_from: .rubocop_todo.yml
+
 plugins:
   - rubocop-rake
   - rubocop-rspec
+
+# Shared house cops. Canonical copy lives in claude/defaults; this one is a
+# duplicate because a plugin has to resolve inside CI's own checkout.
+require:
+  - ./rubocop/comment_density_cops.rb
 
 AllCops:
   TargetRubyVersion: 3.2
@@ -13,6 +20,21 @@ AllCops:
     - "vendor/**/*"
     # Project-specific
     - "spec/grpc_smoke_spec.rb"
+
+# Thresholds ship with the cops; only the excludes are ours. Generated protobuf
+# is out of scope for all three — its comments are the generator's, not ours.
+# The merge mode keeps this permanent exclusion from overwriting the temporary
+# ones in .rubocop_todo.yml, which is a separate list with a separate lifetime.
+House/FileCommentDensity: &house_density
+  inherit_mode:
+    merge:
+      - Exclude
+  Exclude:
+    - "lib/busybee/grpc/*_pb.rb"
+
+House/HeaderCommentDensity: *house_density
+
+House/InternalCommentDensity: *house_density
 
 Layout/DotPosition:
   EnforcedStyle: trailing
