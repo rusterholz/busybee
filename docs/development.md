@@ -205,6 +205,44 @@ RUN_CAMUNDA_CLOUD_TESTS=1 bundle exec rspec --tag camunda_cloud
 
 **Note:** These tests are **disabled by default** - they require explicit opt-in via `RUN_CAMUNDA_CLOUD_TESTS=1` and valid credentials. They are not run in CI. Maintainers should run these tests when making changes to OAuth or CamundaCloud credentials handling.
 
+## Linting
+
+```bash
+bundle exec rubocop            # the whole repo, which is what CI runs
+bundle exec rubocop -a         # safe autocorrections
+```
+
+CI runs `bundle exec rubocop` as its own job, and every other job depends on it, so a lint failure stops the build before any test runs.
+
+### Custom cops
+
+`rubocop/comment_density_cops.rb` holds three cops that measure how much of a method — or a file — is given over to comment:
+
+| Cop | Measures | Max |
+|---|---|--:|
+| `House/HeaderCommentDensity` | comment lines above a `def`, against the method's length | 100% |
+| `House/InternalCommentDensity` | comment lines inside a method body, against its length | 15% |
+| `House/FileCommentDensity` | comment lines in a file, against its code lines | 40% |
+
+All three measure *height*, so a trailing comment on a line of code costs nothing. Directives and magic comments count as neither comment nor code; YARD tags and `@example` bodies are exempt from the header cop, since a long doc-comment at a method top is deliberate. Each ratio divides by at least a floor (`MinDenominator`), which stops a two-line method from scoring 50% for one honest signpost.
+
+The file is a **copy**. The original lives outside this repo, in the shared `claude/defaults/` directory, alongside its specs — a RuboCop plugin has to resolve inside CI's own checkout, so it cannot be loaded by an out-of-tree path the way `doc-drift-check.rb` is. Keep the copy byte-identical rather than restyling it; it passes RuboCop as written, including its own cops.
+
+Thresholds are defaults carried by the cop file itself, so `.rubocop.yml` overrides only what it needs. Generated protobuf is excluded from all three.
+
+### The comment-density todo
+
+`.rubocop_todo.yml` carries 112 offenses that predate these cops, as 89 exclusions across 70 distinct files. **An excluded file is unwatched for that cop** — a new offense in one will not be reported.
+
+So the todo is a ratchet: **when you change a file listed there, clear its recorded offenses and drop its entries in the same change.** Otherwise the list drains slowest for the files under most active development, which is exactly backwards. Regenerate rather than hand-editing:
+
+```bash
+bundle exec rubocop --auto-gen-config --auto-gen-only-exclude --exclude-limit 200 \
+  --only House/FileCommentDensity,House/HeaderCommentDensity,House/InternalCommentDensity
+```
+
+`--only` keeps the regeneration from sweeping unrelated cops into the todo.
+
 ## Local Zeebe Development Environment
 
 Busybee provides a Docker Compose setup for running [Zeebe](https://docs.camunda.io/docs/components/zeebe/zeebe-overview/), [ElasticSearch](https://www.elastic.co/elasticsearch), and [Operate](https://docs.camunda.io/docs/components/operate/operate-introduction/) locally. All three ship in the single `camunda/camunda` Docker image. Versions are pinned in the `.env` file at the project root.
