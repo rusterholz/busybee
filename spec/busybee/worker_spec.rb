@@ -70,6 +70,7 @@ RSpec.describe Busybee::Worker do
 
     it "leaves the job unresolved and still settleable when a non-StandardError escapes" do
       worker = stub_const("NonStdErrorWorker", Class.new(described_class) do
+        strict_outputs false
         define_method(:perform) { raise Exception, "weird" } # rubocop:disable Lint/RaiseException
       end)
 
@@ -768,6 +769,19 @@ RSpec.describe Busybee::Worker do
         instance.complete!(result: "done")
         expect(client).to have_received(:complete_job).with(123456, vars: { result: "done" })
       end
+
+      # An instance built outside perform_job isn't attached to its job, so the
+      # Job-side check finds no contract. This one has to stand on its own.
+      it "validates against its own class when the job has no worker attached" do
+        worker = stub_const("UnattachedWorker", Class.new(described_class) do
+          output :status, required: false
+        end)
+        bare_job = Busybee::Job.new(raw_job, client: client)
+
+        expect(bare_job.worker).to be_nil
+        expect { worker.new(bare_job).complete!(surprise: "nope") }.
+          to raise_error(Busybee::UndeclaredOutput, /:surprise/)
+      end
     end
 
     describe "#fail!" do
@@ -1420,6 +1434,20 @@ RSpec.describe Busybee::Worker do
         end)
 
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+      end
+
+      it "autofails an invalid output offered by a hook, however the hook spells the call" do
+        Busybee.after_perform { |j| j.complete!(surprise: "nope") if j.ready? }
+        worker = stub_const("HookUndeclaredWorker", Class.new(Busybee::Worker) do
+          complete_job_on_success false
+          output :status, required: false
+          define_method(:perform) { :handed_off }
+        end)
+
+        worker.perform_job(job)
+
+        expect(client).not_to have_received(:complete_job)
+        expect(client).to have_received(:fail_job).with(123456, /UndeclaredOutput.*:surprise/, retries: 2, backoff: nil)
       end
 
       # Why reaching them matters: the job is still the worker's to settle.

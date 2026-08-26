@@ -40,6 +40,9 @@ module Busybee
     # Explicit identity for metrics/registries.
     delegate :worker_name, to: :Busybee
 
+    # Not a delegate: an instance built outside perform_job is not attached to
+    # its job, so Job#complete! would find no contract to check. Validating
+    # against our own class covers that path; the two overlap harmlessly.
     def complete!(vars = {})
       self.class.validate_required_outputs!(vars)
       self.class.validate_undeclared_outputs!(vars)
