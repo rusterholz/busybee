@@ -69,22 +69,13 @@ module Busybee
       # @raise [Busybee::Worker::Shutdown] if a shutdown_on exception is caught
       def perform_job(job)
         Client::Call.with_job(job) do # job window spans the whole chain: hooks, perform, autofail all fold it
-          job.timestamps.stamp!(:execution_started_at)
-          instance = new(job)
-          job.set_context(worker: instance)
-
-          run_hooked_perform(instance)
+          run_perform_envelope(job)
         rescue StandardError => e
+          # handle_perform_exception only ever re-raises a Shutdown, so anything
+          # else reaching here was raised by after_perform.
+          raise if e.is_a?(Shutdown)
+
           handle_perform_exception(job, e)
-        ensure
-          # We settled, and we actually tried. resolved? is the original half:
-          # after_perform marks a settled outcome the engine has on file, so a
-          # job that will be re-yielded (a GRPC failure mid-resolution) doesn't
-          # get it. perform_started_at is the half that keeps the triple
-          # symmetric — whatever skips around_perform skips this too, so a
-          # short-circuited or invalid job gets none of the three.
-          # Per-attempt observability belongs to on_job_executed either way.
-          Hooks.run(:after_perform, job, safe: true) if job.resolved? && job.timestamps.perform_started_at
         end
       end
 
@@ -120,6 +111,21 @@ module Busybee
       end
 
       private
+
+      # after_perform propagates like the rest of the triple. An ensure on
+      # perform-plus-auto-resolution: it fires here rather than around perform
+      # proper so the outcome is already on the carrier when it does.
+      def run_perform_envelope(job)
+        job.timestamps.stamp!(:execution_started_at)
+        instance = new(job)
+        job.set_context(worker: instance)
+
+        run_hooked_perform(instance)
+      rescue StandardError => e
+        handle_perform_exception(job, e)
+      ensure
+        Hooks.run(:after_perform, job) if job.timestamps.perform_started_at
+      end
 
       def handle_perform_exception(job, exception)
         # Capture early so after_perform hooks see the error attached to Job even
@@ -204,9 +210,6 @@ module Busybee
         end
       end
 
-      # Reporting a failure to the engine is not optional. Every error escaping
-      # perform lands here, and the only question is whether the job is still
-      # the worker's to resolve.
       def handle_failure(job, error, config)
         unless job.ready?
           log_post_resolution_error(job, error)
