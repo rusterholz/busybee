@@ -93,6 +93,7 @@ RSpec.describe "Job lifecycle hooks", :integration do
       Class.new(Busybee::Worker) do
         job_type "process-order"
         polling request_timeout: 1_000
+        output :manual, required: false
         define_method(:perform) { job.complete!("manual" => true) }
       end
     end

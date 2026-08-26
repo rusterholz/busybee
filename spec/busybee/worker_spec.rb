@@ -70,6 +70,7 @@ RSpec.describe Busybee::Worker do
 
     it "leaves the job unresolved and still settleable when a non-StandardError escapes" do
       worker = stub_const("NonStdErrorWorker", Class.new(described_class) do
+        strict_outputs false
         define_method(:perform) { raise Exception, "weird" } # rubocop:disable Lint/RaiseException
       end)
 
@@ -768,6 +769,19 @@ RSpec.describe Busybee::Worker do
         instance.complete!(result: "done")
         expect(client).to have_received(:complete_job).with(123456, vars: { result: "done" })
       end
+
+      # An instance built outside perform_job isn't attached to its job, so the
+      # Job-side check finds no contract. This one has to stand on its own.
+      it "validates against its own class when the job has no worker attached" do
+        worker = stub_const("UnattachedWorker", Class.new(described_class) do
+          output :status, required: false
+        end)
+        bare_job = Busybee::Job.new(raw_job, client: client)
+
+        expect(bare_job.worker).to be_nil
+        expect { worker.new(bare_job).complete!(surprise: "nope") }.
+          to raise_error(Busybee::UndeclaredOutput, /:surprise/)
+      end
     end
 
     describe "#fail!" do
@@ -1187,10 +1201,9 @@ RSpec.describe Busybee::Worker do
         expect(received_job.status).to eq(:complete)
       end
 
-      # after_perform fires only on a resolved job, so resolving from here is
-      # asking to handle an already-handled job — and that is exactly what the
-      # error now says, instead of a bespoke rule about where resolution is legal.
-      it "reports an attempt to resolve from here as JobAlreadyHandled" do
+      # Resolving from here is legal (see the :ready case below); resolving
+      # something already settled is not, and the error says so.
+      it "reports an attempt to resolve an already-settled job as JobAlreadyHandled" do
         raised = nil
         Busybee.after_perform do |job|
           job.complete!({ late: true })
@@ -1282,17 +1295,6 @@ RSpec.describe Busybee::Worker do
         expect(received_job.error_message).to eq("custom message")
       end
 
-      it "swallows errors in after_perform hooks and logs them" do
-        logger = instance_double(Logger, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-        Busybee.after_perform { raise "hook boom" }
-
-        expect { performing_worker.perform_job(job) }.not_to raise_error
-        expect(job).to be_complete
-        expect(logger).to have_received(:error).
-          with(%r{\[busybee\] Error in hooks \(ignored\): \[RuntimeError\] hook boom \(at .+/worker_spec\.rb:\d+})
-      end
-
       it "propagates shutdown_on errors from after_perform hooks" do
         worker = stub_const("ShutdownAfterWorker", Class.new(Busybee::Worker) do
           shutdown_on RuntimeError
@@ -1339,7 +1341,8 @@ RSpec.describe Busybee::Worker do
         expect(received_job.error_message).to eq("missing")
       end
 
-      it "does not fire when autofail's GRPC also failed" do
+      # The four :ready shapes — perform ran, the engine was never told.
+      it "fires when autofail's own GRPC call failed, with the job still :ready" do
         allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
         allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
         received = []
@@ -1350,9 +1353,127 @@ RSpec.describe Busybee::Worker do
 
         worker.perform_job(job)
 
-        expect(received).to be_empty
+        expect(received.size).to eq(1)
         expect(job).to be_ready
         expect(job.error).to be_a(RuntimeError)
+      end
+
+      it "fires when auto-complete's own GRPC call failed" do
+        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+        allow(client).to receive(:complete_job).and_raise(GRPC::Unavailable, "connection lost")
+        received = []
+        Busybee.after_perform { |j| received << j.status }
+
+        performing_worker.perform_job(job)
+
+        expect(received).to eq([:ready])
+        expect(job.error).to be_a(GRPC::Unavailable)
+      end
+
+      it "fires when perform hands resolution to something else" do
+        received = []
+        Busybee.after_perform { |j| received << j.status }
+        worker = stub_const("DeferredResolutionWorker", Class.new(Busybee::Worker) do
+          complete_job_on_success false
+          define_method(:perform) { :handed_off }
+        end)
+
+        worker.perform_job(job)
+
+        expect(received).to eq([:ready])
+      end
+
+      it "autofails the job when a hook raises while it is still :ready" do
+        Busybee.after_perform { raise "hook boom" }
+        worker = stub_const("ReadyHookRaiser", Class.new(Busybee::Worker) do
+          complete_job_on_success false
+          define_method(:perform) { :handed_off }
+        end)
+
+        expect { worker.perform_job(job) }.not_to raise_error
+
+        expect(job.status).to eq(:failed)
+        expect(client).to have_received(:fail_job).with(123456, /RuntimeError.*hook boom/, retries: 2, backoff: nil)
+      end
+
+      it "reports a hook's error against an already-settled job without re-resolving it" do
+        logger = instance_double(Logger, warn: nil, error: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        Busybee.after_perform { raise "hook boom" }
+
+        expect { performing_worker.perform_job(job) }.not_to raise_error
+
+        expect(job.status).to eq(:complete)
+        expect(client).not_to have_received(:fail_job)
+        expect(logger).to have_received(:warn).with(/already complete: \[RuntimeError\] hook boom/)
+      end
+
+      # An escalation on its way out is not a second error arriving late.
+      it "does not re-report a Shutdown that passed the hooks on its way out" do
+        logger = instance_double(Logger, warn: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        stub_const("FatalPerformError", Class.new(StandardError))
+        Busybee.after_perform { |_j| nil }
+        worker = stub_const("EscalatingPerformWorker", Class.new(Busybee::Worker) do
+          shutdown_on FatalPerformError
+          define_method(:perform) { raise FatalPerformError, "db gone" }
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+
+        expect(logger).not_to have_received(:warn).with(/after job was already/)
+      end
+
+      it "escalates a shutdown_on error raised by a hook" do
+        stub_const("FatalHookError", Class.new(StandardError))
+        Busybee.after_perform { raise FatalHookError, "db gone" }
+        worker = stub_const("ShutdownHookWorker", Class.new(Busybee::Worker) do
+          strict_outputs false
+          shutdown_on FatalHookError
+          define_method(:perform) { { done: true } }
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+      end
+
+      it "autofails an invalid output offered by a hook, however the hook spells the call" do
+        Busybee.after_perform { |j| j.complete!(surprise: "nope") if j.ready? }
+        worker = stub_const("HookUndeclaredWorker", Class.new(Busybee::Worker) do
+          complete_job_on_success false
+          output :status, required: false
+          define_method(:perform) { :handed_off }
+        end)
+
+        worker.perform_job(job)
+
+        expect(client).not_to have_received(:complete_job)
+        expect(client).to have_received(:fail_job).with(123456, /UndeclaredOutput.*:surprise/, retries: 2, backoff: nil)
+      end
+
+      # Why reaching them matters: the job is still the worker's to settle.
+      it "can settle a job it finds still :ready" do
+        Busybee.after_perform { |j| j.fail!("nobody else claimed it") if j.ready? }
+        worker = stub_const("HandOffWorker", Class.new(Busybee::Worker) do
+          complete_job_on_success false
+          define_method(:perform) { :handed_off }
+        end)
+
+        worker.perform_job(job)
+
+        expect(job.status).to eq(:failed)
+        expect(client).to have_received(:fail_job).with(123456, "nobody else claimed it", retries: 2, backoff: nil)
+      end
+
+      it "fires on the way out when a non-StandardError escapes perform" do
+        received = []
+        Busybee.after_perform { |j| received << j.status }
+        worker = stub_const("AfterNonStdErrorWorker", Class.new(Busybee::Worker) do
+          define_method(:perform) { raise Exception, "weird" } # rubocop:disable Lint/RaiseException
+        end)
+
+        expect { worker.perform_job(job) }.to raise_error(Exception, "weird")
+
+        expect(received).to eq([:ready])
       end
 
       it "sees both result and error in Variant D (manual fail then return a partial-payload hash)" do

@@ -222,7 +222,7 @@ around_job_execution ─┐     # the system envelope opens
       perform      │  │
    around_perform ─┘  │
    auto-complete / auto-fail
-   after_perform      │     # only if the job resolved (see below)
+   after_perform      │     # however the attempt exited (see below)
 around_job_execution ─┘
 on_job_executed             # the runner finished with the job — every exit path
 ```
@@ -233,10 +233,22 @@ on_job_executed             # the runner finished with the job — every exit pa
 | `around_job_execution` | around the whole system envelope: validation, perform, automatic resolution | `job, perform` |
 | `before_perform` | after input validation, just before `perform` | `job` |
 | `around_perform` | wrapped immediately around `perform` | `job, perform` |
-| `after_perform` | when the perform envelope exits **with a settled outcome** | `job` |
+| `after_perform` | when the perform envelope exits, **however it exited** | `job` |
 | `on_job_executed` | when the runner finishes with a job it ran — on every exit path ([except a shutdown](#watching-the-system-lifecycle)) | `job` |
 
-**The `after_perform` firing condition is worth reading twice.** It fires when two things are both true: the job actually resolved — completed, failed, or BPMN-errored, with the engine informed — *and* `perform` was actually attempted. If the resolution gRPC call itself failed, the perform envelope exits without a settled outcome and `after_perform` stays silent while the engine eventually re-delivers the job. If a hook [short-circuited](#short-circuiting-a-job) the job, or a required input was missing, `perform` never ran and `after_perform` stays silent for the other reason. A hook that must observe every exit path belongs on `on_job_executed`.
+**`after_perform` is an `ensure` on your code.** It fires on one condition — `perform` was attempted — and then it fires however the attempt turned out: completed, failed, BPMN-errored, or still unresolved because the resolution call itself didn't reach the engine. It runs *after* automatic completion and failure, so the outcome is already on the job when you read `status` and `error`.
+
+The one thing it doesn't do is fire for a job whose `perform` never ran. If a hook [short-circuited](#short-circuiting-a-job) the job, or a required input was missing, none of the three perform hooks fire — that's the naming rule holding. A hook that must observe every exit path, including those, belongs on `on_job_executed`.
+
+**A job arriving here can still be yours to settle.** When the engine was never successfully told — a resolution call that failed, or a `perform` that handed the work to a background thread — `job.status` is `:ready`, and you can resolve it:
+
+```ruby
+config.after_perform do |job|
+  job.fail!(job.error || "worker never resolved this job") if job.ready?
+end
+```
+
+Errors from `after_perform` propagate, like the rest of the perform family: if the job is still unresolved, yours is the error the job is failed with; if it already settled, the error is logged against the job rather than re-resolving it.
 
 ### Wrapping perform: Middleware
 
@@ -475,9 +487,9 @@ What happens when a hook itself raises an error depends on the hook's character:
 
 | Hooks | An error raised in the hook… |
 |-------|------------------------------|
-| `before_perform`, `around_perform` | **propagates** — the job takes the same path as an error raised by `perform` itself (automatic failure, `shutdown_on` check) |
+| `before_perform`, `around_perform`, `after_perform` | **propagates** — the job takes the same path as an error raised by `perform` itself (automatic failure, `shutdown_on` check) |
 | `before_call` | **propagates** — the client call never happens; the caller sees the error |
-| `after_perform`, `on_job_*`, `around_job_execution`, `on_worker_*`, `around_call`, `after_call` | is **logged and swallowed** — one misbehaving observer can't break job processing, other hooks, or shutdown |
+| `on_job_*`, `around_job_execution`, `on_worker_*`, `around_call`, `after_call` | is **logged and swallowed** — one misbehaving observer can't break job processing, other hooks, or shutdown |
 
 Every swallowed error is logged with its class, message, and origin, so a broken hook is visible without being fatal.
 
@@ -583,7 +595,7 @@ end
 
 The demo app's recorder uses this exact fold to keep its per-job records accurate for asynchronously-resolved jobs. A first-class resolution hook is planned alongside broader async-worker support in a future version; until then, `after_call` on the three resolution RPCs is the reliable signal.
 
-**Nothing gets in your way here.** Your background thread can complete the job whenever it finishes — including while the runner is still working through `on_job_executed` for that same job — and it will land. Note the one consequence for the perform-family hooks: `perform` returned without resolving, so `after_perform` does not fire for this job. The settled outcome arrives later, on a thread busybee isn't watching. `on_job_executed` fires as always, at the moment the runner lets go — which may be before your resolution lands.
+**Nothing gets in your way here.** Your background thread can complete the job whenever it finishes — including while the runner is still working through `on_job_executed` for that same job — and it will land. One thing to know if you also register `after_perform`: it fires as soon as `perform` returns, while your hand-off is still in flight, so the job it hands you is still `:ready`. Don't resolve a job from `after_perform` for a job type you resolve asynchronously — the two are racing for the same job. `on_job_executed` fires as always, at the moment the runner lets go, which may be before your resolution lands.
 
 ## Test Isolation
 

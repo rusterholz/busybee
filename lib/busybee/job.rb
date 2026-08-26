@@ -134,6 +134,7 @@ module Busybee
     # @raise [Busybee::JobAlreadyHandled] if job has already been completed, failed, or errored
     def complete!(vars = {})
       ensure_resolvable!("complete")
+      validate_outputs!(vars)
 
       warn_discarded_result(vars) if resolution.result_set?
       resolution.set_result(vars)
@@ -211,6 +212,16 @@ module Busybee
     private
 
     attr_reader :activation, :resolution
+
+    # Output validation is the worker's contract, so it applies exactly when a
+    # worker is attached. Done here rather than by calling Worker#complete!, so
+    # that method stays a plain delegate rather than a mutual call.
+    def validate_outputs!(vars)
+      return unless worker
+
+      worker.class.validate_required_outputs!(vars)
+      worker.class.validate_undeclared_outputs!(vars)
+    end
 
     # A job's own engine calls carry the job whatever the thread — a manual
     # complete!/fail! from outside the perform window (an async worker's own
