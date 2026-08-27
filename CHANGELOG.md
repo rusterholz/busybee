@@ -9,7 +9,8 @@
   - Job lifecycle hooks: both logical, systemic lifecycle (on activated, on executed, around execution) and local, usercode lifecycle (before, after, and around the `perform` method)
   - Call lifecycle hooks: before, after, and around every GRPC call
   - Each callback receives a lifecycle object which exposes the appropriate information (status, gauges, counters, timestamps, durations, configuration) for that lifecycle
-  - Callbacks may be prefiltered by attributes of the lifecycle object (e.g. register an after_perform callback only for failed jobs)
+  - Callbacks may be prefiltered by attributes of the lifecycle object (e.g. register an after_perform callback only for failed jobs) — by a literal, a Regexp, a Class, a Proc, or an array of any of them. Strings and Symbols are interchangeable, so `status: "failed"` and `status: :failed` are one filter and neither spelling quietly misses
+  - A filter that could never fire is refused at boot, with a message saying why: a mistyped status, an RPC busybee never issues, or an outcome filter on a hook that runs before the outcome exists (`around_call` sees a pending call, never a succeeded one). `hooks.md` publishes the full scope table of what each hook can already know when it fires
   - Lifecycle objects expose separate low-cardinality (for metric labels/tags) and high-cardinality (for logging) state projections
   - Support points for integrating with any APM / observability or error reporting platform: Datadog, NewRelic, Dynatrace, Airbrake, Sentry, etc.
 

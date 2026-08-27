@@ -188,6 +188,24 @@ RSpec.describe Busybee::Hooks::Filters do
     end
   end
 
+  describe "the published scope table" do
+    it "accounts for every hook type" do
+      missing = Busybee::Hooks::HOOK_TYPES.reject { |type| scope_table_row(type) }
+      expect(missing).to be_empty, "hooks.md's scope table does not mention #{missing.join(', ')}"
+    end
+
+    it "states the same narrowings the code enforces" do
+      described_class::MOMENTS.each do |type, narrowings|
+        row = scope_table_row(type)
+        narrowings.each_value do |values|
+          values.compact.each do |value|
+            expect(row).to include(value.inspect), "hooks.md's row for #{type} omits #{value.inspect}"
+          end
+        end
+      end
+    end
+  end
+
   describe "the moment table" do
     it "narrows only real hook types" do
       expect(described_class::MOMENTS.keys - Busybee::Hooks::HOOK_TYPES).to be_empty
@@ -199,6 +217,21 @@ RSpec.describe Busybee::Hooks::Filters do
         expect(narrowings.keys - allowed).to be_empty, "#{type} narrows a key it does not filter on"
       end
     end
+  end
+
+  # The scope table in hooks.md is the reader-facing face of MOMENTS; these read it
+  # back so the prose and the enforcement cannot drift apart.
+  def scope_table_row(type)
+    scope_table.find { |row| row.include?("`#{type}`") }
+  end
+
+  def scope_table
+    section = hooks_doc[/^### Filter Scope by Moment$(.*?)^### /m, 1]
+    section.lines.select { |line| line.start_with?("| `") }
+  end
+
+  def hooks_doc
+    @hooks_doc ||= File.read(File.expand_path("../../../docs/hooks.md", __dir__))
   end
 
   # RSpec's be_in needs Object#in?; these carriers hold bare Symbols.

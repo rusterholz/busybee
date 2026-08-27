@@ -546,14 +546,19 @@ Storage is plain arrays (one per hook type). Each entry is `{ callback:, filters
 
 ### Prefiltering
 
-Filter kwargs are validated per-noun at registration time (`FILTER_KEYS`):
+The whole filter concern — vocabulary, validation, and matching — lives in `Busybee::Hooks::Filters`. `Hooks.match?` / `.error_match?` / `.matches?` remain its public face. `FILTERS` declares, per noun, each key's **domain** (`:name`, `:class`, `:boolean`, `:error`) and its **vocabulary** where one is closed:
+
 - **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `source:`, `buffered:`, `error:`
 - **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `reason:`, `error:`
 - **Call hooks:** `rpc:`, `status:`, `grpc_status:`, `error:`
 
 A top-level `nil` filter value is dropped at registration — `nil` means "don't filter on this key," so programmatic composition (`reason: maybe_reason`) degrades to no-op rather than never-fire.
 
-At fire time, `Busybee::Hooks.matches?(hook, target)` reads each filter key off the target (`target.public_send(key)`, nil-safe) and applies `match?` — case equality (`===`) supporting Symbol/String (exact), Regexp (pattern), Class (`is_a?`), Proc (custom). Class values additionally match against their `.name` string, so `worker_class: "OrderWorker"` or `worker_class: /Order/` work regardless of load order. Empty filters match everything (vacuous truth). A filter value may also be an **array**, which matches if any element matches — `job_type: %w[create_shipment assign_driver]` fires for either, and the elements may mix matcher types.
+**Registration refuses a filter that could never match**, under one rule: *a filter is invalid if it cannot match any value the key can hold at that hook's moment*. The check runs the real matcher against those values, so validation and matching cannot disagree. It has two inputs — the key's vocabulary from `FILTERS`, and `MOMENTS`, which narrows a vocabulary where the carrier has not filled it in yet (`before_call` sees `status: :pending` and nothing else). Arrays are validated element by element. **Procs are exempt**, since reading one means running it. Shape is checked separately against `SHAPES`, which is what rejects a value no matcher rule could consume.
+
+`MOMENTS` is also the source of `hooks.md`'s [Filter Scope by Moment](hooks.md#filter-scope-by-moment) table. Around-hooks appear in it because `run_chain` selects matching hooks *before* building the chain, so their filters see the entry state.
+
+At fire time, `Filters.matches?(hook, target)` reads each filter key off the target (`target.public_send(key)`, nil-safe) and applies `match?` — case equality (`===`) supporting Regexp (pattern), Class (`is_a?`), Proc (custom); then equality (`==`) for Class identity; then **name equivalence**, under which String and Symbol are interchangeable (`status: "failed"` matches `:failed`, and `job_type: :charge_card` matches `"charge_card"`). A Class value is additionally offered its own `.name`, so `worker_class: "OrderWorker"` or `/Order/` work regardless of load order. Empty filters match everything (vacuous truth). A filter value may also be an **array**, which matches if any element matches — `job_type: %w[create_shipment assign_driver]` fires for either, and the elements may mix matcher types.
 
 **`error:` is the one error filter, and it has its own semantic table** (`error_match?`, not the generic layers): the filter describes the error — or its absence. Uniform across all three nouns:
 

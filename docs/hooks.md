@@ -19,6 +19,8 @@ You register hooks once at boot, typically in the same `Busybee.configure` block
   - [Filter Keys by Subject](#filter-keys-by-subject)
   - [How Filters Match](#how-filters-match)
   - [Matching on Errors](#matching-on-errors)
+  - [Filter Scope by Moment](#filter-scope-by-moment)
+  - [When a Filter Is Refused](#when-a-filter-is-refused)
 - [Job Hooks](#job-hooks)
   - [Two Lifecycles, One Naming Rule](#two-lifecycles-one-naming-rule)
   - [Wrapping perform: Middleware](#wrapping-perform-middleware)
@@ -114,7 +116,7 @@ Things worth knowing:
 - **Register at boot.** Hooks are meant to be registered while your app boots (a Rails initializer is the natural home) and left alone; there is no supported way to add or remove hooks while workers are running.
 - **Multiple hooks per type are fine** and run in registration order. An `around_*` chain nests: the first-registered hook is outermost.
 - **Hooks are global, filters give them scope.** All workers in a process share one hook registry; use `worker_class:`/`job_type:` filters to scope a hook to particular workers.
-- **Registration fails loudly.** An unknown hook name, an unknown filter key for that subject, or a nonsense `error:` matcher raises `ArgumentError` at boot — not silently at fire time.
+- **Registration fails loudly.** An unknown hook name, an unknown filter key for that subject, or a filter *value* that could never match raises `ArgumentError` at boot — not silently at fire time. See [When a Filter Is Refused](#when-a-filter-is-refused).
 
 ## Filtering
 
@@ -149,7 +151,7 @@ A filter value can be more than a literal:
 
 | Filter value | Matches when |
 |--------------|--------------|
-| Symbol / String | the attribute equals it |
+| Symbol / String | the attribute spells the same thing — the two are interchangeable, so `status: "failed"` and `status: :failed` are one filter, and `job_type: :charge_card` finds a job type of `"charge_card"` |
 | Regexp | the attribute matches the pattern (Class attributes match on their name, so `worker_class: /\AOms::/` works) |
 | Class | the attribute is an instance of it — or is that class itself (so `worker_class: OrderWorker` works) |
 | Proc | `proc.call(value)` is truthy |
@@ -200,6 +202,44 @@ Two details to keep straight:
 - With **no error present**, only `false` matches — every other matcher requires an error to exist (Procs aren't even called).
 
 The carriers also expose an `error_class` *reader* — that one exists for projections (a class name makes a good metric label); filtering always goes through `error:`, matched against the exception itself.
+
+### Filter Scope by Moment
+
+A filter key belongs to a subject, but what the carrier can *hold* depends on when the hook fires. A hook that runs before the work has an outcome cannot be filtered on that outcome, and asking for one is refused at registration.
+
+| Hook | What is already true when it fires |
+|------|------------------------------------|
+| `before_perform`, `around_perform`, `on_job_activated`, `around_job_execution` | `status:` is `:ready`; no error yet, so only `error: false` matches |
+| `after_perform`, `on_job_executed` | any `status:`, including `:ready` for a job that never resolved; any error |
+| `before_call`, `around_call` | `status:` is `:pending`; no `grpc_status:` and no error yet |
+| `after_call` | `status:` is `:succeeded` or `:errored`; `grpc_status:` is set |
+| `on_worker_started` | no `reason:` and no error — the worker has only just come up |
+| `on_worker_stop_requested` | `reason:` is set; no error |
+| `on_worker_stopping`, `on_worker_shutdown` | `reason:` is set; an error may or may not be present |
+
+**The around-hooks are the ones that surprise people.** Filters are evaluated when busybee *selects* which hooks to run, which for an around-hook is before its block is entered — so an `around_call` sees a pending call, never a succeeded one. To act on an outcome, filter the matching `after_` hook, or branch on the carrier inside your block.
+
+Two keys have deliberately **open** vocabularies and are only shape-checked: `job_type:` and `bpmn_process_id:` are yours, and so is `reason:` — the [stop reasons](#stop-reasons) busybee mints are a documented set, but `runner.stop!(reason: :rollover)` lets you mint your own, and filters must keep working when you do.
+
+### When a Filter Is Refused
+
+Registration raises `ArgumentError` when a filter could not match anything, ever:
+
+```ruby
+config.after_perform(status: :completed) { |job| ... }
+# ArgumentError: after_perform filter status: :completed can never match.
+#                status is :ready, :complete, :failed or :error when after_perform fires.
+
+config.before_perform(status: :complete) { |job| ... }
+# ArgumentError: before_perform filter status: :complete can never match.
+#                status is :ready when before_perform fires.
+
+config.after_perform(job_type: 42) { |job| ... }
+# ArgumentError: after_perform filter job_type: 42 cannot express a match.
+#                job_type: accepts String, Symbol, Regexp or Proc, or an Array of these.
+```
+
+Arrays are checked element by element, so one bad entry is refused even when its neighbours are fine. **Procs are exempt** — busybee cannot read a Proc without running it, and running your code against invented values to see what it says is not something registration should do. A Proc filter that never matches stays quiet, which is the price of the escape hatch.
 
 ## Job Hooks
 
