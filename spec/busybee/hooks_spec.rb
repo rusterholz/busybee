@@ -193,8 +193,8 @@ RSpec.describe Busybee::Hooks do
 
     it "accepts valid job filter kwargs" do
       expect do
-        Busybee.before_perform(job_type: "test", worker_class: /Order/, status: :failed,
-                               bpmn_process_id: "flow", buffered: true, error: RuntimeError, &noop)
+        Busybee.after_perform(job_type: "test", worker_class: /Order/, status: :failed,
+                              bpmn_process_id: "flow", buffered: true, error: RuntimeError, &noop)
       end.not_to raise_error
     end
 
@@ -206,9 +206,9 @@ RSpec.describe Busybee::Hooks do
 
     it "accepts valid worker filter kwargs" do
       expect do
-        Busybee.on_worker_started(worker_class: /Order/, job_type: "test",
-                                  worker_mode: :polling, reason: :error,
-                                  error: RuntimeError, &noop)
+        Busybee.on_worker_shutdown(worker_class: /Order/, job_type: "test",
+                                   worker_mode: :polling, reason: :crash,
+                                   error: RuntimeError, &noop)
       end.not_to raise_error
     end
 
@@ -224,8 +224,8 @@ RSpec.describe Busybee::Hooks do
 
     it "accepts valid call filter kwargs" do
       expect do
-        Busybee.before_call(rpc: :complete_job, status: :errored, grpc_status: :ok,
-                            error: "Busybee::GRPC::Error", &noop)
+        Busybee.after_call(rpc: :complete_job, status: :errored, grpc_status: :ok,
+                           error: "Busybee::GRPC::Error", &noop)
       end.not_to raise_error
     end
 
@@ -446,10 +446,10 @@ RSpec.describe Busybee::Hooks do
     context "with prefiltering" do
       it "skips hooks whose filters do not match" do
         results = []
-        Busybee.before_perform(status: :failed) { results << :filtered }
+        Busybee.before_perform(job_type: "some_other_type") { results << :filtered }
         Busybee.before_perform { results << :unfiltered }
 
-        described_class.run(:before_perform, job) # event has status: :ready
+        described_class.run(:before_perform, job) # job_type: "test"
         expect(results).to eq([:unfiltered])
       end
 
@@ -610,7 +610,7 @@ RSpec.describe Busybee::Hooks do
     context "with prefiltering" do
       it "excludes non-matching hooks from the chain" do
         results = []
-        Busybee.around_perform(status: :failed) do |_job, perform|
+        Busybee.around_perform(job_type: "some_other_type") do |_job, perform|
           results << :filtered
           perform.call
         end

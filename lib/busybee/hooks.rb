@@ -1,18 +1,13 @@
 # frozen_string_literal: true
 
 require "busybee/hooks/chain"
+require "busybee/hooks/filters"
 require "busybee/worker/shutdown"
 
 module Busybee
-  # Central module for the hook/instrumentation system.
-  # Provides hook registration and storage, prefilter matching, and
-  # invocation (propagating and swallowing).
+  # Hook registration, storage and invocation; prefiltering lives in Filters.
   module Hooks
-    # Hook types are declared per noun. The :job and :worker hooks are wired
-    # end-to-end (jobs through the Worker/Runner job path; the four worker
-    # moments through Runner#run! / #stop! with a Worker::Status carrier). The
-    # :call entries fire through the Client::Call seam. Each callback receives
-    # its noun's carrier: Job, Worker::Status, or Client::Call.
+    # Declared per noun; each callback receives its noun's carrier.
     HOOK_TYPES = %i[
       before_perform around_perform after_perform
       on_job_activated on_job_executed around_job_execution
@@ -20,21 +15,8 @@ module Busybee
       before_call around_call after_call
     ].freeze
 
-    # Allowed filter kwargs per noun. Each key is resolved against the carrier
-    # via public_send at match time, so every key here must be a public reader
-    # on the noun's carrier (Worker::Status for :worker). :error — on every
-    # noun — is matched by its own semantic table (see error_match?), not the
-    # generic layers.
-    FILTER_KEYS = {
-      job: %i[job_type worker_class status bpmn_process_id source buffered error].freeze,
-      worker: %i[worker_class job_type worker_mode reason error].freeze,
-      call: %i[rpc status grpc_status error].freeze
-    }.freeze
-
-    # Map each hook type to its noun for filter validation. Explicit, not derived
-    # from the name: the perform triple carries the usercode lifecycle's name
-    # ("perform" = wraps usercode; "job" = the system's job lifecycle), while its
-    # carrier — and so its filter noun — is still the Job.
+    # Explicit, not derived from the name: the perform triple is named for the
+    # usercode lifecycle, but its carrier — and so its filter noun — is the Job.
     HOOK_NOUN = {
       before_perform: :job, around_perform: :job, after_perform: :job,
       on_job_activated: :job, on_job_executed: :job, around_job_execution: :job,
@@ -42,6 +24,9 @@ module Busybee
       on_worker_stopping: :worker, on_worker_shutdown: :worker,
       before_call: :call, around_call: :call, after_call: :call
     }.freeze
+
+    # The allowed filter kwargs per noun; their domains and vocabularies are Filters'.
+    FILTER_KEYS = Filters::FILTERS.transform_values { |keys| keys.keys.freeze }.freeze
 
     class << self
       # ====== Hook storage ======
@@ -67,98 +52,57 @@ module Busybee
       # @param type [Symbol] one of HOOK_TYPES
       # @param filters [Hash] optional prefilter kwargs
       # @param callback [Proc] the hook block
+      # @raise [ArgumentError] on a filter that could never match
       def register(type, callback, **filters)
         raise ArgumentError, "#{type} requires a block" unless callback
 
         filters = filters.compact # a nil filter value means "don't filter on this key"
-        validate_filters!(type, filters)
+        Filters.validate!(type, HOOK_NOUN.fetch(type), filters)
         hooks_for(type) << { callback: callback, filters: filters }
       end
 
-      # Define one registration method per hook type.
-      # Each accepts optional filter kwargs and a required block.
+      # One registration method per hook type, each taking filter kwargs and a block.
       HOOK_TYPES.each do |type|
         define_method(type) do |**filters, &callback|
           register(type, callback, **filters)
         end
       end
 
-      # ====== Filter matching ======
+      # ====== Filter matching: Filters owns it, these are its public face ======
 
-      # Test whether a filter matches a value. Arrays match any element; scalars
-      # match by case equality, then equality (Class identity), then by name —
-      # and a Class is additionally offered its own name, so the same matchers
-      # reach it however the adopter spelled the class.
-      def match?(filter, value)
-        return filter.any? { |element| match?(element, value) } if filter.is_a?(Array)
-
-        scalar_match?(filter, value) || (value.is_a?(Class) && scalar_match?(filter, value.name))
-      end
-
-      # Test whether all of a hook's filters match the given target. The target
-      # is a Job for job-noun hooks; filter keys are looked up as job attributes
-      # (via public_send). Returns true (vacuous truth) when filters are empty.
-      #
-      # @param hook [Hash] { callback:, filters: }
-      # @param target [Object] the noun (Busybee::Job for job hooks)
-      # @return [Boolean]
-      def matches?(hook, target)
-        hook[:filters].all? { |key, filter| filter_match?(key, filter, attribute(target, key)) }
-      end
-
-      # The error: filter's semantics — the filter describes the error, or its
-      # absence. The absence and composition laws live here: with no error
-      # present only `false` matches, every other matcher requires one (Procs
-      # aren't even called on nil); an Array matches if any element does. The
-      # scalar presence table is below.
-      def error_match?(filter, error)
-        return error.nil? if filter == false
-        return false if error.nil?
-        return filter.any? { |element| error_match?(element, error) } if filter.is_a?(Array)
-
-        present_error_match?(filter, error)
-      end
+      def match?(filter, value) = Filters.match?(filter, value)
+      def error_match?(filter, error) = Filters.error_match?(filter, error)
+      def matches?(hook, target) = Filters.matches?(hook, target)
 
       # ====== Invocation ======
 
-      # Run all matching hooks for the given type. Callbacks receive the target
-      # (e.g. Busybee::Job for job-noun hooks). Error semantics — propagate by
-      # default (wrapping hooks like before_perform), log-and-continue with
-      # safe: true (observing hooks), shutdown signals excepted — live in
-      # protect_allowing_shutdowns.
+      # Run all matching hooks for the given type, each callback receiving the
+      # target. Error semantics — propagate by default, log-and-continue with
+      # safe: true, shutdown signals excepted — live in protect_allowing_shutdowns.
       def run(type, target, safe: false)
         matching_hooks(type, target).each do |hook|
           protect_allowing_shutdowns(target, safe: safe) { hook[:callback].call(target) }
         end
       end
 
-      # Catch-and-classify for a firing hook: whatever the block raises goes to
-      # the one policy below. Propagating chains (around_perform) bypass this by
-      # design — their errors classify later, at perform_job's rescue, so
-      # autofail runs before the Shutdown wrap.
+      # Catch-and-classify for a firing hook. Propagating chains (around_perform)
+      # bypass this by design — their errors classify later, at perform_job's
+      # rescue, so autofail runs before the Shutdown wrap.
       def protect_allowing_shutdowns(target, safe:)
         yield
       rescue StandardError
         classify_hook_error(target, safe: safe)
       end
 
-      # The one error policy, so it can't drift between invocation sites:
-      # Shutdown always propagates; an error the target's worker (or the gem
-      # config) declared fatal escalates to Shutdown (cause = the original, set
-      # at raise); anything else propagates when unsafe, or is logged and
-      # swallowed when safe.
-      #
-      # Split out from the catch above for callers that must catch *first* —
-      # Chain's safe links have to tell their own raise from one that merely
-      # passed through them, and that can't be decided from inside a wrapper.
-      # MUST be called from within a rescue: it reads the in-flight exception
-      # from $!, which is what makes the bare raises re-raise it and the
-      # Shutdown wrap pick it up as .cause.
+      # The one error policy, so it can't drift between invocation sites. MUST be
+      # called from within a rescue: it reads the in-flight exception from $!, which
+      # is what makes the bare raises re-raise it and the Shutdown wrap pick it up as
+      # .cause. Separate from the catch above for Chain, which must catch first.
       def classify_hook_error(target, safe:)
         error = $!
         raise if error.is_a?(Busybee::Worker::Shutdown)
 
-        worker_class = attribute(target, :worker_class)
+        worker_class = Filters.attribute(target, :worker_class)
         raise Busybee::Worker::Shutdown.new(worker_class: worker_class) if
           Busybee::Worker::Shutdown.triggered_by?(error, worker_class)
         raise unless safe
@@ -166,18 +110,16 @@ module Busybee
         log_swallowed_error(error)
       end
 
-      # Log a hook error that was swallowed (in safe-mode iteration or safe
-      # around-chain). Includes class, message, and the first backtrace frame
-      # so the operator can locate the offending hook from a single log line.
+      # Log a swallowed hook error, with the first backtrace frame so the operator
+      # can locate the offending hook from a single log line.
       def log_swallowed_error(error)
         location = error.backtrace&.first
         suffix = location ? " (at #{location})" : ""
         Busybee.logger&.error("[busybee] Error in hooks (ignored): [#{error.class}] #{error.message}#{suffix}")
       end
 
-      # Run an around-hook chain wrapping a core block. Middleware callbacks
-      # receive (target, perform). The chain return value is the captured
-      # result (HWIA-coerced for job-noun chains via Resolution#set_result).
+      # Run an around-hook chain wrapping a core block; callbacks receive
+      # (target, perform). Returns the captured result.
       def run_chain(type, target, safe: false, &block)
         matching = matching_hooks(type, target)
         core = -> { capture_chain_result(target, block.call) }
@@ -187,10 +129,8 @@ module Busybee
 
       private
 
-      # Innermost step of run_chain. For job-noun chains, captures the
-      # perform-returned result onto Job's Resolution (set-once + HWIA + freeze)
-      # if it isn't already set; the manual-complete flow may have captured it
-      # earlier from inside perform.
+      # Innermost step of run_chain. Guarded because the manual-complete flow may
+      # already have captured the result from inside perform, and it is set-once.
       def capture_chain_result(target, raw_result)
         return unless target.is_a?(Busybee::Job)
 
@@ -198,81 +138,8 @@ module Busybee
         resolution.set_result(raw_result) unless resolution.result_set?
       end
 
-      def scalar_match?(filter, value)
-        filter === value || filter == value || name_match?(filter, value)
-      end
-
-      # Names are spellings, not types: a filter and a value that are both
-      # String-or-Symbol match when they spell the same thing.
-      def name_match?(filter, value)
-        name?(filter) && name?(value) && filter.to_s == value.to_s
-      end
-
-      def name?(object) = object.is_a?(String) || object.is_a?(Symbol)
-
-      # Per-key matcher dispatch: :error gets its semantic table; every other
-      # key goes through the generic match.
-      def filter_match?(key, filter, value)
-        key == :error ? error_match?(filter, value) : match?(filter, value)
-      end
-
-      # The scalar half of the error: table. Name-domain matchers
-      # (String/Regexp) see only the error's own class name, never its
-      # ancestry — hierarchy (and mixin) matching takes the live Class/Module,
-      # mirroring rescue.
-      def present_error_match?(filter, error)
-        case filter
-        when true then true
-        when Module then error.is_a?(filter)
-        when String then error.class.name == filter # rubocop:disable Style/ClassEqualityComparison
-        when Regexp then filter.match?(error.class.name)
-        when Proc then !!filter.call(error)
-        else false
-        end
-      end
-
-      def validate_filters!(type, filters)
-        return if filters.empty?
-
-        allowed = FILTER_KEYS[HOOK_NOUN[type]]
-        unknown = filters.keys - allowed
-        unless unknown.empty?
-          raise ArgumentError,
-                "Unknown filter(s) for #{type}: #{unknown.join(', ')}. " \
-                "Allowed: #{allowed.join(', ')}"
-        end
-
-        validate_error_filter!(filters[:error]) if filters.key?(:error)
-      end
-
-      # Reject error: values outside the semantic table loudly at registration —
-      # under the old generic matching an implausible matcher (a Regexp against
-      # an exception instance) compiled fine and silently never fired.
-      def validate_error_filter!(filter)
-        case filter
-        when true, false, Module, String, Regexp, Proc then nil
-        when Array then filter.each { |element| validate_error_filter!(element) }
-        when nil
-          raise ArgumentError,
-                "error: does not accept nil inside an array — use `error: false` to match \"no error\""
-        else
-          raise ArgumentError,
-                "error: accepts true/false, an exception Class or Module, a String or Regexp " \
-                "(matched against the error's class name), a Proc, or an Array of these; " \
-                "got #{filter.inspect}"
-        end
-      end
-
       def matching_hooks(type, target)
-        hooks_for(type).select { |h| matches?(h, target) }
-      end
-
-      # Look up a filter key against the target. For job-noun hooks the target
-      # is a Busybee::Job; attribute names map to public methods. Missing keys
-      # return nil so a hook can express "filter only fires when this attribute
-      # is non-nil" without needing a separate predicate.
-      def attribute(target, key)
-        target.respond_to?(key) ? target.public_send(key) : nil
+        hooks_for(type).select { |hook| Filters.matches?(hook, target) }
       end
     end
 
