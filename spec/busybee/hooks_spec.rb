@@ -92,6 +92,24 @@ RSpec.describe Busybee::Hooks do
       expect(described_class.match?(/order/, "send_email")).to be false
     end
 
+    it "treats String and Symbol filters as interchangeable, in both directions" do
+      expect(described_class.match?("failed", :failed)).to be true
+      expect(described_class.match?(:charge_card, "charge_card")).to be true
+      expect(described_class.match?("failed", :complete)).to be false
+      expect(described_class.match?(:charge_card, "ship_order")).to be false
+    end
+
+    it "matches a Class by a name given as a Symbol" do
+      klass = Class.new { def self.name = "OrderWorker" }
+      expect(described_class.match?(:OrderWorker, klass)).to be true
+      expect(described_class.match?(:ShipmentWorker, klass)).to be false
+    end
+
+    it "does not cross the String/Symbol seam for values that merely stringify alike" do
+      expect(described_class.match?("5", 5)).to be false
+      expect(described_class.match?(:"1970-01-01", Date.new(1970, 1, 1))).to be false
+    end
+
     it "matches Class via is_a? (case equality)" do
       expect(described_class.match?(RuntimeError, RuntimeError.new("boom"))).to be true
       expect(described_class.match?(RuntimeError, StandardError.new("boom"))).to be false

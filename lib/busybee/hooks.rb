@@ -85,30 +85,14 @@ module Busybee
 
       # ====== Filter matching ======
 
-      # Test whether a single filter matches a value.
-      #
-      # An Array filter matches if any of its elements matches (match-any), so
-      # `job_type: %w[create_shipment assign_driver]` fires for either. Each
-      # element is matched by the same rules, so arrays can mix matchers.
-      #
-      # A scalar filter matches in three layers:
-      #   1. Case equality (===) — Symbol/String exact match, Regexp pattern,
-      #      Class is_a?, Proc/Lambda custom logic.
-      #   2. Equality (==) — catches direct identity, notably Class === Class
-      #      (where === would check is_a? on the class object, not identity).
-      #      So `worker_class: OrderWorker` matches as expected.
-      #   3. Class name fallback — when value is a Class, also match the filter
-      #      against value.name. Lets `worker_class: /Order/` match class names.
-      #
-      # @param filter [Object] the filter (Array, Symbol, String, Regexp, Class, Proc, etc.)
-      # @param value [Object] the value from the event
-      # @return [Boolean]
+      # Test whether a filter matches a value. Arrays match any element; scalars
+      # match by case equality, then equality (Class identity), then by name —
+      # and a Class is additionally offered its own name, so the same matchers
+      # reach it however the adopter spelled the class.
       def match?(filter, value)
         return filter.any? { |element| match?(element, value) } if filter.is_a?(Array)
 
-        filter === value ||
-          filter == value ||
-          (value.is_a?(Class) && filter === value.name)
+        scalar_match?(filter, value) || (value.is_a?(Class) && scalar_match?(filter, value.name))
       end
 
       # Test whether all of a hook's filters match the given target. The target
@@ -214,8 +198,20 @@ module Busybee
         resolution.set_result(raw_result) unless resolution.result_set?
       end
 
+      def scalar_match?(filter, value)
+        filter === value || filter == value || name_match?(filter, value)
+      end
+
+      # Names are spellings, not types: a filter and a value that are both
+      # String-or-Symbol match when they spell the same thing.
+      def name_match?(filter, value)
+        name?(filter) && name?(value) && filter.to_s == value.to_s
+      end
+
+      def name?(object) = object.is_a?(String) || object.is_a?(Symbol)
+
       # Per-key matcher dispatch: :error gets its semantic table; every other
-      # key goes through the generic three-layer match.
+      # key goes through the generic match.
       def filter_match?(key, filter, value)
         key == :error ? error_match?(filter, value) : match?(filter, value)
       end
