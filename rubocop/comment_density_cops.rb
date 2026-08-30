@@ -32,6 +32,8 @@ module RuboCop
         MSG = "%<subject>s has %<comments>s of comment against %<code>s of code " \
               "(%<ratio>d%%); the maximum is %<max>d%%."
 
+        YARD_TAG = /\A@\w+/
+
         private
 
         def density(comments, code, floor)
@@ -66,6 +68,15 @@ module RuboCop
           comment = comment_line_at(line)
           comment if comment && commentary?(comment)
         end
+
+        # YARD is API metadata rather than explanation, and its continuation
+        # lines — an @example body included — are indented under their tag, so
+        # whether a line is metadata depends on whether the one above it was.
+        def metadata?(body, in_tag)
+          YARD_TAG.match?(body) || (in_tag && (body.empty? || body.start_with?(" ")))
+        end
+
+        def comment_body(comment) = comment.text.sub(/\A#+\s?/, "")
 
         def offense_for(subject, comments, code, ratio)
           format(MSG, subject: subject, comments: lines(comments),
@@ -107,8 +118,6 @@ module RuboCop
       class HeaderCommentDensity < Base
         include CommentDensity
 
-        YARD_TAG = /\A@\w+/
-
         def on_def(node)
           comments = header_prose_lines(node)
           return if comments.zero?
@@ -124,14 +133,9 @@ module RuboCop
 
         private
 
-        # YARD is API metadata rather than explanation, and its continuation
-        # lines — including an @example body — are indented under their tag.
         def header_prose_lines(node)
           in_tag = false
-          header_bodies(node).count do |body|
-            in_tag = YARD_TAG.match?(body) || (in_tag && (body.empty? || body.start_with?(" ")))
-            !in_tag
-          end
+          header_bodies(node).count { |body| !(in_tag = metadata?(body, in_tag)) }
         end
 
         # Walks up from the `def`, stopping at the first line that is not a
@@ -141,7 +145,7 @@ module RuboCop
           line = node.first_line - 1
           bodies = []
           while (comment = comment_line_at(line))
-            bodies.unshift(comment.text.sub(/\A#+\s?/, "")) if commentary?(comment)
+            bodies.unshift(comment_body(comment)) if commentary?(comment)
             line -= 1
           end
           bodies
@@ -173,17 +177,32 @@ module RuboCop
 
         private
 
+        # A line of program ends a tag block: carrying the state past it would
+        # let one stray @tag near the top silence every indented comment below.
         def tally
-          counts = [0, 0]
-          processed_source.lines.each_with_index do |text, index|
+          in_tag = false
+          significant_lines.each_with_object([0, 0]) do |body, counts|
+            if body == :code
+              in_tag = false
+              counts[1] += 1
+            elsif !(in_tag = metadata?(body, in_tag))
+              counts[0] += 1
+            end
+          end
+        end
+
+        # Each non-blank line as its comment body, or :code where the line is
+        # program. Machinery drops out here, so it is invisible to the tag
+        # block exactly as it is to the header walk.
+        def significant_lines
+          processed_source.lines.filter_map.with_index(1) do |text, line|
             next if text.strip.empty?
 
-            comment = comment_line_at(index + 1)
-            next counts[0] += 1 if comment && commentary?(comment)
+            comment = comment_line_at(line)
+            next :code unless comment
 
-            counts[1] += 1 unless comment
+            comment_body(comment) if commentary?(comment)
           end
-          counts
         end
       end
     end
