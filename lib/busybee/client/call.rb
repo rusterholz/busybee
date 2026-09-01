@@ -118,6 +118,7 @@ module Busybee
       # chain swallows raises), so the error is recorded, not raised through it.
       def attempt
         _begin_attempt
+        reopen_request
         Busybee::Hooks.run_chain(:around_call, self, safe: true) do
           @timestamps.begin_network
           begin
@@ -127,6 +128,8 @@ module Busybee
           rescue *RECOVERABLE_ERRORS => e
             @timestamps.end_network
             _record_error(translate_error(e))
+          ensure
+            @request.freeze # the wire has seen it; from here it is a record, not an input
           end
         end
         # `error` and `result` are the carrier's own readers (attr_reader), set
@@ -168,6 +171,16 @@ module Busybee
       end
 
       private
+
+      # A retry starts from a writable copy of what the last attempt sent, so
+      # every around_call gets the request the first one got. It has to be a wire
+      # round-trip: protobuf's dup and clone both hand back a *frozen* copy, and
+      # the FrozenError that follows is swallowed by the chain, not raised.
+      def reopen_request
+        return if attempts < 2 || request.nil?
+
+        @request = request.class.decode(request.class.encode(request))
+      end
 
       # error_class returns the Class; project its name so tags/logs stay scalar
       # labels (own_logging_context builds on this, inheriting the coercion).
