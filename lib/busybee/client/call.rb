@@ -10,29 +10,22 @@ require "busybee/hooks"
 module Busybee
   class Client
     # Per-logical-call carrier for the call hooks (before_call / around_call /
-    # after_call); the block arg is |call|. A plain PORO, not an HWIA event:
-    # one Call is constructed per logical client operation and threaded through
-    # the hook seam, accumulating per-attempt outcome and timing and exposing a
-    # read surface (predicates, durations, grpc_status, context tags) computed
-    # live at read time.
-    #
-    # Framework state is written only through the underscore seam methods
-    # (_begin_attempt / _record_result / _record_error / _resolve); there are no
-    # public setters, so the absence of a setter is the seal.
+    # after_call); the block arg is |call|. A plain PORO, not an HWIA event: one
+    # per logical client operation, threaded through the seam, accumulating
+    # per-attempt outcome and timing behind a read surface computed live.
+    # Framework state is written only through the underscore seam methods below —
+    # there are no public setters, so the absence of a setter is the seal.
     class Call
-      # Errors the seam catches and records. StandardError today; widening to
-      # also include ScriptError is tracked as a future mission.
+      # Errors the seam catches and records. Widening to ScriptError is open.
       RECOVERABLE_ERRORS = [StandardError].freeze
 
       # Class-level correlation surface (with_job / with_worker_status /
       # current_job / current_worker_status) — see Correlation.
       extend Correlation
 
-      # Wrap a logical client call: construct the carrier, fire the gating
-      # before_call, run the operation (which records its per-attempt outcome onto
-      # the carrier), resolve, and fire the observing after_call exactly once.
-      # before_call propagates (so it can abort the call); after_call observes
-      # (swallows). Returns the recorded result on success; re-raises on error.
+      # Wrap a logical client call: build the carrier, fire the gating before_call,
+      # run the operation, resolve, fire the observing after_call exactly once.
+      # before_call propagates (it can abort the call); after_call swallows.
       def self.with_hooks(rpc, request = nil)
         call = new(rpc, request)
         Busybee::Hooks.run(:before_call, call)
@@ -75,10 +68,9 @@ module Busybee
       def error_class = error&.class
       def error_message = error&.message
 
-      # The gRPC status as a symbol: :ok on success; the recorded gRPC error's
-      # status when one is present (readable mid-retry, before resolution); nil
-      # otherwise. Synthesized rather than delegated, so a successful call reports
-      # :ok (gRPC's success code) without a result object to ask.
+      # The gRPC status as a symbol: :ok on success, the recorded error's status
+      # when one is present (readable mid-retry), nil otherwise. Synthesized, not
+      # delegated, so success reports :ok without a result object to ask.
       def grpc_status
         return :ok if succeeded?
         return error.grpc_status if error.is_a?(Busybee::GRPC::Error)
@@ -86,10 +78,7 @@ module Busybee
         nil
       end
 
-      # ===== Timing (delegated to Timestamps) =====
-      #
-      # The logical span and per-attempt network durations live on Timestamps;
-      # its read surface is exposed directly on the call.
+      # ===== Timing — the span and per-attempt durations live on Timestamps =====
       delegate :created_at, :resolved_at, :network_started_at, :network_finished_at,
                :network_ms, :backoff_ms, :queue_ms, :total_ms, :cumulative_network_ms,
                to: :@timestamps
@@ -103,21 +92,20 @@ module Busybee
         worker_correlation_tags.merge(job_correlation_tags).merge(own_context_tags).compact
       end
 
-      # High-cardinality projection (logs): a superset adding the worker/job keys
-      # a call log wants (worker_name, job/instance keys) plus the call's own
-      # attempts, durations, and error message.
+      # High-cardinality projection (logs): a superset adding worker_name, the
+      # job/instance keys, and the call's own attempts, durations and message.
       def logging_context
         worker_correlation_logging.merge(job_correlation_logging).merge(own_logging_context).compact
       end
 
       # ===== Execution seam =====
 
-      # Execute one gRPC attempt inside the observing around_call chain. Records
-      # the outcome onto the carrier (translating gRPC errors per attempt), then
-      # re-raises any error *past* the chain: around_call is observing (the safe
-      # chain swallows raises), so the error is recorded, not raised through it.
+      # Execute one gRPC attempt inside the observing around_call chain, recording
+      # the outcome (gRPC errors translated per attempt) and re-raising any error
+      # *past* the chain — the safe chain would otherwise swallow it.
       def attempt
         _begin_attempt
+        reopen_request
         Busybee::Hooks.run_chain(:around_call, self, safe: true) do
           @timestamps.begin_network
           begin
@@ -127,11 +115,12 @@ module Busybee
           rescue *RECOVERABLE_ERRORS => e
             @timestamps.end_network
             _record_error(translate_error(e))
+          ensure
+            @request.freeze # the wire has seen it; from here it is a record, not an input
           end
         end
-        # `error` and `result` are the carrier's own readers (attr_reader), set
-        # just above by _record_result / _record_error inside the chain core —
-        # they are not local variables.
+        # `error` and `result` are the carrier's own attr_readers, set inside the
+        # chain core by _record_result / _record_error — not local variables.
         raise error if error
 
         result
@@ -144,24 +133,20 @@ module Busybee
         @attempts += 1
       end
 
-      # Record this attempt's success result. result and error are mutually
-      # exclusive, latest-wins: recording one clears the other, so after the final
-      # attempt exactly one is live and is the logical outcome (a retry that
-      # succeeds clears the prior attempt's error).
+      # Record this attempt's success. result and error are mutually exclusive,
+      # latest-wins, so a retry that succeeds clears the prior attempt's error.
       def _record_result(value)
         @result = value
         @error = nil
       end
 
-      # Record this attempt's error (see _record_result for the latest-wins
-      # mutual-exclusion contract).
+      # Record this attempt's error (see _record_result for the contract).
       def _record_error(error)
         @error = error
         @result = nil
       end
 
-      # Set the logical status (:succeeded / :errored) — advances once, at final
-      # resolution.
+      # Set the logical status (:succeeded / :errored) — advances once, at resolution.
       def _resolve(status:)
         @status = status
         @timestamps.stamp_resolved!
@@ -169,8 +154,17 @@ module Busybee
 
       private
 
-      # error_class returns the Class; project its name so tags/logs stay scalar
-      # labels (own_logging_context builds on this, inheriting the coercion).
+      # A retry starts from a writable copy of what the last attempt sent, so
+      # every around_call gets the request the first one got. It has to be a wire
+      # round-trip: protobuf's dup and clone both hand back a *frozen* copy, and
+      # the FrozenError that follows is swallowed by the chain, not raised.
+      def reopen_request
+        return if attempts < 2 || request.nil?
+
+        @request = request.class.decode(request.class.encode(request))
+      end
+
+      # error_class returns the Class; project its name so tags/logs stay scalar.
       def own_context_tags
         { rpc: rpc, status: status, grpc_status: grpc_status, error_class: error_class&.name }
       end
@@ -186,9 +180,8 @@ module Busybee
       end
 
       # What a call log wants from its worker: identity, not lifetime gauges.
-      # worker_name is logging-only — it can be per-run-unique (high-cardinality
-      # as a metric label). worker_class is the source of job_type on a job-less
-      # fetch call, where no Job is in scope.
+      # worker_name is logging-only (per-run-unique); worker_class supplies
+      # job_type on a job-less fetch call, where no Job is in scope.
       def worker_correlation_tags
         return {} unless worker_status
 
@@ -203,9 +196,8 @@ module Busybee
         worker_correlation_tags.merge(worker_name: worker_status.worker_name)
       end
 
-      # What a call log wants from its job: correlation identity, not lifecycle
-      # timing/result. retries is deliberately excluded — it reads like this call's
-      # attempts but means the engine's retry budget for the job.
+      # Correlation identity, not lifecycle timing. retries is excluded: it reads
+      # like this call's attempts but means the engine's retry budget for the job.
       def job_correlation_tags
         return {} unless job
 
@@ -220,9 +212,8 @@ module Busybee
                                    element_id: job.element_id)
       end
 
-      # Translate a raw gRPC error to a Busybee::GRPC::Error (preserving it as the
-      # cause); pass any non-gRPC error through unchanged. Per attempt, so the
-      # recorded error and grpc_status read uniformly across retries.
+      # Wrap a raw gRPC error as Busybee::GRPC::Error (keeping it as the cause),
+      # per attempt, so error and grpc_status read uniformly across retries.
       def translate_error(error)
         error.is_a?(::GRPC::BadStatus) ? Busybee::GRPC::Error.wrap(error) : error
       end

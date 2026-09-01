@@ -33,6 +33,7 @@ You register hooks once at boot, typically in the same `Busybee.configure` block
   - [Stop Reasons](#stop-reasons)
 - [Call Hooks](#call-hooks)
   - [Reading the Call](#reading-the-call)
+  - [Changing the Request Before It's Sent](#changing-the-request-before-its-sent)
   - [Fetching Is Observed at Dispatch](#fetching-is-observed-at-dispatch)
 - [When Hooks Raise](#when-hooks-raise)
   - [What the Swallow Doesn't Cover](#what-the-swallow-doesnt-cover)
@@ -494,7 +495,7 @@ end
 
 | Group | Readers |
 |-------|---------|
-| Identity | `rpc` (Symbol, see below), `request` (the protobuf request) |
+| Identity | `rpc` (Symbol, see below), `request` (the protobuf request — writable until it is sent, see [Changing the Request](#changing-the-request-before-its-sent)) |
 | Outcome | `status` (`:pending` / `:succeeded` / `:errored`), `pending?`, `succeeded?`, `errored?`, `resolved?`, `grpc_status` (`:ok` on success, the gRPC status Symbol like `:resource_exhausted` on failure), `result`, `error`, `error_class`, `error_message`, `attempts` |
 | Timing | `network_ms` (this attempt on the wire), `cumulative_network_ms` (all attempts), `backoff_ms` (gap between retries), `queue_ms` (construction → first attempt), `total_ms` (whole logical call), plus `created_at` / `resolved_at` / `network_started_at` / `network_finished_at` moments |
 | Correlation | `job` — the job this call ran on behalf of, when there is one; `worker_status` — the worker it ran in |
@@ -513,11 +514,63 @@ The `rpc` values mirror the engine's gateway API:
 
 Correlation is automatic: a call made during `perform` (including automatic completion/failure, and `job.complete!` from any thread) carries its `call.job`, and any call made inside a running worker carries `call.worker_status`. A fetch call that precedes any job carries only the worker. The call's own `context_tags`/`logging_context` fold in a curated slice of both identities, so tagging a metric with `call.context_tags` already says which worker and job type produced it.
 
+### Changing the Request Before It's Sent
+
+`call.request` is the actual protobuf message on its way to the engine, and `before_call` may write to it. That makes this seam the one place to apply a rule to *every* call of a kind — stated once, applied everywhere, impossible to forget at a new call site.
+
+The clearest case is keeping something out of the broker in the first place. Exception messages are the usual culprit: they carry whatever the failure happened to be holding, and a failed job's message is stored against the process instance, where anyone with Operate access can read it.
+
+```ruby
+Busybee.configure do |config|
+  # Whatever the exception said, the engine only ever sees the scrubbed version.
+  config.before_call(rpc: :fail_job) do |call|
+    call.request.errorMessage = PiiScrubber.call(call.request.errorMessage)
+  end
+end
+```
+
+Every field the message type carries is writable, under the engine's own names — the [gateway protocol](https://docs.camunda.io/docs/apis-tools/zeebe-api/grpc/) is the reference for what each request holds:
+
+```ruby
+# Don't spend a BPMN retry on infrastructure that failed us rather than the job.
+# job.retries is the budget before this failure; assigning it back declines the decrement.
+config.before_call(rpc: :fail_job) do |call|
+  call.request.retries = call.job.retries if call.job&.error.is_a?(Errno::ECONNREFUSED)
+end
+
+# Send your own correlation id along, so what the engine records points back at the request that started it
+config.before_call(rpc: :create_process_instance) do |call|
+  variables = JSON.parse(call.request.variables)
+  call.request.variables = variables.merge("correlationId" => Current.request_id).to_json
+end
+```
+
+**Put the rule in `before_call` unless you specifically want per-attempt behaviour.** It runs once per logical call, and it is the only call hook that **propagates** — if your redaction raises, the call is abandoned rather than sending the unredacted request. That is the right failure for a rule whose whole job is to keep something off the wire.
+
+**A sent request is sealed.** Once an attempt has gone out, its request is frozen. `after_call`, and the part of `around_call` after `continue.call`, therefore read exactly what the engine was handed. Writing to it raises `FrozenError`:
+
+```ruby
+config.after_call { |call| call.request.errorMessage = "too late" } # raises FrozenError
+```
+
+Because those are observing hooks, the error is logged and swallowed rather than propagated (see [When Hooks Raise](#when-hooks-raise)) — your own specs are where you will meet it.
+
+**Retries get a fresh copy.** busybee performs its own retries and `around_call` fires once per attempt, so each attempt begins from a writable copy of what the previous one sent. A hook that writes to `call.request` there works on every attempt, not only the first:
+
+```ruby
+config.around_call(rpc: :fail_job) do |call, continue|
+  call.request.errorMessage = "#{call.request.errorMessage} (attempt #{call.attempts})"
+  continue.call
+end
+```
+
+What `before_call` wrote carries across, because the copy is taken from the request as it was sent. What does not carry is the seal: each attempt gets a writable request and freezes it again at its own send.
+
 ### Fetching Is Observed at Dispatch
 
 Job fetching is the one place where the seam currently sees less than the whole story, and it's worth knowing before you build a dashboard on it.
 
-`:activate_jobs` and `:stream_activated_jobs` are server-streaming RPCs, and the call resolves when the stream **opens** — before a single job has arrived. The hooks all fire, and `before_call` can inspect or annotate the request as usual, but what `after_call` reports is the dispatch: a `network_ms` near zero, a live enumerator as `result`, and `:succeeded` even when the broker goes on to report a failure while jobs are being read.
+`:activate_jobs` and `:stream_activated_jobs` are server-streaming RPCs, and the call resolves when the stream **opens** — before a single job has arrived. The hooks all fire, and `before_call` can inspect or rewrite the request as usual, but what `after_call` reports is the dispatch: a `network_ms` near zero, a live enumerator as `result`, and `:succeeded` even when the broker goes on to report a failure while jobs are being read.
 
 The gap is in the telemetry, not in the behavior. A fetch failure still reaches your worker as a `Busybee::GRPC::Error` with `grpc_status` intact; backpressure is still backed off and retried; the ending still arrives at `on_worker_shutdown` as `:gateway_error`. What you can't do today is watch a fetch fail *through `after_call`* — so alert on worker shutdown reasons rather than on fetch-call outcomes. Per-attempt fetch telemetry lands with the async work in v0.5.
 

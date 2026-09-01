@@ -78,11 +78,12 @@ module Busybee
 
     # Run a gRPC stub call through the call-hook seam: build the request-bearing
     # Call, fire the gating before_call, make the retrying / per-attempt-
-    # instrumented call, and fire the observing after_call. Extra kwargs (e.g.
-    # return_op:) pass through to the stub method. Returns the raw stub response.
+    # instrumented call, fire the observing after_call, return the raw stub
+    # response. Extra kwargs (e.g. return_op:) pass through. Reads `call.request`
+    # at each send rather than closing over it — the carrier reopens it per attempt.
     def run_hooked(rpc, request, **kwargs)
       Call.with_hooks(rpc, request) do |call|
-        with_retry { call.attempt { stub.public_send(rpc, request, **kwargs) } }
+        with_retry { call.attempt { stub.public_send(rpc, call.request, **kwargs) } }
       end
     end
   end
