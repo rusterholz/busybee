@@ -56,6 +56,25 @@ module Monitoring
                tags: job.context_tags)
       end
 
+      # The other way an activation closes: the worker was shutting down and handed
+      # the job straight back unworked. Same rank as an execution because it is the
+      # same slot in the bracket — without it a deploy leaves rows stuck at rank 0
+      # forever, which is exactly the leak the pairing exists to prevent. Nothing
+      # was attempted, so there are no durations and the status is still :ready;
+      # a handback that failed to reach the engine is the worker's error, not the
+      # job's, which is why it comes off worker_status.
+      def record_handback(job)
+        upsert(JobRun, { job_key: job.key },
+               rank: 1,
+               job_type: job.job_type,
+               bpmn_process_id: job.bpmn_process_id,
+               status: job.status.to_s,
+               executed_at: Time.current,
+               buffer_latency_ms: job.buffer_latency_ms,
+               error_message: job.worker_status&.error_message,
+               tags: job.context_tags)
+      end
+
       # Upsert a worker's current lifecycle phase, keyed by its container identity
       # (worker_name is unique per boot, so each incarnation is its own row).
       def record_worker(status, worker)

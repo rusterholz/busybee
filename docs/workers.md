@@ -756,6 +756,14 @@ Jobs of the *same* type are always processed sequentially. That is, only one ins
 
 > An opt-in feature to run workers concurrently (multi-threaded) will be included in a future version of Busybee, and this section will be updated.
 
+#### When One Worker Fails
+
+**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. This is deliberate: a process with one dead worker class is silently doing part of its job, which is worse to operate than a process that's plainly gone. Every worker's `on_worker_shutdown` fires with the crash's reason — so a container of five workers produces five shutdown events, one of which carries the error.
+
+How hard the shutdown is depends on what went wrong. An ordinary error leaves the process healthy enough to be polite, so each worker drains: jobs in hand go back to the engine promptly and are picked up by whoever replaces you. Something the process can't recover from — `NoMemoryError`, `SystemStackError` — skips the drain, because the calls a graceful shutdown makes are exactly the ones about to fail again. Those jobs come back to the engine the slower way, when their activation times out.
+
+Worth knowing when planning capacity: with one poison worker class deployed across a hundred containers, that's a hundred containers churning, not one.
+
 #### Database Connections
 
 When running multiple workers, ensure your database connection pool is large enough to support one connection for each worker. Busybee logs a warning at startup if the ActiveRecord pool size is smaller than the number of workers.

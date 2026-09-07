@@ -863,6 +863,113 @@ RSpec.describe Busybee::Runner do
     end
   end
 
+  # A job the runner took delivery of and is handing back unworked. The bracket
+  # an adopter opens at on_job_activated closes here rather than at
+  # on_job_executed, which keeps meaning what its name says.
+  describe "handing a job back unworked (on_job_not_executed)" do
+    let(:worker_class) do
+      stub_const("HandbackWorker", Class.new(Busybee::Worker) do
+        job_type "handback_worker"
+        def perform = :worked
+      end)
+    end
+    let(:job) { build_test_job(type: worker_class.job_type, key: 4242, retries: 2) }
+    # A runtime config is load-bearing here: without one the backoff lookup
+    # raises while building the handback's arguments, and the rescue swallows it
+    # before any of this behaviour runs.
+    let(:runner) do
+      described_class.new(worker_class, client: client,
+                                        runtime_config: Busybee::RuntimeConfig.new(worker_mode: :polling).
+                                                        resolve_for(worker_class))
+    end
+
+    before { allow(client).to receive(:fail_job) }
+
+    after { Busybee::Hooks.reset! }
+
+    it "fires for a job the runner never executed" do
+      captured = nil
+      Busybee.on_job_not_executed { |handed_back| captured = handed_back }
+
+      runner.send(:handle_shutdown_job, job)
+
+      expect(captured).to be(job)
+    end
+
+    # The job is not failed — it was never attempted. Marking it :failed would
+    # make it indistinguishable from a job that ran and lost.
+    it "leaves the job unresolved, because nothing was ever tried" do
+      runner.send(:handle_shutdown_job, job)
+
+      expect(job.status).to eq(:ready)
+      expect(job.error).to be_nil
+    end
+
+    it "still hands the job back to the engine with its retry count intact" do
+      runner.send(:handle_shutdown_job, job)
+
+      expect(client).to have_received(:fail_job).with(4242, "Worker shutting down", retries: 2, backoff: anything)
+    end
+
+    it "fires even when the handback call itself fails" do
+      allow(Busybee).to receive(:logger).and_return(nil)
+      allow(client).to receive(:fail_job).and_raise(Busybee::GRPC::Error.new("broker gone"))
+      captured = nil
+      Busybee.on_job_not_executed { |handed_back| captured = handed_back }
+
+      runner.send(:handle_shutdown_job, job)
+
+      expect(captured).to be(job)
+    end
+
+    # The handback is worker-lifecycle work, so its failure is the worker's,
+    # not the job's — the job still did nothing wrong and reports no error.
+    it "records a failed handback on the worker carrier, never on the job" do
+      allow(Busybee).to receive(:logger).and_return(nil)
+      allow(client).to receive(:fail_job).and_raise(Busybee::GRPC::Error.new("broker gone"))
+      seen = nil
+      Busybee.on_job_not_executed { |handed_back| seen = handed_back }
+
+      runner.send(:handle_shutdown_job, job)
+
+      aggregate_failures do
+        expect(seen.error).to be_nil
+        expect(seen.worker_status.error).to be_a(Busybee::GRPC::Error)
+      end
+    end
+
+    it "does not fire on_job_executed for a job that was never executed" do
+      fired = []
+      Busybee.on_job_executed { fired << :executed }
+      Busybee.on_job_not_executed { fired << :not_executed }
+
+      runner.send(:handle_shutdown_job, job)
+
+      expect(fired).to eq(%i[not_executed])
+    end
+
+    it "is the complement of on_job_executed, not an addition to it" do
+      fired = []
+      Busybee.on_job_executed { fired << :executed }
+      Busybee.on_job_not_executed { fired << :not_executed }
+
+      runner.send(:execute_job, build_test_job(type: worker_class.job_type))
+
+      expect(fired).to eq(%i[executed])
+    end
+
+    describe "filters" do
+      it "accepts status: :ready, the one value the moment can hold" do
+        expect { Busybee.on_job_not_executed(status: :ready) { nil } }.not_to raise_error
+      end
+
+      it "refuses a status the moment can never reach" do
+        expect { Busybee.on_job_not_executed(status: :complete) { nil } }.
+          to raise_error(ArgumentError, /status/)
+      end
+    end
+  end
+
   describe "computed durations end-to-end" do
     let(:worker_class) do
       stub_const("DurationLifecycleWorker", Class.new(Busybee::Worker) do

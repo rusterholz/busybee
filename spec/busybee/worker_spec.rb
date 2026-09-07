@@ -671,10 +671,15 @@ RSpec.describe Busybee::Worker do
       expect(error.cause).to be_a(RuntimeError)
     end
 
-    it "handles missing cause gracefully" do
+    # Was: asserted the literal filler "due to error". That phrase existed only
+    # because the cause clause was composed unconditionally, so it named a cause
+    # that was never there. The claim worth keeping is that a causeless shutdown
+    # still attributes itself to its worker.
+    it "attributes a causeless shutdown to its worker without inventing a cause" do
       error = described_class.new(worker_class: String)
-      expect(error.message).to include("due to error")
+
       expect(error.message).to include("String")
+      expect(error.message).not_to include("due to")
     end
 
     it "handles anonymous worker class" do
@@ -685,6 +690,36 @@ RSpec.describe Busybee::Worker do
     it "accepts a custom base message" do
       error = described_class.new("Custom shutdown reason", worker_class: String)
       expect(error.message).to start_with("Custom shutdown reason")
+    end
+
+    # The documented idiom: a hook declaring the worker unhealthy on its own
+    # judgement, with no error to wrap. `raise Klass, msg` calls Klass.new(msg),
+    # so a required keyword makes the sentence in docs/hooks.md unwritable.
+    it "can be raised the way the documentation says to raise it" do
+      error = begin
+        raise described_class, "replica lag too high"
+      rescue described_class => e
+        e
+      end
+
+      expect(error.message).to eq("replica lag too high")
+      expect(error.worker_class).to be_nil
+    end
+
+    it "can be raised bare, naming neither a message nor a worker" do
+      error = begin
+        raise described_class
+      rescue described_class => e
+        e
+      end
+
+      expect(error.message).to include("Shutting down worker")
+    end
+
+    it "leaves an explicit message alone when there is no cause to name" do
+      error = described_class.new("replica lag too high", worker_class: String)
+
+      expect(error.message).to eq("replica lag too high in String")
     end
 
     describe ".triggered_by?" do

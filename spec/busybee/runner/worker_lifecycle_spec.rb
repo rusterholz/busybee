@@ -300,6 +300,217 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     end
   end
 
+  # Once teardown has begun the worker cannot be made more stopped, so the
+  # special meaning of Shutdown and shutdown_on is already satisfied and an
+  # escalation from T1/T2/T3 buys nothing — while costing the rest of the
+  # teardown. T0 is deliberately excluded: a start can still be aborted.
+  describe "escalation from a shutting-down moment" do
+    let(:runner_class) do
+      Class.new(super()) do
+        attr_reader :drained
+
+        private
+
+        def drain_on_shutdown = @drained = true
+      end
+    end
+
+    let(:logged) { [] }
+
+    before do
+      logger = instance_double(Logger)
+      allow(logger).to receive(:error) { |message| logged << message }
+      allow(logger).to receive(:warn) { |message| logged << message }
+      allow(Busybee).to receive(:logger).and_return(logger)
+    end
+
+    it "lets the rest of the teardown run when on_worker_stopping declares unhealth" do
+      record_all_lifecycle_hooks
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+
+      expect { runner.run! }.not_to raise_error
+
+      aggregate_failures do
+        expect(moments).to eq(%i[started stopping shutdown])
+        expect(runner.drained).to be(true)
+        expect(runner.running?).to be(false)
+      end
+    end
+
+    # The wedge is worse than a stale predicate: @running never clears, so the
+    # next run! loses start!'s compare-and-set and returns having done nothing.
+    it "leaves the runner able to run again" do
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+      runner.run!
+      Busybee::Hooks.reset!
+
+      entered = false
+      runner.test_run_loop = -> { entered = true }
+      runner.run!
+
+      expect(entered).to be(true)
+    end
+
+    it "does not replace the exception the worker was already exiting on" do
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+      runner.test_run_loop = -> { raise "the original crash" }
+
+      expect { runner.run! }.to raise_error(RuntimeError, "the original crash")
+    end
+
+    it "leaves the set-once stop reason alone" do
+      captured = nil
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+      runner.test_run_loop = -> { runner.stop!(reason: :rollover) } # stopping before run! would early-return
+      runner.run!
+
+      expect(captured.reason).to eq(:rollover)
+    end
+
+    it "hands the escalation to the shutdown observer, so it is not merely lost" do
+      captured = nil
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+      runner.run!
+
+      expect(captured.error).to be_a(Busybee::Worker::Shutdown)
+    end
+
+    # The exit exception is why the worker is going down; a hook's complaint
+    # about it is not allowed to overwrite it on the carrier.
+    it "keeps the exit exception on the carrier when there is one" do
+      captured = nil
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+      runner.test_run_loop = -> { raise "the original crash" }
+      begin
+        runner.run!
+      rescue RuntimeError # rubocop:disable Lint/SuppressedException
+      end
+
+      expect(captured.error).to be_a(RuntimeError)
+    end
+
+    it "says in the log that it declined to escalate, and why" do
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+      runner.run!
+
+      expect(logged).to include(a_string_matching(/on_worker_stopping.*already shutting down/))
+    end
+
+    it "clears running? when on_worker_shutdown declares unhealth" do
+      Busybee.on_worker_shutdown { raise Busybee::Worker::Shutdown, "T3 declares unhealth" }
+
+      expect { runner.run! }.not_to raise_error
+      expect(runner.running?).to be(false)
+    end
+
+    it "does not propagate out of stop! when on_worker_stop_requested declares unhealth" do
+      Busybee.on_worker_stop_requested { raise Busybee::Worker::Shutdown, "T1 declares unhealth" }
+
+      expect { runner.stop! }.not_to raise_error
+      expect(runner.stopping?).to be(true)
+    end
+
+    it "still escalates from on_worker_started, where a start can be aborted" do
+      Busybee.on_worker_started { raise Busybee::Worker::Shutdown, "T0 declares unhealth" }
+
+      expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+    end
+
+    it "escalates a shutdown_on match at T0 and contains one at T2, alike" do
+      stub_const("LifecycleFatal", Class.new(StandardError))
+      Busybee.shutdown_on_errors = [LifecycleFatal]
+      Busybee.on_worker_stopping { raise LifecycleFatal, "listed" }
+
+      expect { runner.run! }.not_to raise_error
+      expect(runner.running?).to be(false)
+    ensure
+      Busybee.shutdown_on_errors = nil
+    end
+  end
+
+  # The drain is the ensure's other door. A hook is the obvious way to blow up
+  # mid-teardown, but a failing wire call or the pump join's re-raise does the
+  # same damage, so the invariant is that run!'s ensure always completes rather
+  # than that hook errors are contained.
+  describe "the drain inside the teardown" do
+    let(:runner_class) do
+      Class.new(super()) do
+        attr_writer :test_drain
+        attr_reader :drained
+
+        private
+
+        def drain_on_shutdown
+          @drained = true
+          @test_drain&.call
+        end
+      end
+    end
+
+    before { allow(Busybee).to receive(:logger).and_return(nil) }
+
+    it "finishes the teardown when the drain fails" do
+      record_all_lifecycle_hooks
+      runner.test_drain = -> { raise "the broker went away mid-drain" }
+
+      expect { runner.run! }.not_to raise_error
+
+      aggregate_failures do
+        expect(moments).to eq(%i[started stopping shutdown])
+        expect(runner.running?).to be(false)
+      end
+    end
+
+    it "hands the drain's failure to the shutdown observer" do
+      captured = nil
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+      runner.test_drain = -> { raise "the broker went away mid-drain" }
+      runner.run!
+
+      expect(captured.error).to be_a(RuntimeError)
+    end
+
+    it "runs the drain when the worker is exiting on an ordinary error" do
+      runner.test_run_loop = -> { raise "an ordinary crash" }
+      begin
+        runner.run!
+      rescue RuntimeError # rubocop:disable Lint/SuppressedException
+      end
+
+      expect(runner.drained).to be(true)
+    end
+
+    # N gRPC calls under memory exhaustion is how you make that worse. Dropping
+    # the work is correct here: the engine re-yields it after the activation
+    # times out, and the process is not going to survive to do it itself.
+    it "skips the drain when the worker is exiting on something it cannot recover from" do
+      runner.test_run_loop = -> { raise NoMemoryError, "out of memory" }
+
+      expect { runner.run! }.to raise_error(NoMemoryError)
+      expect(runner.drained).to be_falsey
+    end
+
+    it "still fires both closing moments on that path" do
+      record_all_lifecycle_hooks
+      runner.test_run_loop = -> { raise NoMemoryError, "out of memory" }
+      begin
+        runner.run!
+      rescue NoMemoryError # rubocop:disable Lint/SuppressedException
+      end
+
+      expect(moments).to eq(%i[started stopping shutdown])
+    end
+
+    it "lets a non-recoverable failure raised by the drain itself out" do
+      runner.test_drain = -> { raise NoMemoryError, "out of memory mid-drain" }
+
+      expect { runner.run! }.to raise_error(NoMemoryError)
+    end
+  end
+
   describe "single-entry guard (no concurrent / repeated run!)" do
     it "rejects a second run! while already running, without re-entering the loop" do
       loop_entries = Concurrent::AtomicFixnum.new(0)

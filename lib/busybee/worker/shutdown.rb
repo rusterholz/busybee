@@ -4,39 +4,36 @@ require "busybee/error"
 
 module Busybee
   class Worker
-    # Raised when a `shutdown_on` exception is caught during perform_job.
-    # Signals to the Runner that the worker process should shut down.
-    # The original exception is available via `cause` (set by Ruby at raise time).
+    # The worker process should shut down — raised by `shutdown_on`, or by
+    # usercode declaring unhealth itself. `cause` carries the original, if any.
     class Shutdown < Busybee::Error
       attr_reader :worker_class
 
-      def initialize(message = "Shutting down worker #{Busybee.worker_name}", worker_class:)
+      # worker_class is optional so `raise Shutdown, "msg"` can be written at all.
+      def initialize(message = "Shutting down worker #{Busybee.worker_name}", worker_class: nil)
         @worker_class = worker_class
         super(message)
       end
 
+      # Conditional: naming an absent cause gives "replica lag too high due to error".
       def message
         super.dup.tap do |msg|
-          msg << " due to #{cause&.class&.name || 'error'}"
+          msg << " due to #{cause.class.name || 'error'}" if cause
           msg << " in #{worker_class.name}" if worker_class&.name
           msg << ": \"#{cause.message}\"" if cause
         end
       end
 
-      # The triggering error behind a shutdown: for a Shutdown, its wrapped cause
-      # (or the Shutdown itself when raised without one); any other exception —
-      # nil included — passes through unchanged. The single unwrap the runner's
-      # exit classification and the worker's autofail both read.
+      # The triggering error: a Shutdown's cause (or itself, uncaused); anything
+      # else passes through. The one unwrap exit classification and autofail read.
       def self.unwrap(exception)
         return exception unless exception.is_a?(self)
 
         exception.cause || exception
       end
 
-      # Whether an error is one the worker (or the gem config) declared fatal —
-      # the shutdown_on classification, shared by the worker's perform rescue
-      # and the hook layer's safe-run rescue. worker_class may be nil or
-      # configuration-less (a bare hook target); only gem-level classes apply then.
+      # The shutdown_on classification, shared by the perform and hook rescues.
+      # A nil or configuration-less worker_class leaves only the gem-level list.
       def self.triggered_by?(error, worker_class)
         per_worker = worker_class.respond_to?(:configuration) ? worker_class.configuration.shutdown_on : []
         (per_worker + Busybee.shutdown_on_errors).any? { |klass| error.is_a?(klass) }

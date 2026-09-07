@@ -54,6 +54,10 @@ module Busybee
         before_perform: { status: %i[ready], error: [nil] },
         around_perform: { status: %i[ready], error: [nil] },
         on_job_activated: { status: %i[ready], error: [nil] },
+        # Its mirror: the job was handed back unworked, so it never resolved
+        # and never errored. status: stays accepted for parity with its
+        # siblings even though only one value can match.
+        on_job_not_executed: { status: %i[ready], error: [nil] },
         around_job_execution: { status: %i[ready], error: [nil] },
         before_call: { status: %i[pending], grpc_status: [nil], error: [nil] },
         around_call: { status: %i[pending], grpc_status: [nil], error: [nil] },

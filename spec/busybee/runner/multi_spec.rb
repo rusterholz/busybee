@@ -261,6 +261,92 @@ RSpec.describe Busybee::Runner::Multi do
     end
   end
 
+  # A child dying of something outside RECOVERABLE_ERRORS used to be the
+  # quietest failure in the gem: nothing logged anywhere, no cascade, and
+  # wait_for_termination never returning — so the container could not even die,
+  # and that worker's job type starved until the next deploy.
+  describe "a child dying of a non-recoverable error" do
+    let(:logged) { Concurrent::Array.new }
+
+    before do
+      logger = instance_double(Logger)
+      allow(logger).to receive(:error) { |message| logged << message }
+      allow(logger).to receive(:warn) { |message| logged << message }
+      allow(logger).to receive(:info)
+      allow(Busybee).to receive(:logger).and_return(logger)
+    end
+
+    def poisoned_multi(error)
+      described_class.new(worker_classes, client: client).tap do |multi|
+        dying, sibling = multi.runners
+        allow(dying).to receive(:run!).and_raise(error)
+        allow(sibling).to receive(:run!) { sleep 0.01 until sibling.stopping? }
+      end
+    end
+
+    def run_to_completion(multi)
+      raised = nil
+      thread = Thread.new do
+        multi.run!
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        raised = e
+      end
+      finished = thread.join(3)
+      thread.kill unless finished
+      [raised, !finished.nil?]
+    end
+
+    def run_with_poisoned_child(error)
+      multi = poisoned_multi(error)
+      raised, returned = run_to_completion(multi)
+      [multi, raised, returned]
+    end
+
+    it "does not leave the container unable to shut down" do
+      _multi, _raised, returned = run_with_poisoned_child(NotImplementedError.new("poison child"))
+
+      expect(returned).to be(true)
+    end
+
+    it "names the child and the error in the log" do
+      run_with_poisoned_child(NotImplementedError.new("poison child"))
+
+      expect(logged).to include(a_string_matching(/TestMultiWorker1.*NotImplementedError.*poison child/))
+    end
+
+    it "re-raises the child's error out of run!, so the process still dies of it" do
+      _multi, raised, = run_with_poisoned_child(NotImplementedError.new("poison child"))
+
+      expect(raised).to be_a(NotImplementedError)
+    end
+
+    it "tears the siblings down instead of leaving them taking work" do
+      multi, = run_with_poisoned_child(NotImplementedError.new("poison child"))
+
+      expect(multi.runners).to all(be_stopping)
+    end
+
+    # multi.rb's existing convention: the container adopts the crash's reason.
+    # A sibling did not crash itself, and nobody killed it by hand, so :kill —
+    # which means an operator forced this — would be the wrong word.
+    it "gives the siblings the crash's reason rather than :kill" do
+      multi, = run_with_poisoned_child(NotImplementedError.new("poison child"))
+      _dying, sibling = multi.runners
+
+      expect(sibling.instance_variable_get(:@stop_reason).get).to eq(:crash)
+    end
+
+    it "still cascades gracefully for an ordinary error" do
+      multi, raised, returned = run_with_poisoned_child(RuntimeError.new("ordinary poison"))
+
+      aggregate_failures do
+        expect(returned).to be(true)
+        expect(raised).to be_a(RuntimeError)
+        expect(multi.runners).to all(be_stopping)
+      end
+    end
+  end
+
   describe "#stop!" do
     after { Busybee::Hooks.reset! }
 
@@ -273,6 +359,26 @@ RSpec.describe Busybee::Runner::Multi do
 
       expect(multi.runners).to all(have_received(:stop!))
       expect(thread_pool).to have_received(:shutdown)
+    end
+
+    # The fan-out calls each child's stop! inline, and each child fires its own
+    # stop-requested hook there — so an escalation from the first child used to
+    # leave every later child running and the pool never shut down. Reached from
+    # the CLI's signal thread, that made SIGTERM a no-op for most of a container.
+    it "stops every child even when one child's stop hook declares unhealth" do
+      multi = described_class.new(worker_classes, client: client)
+      allow(thread_pool).to receive(:shutdown)
+      first_class = worker_classes.first
+      Busybee.on_worker_stop_requested do |status|
+        raise Busybee::Worker::Shutdown, "child declares unhealth" if status.worker_class == first_class
+      end
+
+      expect { multi.stop! }.not_to raise_error
+
+      aggregate_failures do
+        expect(multi.runners).to all(be_stopping)
+        expect(thread_pool).to have_received(:shutdown)
+      end
     end
 
     it "cascades the stop reason to every child" do

@@ -44,12 +44,11 @@ module Busybee
         end
       end
 
+      # Transparent: Multi manages child runners rather than being a worker, so it
+      # fires no worker hooks of its own — hence winning the set-once reason gate
+      # directly rather than through super, whose stop! fires T1. Each child fires
+      # its own lifecycle hooks and takes the same reason, per worker class.
       def stop!(reason: :signal)
-        # Multi is transparent — it manages child runners rather than being a
-        # worker, so it fires no worker hooks of its own. Win the set-once reason
-        # gate directly instead of via super (whose stop! now fires
-        # on_worker_stop_requested); each child fires its own lifecycle hooks and
-        # takes the same reason (cascade below), per worker-class.
         @stop_reason.compare_and_set(nil, reason)
         @runners.each { |runner| runner.stop!(reason: reason) }
         @thread_pool.shutdown
@@ -59,27 +58,54 @@ module Busybee
         @runners.all?(&:stopping?)
       end
 
-      def kill!
+      def kill!(reason: :kill)
         super
-        @runners.each(&:kill!)
+        @runners.each { |runner| runner.kill!(reason: reason) }
         @thread_pool.kill
       end
 
       private
 
+      # Two layers, because how hard to tear down depends on what killed the
+      # child. A recoverable error leaves the process well enough to drain, so
+      # the container stops gracefully. Below that line — NoMemoryError,
+      # SystemStackError — a graceful stop would spend its time on the very
+      # calls about to fail again, so the siblings are killed instead. Without
+      # the second layer the pool thread simply died: nothing logged anywhere,
+      # no cascade, and wait_for_termination never returning.
       def post_runners_to_pool
         @runners.each do |runner|
           @thread_pool.post do
             runner.run!
-          rescue StandardError => e
-            @thread_error.update { |prev| prev || e }
-            Busybee.logger&.error(
-              "Error in runner for #{runner_worker_name(runner)}: " \
-              "[#{e.class}] #{e.message}"
-            )
+          rescue *RECOVERABLE_ERRORS => e
+            record_child_failure(runner, e)
             stop!(reason: reason_for(e)) # container adopts the crash's reason (:crash/:gateway_error/:unhealthy)
+          rescue Exception => e # rubocop:disable Lint/RescueException
+            record_child_failure(runner, e)
+            kill_children(reason_for(e))
           end
         end
+      end
+
+      # Record before cascading, always: a cascade can end this very thread, and
+      # an unrecorded error would leave Multi#run! with nothing to re-raise —
+      # reporting a clean shutdown for a container that crashed.
+      def record_child_failure(runner, error)
+        @thread_error.update { |prev| prev || error }
+        Busybee.logger&.error(
+          "Error in runner for #{runner_worker_name(runner)}: " \
+          "[#{error.class}] #{error.message}"
+        )
+      end
+
+      # Not #kill!: its @thread_pool.kill would end this very pool thread
+      # mid-statement, leaving the pool unterminated and hanging the
+      # wait_for_termination Multi#run! sits in. Killing the children lets each
+      # run! return on its own. The reason stays the crash's — nobody forced this.
+      def kill_children(reason)
+        @stop_reason.compare_and_set(nil, reason)
+        @runners.each { |runner| runner.kill!(reason: reason) }
+        @thread_pool.shutdown
       end
 
       def runner_worker_name(runner)
