@@ -119,6 +119,37 @@ RSpec.describe Monitoring::Recorder do
     end
   end
 
+  describe ".record_handback" do
+    # The other closer. Without it, a job the worker had in hand when a deploy
+    # landed leaves its row stuck at rank 0 forever — the leak the pairing exists
+    # to prevent, and the reason the demo wires all three hooks rather than two.
+    it "closes an activation the worker never got to run" do
+      activated = build_test_job(key: 8888)
+      allow(activated).to receive_messages(status: "ready", activated_at: Time.current,
+                                           worker_status: nil, buffered?: false)
+      described_class.record_activation(activated)
+
+      handed_back = build_test_job(key: 8888)
+      allow(handed_back).to receive_messages(status: "ready", worker_status: nil, buffer_latency_ms: 12.5)
+      described_class.record_handback(handed_back)
+
+      expect(recorded(8888)).to have_attributes(status: "ready", executed_at: be_present,
+                                                lifecycle_rank: 1, buffer_latency_ms: 12.5)
+    end
+
+    # A handback whose own call failed is the worker's error, not the job's — the
+    # job was never attempted and reports nothing of its own.
+    it "records a failed handback's error off the worker carrier" do
+      handed_back = build_test_job(key: 8889)
+      status = instance_double(Busybee::Worker::Status, error_message: "broker unreachable")
+      allow(handed_back).to receive_messages(status: "ready", worker_status: status, buffer_latency_ms: nil)
+
+      described_class.record_handback(handed_back)
+
+      expect(recorded(8889).error_message).to eq("broker unreachable")
+    end
+  end
+
   describe ".record_call" do
     it "folds a resolved call's duration into the engine_call metric under its tags" do
       # A fetch call: no job in scope, so logging_context carries no job_key.

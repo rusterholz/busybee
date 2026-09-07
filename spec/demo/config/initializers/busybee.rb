@@ -4,8 +4,11 @@
 # wire it into a brownfield app. (Connection config lives in application.rb.)
 Busybee.configure do |config|
   # Record each job run into Monitoring::JobRun — the demo's Datadog/OTel stand-in.
-  config.on_job_activated { |job| Monitoring::Recorder.record_activation(job) }
-  config.on_job_executed  { |job| Monitoring::Recorder.record_execution(job) }
+  # Exactly one of the two closers fires per activation, so the bracket always
+  # closes — including across a deploy, when jobs in hand are handed back unworked.
+  config.on_job_activated    { |job| Monitoring::Recorder.record_activation(job) }
+  config.on_job_executed     { |job| Monitoring::Recorder.record_execution(job) }
+  config.on_job_not_executed { |job| Monitoring::Recorder.record_handback(job) }
 
   # Upsert each worker's phase into Monitoring::WorkerProcess as its run progresses.
   config.on_worker_started        { |worker| Monitoring::Recorder.record_worker(:running, worker) }
