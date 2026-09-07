@@ -8,6 +8,7 @@ gem "appraisal", "~> 2.5"
 gem "bundler", "~> 2.7"
 gem "concurrent-ruby", "~> 1.1.7"
 gem "grpc-tools", "~> 1.76"
+gem "json", "< 3"
 gem "openssl", ">= 3.2.2"
 gem "parallel", "< 2.0"
 gem "pry-byebug", platforms: :mri
