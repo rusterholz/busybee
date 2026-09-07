@@ -23,6 +23,32 @@ module Busybee
       # current_job / current_worker_status) — see Correlation.
       extend Correlation
 
+      # Thread-local marking a client call in progress. Fiber-local in Ruby,
+      # which is what we want — a call is synchronous, so the only way to be
+      # inside one on this thread is to be inside one of its own hooks.
+      IN_CALL_KEY = :_busybee_in_call
+
+      # Refuse a client call made from inside a call hook. Left unguarded it
+      # recurses — run_hooked → with_hooks → the same hook — until
+      # SystemStackError, which is not a StandardError and so pierces every safe
+      # layer on the way out. Job and worker hooks are unaffected: they do not
+      # run inside a call, so they never reach the guard. The raise happens
+      # before the flag is claimed, so a refusal cannot clear the outer call's.
+      def self.without_reentry(rpc)
+        if Thread.current[IN_CALL_KEY]
+          raise Busybee::ReentrantCall,
+                "Cannot make a #{rpc} call from inside a call hook: call hooks run within the call " \
+                "they observe, so a call made from one would recurse. Use a job or worker hook instead."
+        end
+
+        begin
+          Thread.current[IN_CALL_KEY] = true
+          yield
+        ensure
+          Thread.current[IN_CALL_KEY] = nil
+        end
+      end
+
       # Wrap a logical client call: build the carrier, fire the gating before_call,
       # run the operation, resolve, fire the observing after_call exactly once.
       # before_call propagates (it can abort the call); after_call swallows.

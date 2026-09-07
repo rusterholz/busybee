@@ -82,8 +82,10 @@ module Busybee
     # response. Extra kwargs (e.g. return_op:) pass through. Reads `call.request`
     # at each send rather than closing over it — the carrier reopens it per attempt.
     def run_hooked(rpc, request, **kwargs)
-      Call.with_hooks(rpc, request) do |call|
-        with_retry { call.attempt { stub.public_send(rpc, call.request, **kwargs) } }
+      Call.without_reentry(rpc) do
+        Call.with_hooks(rpc, request) do |call|
+          with_retry { call.attempt { stub.public_send(rpc, call.request, **kwargs) } }
+        end
       end
     end
   end

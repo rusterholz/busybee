@@ -42,6 +42,9 @@ module Busybee
   # Raised when OAuth2 token refresh fails (HTTP error from token endpoint)
   OAuthTokenRefreshFailed = Class.new(Error)
 
+  # Raised when a call hook tries to make a client call of its own
+  ReentrantCall = Class.new(Error)
+
   # Raised when attempting to iterate a stream that has been closed
   StreamAlreadyClosed = Class.new(Error)
 
