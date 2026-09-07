@@ -21,23 +21,24 @@ module Busybee
     # - buffer: false — stream.each calls perform_job inline on the main thread.
     #   Simpler model for workers that don't need buffer features.
     class Streaming < Runner
+      # @buffered_job_count tracks real jobs apart from Queue#size, so the depth
+      # gauge ignores the :stop control sentinels the queue also carries.
       def initialize(worker_class, runtime_config: nil, client: nil)
         super
         return unless buffer?
 
         @job_buffer = Queue.new
-        # Real jobs in @job_buffer, tracked apart from Queue#size so the depth
-        # gauge ignores the :stop control sentinels the queue also carries.
         @buffered_job_count = Concurrent::AtomicFixnum.new(0)
         @peak_buffer_size = Concurrent::AtomicFixnum.new(0)
         @shutdown_error = Concurrent::AtomicReference.new(nil)
       end
 
-      def kill!
+      def kill!(...)
         super
         @pump_thread&.kill
         return unless buffer?
 
+        report_discarded_jobs
         @job_buffer.clear
         @buffered_job_count.value = 0 # cleared queue holds no real jobs
         @job_buffer.push(:stop)
@@ -45,12 +46,24 @@ module Busybee
 
       private
 
+      # A kill discards these jobs and runs no job hooks to say so — a stuck
+      # container is a poor place for adopter code. No worker hook fires either on
+      # the real path: stop!'s set-once reason was won by the graceful stop, and
+      # the CLI's exit! follows. So this is the only record work was dropped, and
+      # it must precede the clear that drops it.
+      def report_discarded_jobs
+        discarded = @buffered_job_count.value
+        return unless discarded.positive?
+
+        Busybee.logger&.warn("[busybee] kill! discarded #{discarded} activated job(s) still buffered; " \
+                             "the engine re-yields them when their activation times out")
+      end
+
       # Fills Runner#run!'s loop: open the job stream and process jobs (via the
       # pump + buffer, or inline). Raises a worker Shutdown to signal an error exit.
+      # The worker snapshot attributing the stream-open fetch goes stale over the
+      # stream's life; execute-time re-seeding keeps the per-job worker current.
       def run_loop
-        # Attribute the stream-open fetch to the worker. This one snapshot goes
-        # stale over the stream's life; execute-time re-seeding keeps the per-job
-        # worker current (the stream's own jobs re-seed as they're processed).
         @stream = Client::Call.with_worker_status(worker_status) do
           @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
         end
@@ -62,13 +75,11 @@ module Busybee
         end
       end
 
-      # Stop new jobs arriving: close the stream (unblocks stream.each via
-      # GRPC::Cancelled) and drop the :stop sentinel that unblocks a blocking
-      # buffer pop. The single intake-cessation point — base #stop! calls it
-      # before firing on_worker_stop_requested (close-before-fire), and the
-      # run! ensure calls it again as the backstop for the error-exit path
-      # where stop! was never called. Idempotent: a second close is a no-op and
-      # extra :stop sentinels are skipped on drain.
+      # Stop new jobs arriving: close the stream (unblocking stream.each via
+      # GRPC::Cancelled) and drop the :stop sentinel that unblocks a blocking pop.
+      # The single intake-cessation point — #stop! calls it before firing T1
+      # (close-before-fire), and run!'s ensure again as the error-exit backstop.
+      # Idempotent: a second close no-ops and extra sentinels are skipped on drain.
       def cease_intake
         @stream&.close
         @job_buffer&.push(:stop) if buffer?
@@ -94,18 +105,15 @@ module Busybee
         @peak_buffer_size.value
       end
 
-      # Buffer a real job, keeping @buffered_job_count in step with the real jobs
-      # in @job_buffer — the depth/peak gauges read it, and it deliberately
-      # excludes the :stop control sentinels the queue also carries. Increment
-      # before the push so the gauge never momentarily under-reports; roll the
-      # increment back if the push raises, so a failed push can't leak phantom
-      # depth. (Deliberately not AtomicFixnum#update: under contention its block
-      # re-runs in a CAS loop, which would double-push a side-effecting push.)
+      # Buffer a real job, keeping @buffered_job_count in step with @job_buffer's
+      # real jobs. Increment before the push so the gauge never under-reports, and
+      # roll back if the push raises, so a failed push can't leak phantom depth.
+      # (Deliberately not AtomicFixnum#update: under contention its block re-runs
+      # in a CAS loop, which would double-push a side-effecting push.)
       #
-      # Record the high-water from increment's own return value, not a later
-      # value read — a consumer pop on another thread can decrement between the
-      # push and the peak update, so re-reading would miss the depth this push
-      # actually reached.
+      # Take the high-water from increment's own return value, not a later read —
+      # a consumer pop on another thread can decrement between the push and the
+      # peak update, so re-reading would miss the depth this push actually hit.
       def buffer_job(job)
         depth = @buffered_job_count.increment
         pushed = false
@@ -146,6 +154,13 @@ module Busybee
         raise shutdown_error if shutdown_error
       end
 
+      # Pump the stream into the buffer until stopped. A stream error is stashed
+      # for the main thread to re-raise, and stops with its discerned reason
+      # (Shutdown→:unhealthy, gRPC→:gateway_error, else :crash) before the ensure's
+      # default can mislabel it; clean closes arrive as Cancelled and are absorbed.
+      # The ensure is the backstop unblocking the main thread's blocking pop — a
+      # no-op behind any earlier stop!, and reached live only by the gateway
+      # closing the stream cleanly, which is what :gateway_closed names.
       def pump_stream_into_buffer
         delay = @runtime_config.buffer_throttle
 
@@ -157,16 +172,9 @@ module Busybee
           sleep(Busybee::Durations.seconds_from(delay)) if delay
         end
       rescue StandardError => e
-        # Stream error: stash for the main thread to re-raise, and stop with its
-        # discerned reason (Shutdown→:unhealthy, gRPC→:gateway_error, else :crash)
-        # before the ensure's default can mislabel it. Clean closes are Cancelled +
-        # absorbed.
         @shutdown_error.update { |prev| prev || e }
         stop!(reason: reason_for(e))
       ensure
-        # Backstop unblocking the main thread's blocking pop. No-op behind any earlier
-        # stop!; reached live only by the gateway closing the stream cleanly, which
-        # :gateway_closed names.
         stop!(reason: :gateway_closed)
       end
 

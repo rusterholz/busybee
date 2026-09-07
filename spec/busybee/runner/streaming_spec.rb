@@ -226,12 +226,12 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     context "when graceful shutdown is triggered" do
-      it "fails remaining yielded jobs with preserved retries" do # rubocop:disable RSpec/ExampleLength
+      it "hands remaining yielded jobs back with preserved retries, unworked" do # rubocop:disable RSpec/ExampleLength
         jobs = [
           build_test_job(key: 1, retries: 3),
           build_test_job(key: 2, retries: 5)
         ]
-        allow(jobs[1]).to receive(:fail!)
+        allow(client).to receive(:fail_job)
 
         allow(client).to receive(:open_job_stream) do
           allow(stream).to receive(:each) do |&block|
@@ -245,43 +245,42 @@ RSpec.describe Busybee::Runner::Streaming do
 
         runner.run!
 
-        expect(worker_class).to have_received(:perform_job).with(jobs[0]).once
-        expect(worker_class).not_to have_received(:perform_job).with(jobs[1])
-        expect(jobs[1]).to have_received(:fail!).with(
-          "Worker shutting down",
-          retries: 5,
-          backoff: Busybee.default_fail_job_backoff
-        )
+        aggregate_failures do
+          expect(worker_class).to have_received(:perform_job).with(jobs[0]).once
+          expect(worker_class).not_to have_received(:perform_job).with(jobs[1])
+          expect(client).to have_received(:fail_job).with(
+            2, "Worker shutting down", retries: 5, backoff: Busybee.default_fail_job_backoff
+          )
+          expect(jobs[1].status).to eq(:ready)
+        end
       end
 
-      it "uses the worker's configured backoff during shutdown" do # rubocop:disable RSpec/ExampleLength
+      it "uses the worker's configured backoff during shutdown" do
         worker_class.fail_job_backoff 30_000
-        job_to_fail = build_test_job(key: 1, retries: 3)
-        allow(job_to_fail).to receive(:fail!)
+        job_to_hand_back = build_test_job(key: 1, retries: 3)
+        allow(client).to receive(:fail_job)
 
         allow(client).to receive(:open_job_stream) do
           allow(stream).to receive(:each) do |&block|
             runner.stop!
-            block.call(job_to_fail)
+            block.call(job_to_hand_back)
           end
           stream
         end
 
         runner.run!
 
-        expect(job_to_fail).to have_received(:fail!).with(
-          "Worker shutting down",
-          retries: 3,
-          backoff: 30_000
+        expect(client).to have_received(:fail_job).with(
+          1, "Worker shutting down", retries: 3, backoff: 30_000
         )
       end
 
-      it "logs a warning when failing a shutdown job raises an error" do
+      it "logs a warning when handing a shutdown job back raises an error" do
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
         bad_job = build_test_job(key: 99, retries: 1)
-        allow(bad_job).to receive(:fail!).and_raise(StandardError, "grpc gone")
+        allow(client).to receive(:fail_job).and_raise(StandardError, "grpc gone")
 
         allow(client).to receive(:open_job_stream) do
           allow(stream).to receive(:each) do |&block|
@@ -293,7 +292,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
         runner.run!
 
-        expect(logger).to have_received(:warn).with(/Failed to fail job 99 during shutdown.*grpc gone/)
+        expect(logger).to have_received(:warn).with(/Failed to hand job 99 back during shutdown.*grpc gone/)
       end
     end
   end
@@ -439,7 +438,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
       it "joins pump thread and drains remaining buffer during shutdown" do # rubocop:disable RSpec/ExampleLength
         leftover = build_test_job(key: 88, retries: 2)
-        allow(leftover).to receive(:fail!)
+        allow(client).to receive(:fail_job)
 
         allow(client).to receive(:open_job_stream) do
           allow(stream).to receive(:each) { stream_gate.wait }
@@ -455,11 +454,12 @@ RSpec.describe Busybee::Runner::Streaming do
 
         runner.run!
 
-        expect(leftover).to have_received(:fail!).with(
-          "Worker shutting down",
-          retries: 2,
-          backoff: Busybee.default_fail_job_backoff
-        )
+        aggregate_failures do
+          expect(client).to have_received(:fail_job).with(
+            88, "Worker shutting down", retries: 2, backoff: Busybee.default_fail_job_backoff
+          )
+          expect(leftover.status).to eq(:ready)
+        end
       end
 
       context "when stream ends without stop!" do
@@ -692,6 +692,52 @@ RSpec.describe Busybee::Runner::Streaming do
         # Only :stop sentinel should remain
         expect(queue.pop(true)).to eq(:stop)
         expect { queue.pop(true) }.to raise_error(ThreadError) # empty
+      end
+
+      # A kill runs no job hooks — the container is stuck and adopter code is a
+      # poor bet there — and on the real path (a second signal, then exit!) no
+      # worker hook fires either, because stop!'s set-once reason has already
+      # been won. So this line is the only record that work was dropped.
+      it "logs how many activated jobs it discarded" do
+        logged = []
+        logger = instance_double(Logger)
+        allow(logger).to receive(:warn) { |message| logged << message }
+        allow(logger).to receive(:error) { |message| logged << message }
+        allow(Busybee).to receive(:logger).and_return(logger)
+        2.times { |i| runner.send(:buffer_job, build_test_job(key: i)) }
+
+        runner.kill!
+
+        expect(logged).to include(a_string_matching(/discard\w*\s+2\b/i))
+      end
+
+      it "says nothing when there was nothing in hand to discard" do
+        logged = []
+        logger = instance_double(Logger)
+        allow(logger).to receive(:warn) { |message| logged << message }
+        allow(logger).to receive(:error) { |message| logged << message }
+        allow(Busybee).to receive(:logger).and_return(logger)
+
+        runner.kill!
+
+        expect(logged).to be_empty
+      end
+
+      # The buffer clear is what cuts a graceful drain short: the drain's next
+      # non-blocking pop finds nothing and breaks, so no separate "have we been
+      # killed?" guard is needed in the loop. Remove the clear and this reddens
+      # with all three jobs handed back one wire call at a time.
+      it "cuts short a graceful drain already in progress" do
+        handed_back = []
+        3.times { |i| runner.send(:buffer_job, build_test_job(key: i)) }
+        allow(client).to receive(:fail_job) do |key, *|
+          handed_back << key
+          runner.kill!
+        end
+
+        runner.send(:handle_remaining_jobs_in_buffer)
+
+        expect(handed_back.length).to eq(1)
       end
     end
   end

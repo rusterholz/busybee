@@ -10,7 +10,7 @@ module Busybee
     # Declared per noun; each callback receives its noun's carrier.
     HOOK_TYPES = %i[
       before_perform around_perform after_perform
-      on_job_activated on_job_executed around_job_execution
+      on_job_activated on_job_executed on_job_not_executed around_job_execution
       on_worker_started on_worker_stop_requested on_worker_stopping on_worker_shutdown
       before_call around_call after_call
     ].freeze
@@ -19,7 +19,8 @@ module Busybee
     # usercode lifecycle, but its carrier — and so its filter noun — is the Job.
     HOOK_NOUN = {
       before_perform: :job, around_perform: :job, after_perform: :job,
-      on_job_activated: :job, on_job_executed: :job, around_job_execution: :job,
+      on_job_activated: :job, on_job_executed: :job, on_job_not_executed: :job,
+      around_job_execution: :job,
       on_worker_started: :worker, on_worker_stop_requested: :worker,
       on_worker_stopping: :worker, on_worker_shutdown: :worker,
       before_call: :call, around_call: :call, after_call: :call

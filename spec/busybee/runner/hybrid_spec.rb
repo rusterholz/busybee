@@ -104,7 +104,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
     it "starts a pump thread that pushes stream jobs into the buffer" do
       streamed_job = build_test_job(key: 42, retries: 1)
-      allow(streamed_job).to receive(:fail!)
+      allow(client).to receive(:fail_job) # the drain hands it back; this example is about the pump
       queue = runner.instance_variable_get(:@job_buffer)
 
       allow(client).to receive(:open_job_stream) do
@@ -353,9 +353,9 @@ RSpec.describe Busybee::Runner::Hybrid do
     end
 
     context "with graceful shutdown" do
-      it "fails remaining queued jobs during shutdown" do
+      it "hands remaining queued jobs back during shutdown, unworked" do
         leftover = build_test_job(key: 88, retries: 2)
-        allow(leftover).to receive(:fail!)
+        allow(client).to receive(:fail_job)
 
         allow(client).to receive(:open_job_stream).and_return(stream)
         allow(stream).to receive(:each)
@@ -369,17 +369,18 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         runner.run!
 
-        expect(leftover).to have_received(:fail!).with(
-          "Worker shutting down",
-          retries: 2,
-          backoff: Busybee.default_fail_job_backoff
-        )
+        aggregate_failures do
+          expect(client).to have_received(:fail_job).with(
+            88, "Worker shutting down", retries: 2, backoff: Busybee.default_fail_job_backoff
+          )
+          expect(leftover.status).to eq(:ready)
+        end
       end
 
       it "uses the worker's configured backoff during shutdown" do
         worker_class.fail_job_backoff 30_000
         leftover = build_test_job(key: 1, retries: 3)
-        allow(leftover).to receive(:fail!)
+        allow(client).to receive(:fail_job)
 
         allow(client).to receive(:open_job_stream).and_return(stream)
         allow(stream).to receive(:each)
@@ -392,19 +393,17 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         runner.run!
 
-        expect(leftover).to have_received(:fail!).with(
-          "Worker shutting down",
-          retries: 3,
-          backoff: 30_000
+        expect(client).to have_received(:fail_job).with(
+          1, "Worker shutting down", retries: 3, backoff: 30_000
         )
       end
 
-      it "fails polled jobs yielded after stop! during drain" do
+      it "hands polled jobs yielded after stop! back during drain" do
         jobs = [
           build_test_job(key: 1, retries: 3),
           build_test_job(key: 2, retries: 5)
         ]
-        allow(jobs[1]).to receive(:fail!)
+        allow(client).to receive(:fail_job)
 
         allow(client).to receive(:open_job_stream).and_return(stream)
         allow(stream).to receive(:each)
@@ -419,21 +418,22 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         runner.run!
 
-        expect(worker_class).to have_received(:perform_job).with(jobs[0]).once
-        expect(worker_class).not_to have_received(:perform_job).with(jobs[1])
-        expect(jobs[1]).to have_received(:fail!).with(
-          "Worker shutting down",
-          retries: 5,
-          backoff: Busybee.default_fail_job_backoff
-        )
+        aggregate_failures do
+          expect(worker_class).to have_received(:perform_job).with(jobs[0]).once
+          expect(worker_class).not_to have_received(:perform_job).with(jobs[1])
+          expect(client).to have_received(:fail_job).with(
+            2, "Worker shutting down", retries: 5, backoff: Busybee.default_fail_job_backoff
+          )
+          expect(jobs[1].status).to eq(:ready)
+        end
       end
 
-      it "logs a warning when failing a shutdown job raises an error" do
+      it "logs a warning when handing a shutdown job back raises an error" do
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
         bad_job = build_test_job(key: 99, retries: 1)
-        allow(bad_job).to receive(:fail!).and_raise(StandardError, "grpc gone")
+        allow(client).to receive(:fail_job).and_raise(StandardError, "grpc gone")
 
         allow(client).to receive(:open_job_stream).and_return(stream)
         allow(stream).to receive(:each)
@@ -446,7 +446,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         runner.run!
 
-        expect(logger).to have_received(:warn).with(/Failed to fail job 99 during shutdown.*grpc gone/)
+        expect(logger).to have_received(:warn).with(/Failed to hand job 99 back during shutdown.*grpc gone/)
       end
     end
 
@@ -503,7 +503,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
       it "uses first-error-wins when shutdown happens in both threads" do
         stream_error = Busybee::GRPC::Error.new("stream broke")
-        allow(job).to receive(:fail!)
+        allow(client).to receive(:fail_job) # incidental to the claim, which is which error wins
 
         allow(client).to receive(:open_job_stream) do
           # Pump thread will hit this error
@@ -540,10 +540,16 @@ RSpec.describe Busybee::Runner::Hybrid do
   end
 
   describe "#kill!" do
-    it "flushes queued stream jobs without failing them" do
+    after { Busybee::Hooks.reset! }
+
+    # A kill discards rather than hands back, and it runs no job hooks at all —
+    # the container is stuck, and adopter code is a poor bet there.
+    it "flushes queued stream jobs without handing them back or firing job hooks" do
       queued_job = build_test_job(key: 99, retries: 3)
-      allow(queued_job).to receive(:fail!)
+      allow(client).to receive(:fail_job)
       allow(worker_class).to receive(:perform_job)
+      fired = []
+      Busybee.on_job_not_executed { fired << :not_executed }
 
       allow(client).to receive(:open_job_stream).and_return(stream)
       allow(stream).to receive(:each) { stream_gate.wait }
@@ -556,14 +562,17 @@ RSpec.describe Busybee::Runner::Hybrid do
 
       runner.run!
 
-      expect(worker_class).not_to have_received(:perform_job).with(queued_job)
-      expect(queued_job).not_to have_received(:fail!)
+      aggregate_failures do
+        expect(worker_class).not_to have_received(:perform_job).with(queued_job)
+        expect(client).not_to have_received(:fail_job)
+        expect(fired).to be_empty
+      end
     end
 
-    it "still completes the in-flight polled job but fails subsequently-yielded ones" do
+    it "still completes the in-flight polled job but hands subsequently-yielded ones back" do
       inflight = build_test_job(key: 1, retries: 3)
       yielded_after = build_test_job(key: 2, retries: 5)
-      allow(yielded_after).to receive(:fail!)
+      allow(client).to receive(:fail_job)
 
       allow(client).to receive(:open_job_stream).and_return(stream)
       allow(stream).to receive(:each) { stream_gate.wait }
@@ -577,9 +586,11 @@ RSpec.describe Busybee::Runner::Hybrid do
 
       runner.run!
 
-      expect(worker_class).to have_received(:perform_job).with(inflight)
-      expect(worker_class).not_to have_received(:perform_job).with(yielded_after)
-      expect(yielded_after).to have_received(:fail!)
+      aggregate_failures do
+        expect(worker_class).to have_received(:perform_job).with(inflight)
+        expect(worker_class).not_to have_received(:perform_job).with(yielded_after)
+        expect(client).to have_received(:fail_job).with(2, "Worker shutting down", retries: 5, backoff: anything)
+      end
     end
   end
 

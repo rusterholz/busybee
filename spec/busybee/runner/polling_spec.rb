@@ -272,13 +272,15 @@ RSpec.describe Busybee::Runner::Polling do
     end
 
     context "when graceful shutdown is triggered" do
-      it "fails remaining yielded jobs with preserved retries" do # rubocop:disable RSpec/ExampleLength
+      # Asserted at the client rather than at Job#fail!, which is both where the
+      # handback now goes and a layer closer to the wire — and the job's own
+      # status is part of the claim: handed back, never failed.
+      it "hands remaining yielded jobs back with preserved retries, unworked" do # rubocop:disable RSpec/ExampleLength
         jobs = [
           build_test_job(key: 1, retries: 3),
           build_test_job(key: 2, retries: 5)
         ]
-        allow(jobs[0]).to receive(:fail!)
-        allow(jobs[1]).to receive(:fail!)
+        allow(client).to receive(:fail_job)
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
           block.call(jobs[0])
@@ -290,41 +292,66 @@ RSpec.describe Busybee::Runner::Polling do
 
         runner.run!
 
-        expect(worker_class).to have_received(:perform_job).with(jobs[0]).once
-        expect(worker_class).not_to have_received(:perform_job).with(jobs[1])
-        expect(jobs[1]).to have_received(:fail!).with(
-          "Worker shutting down",
-          retries: 5,
-          backoff: Busybee.default_fail_job_backoff
-        )
+        aggregate_failures do
+          expect(worker_class).to have_received(:perform_job).with(jobs[0]).once
+          expect(worker_class).not_to have_received(:perform_job).with(jobs[1])
+          expect(client).to have_received(:fail_job).with(
+            2, "Worker shutting down", retries: 5, backoff: Busybee.default_fail_job_backoff
+          )
+          expect(jobs[1].status).to eq(:ready)
+        end
+      end
+
+      # The invariant an in-flight gauge depends on: increment on activation,
+      # decrement on both closers, and the count comes back to zero across a
+      # deploy. Before the second closer existed it leaked by the in-hand count.
+      it "closes the bracket exactly once for every job it activated" do # rubocop:disable RSpec/ExampleLength
+        jobs = [build_test_job(key: 1, retries: 3), build_test_job(key: 2, retries: 5)]
+        allow(client).to receive(:fail_job)
+        allow(worker_class).to receive(:perform_job)
+        allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
+          block.call(jobs[0])
+          runner.stop!
+          block.call(jobs[1])
+          0
+        end
+        opened = []
+        closed = []
+        Busybee.on_job_activated { |job| opened << job.key }
+        Busybee.on_job_executed { |job| closed << job.key }
+        Busybee.on_job_not_executed { |job| closed << job.key }
+
+        runner.run!
+
+        expect(closed).to match_array(opened)
+      ensure
+        Busybee::Hooks.reset!
       end
 
       it "uses the worker's configured backoff during shutdown" do
         worker_class.fail_job_backoff 30_000
-        job_to_fail = build_test_job(key: 1, retries: 3)
-        allow(job_to_fail).to receive(:fail!)
+        job_to_hand_back = build_test_job(key: 1, retries: 3)
+        allow(client).to receive(:fail_job)
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
           runner.stop!
-          block.call(job_to_fail)
+          block.call(job_to_hand_back)
           0
         end
 
         runner.run!
 
-        expect(job_to_fail).to have_received(:fail!).with(
-          "Worker shutting down",
-          retries: 3,
-          backoff: 30_000
+        expect(client).to have_received(:fail_job).with(
+          1, "Worker shutting down", retries: 3, backoff: 30_000
         )
       end
 
-      it "logs a warning when failing a shutdown job raises an error" do
+      it "logs a warning when handing a shutdown job back raises an error" do
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
         bad_job = build_test_job(key: 99, retries: 1)
-        allow(bad_job).to receive(:fail!).and_raise(StandardError, "grpc gone")
+        allow(client).to receive(:fail_job).and_raise(StandardError, "grpc gone")
 
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
           runner.stop!
@@ -334,7 +361,7 @@ RSpec.describe Busybee::Runner::Polling do
 
         runner.run!
 
-        expect(logger).to have_received(:warn).with(/Failed to fail job 99 during shutdown.*grpc gone/)
+        expect(logger).to have_received(:warn).with(/Failed to hand job 99 back during shutdown.*grpc gone/)
       end
     end
   end
