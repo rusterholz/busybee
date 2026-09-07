@@ -25,14 +25,23 @@ AllCops:
 # is out of scope for all three — its comments are the generator's, not ours.
 # The merge mode keeps this permanent exclusion from overwriting the temporary
 # ones in .rubocop_todo.yml, which is a separate list with a separate lifetime.
-House/FileCommentDensity: &house_density
+House/FileCommentDensity:
   inherit_mode:
     merge:
       - Exclude
   Exclude:
     - "lib/busybee/grpc/*_pb.rb"
+    # A catalogue, not prose: one line of documentation per error class is what
+    # the file is for, so a comment-to-code ratio above the bar is correct here
+    # rather than debt. Permanent by design — not a todo entry.
+    - "lib/busybee/error.rb"
 
-House/HeaderCommentDensity: *house_density
+House/HeaderCommentDensity: &house_density
+  inherit_mode:
+    merge:
+      - Exclude
+  Exclude:
+    - "lib/busybee/grpc/*_pb.rb"
 
 House/InternalCommentDensity: *house_density
 
