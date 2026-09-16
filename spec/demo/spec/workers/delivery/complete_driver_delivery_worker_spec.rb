@@ -19,20 +19,9 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
     { driver_id: driver.id, shipment_id: shipment_id, distance: distance }
   end
 
-  def raw_job(variables)
-    Busybee::GRPC::ActivatedJob.new(
-      key: rand(100_000..999_999), type: described_class.job_type,
-      processInstanceKey: rand(100_000..999_999), bpmnProcessId: "deliver-shipment",
-      elementId: "service-task", retries: 3, worker: Busybee.worker_name,
-      deadline: (Time.now.to_i + 300) * 1000,
-      variables: Busybee::Serialization.to_json(variables),
-      customHeaders: Busybee::Serialization.to_json({})
-    )
-  end
-
   def run(variables:)
-    job = Busybee::Job.new(raw_job(variables), client: gateway.client)
-    job.set_context(worker_class: described_class, source: :poll)
+    job = build_demo_job(type: described_class.job_type, bpmn_process_id: "deliver-shipment",
+                         variables: variables, client: gateway.client, worker_class: described_class)
     described_class.perform_job(job)
     job
   end

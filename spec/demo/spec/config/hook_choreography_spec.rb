@@ -22,11 +22,10 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
   end
 
   around do |example|
-    saved = Busybee::Hooks::HOOK_TYPES.to_h { |type| [type, Busybee::Hooks.hooks_for(type).dup] }
-    observe_every_moment
-    example.run
-  ensure
-    saved.each { |type, hooks| Busybee::Hooks.hooks_for(type).replace(hooks) }
+    with_hook_registry do
+      observe_every_moment
+      example.run
+    end
   end
 
   # The three that wrap rather than observe, so they take (carrier, continue).
@@ -57,15 +56,7 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
   def call_moments = observed.select { |entry| entry.last.is_a?(Busybee::Client::Call) }
   def resolved_calls = call_moments.select { |entry| entry.first == :after_call }
 
-  def raw_job(type:, variables:, headers:, key: rand(100_000..999_999))
-    Busybee::GRPC::ActivatedJob.new(
-      key: key, type: type, processInstanceKey: rand(100_000..999_999),
-      bpmnProcessId: "deliver-shipment", elementId: "service-task", retries: 3,
-      worker: Busybee.worker_name, deadline: (Time.now.to_i + 300) * 1000,
-      variables: Busybee::Serialization.to_json(variables),
-      customHeaders: Busybee::Serialization.to_json(headers)
-    )
-  end
+  def raw_job(**attrs) = build_demo_raw_job(bpmn_process_id: "deliver-shipment", **attrs)
 
   # Deliver one batch, then stop on the following poll — so the jobs are executed
   # rather than handed back, and run! exits through its ordinary teardown.

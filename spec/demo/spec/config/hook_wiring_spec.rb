@@ -22,13 +22,7 @@ RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
   def worker_for(job_type) = workers.find { |worker| worker.job_type == job_type }
 
   def job_for(worker_class)
-    raw = Busybee::GRPC::ActivatedJob.new(
-      key: rand(100_000..999_999), type: worker_class.job_type,
-      processInstanceKey: rand(100_000..999_999), bpmnProcessId: "ship-order",
-      elementId: "service-task", retries: 3, deadline: (Time.now.to_i + 300) * 1000,
-      variables: Busybee::Serialization.to_json({}), customHeaders: Busybee::Serialization.to_json({})
-    )
-    Busybee::Job.new(raw, client: nil).tap { |job| job.set_context(worker_class: worker_class) }
+    build_demo_job(type: worker_class.job_type, bpmn_process_id: "ship-order", worker_class: worker_class)
   end
 
   def matching(type, target)

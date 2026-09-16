@@ -29,6 +29,8 @@ RSpec.configure do |config|
     c.syntax = :expect
   end
 
+  config.include DemoCarriers
+
   # Wrap each example in a transaction per database for isolation. Each domain
   # has its own connection, so a single ActiveRecord::Base transaction would roll
   # back only one of them; nest a rolled-back transaction on each domain base.

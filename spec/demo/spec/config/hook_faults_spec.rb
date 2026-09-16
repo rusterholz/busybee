@@ -19,26 +19,21 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
   end
 
   around do |example|
-    saved = Busybee::Hooks::HOOK_TYPES.to_h { |type| [type, Busybee::Hooks.hooks_for(type).dup] }
-    %i[on_job_activated on_job_executed on_job_not_executed after_call].each do |type|
-      Busybee::Hooks.register(type, ->(carrier) { observed << [type, carrier] })
+    with_hook_registry do
+      %i[on_job_activated on_job_executed on_job_not_executed after_call].each do |type|
+        Busybee::Hooks.register(type, ->(carrier) { observed << [type, carrier] })
+      end
+      example.run
     end
-    example.run
-  ensure
-    saved.each { |type, hooks| Busybee::Hooks.hooks_for(type).replace(hooks) }
   end
 
   def fired = observed.map(&:first)
   def resolved_calls = observed.select { |entry| entry.first == :after_call }.map(&:last)
 
   def raw_job(key:, type: "calculate_distance")
-    Busybee::GRPC::ActivatedJob.new(
-      key: key, type: type, processInstanceKey: rand(100_000..999_999),
-      bpmnProcessId: "deliver-shipment", elementId: "service-task", retries: 3,
-      worker: Busybee.worker_name, deadline: (Time.now.to_i + 300) * 1000,
-      variables: Busybee::Serialization.to_json({ from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 }),
-      customHeaders: Busybee::Serialization.to_json({ algorithm: "pythagorean" })
-    )
+    build_demo_raw_job(key: key, type: type, bpmn_process_id: "deliver-shipment",
+                       variables: { from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 },
+                       headers: { algorithm: "pythagorean" })
   end
 
   # A short backpressure delay: the default is two real seconds, and a spec that

@@ -13,41 +13,14 @@ RSpec.describe Monitoring::EngineCall do
   # A job carries the runner's Worker::Status, and that is where a call gets its
   # worker_name from — a job-correlated call has one only because its job does.
   def job(key)
-    raw = Busybee::GRPC::ActivatedJob.new(
-      key: key, type: "update_order_status", processInstanceKey: rand(100_000..999_999),
-      bpmnProcessId: "ship-order", elementId: "service-task", retries: 3,
-      worker: Busybee.worker_name, deadline: (Time.now.to_i + 300) * 1000,
-      variables: Busybee::Serialization.to_json({}), customHeaders: Busybee::Serialization.to_json({})
-    )
-    Busybee::Job.new(raw, client: gateway.client).tap do |job|
-      job.set_context(worker_class: Oms::UpdateOrderStatusWorker, worker_status: worker_status, source: :poll)
-    end
+    build_demo_job(key: key, type: "update_order_status", bpmn_process_id: "ship-order",
+                   client: gateway.client, worker_class: Oms::UpdateOrderStatusWorker,
+                   worker_status: build_demo_worker_status)
   end
 
-  def worker_status
-    Busybee::Worker::Status.new(worker_class: Oms::UpdateOrderStatusWorker, worker_mode: :hybrid,
-                                timestamps: Busybee::Worker::Timestamps.new.tap { |ts| ts.stamp!(:started_at) })
-  end
-
-  # A call that reached the wire and settled. `attempted: false` leaves it with no
-  # observed network time — the "never got off the ground" shape.
-  def call(rpc, job: nil, attempted: true, status: :succeeded)
-    correlate(job) do
-      Busybee::Client::Call.new(rpc, nil).tap do |call|
-        next unless attempted
-
-        call.attempt do
-          sleep 0.002
-          gateway.dispatch(rpc, nil)
-        end
-        call._resolve(status: status)
-      end
-    end
-  end
-
-  def correlate(job, &)
-    job ? Busybee::Client::Call.with_job(job, &) : yield
-  end
+  # `attempted: false` leaves the call with no observed network time — the "never
+  # got off the ground" shape.
+  def call(rpc, **attrs) = build_demo_call(rpc, gateway: gateway, **attrs)
 
   describe ".record" do
     it "persists a job-correlated call from its logging_context" do
