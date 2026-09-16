@@ -3,30 +3,57 @@
 require_relative "../../rails_helper"
 
 RSpec.describe Delivery::CompleteDriverDeliveryWorker do
-  # This spec intentionally uses execute_worker + manual assertions instead of
-  # the fail_job/complete_job/throw_bpmn_error_on matchers. The matchers are
-  # great for the common case (assert job status + error/vars), but this worker
-  # needs to verify client-level interactions (publish_message) that the matchers
-  # don't cover. When your test needs to stub or assert on the underlying client,
-  # use build_test_job + execute_worker directly.
+  # Part of this worker's contract is what it puts on the wire: it publishes a BPMN
+  # message to unblock a process instance waiting for a driver. That question cannot
+  # be asked of a doubled client, so this spec used to mock publish_message and then
+  # reach around the execution helper to call perform_job directly, because the
+  # helper re-raises.
   #
-  # build_test_job creates an instance_double(Busybee::Client) — we add
-  # publish_message stubbing for tests that exercise request fulfillment.
-  def build_job_with_message_support(variables:)
-    job = build_test_job(variables: variables)
-    allow(job.client).to receive(:publish_message)
-    job
-  end
+  # Run against a real client over an in-process gateway, the assertion is simply
+  # the request that reached the wire — which also checks the serialization and the
+  # TTL conversion that a method-call expectation never saw.
+
+  let(:gateway) { InProcessGateway.new }
 
   def delivery_vars(driver, shipment_id: "ship-1", distance: 5.0)
     { driver_id: driver.id, shipment_id: shipment_id, distance: distance }
   end
 
+  def raw_job(variables)
+    Busybee::GRPC::ActivatedJob.new(
+      key: rand(100_000..999_999), type: described_class.job_type,
+      processInstanceKey: rand(100_000..999_999), bpmnProcessId: "deliver-shipment",
+      elementId: "service-task", retries: 3, worker: Busybee.worker_name,
+      deadline: (Time.now.to_i + 300) * 1000,
+      variables: Busybee::Serialization.to_json(variables),
+      customHeaders: Busybee::Serialization.to_json({})
+    )
+  end
+
+  def run(variables:)
+    job = Busybee::Job.new(raw_job(variables), client: gateway.client)
+    job.set_context(worker_class: described_class, source: :poll)
+    described_class.perform_job(job)
+    job
+  end
+
+  def published = gateway.received(:publish_message)
+
+  def driver_available_for(request, driver)
+    have_attributes(
+      name: "driver_available",
+      correlationKey: request.id,
+      timeToLive: 30_000,
+      variables: JSON.generate("driver_id" => driver.id, "driver_name" => driver.name)
+    )
+  end
+
   it "adds mileage and clears the shipment assignment" do
     driver = Delivery::Driver.create!(name: "Alice", total_mileage: 50.0, current_shipment_id: "ship-1")
 
-    execute_worker(described_class, variables: delivery_vars(driver, distance: 12.5))
+    job = run(variables: delivery_vars(driver, distance: 12.5))
 
+    expect(job).not_to be_failed
     driver.reload
     expect(driver.total_mileage).to eq(62.5)
     expect(driver.current_shipment_id).to be_nil
@@ -37,30 +64,22 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
     older = Delivery::DriverRequest.create!(shipment_id: "ship-waiting-1", requested_at: 2.minutes.ago)
     Delivery::DriverRequest.create!(shipment_id: "ship-waiting-2", requested_at: 1.minute.ago)
 
-    job = build_job_with_message_support(variables: delivery_vars(driver))
-    execute_worker(described_class, job: job)
-    expect(job).not_to be_failed
+    job = run(variables: delivery_vars(driver))
 
+    expect(job).not_to be_failed
     driver.reload
     expect(driver.current_shipment_id).to eq("ship-waiting-1")
     expect(older.reload.driver_id).to eq(driver.id)
-
-    expect(job.client).to have_received(:publish_message).with(
-      "driver_available",
-      correlation_key: older.id,
-      vars: { driver_id: driver.id, driver_name: "Alice" },
-      ttl: 30.seconds
-    )
+    expect(published.sole).to driver_available_for(older, driver)
   end
 
   it "does not publish a message when no open requests exist" do
     driver = Delivery::Driver.create!(name: "Alice", total_mileage: 50.0, current_shipment_id: "ship-1")
 
-    job = build_job_with_message_support(variables: delivery_vars(driver))
-    execute_worker(described_class, job: job)
-    expect(job).not_to be_failed
+    job = run(variables: delivery_vars(driver))
 
-    expect(job.client).not_to have_received(:publish_message)
+    expect(job).not_to be_failed
+    expect(published).to be_empty
     expect(driver.reload.current_shipment_id).to be_nil
   end
 
@@ -69,14 +88,13 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
       driver = Delivery::Driver.create!(name: "Alice", total_mileage: 62.5, current_shipment_id: nil)
       request = Delivery::DriverRequest.create!(shipment_id: "ship-waiting", requested_at: 1.minute.ago)
 
-      job = build_job_with_message_support(variables: delivery_vars(driver, distance: 12.5))
-      described_class.perform_job(job)
-      expect(job).not_to be_failed
+      job = run(variables: delivery_vars(driver, distance: 12.5))
 
+      expect(job).not_to be_failed
       expect(driver.reload.total_mileage).to eq(62.5)
       expect(driver.current_shipment_id).to eq("ship-waiting")
       expect(request.reload.driver_id).to eq(driver.id)
-      expect(job.client).to have_received(:publish_message)
+      expect(published.sole).to driver_available_for(request, driver)
     end
 
     it "re-publishes message when driver already reassigned to a claimed request" do
@@ -85,17 +103,11 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
       request = Delivery::DriverRequest.create!(shipment_id: "ship-waiting", driver_id: driver.id,
                                                 requested_at: 1.minute.ago)
 
-      job = build_job_with_message_support(variables: delivery_vars(driver, distance: 12.5))
-      described_class.perform_job(job)
-      expect(job).not_to be_failed
+      job = run(variables: delivery_vars(driver, distance: 12.5))
 
+      expect(job).not_to be_failed
       expect(driver.reload.total_mileage).to eq(62.5)
-      expect(job.client).to have_received(:publish_message).with(
-        "driver_available",
-        correlation_key: request.id,
-        vars: { driver_id: driver.id, driver_name: "Alice" },
-        ttl: 30.seconds
-      )
+      expect(published.sole).to driver_available_for(request, driver)
     end
   end
 end
