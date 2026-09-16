@@ -14,6 +14,8 @@ require "rspec"
 require "busybee"
 require "busybee/testing"
 
+Dir[File.expand_path("support/**/*.rb", __dir__)].each { |file| require file }
+
 # Disable CSRF protection in tests so Rack::Test requests work without tokens.
 ActionController::Base.allow_forgery_protection = false
 
