@@ -6,6 +6,7 @@ require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 require "busybee/testing/activated_job"
+require "busybee/testing/helpers/builders"
 require "busybee/testing/helpers/execution"
 require "busybee/testing/helpers/support"
 require "busybee/testing/timings"
@@ -18,6 +19,7 @@ module Busybee
     # RSpec helper methods for testing BPMN workflows against Zeebe.
     module Helpers
       extend Support
+      include Builders
       include Execution
 
       # Deploy a BPMN process file to Zeebe.
