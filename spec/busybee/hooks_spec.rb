@@ -28,6 +28,102 @@ RSpec.describe Busybee::Hooks do
         expect(described_class.hooks_for(:before_perform)).to eq([])
       end
     end
+
+    describe ".isolated" do
+      it "restores registrations made inside the block" do
+        described_class.reset!
+
+        described_class.isolated { described_class.before_perform { nil } }
+
+        expect(described_class.hooks_for(:before_perform)).to be_empty
+      end
+
+      it "restores the registry even when the block raises" do
+        described_class.reset!
+
+        expect do
+          described_class.isolated do
+            described_class.before_perform { nil }
+            raise "boom"
+          end
+        end.
+          to raise_error("boom")
+        expect(described_class.hooks_for(:before_perform)).to be_empty
+      end
+
+      it "keeps registrations that predate the block" do
+        described_class.reset!
+        described_class.before_perform { nil }
+
+        described_class.isolated { described_class.after_perform { nil } }
+
+        expect(described_class.hooks_for(:before_perform).size).to eq(1)
+        expect(described_class.hooks_for(:after_perform)).to be_empty
+      end
+
+      it "undoes a reset! made inside the block" do
+        described_class.reset!
+        described_class.before_perform { nil }
+
+        described_class.isolated { described_class.reset! }
+
+        expect(described_class.hooks_for(:before_perform).size).to eq(1)
+      end
+
+      it "returns the block's value" do
+        expect(described_class.isolated { :computed }).to eq(:computed)
+      end
+    end
+
+    describe ".with_only" do
+      let(:fired) { [] }
+
+      before do
+        described_class.reset!
+        described_class.before_perform { fired << :before_perform }
+        described_class.after_perform { fired << :after_perform }
+      end
+
+      it "runs the named types and suppresses the rest" do
+        described_class.with_only(:before_perform) do
+          described_class.run(:before_perform, nil)
+          described_class.run(:after_perform, nil)
+        end
+
+        expect(fired).to eq([:before_perform])
+      end
+
+      it "suppresses every type when named none — the isolation a fixture needs" do
+        described_class.with_only do
+          described_class.run(:before_perform, nil)
+          described_class.run(:after_perform, nil)
+        end
+
+        expect(fired).to be_empty
+      end
+
+      it "restores the registry afterwards" do
+        described_class.with_only(:before_perform) { nil }
+
+        described_class.run(:after_perform, nil)
+        expect(fired).to eq([:after_perform])
+      end
+
+      it "restores the registry even when the block raises" do
+        expect { described_class.with_only { raise "boom" } }.to raise_error("boom")
+
+        described_class.run(:after_perform, nil)
+        expect(fired).to eq([:after_perform])
+      end
+
+      it "returns the block's value" do
+        expect(described_class.with_only(:before_perform) { :computed }).to eq(:computed)
+      end
+
+      it "rejects an unknown hook type rather than silently suppressing everything" do
+        expect { described_class.with_only(:bogus) { nil } }.to raise_error(ArgumentError, /bogus/)
+      end
+    end
   end
 
   describe "registration" do

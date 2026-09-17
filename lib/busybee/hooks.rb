@@ -46,6 +46,29 @@ module Busybee
         @hooks = HOOK_TYPES.to_h { |type| [type, []] }
       end
 
+      # Run a block and put the registry back afterwards, so a spec can register
+      # observers — or reset! — without leaking into the next one. Intended for
+      # test isolation, like reset!.
+      def isolated
+        saved = @hooks.transform_values(&:dup)
+        yield
+      ensure
+        @hooks = saved
+      end
+
+      # Run a block with only the named types able to fire, restoring the registry
+      # afterwards; naming none suppresses everything. A registry swap, not a check
+      # on the hot path — run/run_chain are untouched and a suppressed type simply
+      # finds nothing to match. Types are validated before anything is suppressed,
+      # so a typo raises rather than silently muting the lot.
+      def with_only(*types)
+        types.each { |type| hooks_for(type) }
+        isolated do
+          @hooks = HOOK_TYPES.to_h { |type| [type, types.include?(type) ? @hooks[type] : []] }
+          yield
+        end
+      end
+
       # ====== Registration ======
 
       # Register a hook. Called by delegation methods on the Busybee singleton.
