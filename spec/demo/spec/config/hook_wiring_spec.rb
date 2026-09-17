@@ -22,7 +22,7 @@ RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
   def worker_for(job_type) = workers.find { |worker| worker.job_type == job_type }
 
   def job_for(worker_class)
-    build_demo_job(type: worker_class.job_type, bpmn_process_id: "ship-order", worker_class: worker_class)
+    build_test_job(type: worker_class.job_type, bpmn_process_id: "ship-order", worker_class: worker_class)
   end
 
   def matching(type, target)

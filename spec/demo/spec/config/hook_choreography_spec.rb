@@ -12,17 +12,11 @@ require_relative "../rails_helper"
 # call moments are the point: today nothing in the shipped Testing module can make
 # a call hook fire at all, because its client is doubled above the seam they hang off.
 RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeClass
-  let(:gateway) { InProcessGateway.new }
+  let(:client) { build_test_client }
   let(:observed) { [] }
 
-  # The demo's own hooks stay registered — this run exercises them too — so the
-  # recorder writes inline rather than on its background thread.
-  before do
-    allow(Monitoring::Recorder).to receive(:executor).and_return(Concurrent::ImmediateExecutor.new)
-  end
-
   around do |example|
-    with_hook_registry do
+    Busybee::Hooks.isolated do
       observe_every_moment
       example.run
     end
@@ -56,15 +50,15 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
   def call_moments = observed.select { |entry| entry.last.is_a?(Busybee::Client::Call) }
   def resolved_calls = call_moments.select { |entry| entry.first == :after_call }
 
-  def raw_job(**attrs) = build_demo_raw_job(bpmn_process_id: "deliver-shipment", **attrs)
+  def raw_job(**attrs) = build_test_raw_job(bpmn_process_id: "deliver-shipment", **attrs)
 
   # Deliver one batch, then stop on the following poll — so the jobs are executed
   # rather than handed back, and run! exits through its ordinary teardown.
   def run_until_drained(worker_class, jobs)
     config = Busybee::RuntimeConfig.new(worker_mode: :polling)
-    runner = Busybee::Runner::Polling.new(worker_class, runtime_config: config, client: gateway.client)
+    runner = Busybee::Runner::Polling.new(worker_class, runtime_config: config, client: client)
     deliveries = [jobs]
-    gateway.on(:activate_jobs) do |_request|
+    client.on(:activate_jobs) do |_request|
       batch = deliveries.shift
       next [Busybee::GRPC::ActivateJobsResponse.new(jobs: batch)] if batch
 

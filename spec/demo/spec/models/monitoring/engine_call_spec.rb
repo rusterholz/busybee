@@ -8,19 +8,20 @@ RSpec.describe Monitoring::EngineCall do
   # about it rather than the thing itself. These are real Calls, driven through
   # the same underscore seam the client drives them through.
 
-  let(:gateway) { InProcessGateway.new }
+  let(:client) { build_test_client }
 
   # A job carries the runner's Worker::Status, and that is where a call gets its
   # worker_name from — a job-correlated call has one only because its job does.
   def job(key)
-    build_demo_job(key: key, type: "update_order_status", bpmn_process_id: "ship-order",
-                   client: gateway.client, worker_class: Oms::UpdateOrderStatusWorker,
-                   worker_status: build_demo_worker_status)
+    build_test_job(key: key, type: "update_order_status", bpmn_process_id: "ship-order",
+                   client: client, worker_class: Oms::UpdateOrderStatusWorker,
+                   worker_status: build_test_worker_status(worker_class: Oms::UpdateOrderStatusWorker,
+                                                           worker_mode: :hybrid))
   end
 
   # `attempted: false` leaves the call with no observed network time — the "never
   # got off the ground" shape.
-  def call(rpc, **attrs) = build_demo_call(rpc, gateway: gateway, **attrs)
+  def call(rpc, **attrs) = build_test_call(rpc, **attrs)
 
   describe ".record" do
     it "persists a job-correlated call from its logging_context" do

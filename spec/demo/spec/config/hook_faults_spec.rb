@@ -6,20 +6,16 @@ require_relative "../rails_helper"
 # worker and call lifecycles at once. An adopter has exactly our own error-path
 # questions ("does my shutdown_on actually fire?", "what does my after_call see
 # when the completion is rejected?"), and answering them by stubbing the client
-# tests a belief about the gateway rather than the gateway.
+# tests a belief about the gateway rather than the client.
 #
 # Here the faults are injected at the wire, so everything above it is the real
 # thing: translation, retry, autofail, the teardown, and the demo's own hooks.
 RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
-  let(:gateway) { InProcessGateway.new }
+  let(:client) { build_test_client }
   let(:observed) { [] }
 
-  before do
-    allow(Monitoring::Recorder).to receive(:executor).and_return(Concurrent::ImmediateExecutor.new)
-  end
-
   around do |example|
-    with_hook_registry do
+    Busybee::Hooks.isolated do
       %i[on_job_activated on_job_executed on_job_not_executed after_call].each do |type|
         Busybee::Hooks.register(type, ->(carrier) { observed << [type, carrier] })
       end
@@ -31,7 +27,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
   def resolved_calls = observed.select { |entry| entry.first == :after_call }.map(&:last)
 
   def raw_job(key:, type: "calculate_distance")
-    build_demo_raw_job(key: key, type: type, bpmn_process_id: "deliver-shipment",
+    build_test_raw_job(key: key, type: type, bpmn_process_id: "deliver-shipment",
                        variables: { from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 },
                        headers: { algorithm: "pythagorean" })
   end
@@ -42,7 +38,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     Busybee::Runner::Polling.new(
       worker_class,
       runtime_config: Busybee::RuntimeConfig.new(worker_mode: :polling, backpressure_delay: 10),
-      client: gateway.client
+      client: client
     )
   end
 
@@ -51,7 +47,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
   # harness's contract — the block is the handler.
   def poll_script(runner, *steps)
     queue = steps.dup
-    gateway.on(:activate_jobs) do |_request|
+    client.on(:activate_jobs) do |_request|
       step = queue.shift
       raise step, "injected" if step.is_a?(Class)
       next [Busybee::GRPC::ActivateJobsResponse.new(jobs: step)] if step.is_a?(Array)
@@ -73,7 +69,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     # still captured on the carrier, so a hook can see why the completion did not
     # land even though the job reports no resolution.
     it "shows the failed call to after_call without failing the job" do
-      gateway.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
+      client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
       runner = poll_script(runner_for, [raw_job(key: 9100)], :stop)
 
       runner.run!
@@ -86,7 +82,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "leaves the job unresolved but carrying the reason, for on_job_executed to see" do
-      gateway.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
+      client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
       runner = poll_script(runner_for, [raw_job(key: 9101)], :stop)
 
       runner.run!
@@ -97,7 +93,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "records the run as unresolved in the demo's monitoring, with the errored call beside it" do
-      gateway.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
+      client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
       runner = poll_script(runner_for, [raw_job(key: 9102)], :stop)
 
       runner.run!
@@ -128,7 +124,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     def handback_run(key)
       runner = runner_for
       queue = [[raw_job(key: key)]]
-      gateway.on(:activate_jobs) do |_request|
+      client.on(:activate_jobs) do |_request|
         batch = queue.shift
         next [] unless batch
 
@@ -149,7 +145,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "puts a failed handback's error on the worker carrier, not the job" do
-      gateway.on(:fail_job) { raise GRPC::Internal, "broker unreachable" }
+      client.on(:fail_job) { raise GRPC::Internal, "broker unreachable" }
 
       handback_run(9301)
 

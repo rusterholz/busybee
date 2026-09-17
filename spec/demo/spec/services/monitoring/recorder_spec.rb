@@ -3,17 +3,11 @@
 require_relative "../../rails_helper"
 
 RSpec.describe Monitoring::Recorder do
-  # Run the background write inline so we can assert on the persisted row within
-  # the example's transaction (the real executor writes on another thread/connection).
-  before do
-    allow(described_class).to receive(:executor).and_return(Concurrent::ImmediateExecutor.new)
-  end
+  # Carriers come from the gem's own builders, which build them the way production
+  # does. What stays here is this spec's parameterisation — the Oms worker and its
+  # job type — not the mechanics.
 
-  # Carriers come from DemoCarriers, which builds them the way production does.
-  # What stays here is this spec's own parameterisation of them — the Oms worker
-  # and its job type — not the mechanics.
-
-  let(:gateway) { InProcessGateway.new }
+  let(:client) { build_test_client }
 
   # worker_name is a live delegate to Busybee.worker_name, not a Status field —
   # so the row's identity is the ambient container name, and no builder can pin it.
@@ -22,26 +16,32 @@ RSpec.describe Monitoring::Recorder do
   def recorded(job_key) = Monitoring::JobRun.find_by(job_key: job_key)
 
   def activated_job(key:, **attrs)
-    build_demo_job(key: key, type: "update_order_status", bpmn_process_id: "ship-order",
-                   client: gateway.client, worker_class: Oms::UpdateOrderStatusWorker, **attrs)
+    build_test_job(key: key, type: "update_order_status", bpmn_process_id: "ship-order",
+                   client: client, worker_class: Oms::UpdateOrderStatusWorker, **attrs)
   end
 
   # A job that really reached :complete, through Job#complete! and the wire.
   def completed_job(key:, **attrs)
     activated_job(key: key, **attrs).tap do |job|
       job.timestamps.stamp!(:execution_started_at)
-      without_app_hooks { job.complete!({}) }
+      Busybee::Hooks.with_only { job.complete!({}) }
       job.timestamps.stamp!(:executed_at)
     end
   end
 
-  def resolved_call(rpc, request = nil, **attrs) = build_demo_call(rpc, request, gateway: gateway, **attrs)
+  def resolved_call(rpc, request = nil, **attrs) = build_test_call(rpc, request: request, **attrs)
+
+  # The gem's builder takes the worker class; this spec's subject is always the
+  # Oms worker, so name that once here rather than at every call site.
+  def worker_status(**attrs)
+    build_test_worker_status(worker_class: Oms::UpdateOrderStatusWorker, worker_mode: :hybrid, **attrs)
+  end
 
   def complete_request(job_key) = Busybee::GRPC::CompleteJobRequest.new(jobKey: job_key)
 
   describe ".record_activation" do
     it "records buffer depth from the worker status and whether the job was buffered" do
-      job = activated_job(key: 4242, worker_status: build_demo_worker_status(current_buffer_size: 4), buffered: true)
+      job = activated_job(key: 4242, worker_status: worker_status(current_buffer_size: 4), buffered: true)
 
       described_class.record_activation(job)
 
@@ -59,7 +59,7 @@ RSpec.describe Monitoring::Recorder do
 
   describe ".record_worker" do
     it "records identity, phase, counters and gauges keyed by (worker_name, job_type)" do
-      described_class.record_worker(:running, build_demo_worker_status(
+      described_class.record_worker(:running, worker_status(
                                                 total_job_count: 7, failed_job_count: 2, backpressure_count: 1,
                                                 current_buffer_size: 3, peak_buffer_size: 9
                                               ))
@@ -73,15 +73,15 @@ RSpec.describe Monitoring::Recorder do
 
     it "records the lifecycle timestamps the status snapshotted" do
       described_class.record_worker(:stopping,
-                                    build_demo_worker_status(moments: %i[started_at stop_requested_at stopping_at]))
+                                    worker_status(moments: %i[started_at stop_requested_at stopping_at]))
 
       expect(process).to have_attributes(started_at: be_present, stop_requested_at: be_present,
                                          stopping_at: be_present, shutdown_at: nil)
     end
 
     it "scalarizes the status's error for storage" do
-      described_class.record_worker(:shutdown, build_demo_worker_status(reason: :unhealthy,
-                                                                        error: Sim::Rollover.new("rolling over")))
+      described_class.record_worker(:shutdown, worker_status(reason: :unhealthy,
+                                                             error: Sim::Rollover.new("rolling over")))
 
       expect(process).to have_attributes(reason: "unhealthy", error_class: "Sim::Rollover",
                                          error_message: "rolling over")
@@ -90,22 +90,22 @@ RSpec.describe Monitoring::Recorder do
     it "captures the recorder's write-queue backlog as a liveness gauge" do
       allow(described_class).to receive(:queue_depth).and_return(5)
 
-      described_class.record_worker(:running, build_demo_worker_status)
+      described_class.record_worker(:running, worker_status)
 
       expect(process.write_queue_depth).to eq(5)
     end
 
     it "advances the same row through the lifecycle (upsert by identity, not a new row)" do
-      described_class.record_worker(:running, build_demo_worker_status)
-      described_class.record_worker(:shutdown, build_demo_worker_status(reason: :rollover))
+      described_class.record_worker(:running, worker_status)
+      described_class.record_worker(:shutdown, worker_status(reason: :rollover))
 
       expect(Monitoring::WorkerProcess.count).to eq(1)
       expect(process).to have_attributes(status: "shutdown", reason: "rollover")
     end
 
     it "keeps a later phase when an earlier-phase write arrives out of order" do
-      described_class.record_worker(:shutdown, build_demo_worker_status(reason: :rollover))
-      described_class.record_worker(:running, build_demo_worker_status) # a stale 'running' landing late
+      described_class.record_worker(:shutdown, worker_status(reason: :rollover))
+      described_class.record_worker(:running, worker_status) # a stale 'running' landing late
 
       expect(process).to have_attributes(status: "shutdown", reason: "rollover")
     end
@@ -115,8 +115,8 @@ RSpec.describe Monitoring::Recorder do
       # seen_at) whose write merely landed later — it must not overwrite.
       allow(described_class).to receive(:monotonic_seq).and_return(100.0, 50.0)
 
-      described_class.record_worker(:running, build_demo_worker_status(total_job_count: 7))
-      described_class.record_worker(:running, build_demo_worker_status(total_job_count: 5))
+      described_class.record_worker(:running, worker_status(total_job_count: 7))
+      described_class.record_worker(:running, worker_status(total_job_count: 5))
 
       expect(process.total_job_count).to eq(7)
     end
@@ -124,7 +124,7 @@ RSpec.describe Monitoring::Recorder do
     it "is idempotent — a re-delivered observation neither duplicates nor regresses" do
       allow(described_class).to receive(:monotonic_seq).and_return(100.0)
 
-      2.times { described_class.record_worker(:running, build_demo_worker_status(total_job_count: 3)) }
+      2.times { described_class.record_worker(:running, worker_status(total_job_count: 3)) }
 
       expect(Monitoring::WorkerProcess.count).to eq(1)
       expect(process.total_job_count).to eq(3)
@@ -165,7 +165,7 @@ RSpec.describe Monitoring::Recorder do
     # A handback whose own call failed is the worker's error, not the job's — the
     # job was never attempted and reports nothing of its own.
     it "records a failed handback's error off the worker carrier" do
-      status = build_demo_worker_status(error: StandardError.new("broker unreachable"))
+      status = worker_status(error: StandardError.new("broker unreachable"))
       handed_back = activated_job(key: 8889, worker_status: status)
 
       described_class.record_handback(handed_back)
@@ -177,7 +177,7 @@ RSpec.describe Monitoring::Recorder do
   describe ".record_call" do
     it "folds a resolved call's duration into the engine_call metric under its tags" do
       # A fetch call: no job in scope, so it carries worker identity and no job keys.
-      call = resolved_call(:activate_jobs, worker_status: build_demo_worker_status)
+      call = resolved_call(:activate_jobs, worker_status: worker_status)
 
       described_class.record_call(call)
 
@@ -192,7 +192,7 @@ RSpec.describe Monitoring::Recorder do
     end
 
     it "also records a job-correlated call as an EngineCall row (the per-job log twin)" do
-      job = activated_job(key: 476, worker_status: build_demo_worker_status)
+      job = activated_job(key: 476, worker_status: worker_status)
       call = resolved_call(:complete_job, complete_request(476), job: job)
 
       described_class.record_call(call)

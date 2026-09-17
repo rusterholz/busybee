@@ -13,20 +13,20 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
   # the request that reached the wire — which also checks the serialization and the
   # TTL conversion that a method-call expectation never saw.
 
-  let(:gateway) { InProcessGateway.new }
+  let(:client) { build_test_client }
 
   def delivery_vars(driver, shipment_id: "ship-1", distance: 5.0)
     { driver_id: driver.id, shipment_id: shipment_id, distance: distance }
   end
 
   def run(variables:)
-    job = build_demo_job(type: described_class.job_type, bpmn_process_id: "deliver-shipment",
-                         variables: variables, client: gateway.client, worker_class: described_class)
+    job = build_test_job(type: described_class.job_type, bpmn_process_id: "deliver-shipment",
+                         variables: variables, client: client, worker_class: described_class)
     described_class.perform_job(job)
     job
   end
 
-  def published = gateway.received(:publish_message)
+  def published = client.received(:publish_message)
 
   def driver_available_for(request, driver)
     have_attributes(

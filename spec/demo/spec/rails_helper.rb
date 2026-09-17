@@ -14,8 +14,6 @@ require "rspec"
 require "busybee"
 require "busybee/testing"
 
-Dir[File.expand_path("support/**/*.rb", __dir__)].each { |file| require file }
-
 # Disable CSRF protection in tests so Rack::Test requests work without tokens.
 ActionController::Base.allow_forgery_protection = false
 
@@ -29,7 +27,29 @@ RSpec.configure do |config|
     c.syntax = :expect
   end
 
-  config.include DemoCarriers
+  # Run the recorder's writes inline. It normally offloads them to a background
+  # thread, whose own connection sits outside the example's transaction — so a
+  # hook firing mid-example would commit rows that survive the rollback and leak
+  # into later examples. Specs that exercise the writer itself opt back out with
+  # and_call_original.
+  config.before do
+    allow(Monitoring::Recorder).to receive(:executor).and_return(Concurrent::ImmediateExecutor.new)
+  end
+
+  # A worker spec asks "does my code do the right thing?", where busybee is
+  # scenery. Its job now resolves through a real client, so the app's own call
+  # hooks would otherwise fire during one — and an async worker resolves on a
+  # background thread, whose connection sits outside the transaction, committing
+  # monitoring rows that outlive the example. Narrow these to the perform triple,
+  # which is what a worker spec is about; the domain transactions still wrap
+  # perform, because they are registered there.
+  config.define_derived_metadata(file_path: %r{/spec/workers/}) do |metadata|
+    metadata[:perform_hooks_only] = true
+  end
+
+  config.around(:each, :perform_hooks_only) do |example|
+    Busybee::Hooks.with_only(:before_perform, :around_perform, :after_perform) { example.run }
+  end
 
   # Wrap each example in a transaction per database for isolation. Each domain
   # has its own connection, so a single ActiveRecord::Base transaction would roll
