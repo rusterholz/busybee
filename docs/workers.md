@@ -873,7 +873,7 @@ require "rspec"
 require "busybee/testing"
 ```
 
-This makes `execute_worker`, `build_test_job`, and the worker matchers available in all RSpec examples.
+This makes `execute_worker`, the `build_test_*` builders, and the worker matchers available in all RSpec examples.
 
 ### Basic Worker Testing
 
@@ -933,7 +933,52 @@ RSpec.describe ProcessOrderWorker do
 end
 ```
 
-`build_test_job` returns a real `Busybee::Job` backed by a stub client. All lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) update the job's status but don't make any network calls.
+`build_test_job` returns a real `Busybee::Job` — a genuine `ActivatedJob` protobuf, so it validates its own field types — backed by a real client whose transport is in-process. Lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) run the full client path and touch no network.
+
+Because the client is real rather than a double, your **call hooks fire**, which is what lets you test them at all:
+
+```ruby
+it "records the completion" do
+  client = build_test_client
+  job = build_test_job(key: 4242, client: client)
+
+  job.complete!(status: "shipped")
+
+  expect(client.received(:complete_job).map(&:jobKey)).to eq([4242])
+end
+```
+
+#### Building the other carriers
+
+Hooks receive a `Worker::Status` or a `Client::Call` rather than a `Job`, and those have builders too. Each builds what production builds, so the projections a hook reads (`context_tags`, `logging_context`) are *computed* — a hand-written double would freeze your belief about them into the assertion and stay green when the contract moved.
+
+```ruby
+status = build_test_worker_status(worker_class: ShipOrderWorker, total_job_count: 7)
+call   = build_test_call(:complete_job, job: build_test_job(key: 42))
+```
+
+`build_test_job` also composes with them, and can hand back a job that already resolved:
+
+```ruby
+job = build_test_job(worker_class: ShipOrderWorker, worker_status: status,
+                     source: :stream, buffered: true, status: :complete)
+```
+
+Fixture construction never fires your hooks, so building one of these cannot pollute what the example is about to observe.
+
+#### Programming failures
+
+`build_test_client` takes a handler per RPC. The block **is** the handler, so return a response message for success and raise a `GRPC::BadStatus` subclass for a failure:
+
+```ruby
+it "copes when the broker rejects the completion" do
+  client = build_test_client
+  client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
+
+  job = build_test_job(client: client)
+  # ...
+end
+```
 
 ### Worker Testing Matchers
 
