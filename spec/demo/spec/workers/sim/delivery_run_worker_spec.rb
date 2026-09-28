@@ -30,7 +30,7 @@ RSpec.describe Sim::DeliveryRunWorker do
   it "returns before the run is done, leaving the job unresolved" do
     job = build_test_job(type: described_class.job_type, variables: { distance: 5.0 })
 
-    expect(execute_worker(described_class, job: job)).to be_nil
+    expect(execute_worker(described_class, job: job).result).to be_nil
     expect(job).to be_ready
 
     await_resolution(job)

@@ -26,36 +26,14 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
   def fired = observed.map(&:first)
   def resolved_calls = observed.select { |entry| entry.first == :after_call }.map(&:last)
 
-  def raw_job(key:, type: "calculate_distance")
-    build_test_raw_job(key: key, type: type, bpmn_process_id: "deliver-shipment",
-                       variables: { from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 },
-                       headers: { algorithm: "pythagorean" })
+  def job(key:, type: "calculate_distance")
+    build_test_job(key: key, type: type, bpmn_process_id: "deliver-shipment",
+                   variables: { from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 },
+                   headers: { algorithm: "pythagorean" }, client: client)
   end
 
-  # A short backpressure delay: the default is two real seconds, and a spec that
-  # exercises a back-off should cost milliseconds, not the production pause.
-  def runner_for(worker_class = Delivery::CalculateDistanceWorker)
-    Busybee::Runner::Polling.new(
-      worker_class,
-      runtime_config: Busybee::RuntimeConfig.new(worker_mode: :polling, backpressure_delay: 10),
-      client: client
-    )
-  end
-
-  # Program the poll as a script of batches: an Exception class is raised, an
-  # array of protos is delivered, and :stop ends the run. Mirrors the gateway
-  # harness's contract — the block is the handler.
-  def poll_script(runner, *steps)
-    queue = steps.dup
-    client.on(:activate_jobs) do |_request|
-      step = queue.shift
-      raise step, "injected" if step.is_a?(Class)
-      next [Busybee::GRPC::ActivateJobsResponse.new(jobs: step)] if step.is_a?(Array)
-
-      runner.stop!(reason: :signal)
-      []
-    end
-    runner
+  def run(key, worker_class = Delivery::CalculateDistanceWorker, type: "calculate_distance")
+    execute_worker(worker_class, job: job(key: key, type: type))
   end
 
   def worker_row(job_type = "calculate_distance")
@@ -68,11 +46,10 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     # a retry. It stays :ready and redelivers when the lease expires. The error is
     # still captured on the carrier, so a hook can see why the completion did not
     # land even though the job reports no resolution.
-    it "shows the failed call to after_call without failing the job" do
-      client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
-      runner = poll_script(runner_for, [raw_job(key: 9100)], :stop)
+    before { client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" } }
 
-      runner.run!
+    it "shows the failed call to after_call without failing the job" do
+      run(9100)
 
       completion = resolved_calls.find { |call| call.rpc == :complete_job }
       expect(completion).to be_errored
@@ -82,10 +59,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "leaves the job unresolved but carrying the reason, for on_job_executed to see" do
-      client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
-      runner = poll_script(runner_for, [raw_job(key: 9101)], :stop)
-
-      runner.run!
+      run(9101)
 
       _, job = observed.find { |type, _| type == :on_job_executed }
       expect(job).to be_ready
@@ -93,10 +67,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "records the run as unresolved in the demo's monitoring, with the errored call beside it" do
-      client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
-      runner = poll_script(runner_for, [raw_job(key: 9102)], :stop)
-
-      runner.run!
+      run(9102)
 
       expect(Monitoring::JobRun.find_by(job_key: 9102)).to have_attributes(
         status: "ready", error_message: include("storage unavailable")
@@ -105,41 +76,53 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
     end
   end
 
-  describe "when the broker is under pressure" do
-    it "backs off and keeps working rather than dying" do
-      runner = poll_script(runner_for, GRPC::ResourceExhausted, [raw_job(key: 9200)], :stop)
+  describe "when the broker is under pressure as the job reports back" do
+    # Set directly: under this spec harness busybee loads before Rails, so the
+    # Railtie never applies config.x.busybee's retry settings.
+    around do |example|
+      enabled = Busybee.grpc_retry_enabled
+      delay = Busybee.grpc_retry_delay
+      Busybee.grpc_retry_enabled = true
+      Busybee.grpc_retry_delay = 10
+      example.run
+    ensure
+      Busybee.grpc_retry_enabled = enabled
+      Busybee.grpc_retry_delay = delay
+    end
 
-      runner.run!
+    it "retries the completion, and the job lands" do
+      pressured = false
+      client.on(:complete_job) do
+        next Busybee::GRPC::CompleteJobResponse.new if pressured
 
-      expect(fired).to include(:on_job_activated, :on_job_executed)
-      expect(worker_row).to have_attributes(status: "shutdown", reason: "signal",
-                                            backpressure_count: 1, total_job_count: 1)
+        pressured = true
+        raise GRPC::ResourceExhausted, "injected"
+      end
+
+      expect(run(9200)).to be_complete
+
+      completion = resolved_calls.sole
+      expect(completion).to have_attributes(rpc: :complete_job, attempts: 2)
+      expect(worker_row).to have_attributes(status: "shutdown", reason: "signal", total_job_count: 1)
     end
   end
 
   describe "when a job is in hand as the worker shuts down" do
-    # Stopping before the batch is yielded puts the runner on the handback path:
-    # the job is returned unworked, so it must stay :ready — a :failed status
-    # would read as a job that ran and lost.
+    # A stop that arrives mid-batch puts the rest of it on the handback path: the
+    # job is returned unworked, so it must stay :ready — a :failed status would
+    # read as a job that ran and lost. Stopping from a hook stands in for the
+    # signal that would arrive on its own thread in production.
     def handback_run(key)
-      runner = runner_for
-      queue = [[raw_job(key: key)]]
-      client.on(:activate_jobs) do |_request|
-        batch = queue.shift
-        next [] unless batch
-
-        runner.stop!(reason: :signal)
-        [Busybee::GRPC::ActivateJobsResponse.new(jobs: batch)]
-      end
-      runner.run!
-      runner
+      worker = start_test_worker(Delivery::CalculateDistanceWorker, client: client)
+      Busybee::Hooks.register(:on_job_executed, ->(_job) { worker.stop! })
+      execute_worker(worker, jobs: [job(key: key - 1000), job(key: key)])
     end
 
     it "hands it back unworked and closes the activation through on_job_not_executed" do
       handback_run(9300)
 
-      expect(fired).to include(:on_job_activated, :on_job_not_executed)
-      expect(fired).not_to include(:on_job_executed)
+      handed_back = observed.select { |_, carrier| carrier.is_a?(Busybee::Job) && carrier.key == 9300 }.map(&:first)
+      expect(handed_back).to eq(%i[on_job_activated on_job_not_executed])
       expect(Monitoring::JobRun.find_by(job_key: 9300)).to have_attributes(status: "ready", lifecycle_rank: 1,
                                                                            executed_at: be_present)
     end
@@ -173,9 +156,8 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
 
     it "shuts the worker down gracefully as :unhealthy and fails the pending job" do
       allow(Sim::RolloverPolicy).to receive(:roll).and_return(0.5)
-      runner = poll_script(runner_for, [raw_job(key: 9400)], :stop)
 
-      expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+      expect { run(9400) }.to raise_error(Busybee::Worker::Shutdown)
 
       expect(Sim::Rollover).to be < StandardError
       expect(Busybee.shutdown_on_errors).to include(Sim::Rollover)
@@ -186,10 +168,8 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
 
     it "exempts the sim workers by job, not by wiring" do
       allow(Sim::RolloverPolicy).to receive(:roll).and_return(0.5)
-      runner = poll_script(runner_for(Sim::PickAndPackWorker),
-                           [raw_job(key: 9401, type: "simulate_pick_and_pack")], :stop)
 
-      runner.run!
+      run(9401, Sim::PickAndPackWorker, type: "simulate_pick_and_pack")
 
       expect(fired).to include(:on_job_executed)
       expect(worker_row("simulate_pick_and_pack")).to have_attributes(reason: "signal")

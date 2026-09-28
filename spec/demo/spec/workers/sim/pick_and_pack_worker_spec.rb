@@ -24,7 +24,7 @@ RSpec.describe Sim::PickAndPackWorker do
   it "returns before the picking is done, leaving the job unresolved" do
     job = build_test_job(type: described_class.job_type, variables: { item_count: 3 })
 
-    expect(execute_worker(described_class, job: job)).to be_nil
+    expect(execute_worker(described_class, job: job).result).to be_nil
     expect(job).to be_ready
 
     await_resolution(job)

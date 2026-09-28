@@ -4,14 +4,9 @@ require_relative "../../rails_helper"
 
 RSpec.describe Delivery::CompleteDriverDeliveryWorker do
   # Part of this worker's contract is what it puts on the wire: it publishes a BPMN
-  # message to unblock a process instance waiting for a driver. That question cannot
-  # be asked of a doubled client, so this spec used to mock publish_message and then
-  # reach around the execution helper to call perform_job directly, because the
-  # helper re-raises.
-  #
-  # Run against a real client over an in-process gateway, the assertion is simply
-  # the request that reached the wire — which also checks the serialization and the
-  # TTL conversion that a method-call expectation never saw.
+  # message to unblock a process instance waiting for a driver. The assertion is the
+  # request that reached the test client, which also checks the serialization and
+  # the TTL conversion.
 
   let(:client) { build_test_client }
 
@@ -20,10 +15,9 @@ RSpec.describe Delivery::CompleteDriverDeliveryWorker do
   end
 
   def run(variables:)
-    job = build_test_job(type: described_class.job_type, bpmn_process_id: "deliver-shipment",
-                         variables: variables, client: client, worker_class: described_class)
-    described_class.perform_job(job)
-    job
+    execute_worker(described_class, job: build_test_job(type: described_class.job_type,
+                                                        bpmn_process_id: "deliver-shipment",
+                                                        variables: variables, client: client))
   end
 
   def published = client.received(:publish_message)

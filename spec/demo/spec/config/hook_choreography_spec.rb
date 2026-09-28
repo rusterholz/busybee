@@ -7,10 +7,9 @@ require_relative "../rails_helper"
 # question (would this hook match?) and from the hook-body question (what does the
 # body do with the carrier?).
 #
-# Driven by a real Runner::Polling over an in-process gateway, so the fetch, the
-# activation, perform, auto-completion and the teardown are all genuine paths. The
-# call moments are the point: today nothing in the shipped Testing module can make
-# a call hook fire at all, because its client is doubled above the seam they hang off.
+# Driven by execute_worker, so activation, perform, auto-completion and the
+# teardown are the runner's own code and every hook level fires. No transport sits
+# behind it: the calls observed are the ones the job itself makes.
 RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeClass
   let(:client) { build_test_client }
   let(:observed) { [] }
@@ -50,31 +49,11 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
   def call_moments = observed.select { |entry| entry.last.is_a?(Busybee::Client::Call) }
   def resolved_calls = call_moments.select { |entry| entry.first == :after_call }
 
-  def raw_job(**attrs) = build_test_raw_job(bpmn_process_id: "deliver-shipment", **attrs)
-
-  # Deliver one batch, then stop on the following poll — so the jobs are executed
-  # rather than handed back, and run! exits through its ordinary teardown.
-  def run_until_drained(worker_class, jobs)
-    config = Busybee::RuntimeConfig.new(worker_mode: :polling)
-    runner = Busybee::Runner::Polling.new(worker_class, runtime_config: config, client: client)
-    deliveries = [jobs]
-    client.on(:activate_jobs) do |_request|
-      batch = deliveries.shift
-      next [Busybee::GRPC::ActivateJobsResponse.new(jobs: batch)] if batch
-
-      runner.stop!(reason: :signal)
-      []
-    end
-    runner.run!
-    runner
-  end
-
   def run_one_distance_job(key: 5150)
-    run_until_drained(Delivery::CalculateDistanceWorker, [
-                        raw_job(key: key, type: "calculate_distance",
-                                variables: { from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 },
-                                headers: { algorithm: "pythagorean" })
-                      ])
+    execute_worker(Delivery::CalculateDistanceWorker,
+                   job: build_test_job(key: key, type: "calculate_distance", bpmn_process_id: "deliver-shipment",
+                                       variables: { from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 },
+                                       headers: { algorithm: "pythagorean" }, client: client))
   end
 
   describe "the worker lifecycle" do
@@ -120,34 +99,25 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
   end
 
   describe "the call lifecycle" do
-    it "fires call hooks for every engine call the run actually made" do
+    it "fires the whole call bracket once for the one engine call the job made" do
       run_one_distance_job
 
-      expect(call_moments.map(&:first)).to eq(%i[
-                                                before_call around_call_enter around_call_exit after_call
-                                                before_call around_call_enter around_call_exit after_call
-                                                before_call around_call_enter around_call_exit after_call
-                                              ])
+      expect(call_moments.map(&:first)).to eq(%i[before_call around_call_enter around_call_exit after_call])
     end
 
-    it "covers the fetch, the completion, and the idle poll that ends the run" do
+    it "fires for the completion, the call this worker's code caused" do
       run_one_distance_job
 
-      rpcs = resolved_calls.map { |_, call| call.rpc }
-      expect(rpcs).to eq(%i[activate_jobs complete_job activate_jobs])
+      expect(resolved_calls.map { |_, call| call.rpc }).to eq(%i[complete_job])
+      expect(client.received(:complete_job).size).to eq(1)
     end
 
-    it "correlates the completion call to the job and the fetch calls to the worker only" do
+    it "correlates the completion call to the job and to the worker running it" do
       run_one_distance_job(key: 7000)
 
-      resolved = resolved_calls.map(&:last)
-      complete = resolved.find { |call| call.rpc == :complete_job }
-      fetch = resolved.first
-
+      complete = resolved_calls.map(&:last).sole
       expect(complete.job.key).to eq(7000)
-      expect(complete.worker_status).to be_a(Busybee::Worker::Status)
-      expect(fetch.job).to be_nil
-      expect(fetch.worker_status).to be_a(Busybee::Worker::Status)
+      expect(complete.worker_status).to have_attributes(worker_class: Delivery::CalculateDistanceWorker)
     end
   end
 

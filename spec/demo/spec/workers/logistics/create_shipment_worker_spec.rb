@@ -10,7 +10,7 @@ RSpec.describe Logistics::CreateShipmentWorker do
     result = execute_worker(described_class, variables: {
                               order_id: "order-1", warehouse_id: wh.id,
                               items: [{ "type" => "widget", "qty" => 3 }]
-                            })
+                            }).result
 
     expect(result[:shipment_id]).to be_present
     expect(result[:item_count]).to eq(3)

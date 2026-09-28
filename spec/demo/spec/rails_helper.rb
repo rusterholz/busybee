@@ -37,18 +37,14 @@ RSpec.configure do |config|
   end
 
   # A worker spec asks "does my code do the right thing?", where busybee is
-  # scenery. Its job now resolves through a real client, so the app's own call
-  # hooks would otherwise fire during one — and an async worker resolves on a
+  # scenery. execute_worker fires every hook level, so the app's monitoring hooks
+  # would otherwise write rows during one — and an async worker resolves on a
   # background thread, whose connection sits outside the transaction, committing
-  # monitoring rows that outlive the example. Narrow these to the perform triple,
-  # which is what a worker spec is about; the domain transactions still wrap
-  # perform, because they are registered there.
+  # rows that outlive the example. Keep only the perform hooks, which is what a
+  # worker spec is about; the domain transactions still wrap perform, because
+  # they are registered there.
   config.define_derived_metadata(file_path: %r{/spec/workers/}) do |metadata|
-    metadata[:perform_hooks_only] = true
-  end
-
-  config.around(:each, :perform_hooks_only) do |example|
-    Busybee::Hooks.with_only(:before_perform, :around_perform, :after_perform) { example.run }
+    metadata[:without_hooks] ||= %i[job worker call]
   end
 
   # Wrap each example in a transaction per database for isolation. Each domain

@@ -7,7 +7,7 @@ RSpec.describe Logistics::LoadWarehousesWorker do
     Logistics::Warehouse.create!(name: "Alpha", lat: 5.0, lon: -5.0)
     Logistics::Warehouse.create!(name: "Beta", lat: -3.0, lon: 4.0)
 
-    result = execute_worker(described_class)
+    result = execute_worker(described_class).result
 
     expect(result[:warehouses].size).to eq(2)
     expect(result[:warehouses].first).to include(:id, :name, :address)
