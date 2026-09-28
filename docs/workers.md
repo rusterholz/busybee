@@ -31,7 +31,9 @@ Busybee is built around a workflow engine named [Zeebe](https://docs.camunda.io/
 - [Testing Workers](#testing-workers)
   - [Setup](#setup)
   - [Basic Worker Testing](#basic-worker-testing)
-  - [Inspecting Job State](#inspecting-job-state)
+  - [Passing Your Own Jobs](#passing-your-own-jobs)
+  - [Which Hooks Fire](#which-hooks-fire)
+  - [Holding the Worker Open](#holding-the-worker-open)
   - [Worker Testing Matchers](#worker-testing-matchers)
   - [Testing Best Practices](#testing-best-practices)
 
@@ -873,19 +875,21 @@ require "rspec"
 require "busybee/testing"
 ```
 
-This makes `execute_worker`, the `build_test_*` builders, and the worker matchers available in all RSpec examples.
+This makes `execute_worker`, the `build_test_*` builders, `without_hooks`, and the worker matchers available in all RSpec examples.
 
 ### Basic Worker Testing
 
-The simplest way to test a worker is `execute_worker`. It runs the full worker lifecycle (input validation, `perform`, output validation, auto-complete) and returns the result:
+The simplest way to test a worker is `execute_worker`. It runs your worker the way a running worker process does: the worker starts, the job is activated and executed (input validation, `perform`, output validation, auto-complete), and the worker shuts down. It hands you back the job, carrying everything that happened to it:
 
 ```ruby
 RSpec.describe ProcessOrderWorker do
   let(:order) { create(:order) }
 
-  it "processes the order and returns confirmation number" do
-    result = execute_worker(described_class, variables: { order_id: order.id })
-    expect(result[:confirmation_number]).to be_present
+  it "processes the order and returns a confirmation number" do
+    job = execute_worker(described_class, variables: { order_id: order.id })
+
+    expect(job).to be_complete
+    expect(job.result[:confirmation_number]).to be_present
   end
 
   it "marks the order as processed" do
@@ -893,49 +897,86 @@ RSpec.describe ProcessOrderWorker do
     expect(order.reload).to be_processed
   end
 
-  it "raises when order is missing" do
-    expect {
-      execute_worker(described_class, variables: { order_id: "nonexistent" })
-    }.to raise_error(ActiveRecord::RecordNotFound)
+  it "fails the job when the order is missing" do
+    job = execute_worker(described_class, variables: { order_id: "nonexistent" })
+
+    expect(job).to be_failed
+    expect(job.error).to be_a(ActiveRecord::RecordNotFound)
   end
 end
 ```
 
-`execute_worker` accepts the same keyword arguments as `build_test_job`:
+Keyword arguments go to `build_test_job`, which builds one job of your worker's type from them: `variables:`, `headers:`, `bpmn_process_id:`, `retries:`, and the rest. `job.result` is what your worker completed the job with, which is what the engine receives. A job that fails keeps its error on `job.error`; nothing is re-raised into your example.
 
-| Argument | Type | Default | Description |
-|----------|------|---------|-------------|
-| `variables:` | Hash | `{}` | Process variables |
-| `headers:` | Hash | `{}` | Custom headers |
-| `bpmn_process_id:` | String | `"test-process"` | BPMN process ID |
-| `retries:` | Integer | `3` | Retry count |
+### Passing Your Own Jobs
 
-Errors are re-raised after the worker's error handling runs, so you can use `expect { }.to raise_error` alongside job status assertions (see below).
-
-### Inspecting Job State
-
-When you need to assert on what the worker *did* to the job (completed it? failed it? threw a BPMN error?), or if you need so many variables or headers that passing all options inline becomes unreadable, you can build a test job first with `build_test_job` and then pass it to `execute_worker`:
+When you need so many variables or headers that passing them inline becomes unreadable, or you want to run several jobs through one worker, build them first and pass them in. `execute_worker` hands back what you gave it:
 
 ```ruby
-RSpec.describe ProcessOrderWorker do
-  it "completes the job on success" do
-    job = build_test_job(variables: { order_id: create(:order).id })
-    execute_worker(described_class, job: job)
-    expect(job).to be_complete
+job = build_test_job(variables: { order_id: create(:order).id })
+execute_worker(ProcessOrderWorker, job: job)   # => job
+expect(job).to be_complete
+
+client = build_test_client
+jobs = Array.new(3) { build_test_job(client: client, variables: { order_id: create(:order).id }) }
+execute_worker(ProcessOrderWorker, jobs: jobs) # => jobs, run in order
+```
+
+Jobs run by one worker go through one client, so build a batch on a shared `build_test_client`. Pass exactly one of `job:`, `jobs:`, or `build_test_job` keywords.
+
+### Which Hooks Fire
+
+Every [hook](hooks.md) you register fires under `execute_worker`, at every level: the worker's own lifecycle, each job's lifecycle, the `perform` hooks, and the call hooks for every call the job makes. That is what lets you test them. When a spec is about your worker's logic and your monitoring hooks would only get in the way, subtract them with `without_hooks`, naming the word in the hooks' names:
+
+```ruby
+without_hooks(:worker, :call) do
+  execute_worker(ProcessOrderWorker, variables: { order_id: order.id })
+end
+```
+
+The words are `:perform`, `:job`, `:worker` and `:call`, plus `:all`. Blocks nest, and whatever you name stays silenced until the block ends.
+
+To subtract for a whole file or group, use metadata instead. The innermost setting wins, so an example can restore everything with an empty list:
+
+```ruby
+RSpec.describe ProcessOrderWorker, without_hooks: %i[job worker call] do
+  it "fires only the perform hooks" do
+    # ...
   end
 
-  it "fails the job on error" do
-    job = build_test_job(variables: { order_id: "nonexistent" })
-    expect { execute_worker(described_class, job: job) }
-      .to raise_error(ActiveRecord::RecordNotFound)
-    expect(job).to be_failed
+  it "fires everything", without_hooks: [] do
+    # ...
+  end
+end
+
+# Or for every worker spec, in rails_helper.rb:
+RSpec.configure do |config|
+  config.define_derived_metadata(file_path: %r{/spec/workers/}) do |metadata|
+    metadata[:without_hooks] ||= %i[job worker call]
   end
 end
 ```
+
+`without_hooks(:job, :worker, :call)` keeps your `before_perform` / `around_perform` / `after_perform` hooks in the run, so middleware such as a transaction around `perform` still applies.
+
+### Holding the Worker Open
+
+To test the worker lifecycle itself, build the worker yourself. `build_test_worker` fires nothing; `start` fires `on_worker_started`; `stop!` fires the three closing moments. In between, `execute_worker` runs jobs through it without touching the worker's own hooks:
+
+```ruby
+worker = start_test_worker(ProcessOrderWorker)   # build_test_worker(...).start
+execute_worker(worker, variables: { order_id: order.id })
+expect(MyMonitor.status_of(ProcessOrderWorker)).to eq(:running)
+
+worker.stop!
+expect(MyMonitor.status_of(ProcessOrderWorker)).to eq(:shutdown)
+```
+
+Jobs you build for a held worker must use its client: `build_test_job(client: worker.client)`. The test worker has no transport behind it, so it reports no `worker_mode`, its jobs no `source`, and a hook filtered on either doesn't fire.
 
 `build_test_job` returns a real `Busybee::Job` — a genuine `ActivatedJob` protobuf, so it validates its own field types — backed by a real client whose transport is in-process. Lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) run the full client path and touch no network.
 
-Because the client is real rather than a double, your **call hooks fire**, which is what lets you test them at all:
+Because the client is real rather than a double, your **call hooks fire** whenever the job makes a call, even outside `execute_worker`:
 
 ```ruby
 it "records the completion" do

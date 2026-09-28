@@ -67,7 +67,9 @@ lib/busybee/
 │   ├── helpers/
 │   │   ├── builders.rb      # build_test_job / _raw_job / _worker_status / _call / _client
 │   │   ├── execution.rb     # execute_worker (unit testing workers)
+│   │   ├── hook_scoping.rb  # without_hooks
 │   │   └── support.rb       # Private helper methods
+│   ├── runner.rb            # Synchronous test worker (build_test_worker / start_test_worker)
 │   ├── timings.rb           # The harness's own duration defaults, not the gem's
 │   └── matchers/            # RSpec custom matchers
 │       ├── complete_job.rb  # expect(Worker).to complete_job(job).with_vars(...)
@@ -643,25 +645,26 @@ A Call folds a **curated** correlation subset — not the carriers' full `contex
 - `testing/helpers.rb` — Integration test helpers (`deploy_process`, `with_process_instance`, `activate_job`, etc.) that talk to Zeebe via gRPC.
 - `testing/helpers/builders.rb` — The carrier builders (`build_test_job`, `build_test_raw_job`, `build_test_worker_status`, `build_test_call`, `build_test_client`). Nothing here is doubled: a real `ActivatedJob` proto, a real `Status`, a real `Call` driven through its underscore seam. Hooks read their carrier's projections, so a double would freeze a spec's belief about those projections into its assertions and stay green when the contract moved. Job fixtures are built under `Hooks.with_only`, since resolving one runs a real call and would otherwise fire the hooks the spec is about to observe.
 - `testing/client.rb` — `Testing::Client`, a real `Busybee::Client` subclass that overrides the private `stub`. Everything above the wire is genuine, which is the point: a doubled client sits *above* `run_hooked`, the seam call hooks hang off, so with one in place no call hook can fire. Programming keeps grpc-ruby's contract (`client.on(:rpc) { … }`), matching the internal `FaultInjectionGateway` so both sides teach one vocabulary.
-- `testing/helpers/execution.rb` — `execute_worker`, which runs the full `Worker.perform_job` lifecycle against a built job.
+- `testing/runner.rb` — `Testing::Runner`, the test worker behind `build_test_worker` / `start_test_worker`. A `Runner` subclass run synchronously in the spec's thread: `start` fires T0 through the shared `start!`, `activate(jobs)` runs Polling's per-job intake minus the fetch (`activate_job`, then `execute_job` or the hand-back once stopping), and `stop!` fires T1 and then the shared `Runner#teardown`. Everything past intake is base-class code. It reports no `worker_mode` (overriding `Runner#worker_mode`) and activates with `source: nil`, since no transport stands behind it; `run!` raises.
+- `testing/helpers/execution.rb` — `execute_worker`, over a worker class (start, activate, stop, so all four hook levels fire) or a held test worker (activate only).
+- `testing/helpers/hook_scoping.rb` — `without_hooks`, a registry swap over `Hooks.with_only` keyed by the word in the hook's name. `testing.rb` installs an `around` that applies it from `without_hooks:` metadata.
 - `testing/helpers/support.rb` — Private module-level helpers shared by integration test methods.
 - `testing/timings.rb` — The durations the harness defaults to, and the only place they are written down. Deliberately **not** `Busybee::Defaults`: those are operational settings an adopter sizes for production load, in an initializer the test environment usually loads too, so inheriting them would make a suite wait production lengths for nothing. Named after the helpers that read them (`ACTIVATE_JOB_TIMEOUT_MS`, not `DEFAULT_POLLING_REQUEST_TIMEOUT_MS`) to keep the two sets from being mistaken for each other.
 - `testing/matchers/` — Custom RSpec matchers for both integration and unit testing.
 
 ### Worker Unit Testing
 
-`execute_worker` wraps `handle_failure` via `and_wrap_original` to re-raise errors after production failure logic runs. This lets tests assert both error type and job status. The three worker matchers (`fail_job`, `complete_job`, `throw_bpmn_error_on`) are built on top of `execute_worker` — they call it internally, then inspect the job and/or rescue the re-raised error.
+`execute_worker` raises nothing a job's failure would: the job carries its outcome (`status`, `result`, `error`, `error_code`, `error_message`), and the three worker matchers (`fail_job`, `complete_job`, `throw_bpmn_error_on`) call `execute_worker` and then read those off the job. A `Worker::Shutdown` does propagate, as it would from `run!`.
 
 ### When to Use Matchers vs. execute_worker Directly
 
-The matchers (`fail_job`, `complete_job`, `throw_bpmn_error_on`) cover the common case: assert job status and optionally verify error/vars/code. Use them when that's all you need.
-
-Use `build_test_job` + `execute_worker` directly when you need to:
-- Stub additional client methods (e.g., `publish_message`) via `job.client` and verify them with `have_received`
+The matchers cover the common case: assert job status and optionally verify error/vars/code. Use `execute_worker` directly when you need to:
+- Check what reached the wire, via `client.received(:publish_message)` on the job's `build_test_client`
 - Inspect side effects between execution and assertion
+- Hold the worker open across several runs (`start_test_worker`)
 - Test retry/idempotency scenarios that call `perform_job` directly
 
-See `spec/demo/spec/workers/delivery/complete_driver_delivery_worker_spec.rb` for an example of the "long" form with client interaction testing (stubbing `job.client` for `publish_message` verification).
+`spec/demo/spec/workers/delivery/complete_driver_delivery_worker_spec.rb` is the long form, reading `publish_message` requests back off the test client.
 
 ### Matchers
 

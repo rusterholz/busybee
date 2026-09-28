@@ -41,7 +41,8 @@ You register hooks once at boot, typically in the same `Busybee.configure` block
 - [Keep Hook Bodies Fast](#keep-hook-bodies-fast)
 - [Hooks and Threads: Own What You Spawn](#hooks-and-threads-own-what-you-spawn)
 - [Observing Deferred Resolutions](#observing-deferred-resolutions)
-- [Test Isolation](#test-isolation)
+- [Testing Your Hooks](#testing-your-hooks)
+  - [Test Isolation](#test-isolation)
 
 ---
 
@@ -746,14 +747,28 @@ The demo app's recorder uses this exact fold to keep its per-job records accurat
 
 **Nothing gets in your way here.** Your background thread can complete the job whenever it finishes — including while the runner is still working through `on_job_executed` for that same job — and it will land. One thing to know if you also register `after_perform`: it fires as soon as `perform` returns, while your hand-off is still in flight, so the job it hands you is still `:ready`. Don't resolve a job from `after_perform` for a job type you resolve asynchronously — the two are racing for the same job. `on_job_executed` fires as always, at the moment the runner lets go, which may be before your resolution lands.
 
-## Test Isolation
+## Testing Your Hooks
 
-Hook registrations are global and survive across examples. If your test suite registers hooks (or boots an app that does), clear them where you need a clean slate:
+`busybee/testing` covers the questions you'll ask about the hooks you register. Each has its own tool, and [Testing Workers](workers.md#testing-workers) covers them in full.
+
+- **Does my worker do the right thing, my middleware included?** `execute_worker` runs your worker the way a worker process does, and every hook fires. Subtract the ones that aren't the point of the spec with `without_hooks(:job, :worker, :call)`, or with the `without_hooks:` metadata for a whole group; your `perform` hooks still wrap `perform`.
+- **Does my hook body do the right thing?** Keep the body a thin call into your own code, then test that code with the carrier it will receive: `build_test_job`, `build_test_worker_status` and `build_test_call` build what busybee builds, so the projections your hook reads are computed rather than written by hand. Building one never fires your hooks.
+- **Does busybee call my hook when I think it does?** Register an observer inside `Busybee::Hooks.isolated`, run `execute_worker`, and look at what it saw. The observer is gone when the block ends.
+- **What happens when the broker misbehaves?** Program the call with `build_test_client`, as in `client.on(:complete_job) { raise GRPC::Unavailable }`, pass the client to `build_test_job`, and run the worker. Everything above the wire is the real client, so your call hooks see the failure as they would in production.
+- **What does my worker lifecycle hook see?** `start_test_worker` fires `on_worker_started` and hands you the worker; `stop!` fires the three closing moments.
 
 ```ruby
-RSpec.configure do |config|
-  config.before(:each, :clean_hooks) { Busybee::Hooks.reset! }
+it "records every job the worker runs" do
+  seen = []
+  Busybee::Hooks.isolated do
+    Busybee.on_job_executed { |job| seen << job.key }
+    execute_worker(ShipOrderWorker, job: build_test_job(key: 42))
+  end
+
+  expect(seen).to eq([42])
 end
 ```
 
-`Busybee::Hooks.reset!` empties every hook type's registry. Note that it removes *all* hooks — including any your application registered at boot — so re-register what the code under test depends on.
+### Test Isolation
+
+Hook registrations are global and survive across examples. `Busybee::Hooks.isolated { ... }` puts the registry back when the block ends, so observers registered inside it can't leak into the next example, and `without_hooks` restores whatever it silenced. `Busybee::Hooks.reset!` empties every hook type's registry, your application's own hooks included; use it inside `isolated` when a spec needs a registry with nothing in it.
