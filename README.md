@@ -20,8 +20,8 @@ Busybee provides everything you need to work with Camunda Platform or self-hoste
 | v0.1 | BPMN Testing Tools, GRPC Layer | Available now! |
 | v0.2 | Client, Rails Integration | Available now! |
 | v0.3 | Worker Pattern & CLI | Available now! |
-| v0.4 | Instrumentation Hooks, Deployment Tools | Mid 2026 |
-| v1.0 | Production Polish | Late 2026 |
+| v0.4 | Instrumentation Hooks, Deployment Tools | Late 2026 |
+| v1.0 | Production Polish | 2027 |
 
 ## Installation
 
@@ -213,7 +213,7 @@ end
 
 **For more info, see our [full testing documentation here](docs/testing.md).** For unit testing workers, see [Workers: Testing Workers](docs/workers.md#testing-workers).
 
-### Deployment Tools (coming in mid 2026)
+### Deployment Tools (coming soon)
 
 CI/CD tooling for deploying BPMN processes to your Zeebe clusters. Version tracking, environment-specific deployments, and pre-deployment validation.
 
