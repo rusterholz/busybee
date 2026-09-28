@@ -2,6 +2,7 @@
 
 require "busybee/client/call"
 require "busybee/testing/client"
+require "busybee/testing/runner"
 require "busybee/worker/status"
 require "busybee/worker/timestamps"
 
@@ -42,6 +43,21 @@ module Busybee
         # @return [Busybee::Testing::Client]
         def build_test_client(...) = Busybee::Testing::Client.new(...)
 
+        # A worker for this worker class, built but not started, so nothing fires
+        # yet; see Testing::Runner.
+        #
+        # @param worker_class [Class<Busybee::Worker>]
+        # @param client [Busybee::Client] defaults to a fresh {build_test_client}
+        # @return [Busybee::Testing::Runner]
+        def build_test_worker(worker_class, client: nil)
+          Busybee::Testing::Runner.new(worker_class, client: client || build_test_client)
+        end
+
+        # {build_test_worker}, started: on_worker_started has fired.
+        #
+        # @return [Busybee::Testing::Runner]
+        def start_test_worker(...) = build_test_worker(...).start
+
         # A Job as the runner hands one to a hook: a real ActivatedJob proto —
         # which validates its own field types, so a key the wire could not carry
         # fails here rather than in a spec's imagination — wrapped and given its
@@ -56,7 +72,7 @@ module Busybee
         #   so resolving the job runs the genuine call seam and fires call hooks
         # @param worker_class [Class<Busybee::Worker>] what a job-noun filter matches on
         # @param worker_status [Busybee::Worker::Status] the runner snapshot the job carries
-        # @param source [Symbol] :poll or :stream
+        # @param source [Symbol, nil] :poll or :stream; nil, the default, is no transport
         # @param buffered [Boolean] whether this job came through a runner buffer
         # @param activated [Boolean] stamp activated_at, as activation does
         # @param status [Symbol, nil] :complete, :failed or :error to hand back a
@@ -65,7 +81,7 @@ module Busybee
         def build_test_job(type: "test", key: nil, variables: {}, headers: {}, # rubocop:disable Metrics/ParameterLists
                            bpmn_process_id: "test-process", element_id: "test-element",
                            retries: 3, worker: nil, tenant_id: nil, client: nil,
-                           worker_class: nil, worker_status: nil, source: :poll,
+                           worker_class: nil, worker_status: nil, source: nil,
                            buffered: false, activated: true, status: nil)
           raw_job = build_test_raw_job(type: type, key: key, variables: variables, headers: headers,
                                        bpmn_process_id: bpmn_process_id, element_id: element_id,

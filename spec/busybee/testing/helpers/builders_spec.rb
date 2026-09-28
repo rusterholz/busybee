@@ -209,6 +209,10 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
                                      worker_status: status, source: :stream, buffered?: true)
     end
 
+    it "has no source unless given one, as no transport delivered it" do
+      expect(build_test_job.source).to be_nil
+    end
+
     it "stamps activation, so a job handed to a hook looks activated" do
       expect(build_test_job.activated_at).to be_a(Time)
     end
