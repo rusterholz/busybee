@@ -63,11 +63,21 @@ module Busybee
       # so a typo raises rather than silently muting the lot.
       def with_only(*types)
         types.each { |type| hooks_for(type) }
-        isolated do
-          @hooks = HOOK_TYPES.to_h { |type| [type, types.include?(type) ? @hooks[type] : []] }
-          yield
+        outer = @suppressed
+        begin
+          @suppressed = (outer | (HOOK_TYPES - types)).freeze
+          isolated do
+            @hooks = HOOK_TYPES.to_h { |type| [type, types.include?(type) ? @hooks[type] : []] }
+            yield
+          end
+        ensure
+          @suppressed = outer
         end
       end
+
+      # True while a with_only leaves this type out, so a caller can tell an
+      # empty registry from one that was emptied for it.
+      def suppressed?(type) = @suppressed.include?(type)
 
       # ====== Registration ======
 
@@ -168,5 +178,6 @@ module Busybee
     end
 
     reset!
+    @suppressed = [].freeze
   end
 end

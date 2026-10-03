@@ -68,6 +68,11 @@ module Busybee
         raise NotImplementedError, "#{self.class} runs synchronously: call start, activate and stop! instead"
       end
 
+      # A fresh Worker::Status as of now, the carrier a worker hook would receive.
+      #
+      # @return [Busybee::Worker::Status]
+      def status = worker_status
+
       private
 
       def worker_mode = nil

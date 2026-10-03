@@ -207,6 +207,28 @@ RSpec.describe Busybee::Testing::Runner do
     end
   end
 
+  describe "#status" do
+    it "is a real snapshot of this worker as of now, and fires nothing" do
+      worker = start_test_worker(worker_class, client: client)
+      fired.clear
+
+      status = worker.status
+
+      expect(status).to be_a(Busybee::Worker::Status)
+      expect(status).to have_attributes(worker_class: worker_class, worker_mode: nil, reason: nil,
+                                        started_at: be_a(Time), shutdown_at: nil)
+      expect(fired).to be_empty
+    end
+
+    it "carries what the run has done by the time it is taken" do
+      worker = start_test_worker(worker_class, client: client)
+      worker.activate([job_on_client])
+      worker.stop!
+
+      expect(worker.status).to have_attributes(total_job_count: 1, reason: :signal, shutdown_at: be_a(Time))
+    end
+  end
+
   describe "#run!" do
     it "refuses before anything fires, pointing at start and stop!" do
       worker = build_test_worker(worker_class, client: client)
