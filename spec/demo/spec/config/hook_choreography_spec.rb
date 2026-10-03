@@ -49,11 +49,14 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
   def call_moments = observed.select { |entry| entry.last.is_a?(Busybee::Client::Call) }
   def resolved_calls = call_moments.select { |entry| entry.first == :after_call }
 
+  def distance_job(key)
+    build_test_job(key: key, type: "calculate_distance", bpmn_process_id: "deliver-shipment",
+                   variables: { from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 },
+                   headers: { algorithm: "pythagorean" }, client: client)
+  end
+
   def run_one_distance_job(key: 5150)
-    execute_worker(Delivery::CalculateDistanceWorker,
-                   job: build_test_job(key: key, type: "calculate_distance", bpmn_process_id: "deliver-shipment",
-                                       variables: { from_lat: 0, from_lon: 0, to_lat: 3, to_lon: 4 },
-                                       headers: { algorithm: "pythagorean" }, client: client))
+    execute_worker(Delivery::CalculateDistanceWorker, job: distance_job(key))
   end
 
   describe "the worker lifecycle" do
@@ -138,6 +141,40 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
       run_one_distance_job(key: 8200)
 
       expect(Monitoring::EngineCall.for_job(8200).pluck(:rpc)).to eq(%w[complete_job])
+    end
+  end
+
+  describe "a worker held open across runs" do
+    it "starts and stops once, however many runs go through it" do
+      worker = start_test_worker(Delivery::CalculateDistanceWorker, client: client)
+      execute_worker(worker, job: distance_job(8300))
+      execute_worker(worker, job: distance_job(8301))
+      worker.stop!
+
+      expect(worker_moments).to eq(%i[on_worker_started on_worker_stop_requested
+                                      on_worker_stopping on_worker_shutdown])
+      expect(job_moments.count(:on_job_executed)).to eq(2)
+    end
+
+    it "keeps one row for the worker in the demo's monitoring, counting every run" do
+      worker = start_test_worker(Delivery::CalculateDistanceWorker, client: client)
+      execute_worker(worker, jobs: [distance_job(8400), distance_job(8401)])
+      execute_worker(worker, job: distance_job(8402))
+      worker.stop!
+
+      rows = Monitoring::WorkerProcess.where(worker_name: Busybee.worker_name, job_type: "calculate_distance")
+      expect(rows.pluck(:status, :total_job_count)).to eq([["shutdown", 3]])
+    end
+  end
+
+  describe "a run with call hooks subtracted" do
+    it "still fires every job and worker moment, and no call moment" do
+      without_hooks(:call) { run_one_distance_job }
+
+      expect(call_moments).to be_empty
+      expect(job_moments).to include(:on_job_activated, :after_perform, :on_job_executed)
+      expect(worker_moments).to eq(%i[on_worker_started on_worker_stop_requested
+                                      on_worker_stopping on_worker_shutdown])
     end
   end
 end

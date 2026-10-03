@@ -2,16 +2,15 @@
 
 require_relative "../rails_helper"
 
-# "Would this hook even fire for this job?" — asked of the demo's own registrations
-# in config/initializers/busybee.rb. Nothing executes here; this is pure matching,
-# which is what makes it a different question from "what does the hook body do".
-#
-# It earns its keep because a filter with valid vocabulary and a wrong value is
-# silently inert forever. The three transactional around_perform hooks name four
-# literal job types in a file far from the workers that derive them — nothing
-# declares those strings — and the initializer makes a negative claim in a comment
-# ("Not the async sim jobs ... nor complete_driver_delivery") that nothing checked.
+# "When this carrier reaches this moment, what does our hook code do?" — asked of
+# the demo's own registrations in config/initializers/busybee.rb by firing each
+# moment with fire_hooks. A filter with valid vocabulary and a wrong value is
+# silently inert forever, and here it shows up as a missing effect: the three
+# transactional around_perform hooks name four literal job types, in a file far
+# from the workers that derive them.
 RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
+  def domain_records = [Oms::Record, Logistics::Record, Delivery::Record]
+
   # Every worker the app actually defines, so a newly-added one cannot slip past
   # the claims below by simply not being listed here.
   def workers
@@ -19,83 +18,112 @@ RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
     Busybee::Worker.descendants.sort_by(&:name)
   end
 
-  def worker_for(job_type) = workers.find { |worker| worker.job_type == job_type }
-
-  def job_for(worker_class)
-    build_test_job(type: worker_class.job_type, bpmn_process_id: "ship-order", worker_class: worker_class)
+  def job_for(worker_class, **)
+    build_test_job(type: worker_class.job_type, bpmn_process_id: "ship-order", worker_class: worker_class, **)
   end
 
-  def matching(type, target)
-    Busybee::Hooks.hooks_for(type).select { |hook| Busybee::Hooks.matches?(hook, target) }
-  end
-
-  def filtered(hooks) = hooks.select { |hook| hook[:filters].any? }
-  def unfiltered(hooks) = hooks.reject { |hook| hook[:filters].any? }
-
-  # Read the wiring rather than restating it: whatever job types the initializer
-  # actually filtered on, in whichever registration.
-  def transactional_types
-    filtered(Busybee::Hooks.hooks_for(:around_perform)).flat_map { |hook| Array(hook[:filters][:job_type]) }
-  end
-
-  describe "the transactional around_perform hooks" do
-    it "filters on job types that real workers actually declare" do
-      expect(transactional_types).to match_array(%w[update_order_status create_shipment
-                                                    update_shipment_status assign_driver])
-      expect(workers.map(&:job_type)).to include(*transactional_types)
-    end
-
-    it "wraps each transactional job in exactly one domain transaction" do
-      transactional_types.each do |job_type|
-        hooks = filtered(matching(:around_perform, job_for(worker_for(job_type))))
-
-        expect(hooks.size).to eq(1), "expected exactly one transaction hook for #{job_type}, got #{hooks.size}"
+  # Domain transactions open around perform, by domain.
+  def transactions_around_perform(worker_class)
+    baseline = domain_records.to_h { |record| [record, record.connection.open_transactions] }
+    opened = {}
+    fire_hooks(:around_perform, job_for(worker_class)) do
+      domain_records.each do |record|
+        depth = record.connection.open_transactions - baseline[record]
+        opened[record] = depth if depth.positive?
       end
     end
+    opened
+  end
 
-    it "leaves every other job untransacted, complete_driver_delivery included" do
-      untransacted = workers.reject { |worker| transactional_types.include?(worker.job_type) }
+  # Outside the example's own transaction, which a domain transaction would only
+  # join. Nothing here writes.
+  describe "the transactional around_perform hooks", :no_transaction do
+    it "wrap exactly the four transactional job types, each in one domain transaction" do
+      transacted = workers.to_h { |worker| [worker.job_type, transactions_around_perform(worker)] }.
+                   reject { |_, opened| opened.empty? }
 
-      expect(untransacted.map(&:job_type)).to include("complete_driver_delivery")
-      untransacted.each do |worker|
-        expect(filtered(matching(:around_perform, job_for(worker)))).to be_empty,
-                                                                        "#{worker.job_type} matched a transaction hook"
-      end
+      expect(transacted.keys).to match_array(%w[update_order_status create_shipment update_shipment_status
+                                                assign_driver])
+      expect(transacted.values.map(&:values)).to all(eq([1]))
+    end
+
+    it "leave every other job untransacted, complete_driver_delivery included" do
+      delivery = workers.find { |worker| worker.job_type == "complete_driver_delivery" }
+
+      expect(transactions_around_perform(delivery)).to be_empty
     end
   end
 
   describe "the rollover hazard" do
-    # Registered without filters, so it *matches* every job — including the sim
-    # workers it exempts. That exemption lives in the hook's body, not in its
-    # wiring, which is precisely why "would it fire?" and "what does it do?" are
-    # two questions: this hook fires for Sim::PickAndPackWorker and does nothing.
-    it "matches every job, sim workers included" do
-      workers.each do |worker|
-        hazards = unfiltered(matching(:around_perform, job_for(worker)))
+    # Disabled under test so it can't randomly fail unrelated specs; enabled here,
+    # with the roll forced, to see what it does to each worker's jobs.
+    around do |example|
+      previous = Rails.application.config.x.demo.rollovers_enabled
+      Rails.application.config.x.demo.rollovers_enabled = true
+      example.run
+    ensure
+      Rails.application.config.x.demo.rollovers_enabled = previous
+    end
 
-        expect(hazards).not_to be_empty, "#{worker.job_type} matched no hazard hook"
-      end
+    before { allow(Sim::RolloverPolicy).to receive(:roll).and_return(0.5) }
+
+    def rolls_over?(worker_class)
+      fire_hooks(:around_perform, job_for(worker_class))
+      false
+    rescue Sim::Rollover
+      true
+    end
+
+    it "rolls every business worker over and spares the sim workers" do
+      rolled, spared = workers.partition { |worker| rolls_over?(worker) }
+
+      expect(rolled.map(&:name)).to all(satisfy { |name| !name.start_with?("Sim::") })
+      expect(spared.map(&:name)).to contain_exactly("Sim::DeliveryRunWorker", "Sim::PickAndPackWorker")
     end
   end
 
   describe "the monitoring bracket" do
-    # Exactly one of the two closers fires per activation, so the bracket always
-    # closes. Unfiltered by design — monitoring that skipped a job type would be
-    # worse than none.
-    it "registers an unfiltered hook at every job-lifecycle moment it brackets" do
-      %i[on_job_activated on_job_executed on_job_not_executed].each do |type|
-        expect(unfiltered(Busybee::Hooks.hooks_for(type))).not_to be_empty, "no unfiltered #{type} hook"
-      end
+    it "opens a job's run on activation and closes it on execution" do
+      job = job_for(Delivery::CalculateDistanceWorker, key: 6100, status: :complete)
+
+      fire_hooks(:on_job_activated, job)
+      expect(Monitoring::JobRun.find_by(job_key: 6100)).to have_attributes(lifecycle_rank: 0)
+
+      fire_hooks(:on_job_executed, job)
+      expect(Monitoring::JobRun.find_by(job_key: 6100)).to have_attributes(lifecycle_rank: 1, status: "complete")
     end
 
-    it "registers an unfiltered hook at all four worker-lifecycle moments" do
-      %i[on_worker_started on_worker_stop_requested on_worker_stopping on_worker_shutdown].each do |type|
-        expect(unfiltered(Busybee::Hooks.hooks_for(type))).not_to be_empty, "no unfiltered #{type} hook"
-      end
+    it "closes a handed-back job's run too, so the bracket always closes" do
+      job = job_for(Delivery::CalculateDistanceWorker, key: 6200)
+
+      fire_hooks(:on_job_activated, job)
+      fire_hooks(:on_job_not_executed, job)
+
+      expect(Monitoring::JobRun.find_by(job_key: 6200)).to have_attributes(lifecycle_rank: 1, status: "ready")
     end
 
+    it "advances the worker's row through all four moments" do
+      worker = start_test_worker(Delivery::CalculateDistanceWorker)
+      row = -> { Monitoring::WorkerProcess.find_by(worker_name: Busybee.worker_name, job_type: "calculate_distance") }
+
+      phases = %i[on_worker_started on_worker_stop_requested on_worker_stopping on_worker_shutdown].map do |moment|
+        fire_hooks(moment, worker)
+        row.call.status
+      end
+
+      expect(phases).to eq(%w[running stop_requested stopping shutdown])
+    end
+
+    it "records each call against the job it was made for" do
+      job = job_for(Delivery::CalculateDistanceWorker, key: 6300)
+
+      fire_hooks(:after_call, build_test_call(:complete_job, job: job))
+
+      expect(Monitoring::EngineCall.for_job(6300).pluck(:rpc)).to eq(%w[complete_job])
+    end
+
+    # Nothing is registered at the gating moments, which leaves nothing to fire.
     it "observes calls after the fact rather than gating them" do
-      expect(Busybee::Hooks.hooks_for(:after_call)).not_to be_empty
       expect(Busybee::Hooks.hooks_for(:before_call)).to be_empty
       expect(Busybee::Hooks.hooks_for(:around_call)).to be_empty
     end
