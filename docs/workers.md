@@ -137,7 +137,7 @@ end
 
 #### Reporting Failures Your Own Way
 
-Automatic failure is not something you switch off. Every exception that escapes `perform` is reported to the workflow engine, and that is deliberate: an unreported failure leaves the job silently unresolved, and since a lease expiring doesn't consume a retry, the engine keeps handing the job back without ever raising an incident for anyone to notice. A job that fails the same way every time would loop indefinitely and never appear in Operate.
+Automatic failure is not something you switch off. Every exception that escapes `perform` is reported to the workflow engine.
 
 What you can change is *what gets reported*. Rescue inside `perform` and resolve the job the way you want it resolved:
 
@@ -162,9 +162,9 @@ class ProcessPaymentWorker < Busybee::Worker
 end
 ```
 
-Anything your rescue doesn't catch is still reported for you — which is the point. The errors you didn't anticipate are the ones most worth seeing.
+Anything your rescue doesn't catch is still reported for you.
 
-Two neighbouring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker — redacting sensitive text out of error messages, say — reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
+Two neighboring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker — redacting sensitive text out of error messages, say — reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
 
 #### Manual Lifecycle Control
 
@@ -490,7 +490,9 @@ end
 
 > See the [Dropship Co. demo app's simulation workers](../spec/demo/app/workers/sim/) for a full example of this pattern.
 
-Note that this switches off automatic *completion* only. If `perform` raises, the job is still failed and reported — which is what you want, because at that point nothing else is going to resolve it.
+Note that this switches off automatic *completion* only. If `perform` raises, the job is still failed and reported.
+
+A job you never resolve is not failed for you. When its lease expires the engine hands it out again, without spending a retry or raising an incident, so a job that is never resolved can loop unseen. Make sure every path through your code resolves it.
 
 #### `description`
 
@@ -624,7 +626,7 @@ If you don't have Rails installed, loading the environment will be skipped autom
 BUSYBEE_SKIP_RAILS=1 bundle exec busybee MyWorker
 ```
 
-(Using an env var is necessary because the decision to attempt loading the environment must be made before we could load any configuration values from that environment.)
+(This one can't be set through Rails configuration, since the CLI decides whether to load Rails before that configuration exists.)
 
 ### Signal Handling
 
@@ -760,7 +762,7 @@ Jobs of the *same* type are always processed sequentially. That is, only one ins
 
 #### When One Worker Fails
 
-**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. This is deliberate: a process with one dead worker class is silently doing part of its job, which is worse to operate than a process that's plainly gone. Every worker's `on_worker_shutdown` fires with the crash's reason — so a container of five workers produces five shutdown events, one of which carries the error.
+**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. Every worker's `on_worker_shutdown` fires with the crash's reason — so a container of five workers produces five shutdown events, one of which carries the error.
 
 How hard the shutdown is depends on what went wrong. An ordinary error leaves the process healthy enough to be polite, so each worker drains: jobs in hand go back to the engine promptly and are picked up by whoever replaces you. Something the process can't recover from — `NoMemoryError`, `SystemStackError` — skips the drain, because the calls a graceful shutdown makes are exactly the ones about to fail again. Those jobs come back to the engine the slower way, when their activation times out.
 
@@ -851,7 +853,7 @@ The first non-nil value wins. This means `0` and `false` are valid explicit valu
 
 The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
-**Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process. Also, they often take env vars as their inputs, so they are less useful in YAML.
+**Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
 
@@ -958,6 +960,8 @@ end
 ```
 
 `without_hooks(:job, :worker, :call)` keeps your `before_perform` / `around_perform` / `after_perform` hooks in the run, so middleware such as a transaction around `perform` still applies.
+
+To put a hook under test on its own, without running a worker, fire its moment with `fire_hooks`; see [Testing Your Hooks](hooks.md#testing-your-hooks).
 
 ### Holding the Worker Open
 
