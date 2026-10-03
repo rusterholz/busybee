@@ -16,7 +16,7 @@ RSpec.describe Logistics::PlanShipmentsWorker do
       { "type" => "gadget", "qty" => 1, "available_at" => %w[wh-a] }
     ]
 
-    result = execute_worker(described_class, variables: { warehouses: warehouses, items: items })
+    result = execute_worker(described_class, variables: { warehouses: warehouses, items: items }).result
 
     expect(result[:planned_shipments].size).to eq(1)
     expect(result[:planned_shipments].first[:warehouse_id]).to eq("wh-a")
@@ -28,7 +28,7 @@ RSpec.describe Logistics::PlanShipmentsWorker do
       { "type" => "gadget", "qty" => 1, "available_at" => %w[wh-b] }
     ]
 
-    result = execute_worker(described_class, variables: { warehouses: warehouses, items: items })
+    result = execute_worker(described_class, variables: { warehouses: warehouses, items: items }).result
 
     expect(result[:planned_shipments].size).to eq(2)
     ids = result[:planned_shipments].map { |s| s[:warehouse_id] }.sort

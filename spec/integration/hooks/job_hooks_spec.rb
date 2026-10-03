@@ -30,14 +30,13 @@ RSpec.describe "Job lifecycle hooks", :integration do
   end
 
   before do
-    Busybee::Hooks.reset!
     job_hook_types.each { |type| fired[type] = Concurrent::Array.new }
     register_lifecycle_hooks
 
     client.deploy_process(job_bpmn_path)
   end
 
-  after { Busybee::Hooks.reset! }
+  around { |example| with_isolated_hooks { example.run } }
 
   context "with an auto-completing worker" do
     let(:worker_class) do

@@ -39,8 +39,8 @@ module Busybee
       @teardown_error = Concurrent::AtomicReference.new(nil)
     end
 
-    # Blocks until stopped or until #run_loop raises; the ensure then runs on every
-    # exit path, on the runner thread. Fires T0 here and T2/T3 in the ensure, each
+    # Blocks until stopped or until #run_loop raises; the teardown then runs on every
+    # exit path, on the runner thread. Fires T0 here and T2/T3 in the teardown, each
     # with a fresh Worker::Status; T1 fires from #stop!. Single-entry: start!'s
     # compare-and-set reports whether this call won, so a second run! is a no-op —
     # and sitting before the begin/ensure makes T0/T2/T3 all-or-none.
@@ -51,16 +51,7 @@ module Busybee
       begin
         run_loop
       ensure
-        cease_intake
-        exception = $!
-        error = Busybee::Worker::Shutdown.unwrap(exception)
-        @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
-        fire_worker_lifecycle(:stopping_at, :on_worker_stopping, error)
-        drain_within_teardown(exception)
-        # A contained escalation reaches T3 only where the exit exception is not
-        # already there — that one says why the worker is going down.
-        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error || @teardown_error.get)
-        @running.make_false
+        teardown($!)
       end
     end
 
@@ -157,7 +148,7 @@ module Busybee
     def worker_status(error: nil)
       Worker::Status.new(
         worker_class: @worker_class,
-        worker_mode: @runtime_config&.worker_mode,
+        worker_mode: worker_mode,
         timestamps: @worker_timestamps,
         total_job_count: @total_job_count.value,
         failed_job_count: @failed_job_count.value,
@@ -168,6 +159,8 @@ module Busybee
         error: error
       )
     end
+
+    def worker_mode = @runtime_config&.worker_mode
 
     # The fetch/process loop, filling run!'s body between T0 and the ensure.
     def run_loop = raise(NotImplementedError)

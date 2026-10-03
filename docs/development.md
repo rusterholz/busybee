@@ -96,7 +96,7 @@ The same property covers a stream that simply ends (let the enumerator finish) a
 expect(gateway.received(:publish_message).map(&:name)).to eq(["order-shipped"])
 ```
 
-**Job payloads need real protos.** `FaultInjectionGateway.activated_job(type:, variables:, ...)` builds a genuine `Busybee::GRPC::ActivatedJob`. The Testing module's `build_test_job` cannot be used here — it fabricates the job with an RSpec double, which will not serialize.
+**Job payloads need real protos.** `FaultInjectionGateway.activated_job(type:, variables:, ...)` builds a genuine `Busybee::GRPC::ActivatedJob`; so does the Testing module's `build_test_raw_job`, if you would rather use the shipped builder. What a stub cannot take is a wrapped `Busybee::Job` — `build_test_job` returns one of those, for the worker side of a spec rather than the wire side.
 
 **Transport.** The gateway binds `127.0.0.1:0` and reports what it bound as `gateway.address`. Loopback is the assumption the wider Ruby testing ecosystem already makes, and binding the loopback interface specifically (rather than `0.0.0.0`) avoids the macOS firewall prompt. If an environment cannot bind loopback, pass `bind:` to redirect — a bind failure raises an error naming that knob rather than surfacing later as a confusing connection error.
 

@@ -11,6 +11,18 @@ module Busybee
     module Teardown
       private
 
+      # run!'s ensure body; exception is what the run exits on, nil when clean. A
+      # contained escalation reaches T3 only where no exit exception explains it.
+      def teardown(exception)
+        cease_intake
+        error = Busybee::Worker::Shutdown.unwrap(exception)
+        @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
+        fire_worker_lifecycle(:stopping_at, :on_worker_stopping, error)
+        drain_within_teardown(exception)
+        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error || @teardown_error.get)
+        @running.make_false
+      end
+
       # Stamp a closing moment (T2/T3) and fire its observation-only hook with a
       # fresh Status. error is the classified in-flight exception, shared by both.
       def fire_worker_lifecycle(stamp, type, error)

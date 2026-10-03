@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 require "busybee/hooks"
+require "busybee/testing"
 
 RSpec.describe Busybee::Hooks do
-  describe "hook storage" do
-    after { described_class.reset! }
+  around { |example| with_isolated_hooks { example.run } }
 
+  describe "hook storage" do
     described_class::HOOK_TYPES.each do |hook_type|
       it "stores #{hook_type} hooks in an array" do
         expect(described_class.hooks_for(hook_type)).to eq([])
@@ -21,18 +22,16 @@ RSpec.describe Busybee::Hooks do
       expect(described_class::HOOK_NOUN.values.uniq).to match_array(described_class::FILTER_KEYS.keys)
     end
 
-    describe ".reset!" do
-      it "clears all hook arrays" do
-        described_class.hooks_for(:before_perform) << { callback: -> {}, filters: {} }
-        described_class.reset!
-        expect(described_class.hooks_for(:before_perform)).to eq([])
+    # Scoping the registry for a spec is Busybee::Testing's job (without_hooks,
+    # with_isolated_hooks), so Hooks itself carries none of it.
+    it "exposes no test-isolation API" do
+      %i[reset! isolated with_only suppressed? registry registry=].each do |method|
+        expect(described_class).not_to respond_to(method)
       end
     end
   end
 
   describe "registration" do
-    after { described_class.reset! }
-
     it "registers a before_perform hook via Busybee.configure" do
       callback = proc { |_event| }
       Busybee.configure { |c| c.before_perform(&callback) }
@@ -187,8 +186,6 @@ RSpec.describe Busybee::Hooks do
   end
 
   describe "filter kwargs validation" do
-    after { described_class.reset! }
-
     let(:noop) { proc { |_| "registered" } }
 
     it "accepts valid job filter kwargs" do
@@ -341,8 +338,6 @@ RSpec.describe Busybee::Hooks do
   end
 
   describe ".run" do
-    after { described_class.reset! }
-
     let(:job) { build_test_job(type: "test") }
 
     it "calls matching hooks in FIFO order" do
@@ -468,8 +463,6 @@ RSpec.describe Busybee::Hooks do
   end
 
   describe ".run_chain" do
-    after { described_class.reset! }
-
     let(:job) { build_test_job(type: "test") }
 
     it "calls the core block when no around hooks are registered" do

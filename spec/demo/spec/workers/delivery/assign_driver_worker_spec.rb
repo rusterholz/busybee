@@ -7,7 +7,7 @@ RSpec.describe Delivery::AssignDriverWorker do
     Delivery::Driver.create!(name: "Alice", total_mileage: 100.0)
     bob = Delivery::Driver.create!(name: "Bob", total_mileage: 50.0)
 
-    result = execute_worker(described_class, variables: { shipment_id: "ship-1" })
+    result = execute_worker(described_class, variables: { shipment_id: "ship-1" }).result
 
     expect(result[:driver_id]).to eq(bob.id)
     expect(result[:driver_name]).to eq("Bob")
@@ -22,7 +22,7 @@ RSpec.describe Delivery::AssignDriverWorker do
   it "returns nil driver info and creates an open request when no drivers are available" do
     busy = Delivery::Driver.create!(name: "Alice", total_mileage: 0, current_shipment_id: "ship-other")
 
-    result = execute_worker(described_class, variables: { shipment_id: "ship-1" })
+    result = execute_worker(described_class, variables: { shipment_id: "ship-1" }).result
 
     expect(result[:driver_id]).to be_nil
     expect(result[:driver_name]).to be_nil
