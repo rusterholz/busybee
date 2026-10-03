@@ -8,6 +8,7 @@ require "busybee/serialization"
 require "busybee/testing/activated_job"
 require "busybee/testing/helpers/builders"
 require "busybee/testing/helpers/execution"
+require "busybee/testing/helpers/hook_firing"
 require "busybee/testing/helpers/hook_scoping"
 require "busybee/testing/helpers/support"
 require "busybee/testing/timings"
@@ -22,6 +23,7 @@ module Busybee
       extend Support
       include Builders
       include Execution
+      include HookFiring
       include HookScoping
 
       # Deploy a BPMN process file to Zeebe.
