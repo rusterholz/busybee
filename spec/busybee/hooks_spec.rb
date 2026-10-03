@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 require "busybee/hooks"
+require "busybee/testing"
 
 RSpec.describe Busybee::Hooks do
-  describe "hook storage" do
-    after { described_class.reset! }
+  around { |example| with_isolated_hooks { example.run } }
 
+  describe "hook storage" do
     described_class::HOOK_TYPES.each do |hook_type|
       it "stores #{hook_type} hooks in an array" do
         expect(described_class.hooks_for(hook_type)).to eq([])
@@ -21,149 +22,16 @@ RSpec.describe Busybee::Hooks do
       expect(described_class::HOOK_NOUN.values.uniq).to match_array(described_class::FILTER_KEYS.keys)
     end
 
-    describe ".reset!" do
-      it "clears all hook arrays" do
-        described_class.hooks_for(:before_perform) << { callback: -> {}, filters: {} }
-        described_class.reset!
-        expect(described_class.hooks_for(:before_perform)).to eq([])
-      end
-    end
-
-    describe ".isolated" do
-      it "restores registrations made inside the block" do
-        described_class.reset!
-
-        described_class.isolated { described_class.before_perform { nil } }
-
-        expect(described_class.hooks_for(:before_perform)).to be_empty
-      end
-
-      it "restores the registry even when the block raises" do
-        described_class.reset!
-
-        expect do
-          described_class.isolated do
-            described_class.before_perform { nil }
-            raise "boom"
-          end
-        end.
-          to raise_error("boom")
-        expect(described_class.hooks_for(:before_perform)).to be_empty
-      end
-
-      it "keeps registrations that predate the block" do
-        described_class.reset!
-        described_class.before_perform { nil }
-
-        described_class.isolated { described_class.after_perform { nil } }
-
-        expect(described_class.hooks_for(:before_perform).size).to eq(1)
-        expect(described_class.hooks_for(:after_perform)).to be_empty
-      end
-
-      it "undoes a reset! made inside the block" do
-        described_class.reset!
-        described_class.before_perform { nil }
-
-        described_class.isolated { described_class.reset! }
-
-        expect(described_class.hooks_for(:before_perform).size).to eq(1)
-      end
-
-      it "returns the block's value" do
-        expect(described_class.isolated { :computed }).to eq(:computed)
-      end
-    end
-
-    describe ".with_only" do
-      let(:fired) { [] }
-
-      before do
-        described_class.reset!
-        described_class.before_perform { fired << :before_perform }
-        described_class.after_perform { fired << :after_perform }
-      end
-
-      it "runs the named types and suppresses the rest" do
-        described_class.with_only(:before_perform) do
-          described_class.run(:before_perform, nil)
-          described_class.run(:after_perform, nil)
-        end
-
-        expect(fired).to eq([:before_perform])
-      end
-
-      it "suppresses every type when named none — the isolation a fixture needs" do
-        described_class.with_only do
-          described_class.run(:before_perform, nil)
-          described_class.run(:after_perform, nil)
-        end
-
-        expect(fired).to be_empty
-      end
-
-      it "restores the registry afterwards" do
-        described_class.with_only(:before_perform) { nil }
-
-        described_class.run(:after_perform, nil)
-        expect(fired).to eq([:after_perform])
-      end
-
-      it "restores the registry even when the block raises" do
-        expect { described_class.with_only { raise "boom" } }.to raise_error("boom")
-
-        described_class.run(:after_perform, nil)
-        expect(fired).to eq([:after_perform])
-      end
-
-      it "returns the block's value" do
-        expect(described_class.with_only(:before_perform) { :computed }).to eq(:computed)
-      end
-
-      it "rejects an unknown hook type rather than silently suppressing everything" do
-        expect { described_class.with_only(:bogus) { nil } }.to raise_error(ArgumentError, /bogus/)
-      end
-    end
-
-    describe ".suppressed?" do
-      it "is false outside any with_only" do
-        expect(described_class.suppressed?(:after_perform)).to be(false)
-      end
-
-      it "names what a with_only left out, and only that" do
-        described_class.with_only(:before_perform) do
-          expect(described_class.suppressed?(:after_perform)).to be(true)
-          expect(described_class.suppressed?(:before_perform)).to be(false)
-        end
-      end
-
-      it "accumulates through nesting, and unwinds with it" do
-        described_class.with_only(:before_perform, :after_perform) do
-          described_class.with_only(:before_perform) do
-            expect(described_class.suppressed?(:after_perform)).to be(true)
-          end
-          expect(described_class.suppressed?(:after_perform)).to be(false)
-        end
-        expect(described_class.suppressed?(:on_job_activated)).to be(false)
-      end
-
-      it "unwinds even when the block raises" do
-        expect { described_class.with_only { raise "boom" } }.to raise_error("boom")
-
-        expect(described_class.suppressed?(:after_perform)).to be(false)
-      end
-
-      it "is untouched by a with_only that refuses an unknown type" do
-        expect { described_class.with_only(:bogus) { nil } }.to raise_error(ArgumentError)
-
-        expect(described_class.suppressed?(:after_perform)).to be(false)
+    # Scoping the registry for a spec is Busybee::Testing's job (without_hooks,
+    # with_isolated_hooks), so Hooks itself carries none of it.
+    it "exposes no test-isolation API" do
+      %i[reset! isolated with_only suppressed? registry registry=].each do |method|
+        expect(described_class).not_to respond_to(method)
       end
     end
   end
 
   describe "registration" do
-    after { described_class.reset! }
-
     it "registers a before_perform hook via Busybee.configure" do
       callback = proc { |_event| }
       Busybee.configure { |c| c.before_perform(&callback) }
@@ -318,8 +186,6 @@ RSpec.describe Busybee::Hooks do
   end
 
   describe "filter kwargs validation" do
-    after { described_class.reset! }
-
     let(:noop) { proc { |_| "registered" } }
 
     it "accepts valid job filter kwargs" do
@@ -472,8 +338,6 @@ RSpec.describe Busybee::Hooks do
   end
 
   describe ".run" do
-    after { described_class.reset! }
-
     let(:job) { build_test_job(type: "test") }
 
     it "calls matching hooks in FIFO order" do
@@ -599,8 +463,6 @@ RSpec.describe Busybee::Hooks do
   end
 
   describe ".run_chain" do
-    after { described_class.reset! }
-
     let(:job) { build_test_job(type: "test") }
 
     it "calls the core block when no around hooks are registered" do

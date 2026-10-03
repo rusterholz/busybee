@@ -37,13 +37,12 @@ RSpec.describe "job.worker_status visibility", :integration do
   end
 
   before do
-    Busybee::Hooks.reset!
     Busybee.on_job_activated { |job| captured[:activated] = job.worker_status }
     Busybee.on_job_executed  { |job| captured[:executed]  = job.worker_status }
     client.deploy_process(job_bpmn_path)
   end
 
-  after { Busybee::Hooks.reset! }
+  around { |example| with_isolated_hooks { example.run } }
 
   it "exposes a Worker::Status to job hooks at activation and execution" do
     run_one_job

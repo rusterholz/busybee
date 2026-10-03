@@ -167,7 +167,7 @@ RSpec.describe Busybee::Runner::Streaming do
     context "when worker raises Busybee::Worker::Shutdown" do
       let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: worker_class) }
 
-      after { Busybee::Hooks.reset! }
+      around { |example| with_isolated_hooks { example.run } }
 
       it "tags the stop :unhealthy — the worker declared itself down" do
         captured = nil
@@ -412,8 +412,6 @@ RSpec.describe Busybee::Runner::Streaming do
 
         expect { runner.run! }.to raise_error(Busybee::GRPC::Error)
         expect(captured.reason).to eq(:gateway_error)
-      ensure
-        Busybee::Hooks.reset!
       end
 
       it "reports :gateway_closed when the stream closes cleanly on its own (pump backstop)" do
@@ -432,8 +430,6 @@ RSpec.describe Busybee::Runner::Streaming do
           expect(runner.running?).to be false
           expect(captured.reason).to eq(:gateway_closed)
         end
-      ensure
-        Busybee::Hooks.reset!
       end
 
       it "joins pump thread and drains remaining buffer during shutdown" do # rubocop:disable RSpec/ExampleLength
@@ -481,7 +477,7 @@ RSpec.describe Busybee::Runner::Streaming do
       context "when worker raises Busybee::Worker::Shutdown" do
         let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: queue_worker_class) }
 
-        after { Busybee::Hooks.reset! }
+        around { |example| with_isolated_hooks { example.run } }
 
         it "tags the stop :unhealthy — the worker declared itself down" do
           captured = nil
@@ -517,7 +513,7 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     describe "#stop!" do
-      after { Busybee::Hooks.reset! }
+      around { |example| with_isolated_hooks { example.run } }
 
       it "closes the stream and pushes :stop sentinel" do
         runner.instance_variable_set(:@stream, stream)
@@ -743,7 +739,7 @@ RSpec.describe Busybee::Runner::Streaming do
   end
 
   describe "on_job_activated wiring (inline mode)" do
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "fires on_job_activated with source: :stream, not buffered (inline)" do
       captured = nil
@@ -776,7 +772,7 @@ RSpec.describe Busybee::Runner::Streaming do
     let(:stream_gate) { Concurrent::Event.new }
 
     before { allow(stream).to receive(:close) { stream_gate.set } }
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "fires on_job_activated with source: :stream, buffered" do
       streamed_job = build_test_job(key: 42, retries: 1)

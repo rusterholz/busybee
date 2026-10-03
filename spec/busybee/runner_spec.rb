@@ -176,7 +176,7 @@ RSpec.describe Busybee::Runner do
       end
     end
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "stamps activated_at on the job (monotonic + utc)" do
       runner.send(:activate_job, job, source: :poll)
@@ -308,7 +308,7 @@ RSpec.describe Busybee::Runner do
       end
     end
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "seeds the job's worker (same object as job.worker_status) so a Call in on_job_activated folds it" do
       captured_call = nil
@@ -343,7 +343,7 @@ RSpec.describe Busybee::Runner do
     end
 
     before { allow(worker_class).to receive(:perform_job) }
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "calls @worker_class.perform_job(job)" do
       runner.send(:execute_job, job)
@@ -459,7 +459,7 @@ RSpec.describe Busybee::Runner do
       end
     end
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     def exercise(&work)
       allow(worker_class).to receive(:perform_job) { work.call }
@@ -474,7 +474,7 @@ RSpec.describe Busybee::Runner do
   end
 
   describe "error policy invariance (worker lifecycle)" do
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     # A fresh runner per turn: run! is single-use (the second call would take
     # `return if stopping?` and never reach the work).
@@ -519,7 +519,7 @@ RSpec.describe Busybee::Runner do
       end
     end
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     # Two jobs is what makes this a corridor rather than a unit test: it
     # distinguishes "ends that job" from "ends the worker". Nothing an adopter
@@ -556,7 +556,7 @@ RSpec.describe Busybee::Runner do
       allow(client).to receive(:complete_job)
     end
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     # Resolving from a hook is how a hook short-circuits a job. The claim in
     # each case is that the engine really was told — not merely that nothing
@@ -659,7 +659,7 @@ RSpec.describe Busybee::Runner do
       end
     end
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "seeds the worker (same object as job.worker_status) around perform, so a Call built there folds it" do
       captured_call = nil
@@ -786,7 +786,7 @@ RSpec.describe Busybee::Runner do
     end
     let(:job) { build_test_job(type: worker_class.job_type) }
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     describe "executed_at stamping" do
       it "stamps executed_at when execute_job exits successfully" do
@@ -885,7 +885,7 @@ RSpec.describe Busybee::Runner do
 
     before { allow(client).to receive(:fail_job) }
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "fires for a job the runner never executed" do
       captured = nil
@@ -983,7 +983,7 @@ RSpec.describe Busybee::Runner do
     end
     let(:job) { build_test_job(type: worker_class.job_type) }
 
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "computes all 7 durations with non-nil values across the full lifecycle" do
       captured = nil

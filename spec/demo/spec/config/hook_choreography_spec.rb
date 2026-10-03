@@ -15,7 +15,7 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
   let(:observed) { [] }
 
   around do |example|
-    Busybee::Hooks.isolated do
+    with_isolated_hooks do
       observe_every_moment
       example.run
     end

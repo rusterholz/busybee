@@ -1,13 +1,14 @@
 # frozen_string_literal: true
 
 require "busybee/hooks"
+require "busybee/testing/hook_registry"
 
 module Busybee
   module Testing
     module Helpers
-      # Narrows which registered hooks fire while a block runs. Everything fires by
-      # default; each word names the hooks with that word in their name, the same
-      # rule the hook names follow.
+      # Scopes which registered hooks fire while a block runs; hooks registered
+      # inside it run, and are gone when it ends. Each word names the hooks with
+      # that word in their name.
       #
       # @example A worker spec that shouldn't write monitoring rows
       #   without_hooks(:job, :worker, :call) { execute_worker(MyWorker, job: job) }
@@ -24,8 +25,11 @@ module Busybee
                                  "Expected any of #{WORDS.map(&:inspect).join(', ')}"
           end
 
-          Hooks.with_only(*Hooks::HOOK_TYPES.reject { |type| HookScoping.named_by?(type, words) }, &)
+          HookRegistry.with_only(*Hooks::HOOK_TYPES.reject { |type| HookScoping.named_by?(type, words) }, &)
         end
+
+        # Hooks registered inside the block are discarded when it ends.
+        def with_isolated_hooks(&) = HookRegistry.isolated(&)
 
         # Kept off the example's namespace, which every helper here shares.
         def self.named_by?(type, words) = words.include?(:all) || type.to_s.split("_").intersect?(words.map(&:to_s))

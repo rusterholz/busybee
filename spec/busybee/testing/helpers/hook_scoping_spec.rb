@@ -4,8 +4,7 @@ require "busybee/testing"
 
 RSpec.describe Busybee::Testing::Helpers::HookScoping do
   around do |example|
-    Busybee::Hooks.isolated do
-      Busybee::Hooks.reset!
+    with_isolated_hooks do
       Busybee::Hooks::HOOK_TYPES.each { |type| Busybee::Hooks.register(type, proc {}) }
       example.run
     end
@@ -54,6 +53,38 @@ RSpec.describe Busybee::Testing::Helpers::HookScoping do
 
     it "refuses an unknown word before suppressing anything" do
       expect { without_hooks(:perform, :jobs) { nil } }.to raise_error(ArgumentError, /:jobs.*:perform, :job/)
+    end
+
+    it "empties the registry for :all, while hooks registered inside still run, and are gone afterwards" do
+      fired = []
+      without_hooks(:all) do
+        Busybee::Hooks.after_perform { |_job| fired << :inside }
+        Busybee::Hooks.run(:after_perform, nil)
+      end
+
+      expect(fired).to eq([:inside])
+      expect(Busybee::Hooks.hooks_for(:after_perform).size).to eq(1)
+    end
+  end
+
+  describe "#with_isolated_hooks" do
+    it "keeps every registered hook in place while the block runs" do
+      expect(with_isolated_hooks { suppressed }).to be_empty
+    end
+
+    it "discards registrations made inside the block, even when it raises" do
+      expect do
+        with_isolated_hooks do
+          Busybee::Hooks.after_perform { nil }
+          raise "boom"
+        end
+      end.to raise_error("boom")
+
+      expect(Busybee::Hooks.hooks_for(:after_perform).size).to eq(1)
+    end
+
+    it "returns the block's value" do
+      expect(with_isolated_hooks { :computed }).to eq(:computed)
     end
   end
 end

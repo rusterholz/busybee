@@ -776,4 +776,4 @@ end
 
 ### Test Isolation
 
-Hook registrations are global and survive across examples. `Busybee::Hooks.isolated { ... }` puts the registry back when the block ends, so observers registered inside it can't leak into the next example, and `without_hooks` restores whatever it silenced. `Busybee::Hooks.reset!` empties every hook type's registry, your application's own hooks included; use it inside `isolated` when a spec needs a registry with nothing in it.
+Hook registrations are global and survive across examples. `with_isolated_hooks { ... }` puts the registry back when the block ends, so observers registered inside it can't leak into the next example, and `without_hooks` restores whatever it silenced. When a spec needs a registry with nothing in it, `without_hooks(:all) { ... }` empties it, your application's own hooks included; hooks you register inside the block still run, and are gone when it ends.

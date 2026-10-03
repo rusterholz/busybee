@@ -38,46 +38,8 @@ module Busybee
           raise ArgumentError, "Unknown hook type: #{type.inspect}. Expected one of: #{HOOK_TYPES.join(', ')}"
         end
 
-        @hooks[type]
+        registry[type]
       end
-
-      # Clear all registered hooks. Intended for test isolation.
-      def reset!
-        @hooks = HOOK_TYPES.to_h { |type| [type, []] }
-      end
-
-      # Run a block and put the registry back afterwards, so a spec can register
-      # observers — or reset! — without leaking into the next one. Intended for
-      # test isolation, like reset!.
-      def isolated
-        saved = @hooks.transform_values(&:dup)
-        yield
-      ensure
-        @hooks = saved
-      end
-
-      # Run a block with only the named types able to fire, restoring the registry
-      # afterwards; naming none suppresses everything. A registry swap, not a check
-      # on the hot path — run/run_chain are untouched and a suppressed type simply
-      # finds nothing to match. Types are validated before anything is suppressed,
-      # so a typo raises rather than silently muting the lot.
-      def with_only(*types)
-        types.each { |type| hooks_for(type) }
-        outer = @suppressed
-        begin
-          @suppressed = (outer | (HOOK_TYPES - types)).freeze
-          isolated do
-            @hooks = HOOK_TYPES.to_h { |type| [type, types.include?(type) ? @hooks[type] : []] }
-            yield
-          end
-        ensure
-          @suppressed = outer
-        end
-      end
-
-      # True while a with_only leaves this type out, so a caller can tell an
-      # empty registry from one that was emptied for it.
-      def suppressed?(type) = @suppressed.include?(type)
 
       # ====== Registration ======
 
@@ -175,9 +137,11 @@ module Busybee
       def matching_hooks(type, target)
         hooks_for(type).select { |hook| Filters.matches?(hook, target) }
       end
+
+      # Registrations by type. Private, and the seam Busybee::Testing scopes it through.
+      attr_accessor :registry
     end
 
-    reset!
-    @suppressed = [].freeze
+    self.registry = HOOK_TYPES.to_h { |type| [type, []] }
   end
 end

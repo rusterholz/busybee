@@ -3,6 +3,7 @@
 require "busybee/client/call"
 require "busybee/hooks"
 require "busybee/job"
+require "busybee/testing/hook_registry"
 require "busybee/testing/runner"
 require "busybee/worker/status"
 
@@ -58,9 +59,9 @@ module Busybee
           end
 
           def refuse_silenced!(type)
-            return unless Hooks.hooks_for(type).empty? && Hooks.suppressed?(type)
+            return unless Hooks.hooks_for(type).empty? && HookRegistry.suppressed?(type)
 
-            raise ArgumentError, "every #{type} hook is suppressed here by without_hooks (or Hooks.with_only), " \
+            raise ArgumentError, "every #{type} hook is suppressed here by without_hooks, " \
                                  "so fire_hooks would run nothing. Fire it outside the suppression, " \
                                  "or set `without_hooks: []` on this example"
           end

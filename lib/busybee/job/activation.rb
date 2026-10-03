@@ -52,7 +52,7 @@ module Busybee
       private
 
       def validate_source!(source)
-        return if source.nil? || VALID_SOURCES.include?(source) # nil: no transport, as under Testing::Runner
+        return if source.nil? || VALID_SOURCES.include?(source) # nil: no transport delivered the job
 
         raise ArgumentError, "Invalid source: #{source.inspect}. Must be one of #{VALID_SOURCES.inspect}"
       end

@@ -13,8 +13,7 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
   let(:seen) { [] }
 
   around do |example|
-    Busybee::Hooks.isolated do
-      Busybee::Hooks.reset!
+    with_isolated_hooks do
       example.run
     end
   end

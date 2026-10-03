@@ -15,8 +15,7 @@ RSpec.describe Busybee::Testing::Runner do
   let(:fired) { [] }
 
   around do |example|
-    Busybee::Hooks.isolated do
-      Busybee::Hooks.reset!
+    with_isolated_hooks do
       observe_every_moment
       example.run
     end

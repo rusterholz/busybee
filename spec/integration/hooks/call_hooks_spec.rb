@@ -27,7 +27,6 @@ RSpec.describe "Call hooks", :integration do
   end
 
   before do
-    Busybee::Hooks.reset!
     Busybee.before_call { |call| fired[:before] << snapshot(call) }
     Busybee.after_call  { |call| fired[:after]  << snapshot(call) }
     Busybee.around_call do |call, continue|
@@ -36,7 +35,7 @@ RSpec.describe "Call hooks", :integration do
     end
   end
 
-  after { Busybee::Hooks.reset! }
+  around { |example| with_isolated_hooks { example.run } }
 
   it "brackets a successful op with before/around/after_call" do
     client.deploy_process(job_bpmn_path)

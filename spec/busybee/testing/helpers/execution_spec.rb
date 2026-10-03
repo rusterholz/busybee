@@ -69,8 +69,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
       let(:fired) { [] }
 
       around do |example|
-        Busybee::Hooks.isolated do
-          Busybee::Hooks.reset!
+        with_isolated_hooks do
           %i[on_worker_started on_job_activated after_perform after_call on_worker_shutdown].each do |type|
             Busybee::Hooks.register(type, ->(_) { fired << type })
           end

@@ -52,7 +52,7 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
   end
 
   describe "#build_test_client" do
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "is a real Busybee::Client" do
       expect(build_test_client).to be_a(Busybee::Client)
@@ -114,7 +114,7 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
   end
 
   describe "#build_test_job" do
-    after { Busybee::Hooks.reset! }
+    around { |example| with_isolated_hooks { example.run } }
 
     it "returns a Busybee::Job" do
       job = build_test_job

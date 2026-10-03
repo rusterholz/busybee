@@ -2,6 +2,7 @@
 
 require "busybee/client/call"
 require "busybee/testing/client"
+require "busybee/testing/hook_registry"
 require "busybee/testing/runner"
 require "busybee/worker/status"
 require "busybee/worker/timestamps"
@@ -87,7 +88,7 @@ module Busybee
                                        bpmn_process_id: bpmn_process_id, element_id: element_id,
                                        retries: retries, worker: worker, tenant_id: tenant_id)
           job = Busybee::Job.new(raw_job, client: client || build_test_client)
-          Busybee::Hooks.with_only do # a fixture must not fire the hooks under test
+          HookRegistry.with_only do # a fixture must not fire the hooks under test
             job.set_context(worker_class: worker_class, worker_status: worker_status,
                             source: source, buffered: buffered)
             job.timestamps.stamp!(:activated_at) if activated
