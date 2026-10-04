@@ -31,7 +31,9 @@ Busybee is built around a workflow engine named [Zeebe](https://docs.camunda.io/
 - [Testing Workers](#testing-workers)
   - [Setup](#setup)
   - [Basic Worker Testing](#basic-worker-testing)
-  - [Inspecting Job State](#inspecting-job-state)
+  - [Passing Your Own Jobs](#passing-your-own-jobs)
+  - [Which Hooks Fire](#which-hooks-fire)
+  - [Holding the Worker Open](#holding-the-worker-open)
   - [Worker Testing Matchers](#worker-testing-matchers)
   - [Testing Best Practices](#testing-best-practices)
 
@@ -135,7 +137,7 @@ end
 
 #### Reporting Failures Your Own Way
 
-Automatic failure is not something you switch off. Every exception that escapes `perform` is reported to the workflow engine, and that is deliberate: an unreported failure leaves the job silently unresolved, and since a lease expiring doesn't consume a retry, the engine keeps handing the job back without ever raising an incident for anyone to notice. A job that fails the same way every time would loop indefinitely and never appear in Operate.
+Automatic failure is not something you switch off. Every exception that escapes `perform` is reported to the workflow engine.
 
 What you can change is *what gets reported*. Rescue inside `perform` and resolve the job the way you want it resolved:
 
@@ -160,9 +162,9 @@ class ProcessPaymentWorker < Busybee::Worker
 end
 ```
 
-Anything your rescue doesn't catch is still reported for you — which is the point. The errors you didn't anticipate are the ones most worth seeing.
+Anything your rescue doesn't catch is still reported for you.
 
-Two neighbouring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker — redacting sensitive text out of error messages, say — reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
+Two neighboring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker — redacting sensitive text out of error messages, say — reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
 
 #### Manual Lifecycle Control
 
@@ -488,7 +490,9 @@ end
 
 > See the [Dropship Co. demo app's simulation workers](../spec/demo/app/workers/sim/) for a full example of this pattern.
 
-Note that this switches off automatic *completion* only. If `perform` raises, the job is still failed and reported — which is what you want, because at that point nothing else is going to resolve it.
+Note that this switches off automatic *completion* only. If `perform` raises, the job is still failed and reported.
+
+A job you never resolve is not failed for you. When its lease expires the engine hands it out again, without spending a retry or raising an incident, so a job that is never resolved can loop unseen. Make sure every path through your code resolves it.
 
 #### `description`
 
@@ -622,7 +626,7 @@ If you don't have Rails installed, loading the environment will be skipped autom
 BUSYBEE_SKIP_RAILS=1 bundle exec busybee MyWorker
 ```
 
-(Using an env var is necessary because the decision to attempt loading the environment must be made before we could load any configuration values from that environment.)
+(This one can't be set through Rails configuration, since the CLI decides whether to load Rails before that configuration exists.)
 
 ### Signal Handling
 
@@ -758,7 +762,7 @@ Jobs of the *same* type are always processed sequentially. That is, only one ins
 
 #### When One Worker Fails
 
-**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. This is deliberate: a process with one dead worker class is silently doing part of its job, which is worse to operate than a process that's plainly gone. Every worker's `on_worker_shutdown` fires with the crash's reason — so a container of five workers produces five shutdown events, one of which carries the error.
+**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. Every worker's `on_worker_shutdown` fires with the crash's reason — so a container of five workers produces five shutdown events, one of which carries the error.
 
 How hard the shutdown is depends on what went wrong. An ordinary error leaves the process healthy enough to be polite, so each worker drains: jobs in hand go back to the engine promptly and are picked up by whoever replaces you. Something the process can't recover from — `NoMemoryError`, `SystemStackError` — skips the drain, because the calls a graceful shutdown makes are exactly the ones about to fail again. Those jobs come back to the engine the slower way, when their activation times out.
 
@@ -849,7 +853,7 @@ The first non-nil value wins. This means `0` and `false` are valid explicit valu
 
 The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
-**Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process. Also, they often take env vars as their inputs, so they are less useful in YAML.
+**Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
 
@@ -873,19 +877,21 @@ require "rspec"
 require "busybee/testing"
 ```
 
-This makes `execute_worker`, `build_test_job`, and the worker matchers available in all RSpec examples.
+This makes `execute_worker`, the `build_test_*` builders, `without_busybee_hooks`, and the worker matchers available in all RSpec examples.
 
 ### Basic Worker Testing
 
-The simplest way to test a worker is `execute_worker`. It runs the full worker lifecycle (input validation, `perform`, output validation, auto-complete) and returns the result:
+The simplest way to test a worker is `execute_worker`. It runs your worker the way a running worker process does: the worker starts, the job is activated and executed (input validation, `perform`, output validation, auto-complete), and the worker shuts down. It hands you back the job, carrying everything that happened to it:
 
 ```ruby
 RSpec.describe ProcessOrderWorker do
   let(:order) { create(:order) }
 
-  it "processes the order and returns confirmation number" do
-    result = execute_worker(described_class, variables: { order_id: order.id })
-    expect(result[:confirmation_number]).to be_present
+  it "processes the order and returns a confirmation number" do
+    job = execute_worker(described_class, variables: { order_id: order.id })
+
+    expect(job).to be_complete
+    expect(job.result[:confirmation_number]).to be_present
   end
 
   it "marks the order as processed" do
@@ -893,47 +899,131 @@ RSpec.describe ProcessOrderWorker do
     expect(order.reload).to be_processed
   end
 
-  it "raises when order is missing" do
-    expect {
-      execute_worker(described_class, variables: { order_id: "nonexistent" })
-    }.to raise_error(ActiveRecord::RecordNotFound)
+  it "fails the job when the order is missing" do
+    job = execute_worker(described_class, variables: { order_id: "nonexistent" })
+
+    expect(job).to be_failed
+    expect(job.error).to be_a(ActiveRecord::RecordNotFound)
   end
 end
 ```
 
-`execute_worker` accepts the same keyword arguments as `build_test_job`:
+Keyword arguments go to `build_test_job`, which builds one job of your worker's type from them: `variables:`, `headers:`, `bpmn_process_id:`, `retries:`, and the rest. `job.result` is what your worker completed the job with, which is what the engine receives. A job that fails keeps its error on `job.error`; nothing is re-raised into your example.
 
-| Argument | Type | Default | Description |
-|----------|------|---------|-------------|
-| `variables:` | Hash | `{}` | Process variables |
-| `headers:` | Hash | `{}` | Custom headers |
-| `bpmn_process_id:` | String | `"test-process"` | BPMN process ID |
-| `retries:` | Integer | `3` | Retry count |
+### Passing Your Own Jobs
 
-Errors are re-raised after the worker's error handling runs, so you can use `expect { }.to raise_error` alongside job status assertions (see below).
-
-### Inspecting Job State
-
-When you need to assert on what the worker *did* to the job (completed it? failed it? threw a BPMN error?), or if you need so many variables or headers that passing all options inline becomes unreadable, you can build a test job first with `build_test_job` and then pass it to `execute_worker`:
+When you need so many variables or headers that passing them inline becomes unreadable, or you want to run several jobs through one worker, build them first and pass them in. `execute_worker` hands back what you gave it:
 
 ```ruby
-RSpec.describe ProcessOrderWorker do
-  it "completes the job on success" do
-    job = build_test_job(variables: { order_id: create(:order).id })
-    execute_worker(described_class, job: job)
-    expect(job).to be_complete
+job = build_test_job(variables: { order_id: create(:order).id })
+execute_worker(ProcessOrderWorker, job: job)   # => job
+expect(job).to be_complete
+
+client = build_test_client
+jobs = Array.new(3) { build_test_job(client: client, variables: { order_id: create(:order).id }) }
+execute_worker(ProcessOrderWorker, jobs: jobs) # => jobs, run in order
+```
+
+Jobs run by one worker go through one client, so build a batch on a shared `build_test_client`. Pass exactly one of `job:`, `jobs:`, or `build_test_job` keywords.
+
+### Which Hooks Fire
+
+Every [hook](hooks.md) you register fires under `execute_worker`, at every level: the worker's own lifecycle, each job's lifecycle, the `perform` hooks, and the call hooks for every call the job makes. That is what lets you test them. When a spec is about your worker's logic and your monitoring hooks would only get in the way, subtract them with `without_busybee_hooks`, naming the word in the hooks' names:
+
+```ruby
+without_busybee_hooks(:worker, :call) do
+  execute_worker(ProcessOrderWorker, variables: { order_id: order.id })
+end
+```
+
+The words are `:perform`, `:job`, `:worker` and `:call`, plus `:all`. Blocks nest, and whatever you name stays silenced until the block ends.
+
+To subtract for a whole file or group, use metadata instead. The innermost setting wins, so an example can restore everything with an empty list:
+
+```ruby
+RSpec.describe ProcessOrderWorker, without_busybee_hooks: %i[job worker call] do
+  it "fires only the perform hooks" do
+    # ...
   end
 
-  it "fails the job on error" do
-    job = build_test_job(variables: { order_id: "nonexistent" })
-    expect { execute_worker(described_class, job: job) }
-      .to raise_error(ActiveRecord::RecordNotFound)
-    expect(job).to be_failed
+  it "fires everything", without_busybee_hooks: [] do
+    # ...
+  end
+end
+
+# Or for every worker spec, in rails_helper.rb:
+RSpec.configure do |config|
+  config.define_derived_metadata(file_path: %r{/spec/workers/}) do |metadata|
+    metadata[:without_busybee_hooks] ||= %i[job worker call]
   end
 end
 ```
 
-`build_test_job` returns a real `Busybee::Job` backed by a stub client. All lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) update the job's status but don't make any network calls.
+`without_busybee_hooks(:job, :worker, :call)` keeps your `before_perform` / `around_perform` / `after_perform` hooks in the run, so middleware such as a transaction around `perform` still applies.
+
+To put a hook under test on its own, without running a worker, fire its moment with `fire_busybee_hooks`; see [Testing Your Hooks](hooks.md#testing-your-hooks).
+
+### Holding the Worker Open
+
+To test the worker lifecycle itself, build the worker yourself. `build_test_worker` fires nothing; `start` fires `on_worker_started`; `stop!` fires the three closing moments. In between, `execute_worker` runs jobs through it without touching the worker's own hooks:
+
+```ruby
+worker = start_test_worker(ProcessOrderWorker)   # build_test_worker(...).start
+execute_worker(worker, variables: { order_id: order.id })
+expect(MyMonitor.status_of(ProcessOrderWorker)).to eq(:running)
+
+worker.stop!
+expect(MyMonitor.status_of(ProcessOrderWorker)).to eq(:shutdown)
+```
+
+Jobs you build for a held worker must use its client: `build_test_job(client: worker.client)`. The test worker has no transport behind it, so it reports no `worker_mode`, its jobs no `source`, and a hook filtered on either doesn't fire.
+
+`build_test_job` returns a real `Busybee::Job` — a genuine `ActivatedJob` protobuf, so it validates its own field types — backed by a real client whose transport is in-process. Lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) run the full client path and touch no network.
+
+Because the client is real rather than a double, your **call hooks fire** whenever the job makes a call, even outside `execute_worker`:
+
+```ruby
+it "records the completion" do
+  client = build_test_client
+  job = build_test_job(key: 4242, client: client)
+
+  job.complete!(status: "shipped")
+
+  expect(client.received(:complete_job).map(&:jobKey)).to eq([4242])
+end
+```
+
+#### Building the other carriers
+
+Hooks receive a `Worker::Status` or a `Client::Call` rather than a `Job`, and those have builders too. Each builds what production builds, so the projections a hook reads (`context_tags`, `logging_context`) are *computed* — a hand-written double would freeze your belief about them into the assertion and stay green when the contract moved.
+
+```ruby
+status = build_test_worker_status(worker_class: ShipOrderWorker, total_job_count: 7)
+call   = build_test_call(:complete_job, job: build_test_job(key: 42))
+```
+
+`build_test_job` also composes with them, and can hand back a job that already resolved:
+
+```ruby
+job = build_test_job(worker_class: ShipOrderWorker, worker_status: status,
+                     source: :stream, buffered: true, status: :complete)
+```
+
+Fixture construction never fires your hooks, so building one of these cannot pollute what the example is about to observe.
+
+#### Programming failures
+
+`build_test_client` takes a handler per RPC. The block **is** the handler, so return a response message for success and raise a `GRPC::BadStatus` subclass for a failure:
+
+```ruby
+it "copes when the broker rejects the completion" do
+  client = build_test_client
+  client.on(:complete_job) { raise GRPC::Internal, "storage unavailable" }
+
+  job = build_test_job(client: client)
+  # ...
+end
+```
 
 ### Worker Testing Matchers
 

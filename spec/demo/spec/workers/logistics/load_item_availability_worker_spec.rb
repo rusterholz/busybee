@@ -9,7 +9,7 @@ RSpec.describe Logistics::LoadItemAvailabilityWorker do
     Logistics::StockItem.create!(warehouse: wh1, item_type: "widget", quantity: 10)
     Logistics::StockItem.create!(warehouse: wh2, item_type: "widget", quantity: 0)
 
-    result = execute_worker(described_class, variables: { item_type: "widget" })
+    result = execute_worker(described_class, variables: { item_type: "widget" }).result
 
     expect(result[:warehouse_ids]).to eq([wh1.id])
   end

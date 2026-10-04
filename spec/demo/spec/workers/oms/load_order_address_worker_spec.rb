@@ -9,7 +9,7 @@ RSpec.describe Oms::LoadOrderAddressWorker do
       state: "CA", zip: "90210", lat: 3.5, lon: -7.2
     )
 
-    result = execute_worker(described_class, variables: { order_id: order.id })
+    result = execute_worker(described_class, variables: { order_id: order.id }).result
 
     # job.result is a frozen HashWithIndifferentAccess, so it reads back string-keyed.
     expect(result).to eq("lat" => 3.5, "lon" => -7.2)

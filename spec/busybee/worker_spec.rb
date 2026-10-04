@@ -37,7 +37,7 @@ RSpec.describe Busybee::Worker do
   describe "error policy invariance (perform lifecycle)" do
     before { allow(client).to receive(:fail_job) }
 
-    after { Busybee::Hooks.reset! }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     # A fresh job per turn. Autofail reports every escaping error now, so a
     # shared job would arrive at the second turn already resolved and the two
@@ -625,7 +625,7 @@ RSpec.describe Busybee::Worker do
 
   describe "ambient job context (.perform_job)" do
     before { allow(client).to receive(:complete_job) }
-    after { Busybee::Hooks.reset! }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "seeds the job so a Call built inside perform folds it" do
       captured_call = nil
@@ -887,7 +887,7 @@ RSpec.describe Busybee::Worker do
       allow(client).to receive(:throw_bpmn_error)
     end
 
-    after { Busybee::Hooks.reset! }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     describe "timestamps" do
       it "stamps execution_started_at during perform_job" do

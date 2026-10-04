@@ -29,7 +29,7 @@ module Busybee
 
       # Filter keys per noun, as [domain, vocabulary]. A nil vocabulary is an
       # open one — job types, process ids, worker classes and stop reasons are
-      # all minted by the adopter, so only the domain can be checked.
+      # all supplied by the adopter, so only the domain can be checked.
       FILTERS = {
         job: {
           job_type: [:name], worker_class: [:class], status: [:name, JOB_STATUSES],

@@ -46,7 +46,6 @@ RSpec.describe "Worker lifecycle hooks", :integration do
   end
 
   before do
-    Busybee::Hooks.reset!
     worker_hook_types.each do |type|
       moment = type.to_s.delete_prefix("on_worker_").to_sym
       Busybee.public_send(type) { |worker| fired[moment] = worker }
@@ -56,7 +55,7 @@ RSpec.describe "Worker lifecycle hooks", :integration do
     client.deploy_process(job_bpmn_path)
   end
 
-  after { Busybee::Hooks.reset! }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   it "fires all four lifecycle moments, each with a Worker::Status" do
     run_one_job

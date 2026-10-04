@@ -2,7 +2,8 @@
 
 require "rspec/expectations"
 
-# Asserts that a worker fails the job with an optional error match.
+# Asserts that a worker fails the job, optionally matching the error it failed with.
+# Runs the worker through {Busybee::Testing::Helpers::Execution#execute_worker}.
 #
 # Accepts the same argument forms as RSpec's +raise_error+:
 #   with_error(ErrorClass)
@@ -24,17 +25,12 @@ require "rspec/expectations"
 RSpec::Matchers.define :fail_job do |job|
   match do |worker_class|
     execute_worker(worker_class, job: job)
-    @no_error = true
-    false
-  rescue StandardError => e
-    @raised_error = e
-    job.failed? && error_matches?(e)
+    job.failed? && error_matches?
   end
 
   chain :with_error do |expected_error_or_message, expected_message = nil|
     case expected_error_or_message
     when String, Regexp
-      @expected_error = StandardError
       @expected_message = expected_error_or_message
     else
       @expected_error = expected_error_or_message
@@ -42,34 +38,32 @@ RSpec::Matchers.define :fail_job do |job|
     end
   end
 
-  def error_matches?(error)
-    return true unless @expected_error
-
-    class_matches = @expected_error === error
-    return false unless class_matches
+  def error_matches?
+    return false if @expected_error && !(@expected_error === expected.error)
     return true unless @expected_message
 
     case @expected_message
-    when Regexp then error.message.match?(@expected_message)
-    else error.message == @expected_message.to_s
+    when Regexp then expected.error_message.to_s.match?(@expected_message)
+    else expected.error_message == @expected_message.to_s
     end
   end
 
   failure_message do
-    if @no_error
+    if job.complete? && job.error.nil?
       "expected #{actual} to fail the job, but it completed successfully"
     elsif !job.failed?
       "expected job to be failed, but was #{job.status}"
     else
-      "expected error matching #{expected_description}, " \
-        "got #{@raised_error.class}: #{@raised_error.message}"
+      "expected error matching #{expected_description}, got #{actual_description}"
     end
   end
 
   def expected_description
-    parts = []
-    parts << @expected_error.inspect if @expected_error
-    parts << @expected_message.inspect if @expected_message
-    parts.join(" with message ")
+    [@expected_error&.inspect, @expected_message&.inspect].compact.join(" with message ")
+  end
+
+  def actual_description
+    error = expected.error
+    error ? "#{error.class}: #{error.message}" : expected.error_message.inspect
   end
 end

@@ -37,7 +37,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
   let(:runner) { runner_class.new(worker_class, runtime_config: runtime_config, client: client) }
   let(:events) { Concurrent::Array.new }
 
-  after { Busybee::Hooks.reset! }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   def record_all_lifecycle_hooks
     %i[on_worker_started on_worker_stop_requested on_worker_stopping on_worker_shutdown].each do |type|
@@ -340,9 +340,10 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     # The wedge is worse than a stale predicate: @running never clears, so the
     # next run! loses start!'s compare-and-set and returns having done nothing.
     it "leaves the runner able to run again" do
-      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
-      runner.run!
-      Busybee::Hooks.reset!
+      isolate_busybee_hooks do
+        Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+        runner.run!
+      end
 
       entered = false
       runner.test_run_loop = -> { entered = true }

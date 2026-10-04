@@ -27,6 +27,26 @@ RSpec.configure do |config|
     c.syntax = :expect
   end
 
+  # Run the recorder's writes inline. It normally offloads them to a background
+  # thread, whose own connection sits outside the example's transaction — so a
+  # hook firing mid-example would commit rows that survive the rollback and leak
+  # into later examples. Specs that exercise the writer itself opt back out with
+  # and_call_original.
+  config.before do
+    allow(Monitoring::Recorder).to receive(:executor).and_return(Concurrent::ImmediateExecutor.new)
+  end
+
+  # A worker spec asks "does my code do the right thing?", where busybee is
+  # scenery. execute_worker fires every hook level, so the app's monitoring hooks
+  # would otherwise write rows during one — and an async worker resolves on a
+  # background thread, whose connection sits outside the transaction, committing
+  # rows that outlive the example. Keep only the perform hooks, which is what a
+  # worker spec is about; the domain transactions still wrap perform, because
+  # they are registered there.
+  config.define_derived_metadata(file_path: %r{/spec/workers/}) do |metadata|
+    metadata[:without_busybee_hooks] ||= %i[job worker call]
+  end
+
   # Wrap each example in a transaction per database for isolation. Each domain
   # has its own connection, so a single ActiveRecord::Base transaction would roll
   # back only one of them; nest a rolled-back transaction on each domain base.

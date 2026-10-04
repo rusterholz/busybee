@@ -93,6 +93,13 @@ RSpec.describe Busybee::Job::Activation do
       expect(activation.source).to eq(:stream)
     end
 
+    it "accepts nil: a job activated with no transport behind it" do
+      activation.harvest!(source: nil)
+
+      expect(activation.source).to be_nil
+      expect(activation.context_tags).not_to have_key(:source)
+    end
+
     it "raises on unknown source values" do
       expect { activation.harvest!(source: :unknown) }.
         to raise_error(ArgumentError, /Invalid source/)

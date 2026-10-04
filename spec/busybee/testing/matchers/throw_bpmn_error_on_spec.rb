@@ -72,6 +72,14 @@ RSpec.describe "throw_bpmn_error_on matcher" do
     end
   end
 
+  it "sends the throw through the real client, so it reaches the wire" do
+    client = build_test_client
+    job = build_test_job(client: client)
+
+    expect(bpmn_error_worker).to throw_bpmn_error_on(job)
+    expect(client.received(:throw_error).map(&:errorCode)).to eq(["NOT_FOUND"])
+  end
+
   describe ".with_code chain" do
     it "passes when the error code matches" do
       job = build_test_job

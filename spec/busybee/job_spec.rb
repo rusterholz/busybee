@@ -856,7 +856,7 @@ RSpec.describe Busybee::Job do
     # methods invoke no hook callbacks themselves, so they also cannot
     # raise Busybee::Worker::Shutdown even with a shutdown_on-classed
     # after_perform hook registered.
-    after { Busybee::Hooks.reset! }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "#complete! does not fire after_perform" do
       allow(client).to receive(:complete_job)

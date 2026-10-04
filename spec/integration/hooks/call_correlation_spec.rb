@@ -40,7 +40,6 @@ RSpec.describe "Call correlation folding", :integration do
   end
 
   before do
-    Busybee::Hooks.reset!
     Busybee.after_call(rpc: :complete_job) do |call|
       folded[:tags] = call.context_tags
       folded[:log] = call.logging_context
@@ -48,7 +47,7 @@ RSpec.describe "Call correlation folding", :integration do
     client.deploy_process(job_bpmn_path)
   end
 
-  after { Busybee::Hooks.reset! }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   it "folds curated worker + job identity into the tags, without lifecycle telemetry" do
     run_one_job

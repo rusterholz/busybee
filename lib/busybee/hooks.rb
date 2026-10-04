@@ -38,12 +38,7 @@ module Busybee
           raise ArgumentError, "Unknown hook type: #{type.inspect}. Expected one of: #{HOOK_TYPES.join(', ')}"
         end
 
-        @hooks[type]
-      end
-
-      # Clear all registered hooks. Intended for test isolation.
-      def reset!
-        @hooks = HOOK_TYPES.to_h { |type| [type, []] }
+        registry[type]
       end
 
       # ====== Registration ======
@@ -142,8 +137,11 @@ module Busybee
       def matching_hooks(type, target)
         hooks_for(type).select { |hook| Filters.matches?(hook, target) }
       end
+
+      # Registrations by type. Private, and the seam Busybee::Testing scopes it through.
+      attr_accessor :registry
     end
 
-    reset!
+    self.registry = HOOK_TYPES.to_h { |type| [type, []] }
   end
 end

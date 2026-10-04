@@ -22,5 +22,10 @@ if defined?(RSpec)
 
   RSpec.configure do |config|
     config.include Busybee::Testing::Helpers
+
+    # `without_busybee_hooks: [:worker, :call]` on a group or example; innermost wins.
+    config.around(:example, :without_busybee_hooks) do |example|
+      without_busybee_hooks(*example.metadata[:without_busybee_hooks]) { example.run }
+    end
   end
 end
