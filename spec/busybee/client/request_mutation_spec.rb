@@ -6,7 +6,7 @@
 RSpec.describe "mutating a request on its way to the wire", :gateway do # rubocop:disable RSpec/DescribeClass
   let(:client) { gateway.client }
 
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   describe "before_call" do
     before { gateway.on(:fail_job) { Busybee::GRPC::FailJobResponse.new } }

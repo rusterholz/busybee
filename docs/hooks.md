@@ -224,7 +224,7 @@ A filter key belongs to a subject, but what the carrier can *hold* depends on wh
 
 **The around-hooks are the ones that surprise people.** Filters are evaluated when busybee *selects* which hooks to run, which for an around-hook is before its block is entered — so an `around_call` sees a pending call, never a succeeded one. To act on an outcome, filter the matching `after_` hook, or branch on the carrier inside your block.
 
-Three keys have **open** vocabularies and are only shape-checked: `job_type:` and `bpmn_process_id:` are yours, and so is `reason:` — the [stop reasons](#stop-reasons) busybee mints are a documented set, but `runner.stop!(reason: :rollover)` lets you mint your own, and you can filter on those too.
+Three keys have **open** vocabularies and are only shape-checked: `job_type:` and `bpmn_process_id:` are yours, and so is `reason:` — the [stop reasons](#stop-reasons) busybee provides are a documented set, but `runner.stop!(reason: :rollover)` lets you supply your own, and you can filter on those too.
 
 ### When a Filter Is Refused
 
@@ -575,7 +575,7 @@ end
 config.after_call { |call| call.request.errorMessage = "too late" } # raises FrozenError
 ```
 
-Because those are observing hooks, the error is logged and swallowed rather than propagated (see [When Hooks Raise](#when-hooks-raise)). To see it fail a spec, fire the hook with [`fire_hooks`](#testing-your-hooks), which lets hook errors through.
+Because those are observing hooks, the error is logged and swallowed rather than propagated (see [When Hooks Raise](#when-hooks-raise)). To see it fail a spec, fire the hook with [`fire_busybee_hooks`](#testing-your-hooks), which lets hook errors through.
 
 **Retries get a fresh copy.** busybee performs its own retries and `around_call` fires once per attempt, so each attempt begins from a writable copy of what the previous one sent. A hook that writes to `call.request` there works on every attempt, not only the first:
 
@@ -751,29 +751,29 @@ The demo app's recorder uses this exact fold to keep its per-job records accurat
 
 `busybee/testing` gives you two ways to put the hooks you register under test, and [Testing Workers](workers.md#testing-workers) covers the worker side in full.
 
-**Fire one moment with `fire_hooks`.** Build the carrier in the state you care about, name the moment, and assert on what your code did. Every hook you registered for that moment whose filters accept the carrier runs, exactly as busybee would run it there, so one example checks both that your filters select the job and that the hook body does the right thing:
+**Fire one moment with `fire_busybee_hooks`.** Build the carrier in the state you care about, name the moment, and assert on what your code did. Every hook you registered for that moment whose filters accept the carrier runs, exactly as busybee would run it there, so one example checks both that your filters select the job and that the hook body does the right thing:
 
 ```ruby
 it "counts failed shipments" do
-  fire_hooks(:on_job_executed, build_test_job(type: "ship_order", status: :failed))
+  fire_busybee_hooks(:on_job_executed, build_test_job(type: "ship_order", status: :failed))
 
   expect(RelicDog.count("shipments.failed")).to eq(1)
 end
 
 it "leaves other job types alone" do
-  fire_hooks(:on_job_executed, build_test_job(type: "send_invoice", status: :failed))
+  fire_busybee_hooks(:on_job_executed, build_test_job(type: "send_invoice", status: :failed))
 
   expect(RelicDog.count("shipments.failed")).to eq(0)
 end
 ```
 
 - The carrier is a `Busybee::Job`, `Busybee::Worker::Status` or `Busybee::Client::Call`, whichever the moment's hooks receive; `build_test_job`, `build_test_worker_status` and `build_test_call` build each. For worker moments you can also pass a test worker from `start_test_worker`, which stands in for its current status. A carrier of the wrong kind raises `ArgumentError`.
-- For an `around_*` moment, the block is what your hook wraps: `fire_hooks(:around_perform, job) { expect(Order.connection.transaction_open?).to be(true) }`.
+- For an `around_*` moment, the block is what your hook wraps: `fire_busybee_hooks(:around_perform, job) { expect(Order.connection.transaction_open?).to be(true) }`.
 - An error your hook raises propagates to the example.
-- It fires only the moment you name, and only your hooks for it. `without_hooks` still applies; if it has silenced the moment entirely, `fire_hooks` raises rather than quietly running nothing.
+- It fires only the moment you name, and only your hooks for it. `without_busybee_hooks` still applies; if it has silenced the moment entirely, `fire_busybee_hooks` raises rather than quietly running nothing.
 
-**Run the whole worker with `execute_worker`.** When the question is about your worker, with your middleware around it, `execute_worker` runs it the way a worker process does and every hook fires in the order shown in [Two Lifecycles, One Naming Rule](#two-lifecycles-one-naming-rule) and [The Four Moments](#the-four-moments). Subtract the ones that aren't the point of the spec with `without_hooks(:job, :worker, :call)`, or the `without_hooks:` metadata for a whole group; your `perform` hooks keep wrapping `perform`. To see what your hooks do when the broker misbehaves, program the call on a `build_test_client`, as in `client.on(:complete_job) { raise GRPC::Unavailable }`, and build the job on that client.
+**Run the whole worker with `execute_worker`.** When the question is about your worker, with your middleware around it, `execute_worker` runs it the way a worker process does and every hook fires in the order shown in [Two Lifecycles, One Naming Rule](#two-lifecycles-one-naming-rule) and [The Four Moments](#the-four-moments). Subtract the ones that aren't the point of the spec with `without_busybee_hooks(:job, :worker, :call)`, or the `without_busybee_hooks:` metadata for a whole group; your `perform` hooks keep wrapping `perform`. To see what your hooks do when the broker misbehaves, program the call on a `build_test_client`, as in `client.on(:complete_job) { raise GRPC::Unavailable }`, and build the job on that client.
 
 ### Test Isolation
 
-Hook registrations are global and survive across examples. `with_isolated_hooks { ... }` puts the registry back when the block ends, so observers registered inside it can't leak into the next example, and `without_hooks` restores whatever it silenced. When a spec needs a registry with nothing in it, `without_hooks(:all) { ... }` empties it, your application's own hooks included; hooks you register inside the block still run, and are gone when it ends.
+Hook registrations are global and survive across examples. `isolate_busybee_hooks { ... }` puts the registry back when the block ends, so observers registered inside it can't leak into the next example, and `without_busybee_hooks` restores whatever it silenced. When a spec needs a registry with nothing in it, `without_busybee_hooks(:all) { ... }` empties it, your application's own hooks included; hooks you register inside the block still run, and are gone when it ends.

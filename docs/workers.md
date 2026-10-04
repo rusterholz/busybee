@@ -877,7 +877,7 @@ require "rspec"
 require "busybee/testing"
 ```
 
-This makes `execute_worker`, the `build_test_*` builders, `without_hooks`, and the worker matchers available in all RSpec examples.
+This makes `execute_worker`, the `build_test_*` builders, `without_busybee_hooks`, and the worker matchers available in all RSpec examples.
 
 ### Basic Worker Testing
 
@@ -928,10 +928,10 @@ Jobs run by one worker go through one client, so build a batch on a shared `buil
 
 ### Which Hooks Fire
 
-Every [hook](hooks.md) you register fires under `execute_worker`, at every level: the worker's own lifecycle, each job's lifecycle, the `perform` hooks, and the call hooks for every call the job makes. That is what lets you test them. When a spec is about your worker's logic and your monitoring hooks would only get in the way, subtract them with `without_hooks`, naming the word in the hooks' names:
+Every [hook](hooks.md) you register fires under `execute_worker`, at every level: the worker's own lifecycle, each job's lifecycle, the `perform` hooks, and the call hooks for every call the job makes. That is what lets you test them. When a spec is about your worker's logic and your monitoring hooks would only get in the way, subtract them with `without_busybee_hooks`, naming the word in the hooks' names:
 
 ```ruby
-without_hooks(:worker, :call) do
+without_busybee_hooks(:worker, :call) do
   execute_worker(ProcessOrderWorker, variables: { order_id: order.id })
 end
 ```
@@ -941,12 +941,12 @@ The words are `:perform`, `:job`, `:worker` and `:call`, plus `:all`. Blocks nes
 To subtract for a whole file or group, use metadata instead. The innermost setting wins, so an example can restore everything with an empty list:
 
 ```ruby
-RSpec.describe ProcessOrderWorker, without_hooks: %i[job worker call] do
+RSpec.describe ProcessOrderWorker, without_busybee_hooks: %i[job worker call] do
   it "fires only the perform hooks" do
     # ...
   end
 
-  it "fires everything", without_hooks: [] do
+  it "fires everything", without_busybee_hooks: [] do
     # ...
   end
 end
@@ -954,14 +954,14 @@ end
 # Or for every worker spec, in rails_helper.rb:
 RSpec.configure do |config|
   config.define_derived_metadata(file_path: %r{/spec/workers/}) do |metadata|
-    metadata[:without_hooks] ||= %i[job worker call]
+    metadata[:without_busybee_hooks] ||= %i[job worker call]
   end
 end
 ```
 
-`without_hooks(:job, :worker, :call)` keeps your `before_perform` / `around_perform` / `after_perform` hooks in the run, so middleware such as a transaction around `perform` still applies.
+`without_busybee_hooks(:job, :worker, :call)` keeps your `before_perform` / `around_perform` / `after_perform` hooks in the run, so middleware such as a transaction around `perform` still applies.
 
-To put a hook under test on its own, without running a worker, fire its moment with `fire_hooks`; see [Testing Your Hooks](hooks.md#testing-your-hooks).
+To put a hook under test on its own, without running a worker, fire its moment with `fire_busybee_hooks`; see [Testing Your Hooks](hooks.md#testing-your-hooks).
 
 ### Holding the Worker Open
 

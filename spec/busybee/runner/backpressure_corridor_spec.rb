@@ -21,7 +21,7 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
 
   let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
 
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   describe "the polling runner" do
     let(:runner) do

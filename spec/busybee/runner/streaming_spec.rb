@@ -167,7 +167,7 @@ RSpec.describe Busybee::Runner::Streaming do
     context "when worker raises Busybee::Worker::Shutdown" do
       let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: worker_class) }
 
-      around { |example| with_isolated_hooks { example.run } }
+      around { |example| isolate_busybee_hooks { example.run } }
 
       it "tags the stop :unhealthy — the worker declared itself down" do
         captured = nil
@@ -477,7 +477,7 @@ RSpec.describe Busybee::Runner::Streaming do
       context "when worker raises Busybee::Worker::Shutdown" do
         let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: queue_worker_class) }
 
-        around { |example| with_isolated_hooks { example.run } }
+        around { |example| isolate_busybee_hooks { example.run } }
 
         it "tags the stop :unhealthy — the worker declared itself down" do
           captured = nil
@@ -513,7 +513,7 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     describe "#stop!" do
-      around { |example| with_isolated_hooks { example.run } }
+      around { |example| isolate_busybee_hooks { example.run } }
 
       it "closes the stream and pushes :stop sentinel" do
         runner.instance_variable_set(:@stream, stream)
@@ -739,7 +739,7 @@ RSpec.describe Busybee::Runner::Streaming do
   end
 
   describe "on_job_activated wiring (inline mode)" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "fires on_job_activated with source: :stream, not buffered (inline)" do
       captured = nil
@@ -772,7 +772,7 @@ RSpec.describe Busybee::Runner::Streaming do
     let(:stream_gate) { Concurrent::Event.new }
 
     before { allow(stream).to receive(:close) { stream_gate.set } }
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "fires on_job_activated with source: :stream, buffered" do
       streamed_job = build_test_job(key: 42, retries: 1)

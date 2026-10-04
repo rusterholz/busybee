@@ -40,7 +40,7 @@ RSpec.shared_examples "a hook-count-invariant error policy" do
   end
 
   it "applies one policy to a hook's own error however many hooks are registered" do
-    alone = with_isolated_hooks do
+    alone = isolate_busybee_hooks do
       register_raising_observer
       outcome_of { exercise { :work } }
     end

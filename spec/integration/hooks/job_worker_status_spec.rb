@@ -42,7 +42,7 @@ RSpec.describe "job.worker_status visibility", :integration do
     client.deploy_process(job_bpmn_path)
   end
 
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   it "exposes a Worker::Status to job hooks at activation and execution" do
     run_one_job

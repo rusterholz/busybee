@@ -14,7 +14,7 @@ RSpec.describe Busybee::Client::Call do
   end
 
   describe "error policy invariance (call lifecycle)" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     def exercise(&work) = described_class.new(:complete_job).attempt(&work)
 
@@ -285,7 +285,7 @@ RSpec.describe Busybee::Client::Call do
   end
 
   describe "#attempt (per-attempt bracket)" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "runs around_call around the gRPC attempt, observing" do
       events = []
@@ -364,7 +364,7 @@ RSpec.describe Busybee::Client::Call do
   end
 
   describe ".with_hooks (logical bracket)" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "fires before_call once at initiation and returns the result on success" do
       fired = []

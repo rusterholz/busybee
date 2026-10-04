@@ -5,7 +5,7 @@ require "busybee/job/activation"
 require "busybee/worker/configuration"
 
 RSpec.describe Busybee::Hooks::Filters do
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   let(:noop) { proc { |_| } }
 

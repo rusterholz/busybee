@@ -4,7 +4,7 @@ require_relative "../rails_helper"
 
 # "When this carrier reaches this moment, what does our hook code do?" — asked of
 # the demo's own registrations in config/initializers/busybee.rb by firing each
-# moment with fire_hooks. A filter with valid vocabulary and a wrong value is
+# moment with fire_busybee_hooks. A filter with valid vocabulary and a wrong value is
 # silently inert forever, and here it shows up as a missing effect: the three
 # transactional around_perform hooks name four literal job types, in a file far
 # from the workers that derive them.
@@ -26,7 +26,7 @@ RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
   def transactions_around_perform(worker_class)
     baseline = domain_records.to_h { |record| [record, record.connection.open_transactions] }
     opened = {}
-    fire_hooks(:around_perform, job_for(worker_class)) do
+    fire_busybee_hooks(:around_perform, job_for(worker_class)) do
       domain_records.each do |record|
         depth = record.connection.open_transactions - baseline[record]
         opened[record] = depth if depth.positive?
@@ -68,7 +68,7 @@ RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
     before { allow(Sim::RolloverPolicy).to receive(:roll).and_return(0.5) }
 
     def rolls_over?(worker_class)
-      fire_hooks(:around_perform, job_for(worker_class))
+      fire_busybee_hooks(:around_perform, job_for(worker_class))
       false
     rescue Sim::Rollover
       true
@@ -86,18 +86,18 @@ RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
     it "opens a job's run on activation and closes it on execution" do
       job = job_for(Delivery::CalculateDistanceWorker, key: 6100, status: :complete)
 
-      fire_hooks(:on_job_activated, job)
+      fire_busybee_hooks(:on_job_activated, job)
       expect(Monitoring::JobRun.find_by(job_key: 6100)).to have_attributes(lifecycle_rank: 0)
 
-      fire_hooks(:on_job_executed, job)
+      fire_busybee_hooks(:on_job_executed, job)
       expect(Monitoring::JobRun.find_by(job_key: 6100)).to have_attributes(lifecycle_rank: 1, status: "complete")
     end
 
     it "closes a handed-back job's run too, so the bracket always closes" do
       job = job_for(Delivery::CalculateDistanceWorker, key: 6200)
 
-      fire_hooks(:on_job_activated, job)
-      fire_hooks(:on_job_not_executed, job)
+      fire_busybee_hooks(:on_job_activated, job)
+      fire_busybee_hooks(:on_job_not_executed, job)
 
       expect(Monitoring::JobRun.find_by(job_key: 6200)).to have_attributes(lifecycle_rank: 1, status: "ready")
     end
@@ -107,7 +107,7 @@ RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
       row = -> { Monitoring::WorkerProcess.find_by(worker_name: Busybee.worker_name, job_type: "calculate_distance") }
 
       phases = %i[on_worker_started on_worker_stop_requested on_worker_stopping on_worker_shutdown].map do |moment|
-        fire_hooks(moment, worker)
+        fire_busybee_hooks(moment, worker)
         row.call.status
       end
 
@@ -117,7 +117,7 @@ RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
     it "records each call against the job it was made for" do
       job = job_for(Delivery::CalculateDistanceWorker, key: 6300)
 
-      fire_hooks(:after_call, build_test_call(:complete_job, job: job))
+      fire_busybee_hooks(:after_call, build_test_call(:complete_job, job: job))
 
       expect(Monitoring::EngineCall.for_job(6300).pluck(:rpc)).to eq(%w[complete_job])
     end

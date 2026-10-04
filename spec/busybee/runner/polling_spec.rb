@@ -146,7 +146,7 @@ RSpec.describe Busybee::Runner::Polling do
       let(:cause) { RuntimeError.new("DB connection lost") }
       let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: worker_class) }
 
-      around { |example| with_isolated_hooks { example.run } }
+      around { |example| isolate_busybee_hooks { example.run } }
 
       it "tags the stop :unhealthy — the worker declared itself down" do
         captured = nil
@@ -365,7 +365,7 @@ RSpec.describe Busybee::Runner::Polling do
   end
 
   describe "on_job_activated wiring" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "fires on_job_activated with source: :poll, not buffered" do
       captured = nil
@@ -408,7 +408,7 @@ RSpec.describe Busybee::Runner::Polling do
   end
 
   describe "around_job_execution wiring" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "fires around_job_execution around perform_job during run!" do
       fired = false

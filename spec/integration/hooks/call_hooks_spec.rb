@@ -35,7 +35,7 @@ RSpec.describe "Call hooks", :integration do
     end
   end
 
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   it "brackets a successful op with before/around/after_call" do
     client.deploy_process(job_bpmn_path)

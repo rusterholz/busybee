@@ -200,7 +200,7 @@ end
 
 **Direct pattern** (for client interaction testing): builds the job on a `build_test_client`, runs it with `execute_worker`, and reads what reached the wire back off the client (e.g., `client.received(:publish_message)`). See `complete_driver_delivery_worker_spec.rb` for an example.
 
-Worker specs (`spec/workers/`) run with `without_hooks: %i[job worker call]` metadata, set in `rails_helper.rb`, so the demo's monitoring hooks stay out of them and only the `perform` hooks (the domain transactions) fire.
+Worker specs (`spec/workers/`) run with `without_busybee_hooks: %i[job worker call]` metadata, set in `rails_helper.rb`, so the demo's monitoring hooks stay out of them and only the `perform` hooks (the domain transactions) fire.
 
 ## Creating Orders Programmatically
 

@@ -24,7 +24,7 @@ RSpec.describe Monitoring::Recorder do
   def completed_job(key:, **attrs)
     activated_job(key: key, **attrs).tap do |job|
       job.timestamps.stamp!(:execution_started_at)
-      without_hooks(:all) { job.complete!({}) }
+      without_busybee_hooks(:all) { job.complete!({}) }
       job.timestamps.stamp!(:executed_at)
     end
   end

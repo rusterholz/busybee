@@ -7,7 +7,7 @@ RSpec.describe "making a client call from inside a hook", :gateway do # rubocop:
 
   before { gateway.on(:complete_job) { Busybee::GRPC::CompleteJobResponse.new } }
 
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   describe "from a call hook — refused" do
     # Left unguarded this recurses through run_hooked → with_hooks → the same

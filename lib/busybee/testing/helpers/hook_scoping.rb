@@ -11,14 +11,14 @@ module Busybee
       # that word in their name.
       #
       # @example A worker spec that shouldn't write monitoring rows
-      #   without_hooks(:job, :worker, :call) { execute_worker(MyWorker, job: job) }
+      #   without_busybee_hooks(:job, :worker, :call) { execute_worker(MyWorker, job: job) }
       module HookScoping
         WORDS = %i[perform job worker call all].freeze
 
         # @param words [Array<Symbol>] any of :perform, :job, :worker, :call, or :all
         # @return [Object] the block's value
         # @raise [ArgumentError] on an unknown word, before anything is suppressed
-        def without_hooks(*words, &)
+        def without_busybee_hooks(*words, &)
           unknown = words - WORDS
           if unknown.any?
             raise ArgumentError, "Unknown hook word(s) #{unknown.map(&:inspect).join(', ')}. " \
@@ -29,7 +29,7 @@ module Busybee
         end
 
         # Hooks registered inside the block are discarded when it ends.
-        def with_isolated_hooks(&) = HookRegistry.isolated(&)
+        def isolate_busybee_hooks(&) = HookRegistry.isolated(&)
 
         # Kept off the example's namespace, which every helper here shares.
         def self.named_by?(type, words) = words.include?(:all) || type.to_s.split("_").intersect?(words.map(&:to_s))

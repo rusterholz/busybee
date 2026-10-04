@@ -55,7 +55,7 @@ RSpec.describe "Worker lifecycle hooks", :integration do
     client.deploy_process(job_bpmn_path)
   end
 
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   it "fires all four lifecycle moments, each with a Worker::Status" do
     run_one_job

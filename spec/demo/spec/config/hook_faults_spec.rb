@@ -15,7 +15,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
   let(:observed) { [] }
 
   around do |example|
-    with_isolated_hooks do
+    isolate_busybee_hooks do
       %i[on_job_activated on_job_executed on_job_not_executed after_call].each do |type|
         Busybee::Hooks.register(type, ->(carrier) { observed << [type, carrier] })
       end

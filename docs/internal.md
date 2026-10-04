@@ -67,8 +67,8 @@ lib/busybee/
 │   ├── helpers/
 │   │   ├── builders.rb      # build_test_job / _raw_job / _worker_status / _call / _client
 │   │   ├── execution.rb     # execute_worker (unit testing workers)
-│   │   ├── hook_firing.rb   # fire_hooks
-│   │   ├── hook_scoping.rb  # without_hooks / with_isolated_hooks
+│   │   ├── hook_firing.rb   # fire_busybee_hooks
+│   │   ├── hook_scoping.rb  # without_busybee_hooks / isolate_busybee_hooks
 │   │   └── support.rb       # Private helper methods
 │   ├── hook_registry.rb     # Snapshots and swaps Hooks' registry for the hook helpers
 │   ├── runner.rb            # Synchronous test worker (build_test_worker / start_test_worker)
@@ -650,8 +650,8 @@ A Call folds a **curated** correlation subset — not the carriers' full `contex
 - `testing/runner.rb` — `Testing::Runner`, the test worker behind `build_test_worker` / `start_test_worker`. A `Runner` subclass run synchronously in the spec's thread: `start` fires T0 through the shared `start!`, `activate(jobs)` runs Polling's per-job intake minus the fetch (`activate_job`, then `execute_job` or the hand-back once stopping), and `stop!` fires T1 and then the shared `Runner#teardown`. Everything past intake is base-class code. It reports no `worker_mode` (overriding `Runner#worker_mode`) and activates with `source: nil`, since no transport stands behind it; `run!` raises.
 - `testing/helpers/execution.rb` — `execute_worker`, over a worker class (start, activate, stop, so all four hook levels fire) or a held test worker (activate only).
 - `testing/hook_registry.rb` — `Testing::HookRegistry`, the only code that reaches `Hooks`' private registry: `isolated` snapshots and restores it, `with_only` swaps in a registry holding only the named types and records what it suppressed. Not a helper itself; the helpers below are built on it.
-- `testing/helpers/hook_scoping.rb` — `without_hooks` and `with_isolated_hooks`; a registry swap through `Testing::HookRegistry` keyed by the word in the hook's name. `testing.rb` installs an `around` that applies it from `without_hooks:` metadata. `HookRegistry` also records what is currently suppressed, as `HookRegistry.suppressed?(type)`.
-- `testing/helpers/hook_firing.rb` — `fire_hooks`, one moment fired against a built carrier through `Hooks.run` / `Hooks.run_chain` with `safe: false`, inside the correlation scopes the runner would set for that moment (the job's worker status; for the perform triple, the job too). A test worker converts to its `status`. It raises on a carrier of the wrong noun, and when `HookRegistry.suppressed?` says the moment was emptied rather than never registered.
+- `testing/helpers/hook_scoping.rb` — `without_busybee_hooks` and `isolate_busybee_hooks`; a registry swap through `Testing::HookRegistry` keyed by the word in the hook's name. `testing.rb` installs an `around` that applies it from `without_busybee_hooks:` metadata. `HookRegistry` also records what is currently suppressed, as `HookRegistry.suppressed?(type)`.
+- `testing/helpers/hook_firing.rb` — `fire_busybee_hooks`, one moment fired against a built carrier through `Hooks.run` / `Hooks.run_chain` with `safe: false`, inside the correlation scopes the runner would set for that moment (the job's worker status; for the perform triple, the job too). A test worker converts to its `status`. It raises on a carrier of the wrong noun, and when `HookRegistry.suppressed?` says the moment was emptied rather than never registered.
 - `testing/helpers/support.rb` — Private module-level helpers shared by integration test methods.
 - `testing/timings.rb` — The durations the harness defaults to, and the only place they are written down. Not `Busybee::Defaults`: those are operational settings an adopter sizes for production load, in an initializer the test environment usually loads too, so inheriting them would make a suite wait production lengths for nothing. Named after the helpers that read them (`ACTIVATE_JOB_TIMEOUT_MS`, not `DEFAULT_POLLING_REQUEST_TIMEOUT_MS`) to keep the two sets from being mistaken for each other.
 - `testing/matchers/` — Custom RSpec matchers for both integration and unit testing.

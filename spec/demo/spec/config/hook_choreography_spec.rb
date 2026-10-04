@@ -15,7 +15,7 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
   let(:observed) { [] }
 
   around do |example|
-    with_isolated_hooks do
+    isolate_busybee_hooks do
       observe_every_moment
       example.run
     end
@@ -169,7 +169,7 @@ RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeCl
 
   describe "a run with call hooks subtracted" do
     it "still fires every job and worker moment, and no call moment" do
-      without_hooks(:call) { run_one_distance_job }
+      without_busybee_hooks(:call) { run_one_distance_job }
 
       expect(call_moments).to be_empty
       expect(job_moments).to include(:on_job_activated, :after_perform, :on_job_executed)

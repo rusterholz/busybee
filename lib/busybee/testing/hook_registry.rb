@@ -8,7 +8,7 @@ module Busybee
     # fire. The registry swap is the whole mechanism: Hooks.run never checks for
     # it, and a suppressed type simply finds nothing to match. This is the only
     # code that reaches Hooks' private registry accessor; the helpers built on it
-    # are without_hooks, with_isolated_hooks, fire_hooks and the builders.
+    # are without_busybee_hooks, isolate_busybee_hooks, fire_busybee_hooks and the builders.
     module HookRegistry
       class << self
         # Run a block and put the registry back afterwards, discarding whatever

@@ -44,7 +44,7 @@ RSpec.configure do |config|
   # worker spec is about; the domain transactions still wrap perform, because
   # they are registered there.
   config.define_derived_metadata(file_path: %r{/spec/workers/}) do |metadata|
-    metadata[:without_hooks] ||= %i[job worker call]
+    metadata[:without_busybee_hooks] ||= %i[job worker call]
   end
 
   # Wrap each example in a transaction per database for isolation. Each domain

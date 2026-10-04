@@ -348,7 +348,7 @@ RSpec.describe Busybee::Runner::Multi do
   end
 
   describe "#stop!" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "stops all child runners and shuts down the thread pool" do
       multi = described_class.new(worker_classes, client: client)

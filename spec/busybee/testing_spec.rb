@@ -7,7 +7,7 @@ RSpec.describe Busybee::Testing do
     expect(described_class).to be_a(Module)
   end
 
-  describe "the without_hooks metadata" do
+  describe "the without_busybee_hooks metadata" do
     # Registered outside every example's around, so what an example sees is
     # exactly what the metadata left of them.
     before(:context) do # rubocop:disable RSpec/BeforeAfterAll
@@ -22,17 +22,17 @@ RSpec.describe Busybee::Testing do
 
     def registered?(type) = Busybee::Hooks.hooks_for(type).any?
 
-    context "when a group names hooks", without_hooks: [:call] do
+    context "when a group names hooks", without_busybee_hooks: [:call] do
       it "suppresses them for every example in it" do
         expect(registered?(:after_call)).to be(false)
         expect(registered?(:after_perform)).to be(true)
       end
 
-      it "is undone for one example by an empty list", without_hooks: [] do
+      it "is undone for one example by an empty list", without_busybee_hooks: [] do
         expect(registered?(:after_call)).to be(true)
       end
 
-      it "is replaced, not added to, by an example's own list", without_hooks: [:perform] do
+      it "is replaced, not added to, by an example's own list", without_busybee_hooks: [:perform] do
         expect(registered?(:after_call)).to be(true)
         expect(registered?(:after_perform)).to be(false)
       end

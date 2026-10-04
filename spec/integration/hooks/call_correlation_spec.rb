@@ -47,7 +47,7 @@ RSpec.describe "Call correlation folding", :integration do
     client.deploy_process(job_bpmn_path)
   end
 
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   it "folds curated worker + job identity into the tags, without lifecycle telemetry" do
     run_one_job

@@ -36,7 +36,7 @@ RSpec.describe "Job lifecycle hooks", :integration do
     client.deploy_process(job_bpmn_path)
   end
 
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   context "with an auto-completing worker" do
     let(:worker_class) do

@@ -751,7 +751,7 @@ RSpec.describe Busybee::Client::JobOperations do
   describe "call-hook wiring" do
     let(:response) { double("CompleteJobResponse") } # rubocop:disable RSpec/VerifiedDoubles
 
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "routes an operation through the Call seam, firing before_call then after_call" do
       fired = []

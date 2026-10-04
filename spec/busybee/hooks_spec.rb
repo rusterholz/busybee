@@ -4,7 +4,7 @@ require "busybee/hooks"
 require "busybee/testing"
 
 RSpec.describe Busybee::Hooks do
-  around { |example| with_isolated_hooks { example.run } }
+  around { |example| isolate_busybee_hooks { example.run } }
 
   describe "hook storage" do
     described_class::HOOK_TYPES.each do |hook_type|
@@ -22,8 +22,8 @@ RSpec.describe Busybee::Hooks do
       expect(described_class::HOOK_NOUN.values.uniq).to match_array(described_class::FILTER_KEYS.keys)
     end
 
-    # Scoping the registry for a spec is Busybee::Testing's job (without_hooks,
-    # with_isolated_hooks), so Hooks itself carries none of it.
+    # Scoping the registry for a spec is Busybee::Testing's job (without_busybee_hooks,
+    # isolate_busybee_hooks), so Hooks itself carries none of it.
     it "exposes no test-isolation API" do
       %i[reset! isolated with_only suppressed? registry registry=].each do |method|
         expect(described_class).not_to respond_to(method)

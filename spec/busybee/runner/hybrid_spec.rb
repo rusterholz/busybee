@@ -453,7 +453,7 @@ RSpec.describe Busybee::Runner::Hybrid do
     context "when worker raises Busybee::Worker::Shutdown" do
       let(:shutdown_error) { Busybee::Worker::Shutdown.new("shutting down", worker_class: worker_class) }
 
-      around { |example| with_isolated_hooks { example.run } }
+      around { |example| isolate_busybee_hooks { example.run } }
 
       it "tags the stop :unhealthy — the worker declared itself down" do
         captured = nil
@@ -540,7 +540,7 @@ RSpec.describe Busybee::Runner::Hybrid do
   end
 
   describe "#kill!" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     # A kill discards rather than hands back, and it runs no job hooks at all —
     # the container is stuck, and adopter code is a poor bet there.
@@ -595,7 +595,7 @@ RSpec.describe Busybee::Runner::Hybrid do
   end
 
   describe "on_job_activated wiring (drain phase)" do
-    around { |example| with_isolated_hooks { example.run } }
+    around { |example| isolate_busybee_hooks { example.run } }
 
     it "fires on_job_activated with source: :poll during backlog drain" do
       polled_job = build_test_job(key: 10, retries: 1)

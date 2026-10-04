@@ -18,7 +18,7 @@ RSpec.describe Busybee::Runner::Polling, "#run!" do
   end
 
   around do |example|
-    with_isolated_hooks do
+    isolate_busybee_hooks do
       Busybee::Hooks.after_call { |call| resolved << call }
       example.run
     end

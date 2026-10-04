@@ -69,7 +69,7 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
       let(:fired) { [] }
 
       around do |example|
-        with_isolated_hooks do
+        isolate_busybee_hooks do
           %i[on_worker_started on_job_activated after_perform after_call on_worker_shutdown].each do |type|
             Busybee::Hooks.register(type, ->(_) { fired << type })
           end
@@ -93,8 +93,8 @@ RSpec.describe Busybee::Testing::Helpers::Execution do
         expect(worker).to be_running
       end
 
-      it "fires only what without_hooks leaves" do
-        without_hooks(:worker, :call) { execute_worker(worker_class) }
+      it "fires only what without_busybee_hooks leaves" do
+        without_busybee_hooks(:worker, :call) { execute_worker(worker_class) }
 
         expect(fired).to eq(%i[on_job_activated after_perform])
       end
