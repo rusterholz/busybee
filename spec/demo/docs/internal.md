@@ -59,7 +59,7 @@ The driver fleet is a fixed size, seeded at startup via `db/seeds.rb`. Fleet siz
 
 ## Pipeline Throughput
 
-The primary bottleneck is `LoadItemAvailabilityWorker` in the `prepare_order` process. Each order fans out to 3–10 availability checks (one per line item), and these are multi-instance but still limited by the Zeebe job poll interval and single-threaded worker execution. The logistics YAML config (`config/busybee/logistics.yml`) gives this worker a higher `max_jobs: 32` to help keep up.
+The primary bottleneck is `LoadItemAvailabilityWorker` in the `prepare_order` process. Each order fans out to 3–10 availability checks (one per line item), and these are multi-instance but still limited by the Zeebe job poll interval and single-threaded worker execution.
 
 **Diagnosing bottlenecks**: At high speeds, grep the logs for submitted backlog counts:
 
@@ -98,14 +98,7 @@ All constants with their formulas and derivation:
 
 Worker containers use per-domain YAML config files (`config/busybee/<domain>.yml`) loaded via `busybee --config`. This replaces the earlier approach of listing worker class names on the command line in `docker-compose.yml`.
 
-Each file demonstrates a different aspect of YAML configuration:
-
-| File | What it shows |
-|------|---------------|
-| `oms.yml` | Basic worker listing — no per-worker overrides needed |
-| `logistics.yml` | Global `max_jobs` default + per-worker override for the bottleneck worker |
-| `delivery.yml` | Per-worker `worker_mode` selection (polling for pure computation) |
-| `sim.yml` | Global `job_timeout` override for long-running workers |
+`oms.yml`, `logistics.yml` and `delivery.yml` list their workers only. `sim.yml` adds a global `job_timeout` override for its long-running workers.
 
 Note that some worker settings remain in the DSL (e.g., Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning — settings that might vary by environment or deployment.
 
@@ -122,9 +115,9 @@ The Monitoring domain demonstrates how an app consumes busybee's lifecycle hooks
 
 The last two are the point of the exercise: they render busybee's **two-cardinality contract** — `context_tags` (grouping keys) fold into the aggregate, `logging_context` (measurements) into the per-call record.
 
-**Hook registration.** All hooks live in one `Busybee.configure` block in `config/initializers/busybee.rb` (the brownfield-typical shape), fired by the runner with `safe: true` so a raised error can't disrupt job execution:
+**Hook registration.** All hooks live in one `Busybee.configure` block in `config/initializers/busybee.rb` (the brownfield-typical shape). The recording hooks (job, worker, `after_call`) fire with `safe: true`, so a recorder error can't disrupt job execution. The `around_perform` hooks are middleware, and their errors propagate, which the rollover hook relies on:
 
-- **Job** — `on_job_activated` / `on_job_executed` → `JobRun`.
+- **Job** — `on_job_activated` / `on_job_executed` / `on_job_not_executed` → `JobRun`.
 - **Worker** — the four lifecycle hooks (`on_worker_started`, `_stop_requested`, `_stopping`, `_shutdown`) → `WorkerProcess`; `after_call` also refreshes the worker row, so a worker that only fetches still shows live counters.
 - **Call** — `after_call` folds every call into `CallMetric` and, when job-correlated, `EngineCall`.
 - **Per-job transactions** — one `around_perform` per domain wrapping `perform` in a transaction on *that domain's* connection (e.g. `Oms::Record.transaction`); a base-class `ActiveRecord::Base.transaction` would wrap nothing now that each domain has its own connection. `complete_driver_delivery` (publishes a Zeebe message mid-`perform`) and the async `Sim` jobs are excluded.
@@ -157,7 +150,7 @@ bin/demo test           # 25 orders (default)
 bin/demo test 20        # 20 orders
 ```
 
-This is the primary verification command for gem maintainers — run it after completing a mission and before pushing.
+This is the primary verification command for gem maintainers — run it before every pull request.
 
 ### Integration Test: `demo:run_orders[count]`
 
@@ -176,7 +169,7 @@ bin/rails demo:run_orders[10]          # Quick smoke test
 
 **Expected timing**: At speed 1, each order takes roughly 30–60 seconds to complete. At speed 50, orders complete in ~1–2 seconds. The task uses a polling timeout of `count * 300 / speed` seconds (clamped to a minimum of 30s).
 
-**How outer busybee specs connect**: The busybee gem's Railtie specs already load the demo app's environment (`spec/demo/config/environment.rb`). The rake task can be invoked from busybee's spec suite:
+**How outer busybee specs connect**: The busybee gem's Railtie specs already load the demo app's environment (`spec/demo/config/environment.rb`), under its `railtie_fixture` env, whose dummy `config.x.busybee` values they assert. The demo's own busybee settings live in `config/application.rb`, shared by the running stack and the test env. The rake task can be invoked from busybee's spec suite:
 
 ```ruby
 system("cd spec/demo && bin/rails demo:run_orders[100]") or fail "Demo orders did not complete"

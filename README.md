@@ -153,7 +153,7 @@ end
 
 Capabilities:
 
-- Thirteen hooks across three subjects: the job lifecycle (both the system's view and around your `perform`), the worker lifecycle, and per-call gRPC instrumentation
+- Fourteen hooks across three subjects: the job lifecycle (both the system's view and around your `perform`), the worker lifecycle, and per-call gRPC instrumentation
 - Rich carrier objects with ready-made metric labels (`context_tags`) and structured log fields (`logging_context`)
 - Registration-time filters — by job type, worker class, outcome, stop reason, rpc, or error — validated loudly at boot
 - Machine-readable stop reasons, so your alerts know *why* a worker went down
@@ -176,6 +176,8 @@ Busybee.configure do |config|
   config.cluster_address = "localhost:26500"
 end
 ```
+
+In a Rails app, your `config.x.busybee` settings apply once Rails boots, whether `busybee/testing` or Rails is required first.
 
 #### Example
 

@@ -129,7 +129,7 @@ lib/busybee/
 - **Client** wraps GRPC with Ruby-idiomatic interface
 - **Worker** defines job handling logic; uses Client for job operations (complete, fail), plus GRPC directly for streaming
 - **Runner** orchestrates Workers — uses Client to fetch/stream jobs, dispatches to Worker's `perform_job`
-- **Railtie** is optional; it reads Rails config and sets up gem-level configuration for Client, Worker, and Runner defaults
+- **Railtie** is optional; it reads Rails config and sets up gem-level configuration for Client, Worker, and Runner defaults. `busybee.rb` requires it at once when Rails is already loaded, and otherwise from an ActiveSupport `:before_configuration` load hook, which Rails runs as the app class is defined, before `initialize!` collects Railtie initializers
 
 ## Gem-Level Configuration
 
@@ -140,7 +140,7 @@ Gem-level configuration (`Busybee.cluster_address`, `Busybee.default_message_ttl
 
 All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), buffer throttle (Numeric/boolean/numeric String), worker mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
 
-The Railtie passes Rails config values through these setters. It pre-coerces booleans with `!!` (standard Rails practice) but otherwise relies on the setters for validation.
+The Railtie passes Rails config values through these setters. It pre-coerces booleans with `!!` (standard Rails practice) but otherwise relies on the setters for validation. Every assignment is guarded on the key being meaningfully present (`present?`, or non-`nil` where `false` is a value: booleans, keepalive, buffer throttle), because a setter treats `nil` as "reset to default" and an unguarded line would wipe a value configured before boot. The logger default fills an empty slot only.
 
 ## Logging Module
 
@@ -444,7 +444,7 @@ Traps `INT`, `QUIT`, `TERM` — all mapped to the same handler. The trap block s
 
 ### Rails Environment Loading
 
-Attempts `require "rails"` — if `LoadError`, Rails is not available and loading is skipped silently. If Rails is present, loads `./config/environment` to boot the app (which triggers the Railtie). If environment loading fails, logs an error with the exception class and message, and suggests `BUSYBEE_SKIP_RAILS=1` as an escape hatch. The env var check happens before any `require` calls (chicken-and-egg: gem config isn't available yet since it's set by the Railtie).
+Attempts `require "rails"` — if `LoadError`, Rails is not available and loading is skipped silently. If Rails is present, requires `busybee/railtie` as a backstop (the `:before_configuration` hook should already have registered it), then loads `./config/environment` to boot the app. If environment loading fails, logs an error with the exception class and message, and suggests `BUSYBEE_SKIP_RAILS=1` as an escape hatch. The env var check happens before any `require` calls (chicken-and-egg: gem config isn't available yet since it's set by the Railtie).
 
 ### Error Classes
 

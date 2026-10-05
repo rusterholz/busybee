@@ -36,7 +36,7 @@ RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
 RUN_INTEGRATION_TESTS=1 bundle exec rspec
 
 # Run a specific integration test
-RUN_INTEGRATION_TESTS=1 bundle exec rspec spec/integration/topology_spec.rb
+RUN_INTEGRATION_TESTS=1 bundle exec rspec spec/integration/grpc/topology_spec.rb
 
 # Stop Zeebe when done
 rake zeebe:stop
@@ -48,7 +48,7 @@ Integration tests will automatically skip if Zeebe is not running, so you can sa
 
 Two different mechanisms decide what runs, and conflating them is how a checkpoint ends up quietly under-run while reporting green.
 
-**Environment variables gate eligibility.** `RUN_INTEGRATION_TESTS`, `RUN_CAMUNDA_CLOUD_TESTS` and `TEST_RAILS_INTEGRATION` each un-gate a group that is otherwise excluded before RSpec ever considers it. The gates are per-group and don't imply one another — setting one does nothing for the others. Each lives on its own line in `spec/spec_helper.rb`, which is the authority; an example invocation elsewhere in this document shows *a* way to run a group, not the definition of what enables it.
+**Environment variables gate eligibility.** `RUN_INTEGRATION_TESTS` and `RUN_CAMUNDA_CLOUD_TESTS` each un-gate a group that is otherwise excluded before RSpec ever considers it; each lives on its own line in `spec/spec_helper.rb`. `TEST_RAILS_INTEGRATION` works differently: it boots the demo app (in `spec/spec_helper.rb`), and the Rails integration specs skip themselves without it, so they report as pending rather than vanishing. The gates are per-group and don't imply one another: setting one does nothing for the others.
 
 `MULTITENANCY_ENABLED` is the odd one out. It doesn't un-gate anything — it *swaps* which of `:single_tenant_only` / `:multi_tenant_only` is excluded (`spec/support/integration_helper.rb`). Both modes always run; the variable chooses which half.
 
@@ -98,9 +98,9 @@ expect(gateway.received(:publish_message).map(&:name)).to eq(["order-shipped"])
 
 **Job payloads need real protos.** `FaultInjectionGateway.activated_job(type:, variables:, ...)` builds a genuine `Busybee::GRPC::ActivatedJob`; so does the Testing module's `build_test_raw_job`, if you would rather use the shipped builder. What a stub cannot take is a wrapped `Busybee::Job` — `build_test_job` returns one of those, for the worker side of a spec rather than the wire side.
 
-**Transport.** The gateway binds `127.0.0.1:0` and reports what it bound as `gateway.address`. Loopback is the assumption the wider Ruby testing ecosystem already makes, and binding the loopback interface specifically (rather than `0.0.0.0`) avoids the macOS firewall prompt. If an environment cannot bind loopback, pass `bind:` to redirect — a bind failure raises an error naming that knob rather than surfacing later as a confusing connection error.
+**Transport.** The gateway binds `127.0.0.1:0` and reports what it bound as `gateway.address`. Binding loopback rather than `0.0.0.0` avoids the macOS firewall prompt. Where loopback is unavailable, pass `bind:`; a bind failure raises an error that names that option.
 
-The gateway is **not** tagged `:integration`. That tag carries `skip_unless_zeebe_available`, so adopting it would skip these specs precisely when local Zeebe is down, which is the opposite of what a self-contained gateway is for. Boot and teardown cost a couple of milliseconds, so a fresh gateway per example is affordable.
+Don't tag gateway specs `:integration`: that tag skips when local Zeebe is down, and the gateway needs no Zeebe. Each example gets a fresh gateway, which boots and tears down in a couple of milliseconds.
 
 **Scope.** This is maintainer-facing test infrastructure. It lives in `spec/support/` and is not part of the public `Busybee::Testing` module documented in [testing.md](testing.md); adopters testing their own workers use the helpers described there.
 
@@ -155,7 +155,7 @@ MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integr
 
 **CI Behavior:**
 
-CI automatically runs integration tests in parallel for both modes using a matrix strategy, ensuring full coverage across single-tenant and multi-tenant configurations.
+CI runs the integration tests in parallel for both modes using a matrix strategy. Until Identity is configured, the multi-tenant run's `:multi_tenant_only` specs report as pending (see the note above).
 
 ### Camunda Cloud Integration Tests
 
@@ -212,7 +212,7 @@ bundle exec rubocop            # the whole repo, which is what CI runs
 bundle exec rubocop -a         # safe autocorrections
 ```
 
-CI runs `bundle exec rubocop` as its own job, and every other job depends on it, so a lint failure stops the build before any test runs.
+CI runs `bundle exec rubocop` as its own job, alongside the unit test matrix. The Zeebe and Rails integration jobs wait for both, so a lint failure stops those before they start.
 
 ### Custom cops
 
@@ -224,15 +224,15 @@ CI runs `bundle exec rubocop` as its own job, and every other job depends on it,
 | `House/InternalCommentDensity` | comment lines inside a method body, against its length | 15% |
 | `House/FileCommentDensity` | comment lines in a file, against its code lines | 40% |
 
-All three measure *height*, so a trailing comment on a line of code costs nothing. Directives and magic comments count as neither comment nor code; YARD tags and `@example` bodies are exempt from the header cop, since a long doc-comment at a method top is deliberate. Each ratio divides by at least a floor (`MinDenominator`), which stops a two-line method from scoring 50% for one honest signpost.
+All three measure *height*, so a trailing comment on a line of code costs nothing. Directives and magic comments count as neither comment nor code; YARD tags and `@example` bodies are exempt from the header cop. Each ratio divides by at least a floor (`MinDenominator`), which stops a two-line method from scoring 50% for one honest signpost.
 
-The file is a **copy**. The original lives outside this repo, in the shared `claude/defaults/` directory, alongside its specs — a RuboCop plugin has to resolve inside CI's own checkout, so it cannot be loaded by an out-of-tree path the way `doc-drift-check.rb` is. Keep the copy byte-identical rather than restyling it; it passes RuboCop as written, including its own cops.
+The file is vendored from a shared original that lives outside this repo, with its specs. Keep this copy byte-identical; it passes RuboCop as written, including its own cops.
 
 Thresholds are defaults carried by the cop file itself, so `.rubocop.yml` overrides only what it needs. Generated protobuf is excluded from all three.
 
 ### The comment-density todo
 
-`.rubocop_todo.yml` carries 112 offenses that predate these cops, as 89 exclusions across 70 distinct files. **An excluded file is unwatched for that cop** — a new offense in one will not be reported.
+`.rubocop_todo.yml` carries the offenses that predate these cops, as per-file exclusions. **An excluded file is unwatched for that cop**: a new offense in one will not be reported.
 
 So the todo is a ratchet: **when you change a file listed there, clear its recorded offenses and drop its entries in the same change.** Otherwise the list drains slowest for the files under most active development, which is exactly backwards. Regenerate rather than hand-editing:
 
@@ -245,7 +245,7 @@ bundle exec rubocop --auto-gen-config --auto-gen-only-exclude --exclude-limit 20
 
 ## Local Zeebe Development Environment
 
-Busybee provides a Docker Compose setup for running [Zeebe](https://docs.camunda.io/docs/components/zeebe/zeebe-overview/), [ElasticSearch](https://www.elastic.co/elasticsearch), and [Operate](https://docs.camunda.io/docs/components/operate/operate-introduction/) locally. All three ship in the single `camunda/camunda` Docker image. Versions are pinned in the `.env` file at the project root.
+Busybee provides a Docker Compose setup for running [Zeebe](https://docs.camunda.io/docs/components/zeebe/zeebe-overview/), [ElasticSearch](https://www.elastic.co/elasticsearch), and [Operate](https://docs.camunda.io/docs/components/operate/operate-introduction/) locally. Zeebe and Operate ship in the `camunda/camunda` Docker image; ElasticSearch runs from its own. Versions are pinned in the `.env` file at the project root.
 
 ### Version Management
 
@@ -321,7 +321,7 @@ If services fail to start or become unresponsive:
 4. Try restarting: `rake zeebe:restart`
 5. If data is corrupted, clean and restart: `rake zeebe:clean` then `rake zeebe:start`
 
-The health check task (`rake zeebe:health`) will wait up to 60 seconds for each service to become healthy. If services don't become healthy in that time, check the logs for errors.
+The health check task (`rake zeebe:health`) will wait up to 120 seconds for each service to become healthy. If services don't become healthy in that time, check the logs for errors.
 
 ## Demo Application
 
@@ -329,7 +329,7 @@ Busybee includes a full-featured demo app at `spec/demo/` — a simulated dropsh
 
 ### Purpose
 
-The demo app exercises busybee features in a realistic Rails application with 18 workers across 4 business domains, 3 BPMN processes with parallel gateways, multi-instance subprocesses, and process chaining. It runs as a Docker Compose stack with its own Zeebe instance, web dashboard, and simulation engine.
+The demo app exercises busybee features in a realistic Rails application with 13 workers across 4 business domains, 3 BPMN processes with parallel gateways, multi-instance subprocesses, and process chaining. It runs as a Docker Compose stack with its own Zeebe instance, web dashboard, and simulation engine.
 
 See `spec/demo/README.md` for full architecture details and `spec/demo/docs/internal.md` for maintainer notes on simulation tuning and internals.
 
@@ -366,11 +366,11 @@ After making changes to busybee, verify they don't break the demo app. The `test
 spec/demo/bin/demo test
 
 # Run more orders for heavier verification
-spec/demo/bin/demo test 20
+spec/demo/bin/demo test 50
 ```
 
 This should be run:
-- **After completing a mission**, before pushing — catches regressions early
+- **Before every pull request**: catches regressions early
 - **Before cutting a release** — final verification gate
 
 The test starts the Docker stack at speed 30 for fast feedback, creates orders, polls until all reach "fulfilled" status, verifies final state (all shipments delivered, all drivers released), and cleans up. Exits non-zero on failure.
@@ -391,9 +391,9 @@ Run it whenever you refactor the demo or change how it exercises the gem. The sm
 
 **Mind the demo's own workers, too.** Those same 17 specs activate jobs by type and assert on what comes back, so they need Zeebe **up** and the demo's worker containers **down**. Run them while the demo stack is running and its workers consume the jobs first, out of the same broker, and every one of the 17 fails with `Busybee::Testing::NoJobAvailable` — a failure that looks like a regression in whatever you just changed and is nothing of the kind. `spec/demo/bin/demo stop` before the run, or stop the `busybee-demo-workers-*` and `busybee-demo-clockwork` containers and leave Zeebe up. The two hazards are mirror images: with the stack down *and* Zeebe down these specs vanish silently, and with the full stack up they fail loudly for no reason. Check the count, and check what else is holding the broker.
 
-### Why Neither Runs in CI
+### Neither Runs in CI
 
-CI runs the gem's unit and integration suites, not the demo's. The demo needs its own container stack — its images built, a database with persistence, web and worker services, health checks and startup ordering — which is a materially different environment from the rest of CI. That remains a deliberate call rather than an oversight, and it is the reason the local runs above carry real weight: **they are the only place this code is exercised at all.** Treat the smoke test as a required step of every pull request rather than an optional extra.
+CI runs the gem's unit and integration suites, not the demo's: the demo needs its own container stack (built images, a persistent database, web and worker services, health checks, startup ordering). **The local runs above are the only place this code is exercised**, so run the smoke test for every pull request.
 
 ### Maintaining the Demo App
 
@@ -454,7 +454,7 @@ bundle exec appraisal rails-7.1-concurrent-1.3 rspec
 
 ### Running Railtie Specs
 
-Railtie specs require a Rails appraisal gemfile. Running them with the base gemfile will show them as pending:
+Railtie specs (tagged `:rails`) require a Rails appraisal gemfile. Without Rails they are filtered out, or reported as pending under `--tag rails`. `spec/busybee/railtie_load_order_spec.rb` boots a bare Rails app in a subprocess for each require order, busybee first and Rails first, since an in-process suite has already loaded busybee:
 
 ```bash
 # Run railtie specs with a Rails appraisal
@@ -466,7 +466,7 @@ BUNDLE_GEMFILE=gemfiles/rails_7.1_concurrent_1.3.gemfile bundle exec rspec
 
 ### Running Rails Integration Tests (dummy app)
 
-The `TEST_RAILS_INTEGRATION=1` env var boots a full dummy Rails app whose railtie sets gem-level config (cluster address, timeouts, credential type, etc.). These values leak into the Busybee singleton and contaminate unit specs that assume gem defaults. **Run Rails integration tests separately**, not combined with the unit suite:
+The `TEST_RAILS_INTEGRATION=1` env var boots the demo app under its `railtie_fixture` environment (`spec/demo/config/environments/railtie_fixture.rb`), after busybee, in the order an adopter's `spec_helper` loads them. That environment's `config.x.busybee` values each differ from busybee's defaults (cluster address, timeouts, credential type, etc.), and the Railtie writes them into the Busybee singleton, where they contaminate unit specs that assume gem defaults. **Run Rails integration tests separately**, not combined with the unit suite:
 
 ```bash
 # Rails integration tests only (separate run)
@@ -526,10 +526,11 @@ excluded.each { |f| puts \"  - #{f}\" }
 Before each release, audit the complete file list:
 
 ```bash
-ruby -e "puts Dir.glob(%w[lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]).reject { |f| f.include?('docs/internal.md') || f.include?('docs/development.md') }"
+ruby -e "puts Dir.glob(%w[exe/**/* lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]).reject { |f| f.include?('docs/internal.md') || f.include?('docs/development.md') }"
 ```
 
 **Files that SHOULD be in the gem:**
+- `exe/**/*` — The `busybee` executable
 - `lib/**/*` — All library code
 - `docs/testing.md`, `docs/grpc.md`, etc. — User-facing documentation
 - `LICENSE.txt`, `README.md`, `CHANGELOG.md` — Standard files
@@ -555,7 +556,7 @@ Releases are published via GitHub Actions with manual trigger (`workflow_dispatc
 4. Run full test suite: `RUN_INTEGRATION_TESTS=1 bundle exec rspec`
 5. Run demo app smoke test: `spec/demo/bin/demo test`
 6. Commit, PR, and merge to `main`
-6. From clean `main`: trigger the release workflow, or manually:
+7. From clean `main`: trigger the release workflow, or manually:
    - `bundle exec rake build` (outputs to `pkg/`, which is gitignored — do not use raw `gem build`)
    - Verify contents: `gem unpack pkg/busybee-X.Y.Z.gem` and inspect
    - Push to RubyGems: `gem push pkg/busybee-X.Y.Z.gem`

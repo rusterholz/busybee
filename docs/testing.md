@@ -31,6 +31,8 @@ require "busybee/testing"
 
 The testing module will automatically include helper methods in all RSpec examples.
 
+In a Rails app, the order doesn't matter: your `config.x.busybee` settings apply once Rails boots, whether `busybee/testing` or Rails is required first.
+
 ## Configuration
 
 Configure the Zeebe connection. Busybee reads from environment variables by default, or you can configure explicitly:
@@ -52,13 +54,13 @@ job = activate_job("my-task", timeout: 2000)
 jobs = activate_jobs("my-task", max_jobs: 5, timeout: 2.seconds)
 ```
 
-See [The harness picks its own timings](#the-harness-picks-its-own-timings) for why these helpers don't read your operational configuration.
+See [The harness picks its own timings](#the-harness-picks-its-own-timings) for every default.
 
 For authenticated cluster connections (TLS, OAuth, Camunda Cloud), configure credentials via `Busybee.configure` in your Rails `config/environments/test.rb` or equivalent. See [Providing Credentials](client.md#providing-credentials) for details.
 
 ### A note on units
 
-One parameter name in Busybee means seconds: **`wait:`**. It appears only on the helpers that pause your test process — [`assert_process_completed!`](#assert_process_completedwait-025) and [`zeebe_available?`](#zeebe_availablewait-5) — where seconds are the grain you actually think in, because the difference that matters is half a second versus ten, not 500ms versus 10,000ms.
+One parameter name in Busybee means seconds: **`wait:`**. It appears only on the helpers that pause your test process: [`assert_process_completed!`](#assert_process_completedwait-025) and [`zeebe_available?`](#zeebe_availablewait-5).
 
 Everything else, here and throughout the gem, is a [duration](configuration.md#how-busybee-reads-durations): a bare number means milliseconds, and an `ActiveSupport::Duration` works anywhere. That includes the helpers sitting right next to those two — `activate_job(timeout:)` and `publish_message(ttl:)` both set real Zeebe duration fields, so they read like every other duration in the gem.
 
@@ -72,9 +74,9 @@ Those durations have defaults, and the defaults belong to the harness rather tha
 | the lock an activated job holds | 30 s | `Busybee::Testing::ACTIVATE_JOB_LOCK_MS` |
 | `publish_message` — `ttl:` | 5 s | `Busybee::Testing::PUBLISH_MESSAGE_TTL_MS` |
 
-`Busybee.default_polling_request_timeout`, `Busybee.default_job_timeout`, and `Busybee.default_message_ttl` are operational settings — the ones you size for production load, in an initializer your test environment probably loads too. Inheriting them here would mean a suite that waits a full minute to find out a job was never coming, and would leave you to discover on your own that you need `Rails.env.test?` branches for reasons that have nothing to do with your app.
+These helpers don't read `Busybee.default_polling_request_timeout`, `Busybee.default_job_timeout`, or `Busybee.default_message_ttl`, so the values you size for production never slow your suite, and your test environment needs no overrides.
 
-Five seconds for a job is the razor behind these numbers: either you expect a job, and the engine produces it in well under a second, or you expect none and want to learn that promptly. A long poll serves neither. Pass `timeout:` or `ttl:` explicitly when a particular example needs something different.
+The defaults assume a job the engine produces in well under a second. Pass `timeout:` or `ttl:` explicitly when a particular example needs something different.
 
 ## Helper Methods
 

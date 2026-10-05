@@ -118,6 +118,8 @@ For convenience, many of the credential parameters may be read implicitly from t
 | `CAMUNDA_CLUSTER_ID` | Cluster UUID | Camunda Cloud |
 | `CAMUNDA_CLUSTER_REGION` | Cluster region (e.g., "bru-2") | Camunda Cloud |
 
+An empty variable counts as unset.
+
 ## Error Handling
 
 Busybee wraps low-level GRPC errors in Ruby exceptions that are easier to work with. The goal is to let you rescue errors by type without needing to understand GRPC status codes, while still giving you access to the underlying details when you need them.
