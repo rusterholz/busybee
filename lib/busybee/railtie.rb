@@ -34,18 +34,20 @@ module Busybee
       Busybee.configure do |config|
         busybee_conf = Rails.configuration.x.busybee
 
-        # Logger: Rails.logger by default, custom logger if set, nil if explicitly false
-        config.logger = case busybee_conf&.logger
-                        when false then nil
-                        when nil, true then Rails.logger
-                        else busybee_conf.logger
-                        end
+        # Logger: custom if set, nil if explicitly false; Rails.logger if true, or
+        # by default when no logger was configured before boot
+        case busybee_conf&.logger
+        when false then config.logger = nil
+        when true then config.logger = Rails.logger
+        when nil then config.logger ||= Rails.logger
+        else config.logger = busybee_conf.logger
+        end
 
         next unless busybee_conf.presence
 
-        config.log_format = busybee_conf.log_format.presence if busybee_conf.log_format.presence
-        config.cluster_address = busybee_conf.cluster_address.presence
-        config.worker_name = busybee_conf.worker_name.presence
+        config.log_format = busybee_conf.log_format if busybee_conf.log_format.present?
+        config.cluster_address = busybee_conf.cluster_address if busybee_conf.cluster_address.present?
+        config.worker_name = busybee_conf.worker_name if busybee_conf.worker_name.present?
 
         # Credentials: explicit object, or build from type + params
         Busybee::Railtie.configure_credentials(config, busybee_conf)
@@ -100,6 +102,7 @@ module Busybee
       if busybee_conf.default_backpressure_delay.presence
         config.default_backpressure_delay = busybee_conf.default_backpressure_delay
       end
+      config.backpressure_statuses = busybee_conf.backpressure_statuses if busybee_conf.backpressure_statuses.present?
       config.shutdown_on_errors = busybee_conf.shutdown_on_errors if busybee_conf.shutdown_on_errors.presence
     end
 
@@ -123,7 +126,7 @@ module Busybee
     def self.extract_credential_params(busybee_conf)
       CREDENTIAL_PARAMS.each_with_object({}) do |param, hash|
         value = busybee_conf.public_send(param)
-        hash[param] = value unless value.nil?
+        hash[param] = value unless value.to_s.blank? # to_s: a Pathname's blank? asks the filesystem
       end
     end
   end

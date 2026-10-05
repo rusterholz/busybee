@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "pathname"
+require "tempfile"
+
 require "busybee/credentials/insecure"
 require "busybee/railtie" if defined?(Rails::Railtie)
 
@@ -12,7 +15,7 @@ def busybee_config_ivars
     @grpc_retry_delay @grpc_retry_enabled @grpc_retry_errors
     @grpc_keepalive_interval @grpc_keepalive_timeout
     @log_format @logger @default_backpressure_delay
-    @worker_name
+    @worker_name @backpressure_statuses
   ]
 end
 
@@ -65,9 +68,11 @@ RSpec.describe "Busybee::Railtie", :rails do
       busybee_config_ivars.each { |ivar| Busybee.instance_variable_set(ivar, nil) }
     end
 
-    # Helper to simulate Railtie initialization with given config
-    def configure_and_initialize(**settings)
+    # Helper to simulate Railtie initialization with given config; preset: is
+    # what the app configured on Busybee directly before boot
+    def configure_and_initialize(preset: {}, **settings)
       reset_busybee_config!
+      preset.each { |k, v| Busybee.public_send(:"#{k}=", v) }
       settings.each { |k, v| rails_config.x.busybee[k] = v }
       railtie_class.initializers.find { |i| i.name == "busybee.configure" }.run(rails_app)
     end
@@ -93,6 +98,12 @@ RSpec.describe "Busybee::Railtie", :rails do
         configure_and_initialize(logger: true)
         expect(Busybee.logger).to eq(rails_logger)
       end
+
+      it "keeps a logger configured before boot when not configured" do
+        custom_logger = Logger.new(StringIO.new)
+        configure_and_initialize(preset: { logger: custom_logger })
+        expect(Busybee.logger).to eq(custom_logger)
+      end
     end
 
     describe "log_format" do
@@ -117,6 +128,11 @@ RSpec.describe "Busybee::Railtie", :rails do
         configure_and_initialize
         expect(Busybee.instance_variable_get(:@cluster_address)).to be_nil
       end
+
+      it "keeps a value configured before boot when another key is configured" do
+        configure_and_initialize(preset: { cluster_address: "explicit:26500" }, grpc_retry_enabled: true)
+        expect(Busybee.cluster_address).to eq("explicit:26500")
+      end
     end
 
     describe "credential_type" do
@@ -140,6 +156,11 @@ RSpec.describe "Busybee::Railtie", :rails do
       it "leaves nil when not configured" do
         configure_and_initialize
         expect(Busybee.instance_variable_get(:@worker_name)).to be_nil
+      end
+
+      it "keeps a value configured before boot when another key is configured" do
+        configure_and_initialize(preset: { worker_name: "explicit-worker" }, grpc_retry_enabled: true)
+        expect(Busybee.worker_name).to eq("explicit-worker")
       end
     end
 
@@ -270,6 +291,19 @@ RSpec.describe "Busybee::Railtie", :rails do
       end
     end
 
+    describe "backpressure_statuses" do
+      it "sets backpressure_statuses when configured" do
+        configure_and_initialize(backpressure_statuses: %i[resource_exhausted unavailable])
+        expect(Busybee.backpressure_statuses).to eq(%i[resource_exhausted unavailable])
+      end
+
+      it "leaves nil when not configured (uses default from Defaults)" do
+        configure_and_initialize
+        expect(Busybee.instance_variable_get(:@backpressure_statuses)).to be_nil
+        expect(Busybee.backpressure_statuses).to eq(Busybee::Defaults::DEFAULT_BACKPRESSURE_STATUSES)
+      end
+    end
+
     describe "default_max_jobs" do
       it "sets default_max_jobs when configured" do
         configure_and_initialize(default_max_jobs: 50)
@@ -315,6 +349,28 @@ RSpec.describe "Busybee::Railtie", :rails do
         configure_and_initialize(credentials: explicit_creds)
 
         expect(Busybee.credentials).to eq(explicit_creds)
+      end
+
+      it "ignores blank credential params" do
+        configure_and_initialize(credential_type: :insecure, cluster_address: "")
+
+        expect(Busybee.credentials).to be_nil
+      end
+
+      it "raises at boot when an explicit type's required param is blank" do
+        expect do
+          configure_and_initialize(credential_type: :camunda_cloud, client_id: "my-client-id",
+                                   client_secret: "", cluster_id: "abc-123", region: "bru-2")
+        end.to raise_error(ArgumentError, /client_secret is required/)
+      end
+
+      it "keeps a Pathname credential param, whatever the file holds" do
+        Tempfile.create("ca.pem") do |file|
+          configure_and_initialize(credential_type: :tls, cluster_address: "secure.zeebe:443",
+                                   certificate_file: Pathname.new(file.path))
+
+          expect(Busybee.credentials.certificate_file).to eq(Pathname.new(file.path))
+        end
       end
 
       it "does not build credentials when only credential_type is set (uses ENV fallback)" do
