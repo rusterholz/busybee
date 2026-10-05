@@ -47,7 +47,7 @@ There are three ways to configure Busybee, which can be mixed as needed.
 The `Busybee.configure` block is the recommended approach for application setup:
 
 ```ruby
-# config/initializers/busybee.rb (or anywhere during app boot)
+# config/initializers/busybee.rb
 Busybee.configure do |config|
   config.cluster_address = ENV.fetch("ZEEBE_ADDRESS")
   config.credential_type = :oauth
@@ -77,6 +77,8 @@ Several configuration options fall back to environment variables when not explic
 | `cluster_address` | `CLUSTER_ADDRESS` | Falls back to `localhost:26500` |
 | `credential_type` | `BUSYBEE_CREDENTIAL_TYPE` | One of: insecure, tls, oauth, camunda_cloud |
 | `worker_name` | `BUSYBEE_WORKER_NAME` | Falls back to hostname |
+
+An empty environment variable counts as unset, here and everywhere Busybee reads one.
 
 Credential-specific environment variables are documented in [Client: Environment Variables](client.md#environment-variables).
 
@@ -276,7 +278,7 @@ Every setting that takes a length of time — here, in the [worker DSL](workers.
 | `2_000` | 2,000 milliseconds |
 | `2.seconds` | an `ActiveSupport::Duration`, in whatever unit you spell it |
 | `"2000"` | 2,000 milliseconds — handy for values arriving from `ENV` |
-| `0.5` | half a millisecond; fractions are kept, and rounded only when the value reaches the wire |
+| `0.5` | half a millisecond; fractions are kept, and truncated to whole milliseconds only when the value reaches the wire |
 
 **A bare number always means milliseconds.** That is the one thing to remember, and it is also the one thing that is easy to get wrong: `default_message_ttl = 30` is a message that expires in thirty *milliseconds*. Busybee watches for that mistake and says so:
 
@@ -285,9 +287,9 @@ Every setting that takes a length of time — here, in the [worker DSL](workers.
 milliseconds — if you meant 30 seconds, use 30000 or 30.seconds
 ```
 
-The value is still applied — the warning advises, it doesn't override you — and it only appears for settings where a sub-second value is almost certainly a slip. Deliberately tiny values are left alone: `0` means "no delay", `-1` is Zeebe's "answer immediately" for [`request_timeout`](workers.md#polling), and [`buffer_throttle`](workers.md#buffer-throttle) is exempt entirely, since sub-millisecond values are exactly what it exists for.
+The value is still applied — the warning advises, it doesn't override you — and it only appears for settings where a sub-second value is almost certainly a slip. Deliberately tiny values are left alone: `0` means "no delay", `-1` is Zeebe's "answer immediately" for [`request_timeout`](workers.md#polling), and [`buffer_throttle`](workers.md#buffer-throttle), which takes sub-millisecond values, never warns.
 
-Per-call arguments never warn. `publish_message(name, correlation_key: key, ttl: 50)` is a deliberate one-off, not a misconfiguration.
+Per-call arguments never warn: `publish_message(name, correlation_key: key, ttl: 50)` sets a 50ms TTL without comment.
 
 #### `default_message_ttl`
 
@@ -317,7 +319,7 @@ Busybee.default_fail_job_backoff = 10_000  # 10 seconds
 
 #### `default_polling_request_timeout`
 
-Default timeout for job activation requests, in milliseconds. This controls how long the Zeebe gateway waits for jobs to become available before returning an empty response. Individual `with_each_job` and `activate_job` calls can override this.
+Default timeout for job activation requests, in milliseconds. This controls how long the Zeebe gateway waits for jobs to become available before returning an empty response. Individual `with_each_job` calls can override this.
 
 | | |
 |--|--|
@@ -359,10 +361,10 @@ Busybee.worker_name = "worker-#{Process.pid}"
 
 ## Rails Integration
 
-When Rails is detected, Busybee automatically loads a Railtie that:
+In a Rails app, Busybee loads a Railtie, whether busybee or Rails is required first. The Railtie:
 
-1. Sets `Busybee.logger` to `Rails.logger`
-2. Reads configuration from `config.x.busybee.*`
+1. Sets `Busybee.logger` to `Rails.logger`, unless a logger is already configured
+2. Applies each `config.x.busybee.*` setting you make, and leaves every other setting as it was
 
 ### Basic Rails Setup
 
@@ -395,15 +397,15 @@ end
 
 ### Separate Initializer
 
-For more complex configuration, use an initializer:
+The Railtie reads `config.x.busybee` while Rails boots, before your app's own initializers run, so set it in `config/application.rb` or `config/environments/*.rb`. In an initializer, configure Busybee directly:
 
 ```ruby
 # config/initializers/busybee.rb
-Rails.application.config.x.busybee.tap do |busybee|
-  busybee.cluster_address = ENV.fetch("ZEEBE_CLUSTER_ADDRESS", "localhost:26500")
-  busybee.credential_type = Rails.env.production? ? :camunda_cloud : :insecure
-  busybee.grpc_retry_enabled = Rails.env.production?
-  busybee.default_message_ttl = 30_000
+Busybee.configure do |config|
+  config.cluster_address = ENV.fetch("ZEEBE_CLUSTER_ADDRESS", "localhost:26500")
+  config.credential_type = Rails.env.production? ? :camunda_cloud : :insecure
+  config.grpc_retry_enabled = Rails.env.production?
+  config.default_message_ttl = 30_000
 end
 ```
 
@@ -433,6 +435,7 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_buffer` | `Busybee.default_buffer` |
 | `config.x.busybee.default_buffer_throttle` | `Busybee.default_buffer_throttle` |
 | `config.x.busybee.default_backpressure_delay` | `Busybee.default_backpressure_delay` |
+| `config.x.busybee.backpressure_statuses` | `Busybee.backpressure_statuses` |
 | `config.x.busybee.default_input_required` | `Busybee.default_input_required` |
 | `config.x.busybee.default_output_required` | `Busybee.default_output_required` |
 | `config.x.busybee.default_strict_outputs` | `Busybee.default_strict_outputs` |
@@ -484,8 +487,9 @@ When both `credential_type` and credential parameters are provided, Busybee buil
 
 **Logger behavior:**
 
-- If not set, defaults to `Rails.logger`
+- If not set, defaults to `Rails.logger`, unless a logger was configured before Rails booted
 - Set to a custom logger to override
+- Set to `true` to use `Rails.logger` in any case
 - Set to `false` to disable logging entirely
 
 ## Configuration Precedence
@@ -493,10 +497,9 @@ When both `credential_type` and credential parameters are provided, Busybee buil
 When resolving configuration values, Busybee follows this precedence (highest to lowest):
 
 1. **Explicit parameter** - Values passed directly to methods (e.g., `Client.new(cluster_address: "...")`)
-2. **Module configuration** - Values set via `Busybee.configure` or direct assignment
-3. **Rails configuration** - Values from `config.x.busybee.*` (when Rails is present)
-4. **Environment variables** - Fallback for supported options
-5. **Defaults** - Built-in default values
+2. **Module or Rails configuration, whichever is written last** - Values set via `Busybee.configure` or direct assignment, and values from `config.x.busybee.*` (when Rails is present). The Railtie applies the keys you set while Rails boots, before `config/initializers/*` run, so `Busybee.configure` in an initializer overrides Rails configuration. A value set before boot (in `spec_helper.rb`, say) holds unless `config.x.busybee` sets the same key
+3. **Environment variables** - Fallback for supported options
+4. **Defaults** - Built-in default values
 
 For credential parameters specifically, see [Client: Cluster Address Resolution](client.md#cluster-address-resolution).
 
@@ -577,7 +580,7 @@ See [Workers: Buffer Throttle](workers.md#buffer-throttle) for guidance on choos
 
 #### `default_backpressure_delay`
 
-How long to wait after a backpressure error (`GRPC::ResourceExhausted`) before retrying.
+How long to wait after a backpressure error (any status in [`backpressure_statuses`](#backpressure_statuses)) before retrying.
 
 | | |
 |--|--|
@@ -642,4 +645,4 @@ Exception classes that trigger a graceful worker shutdown when raised during `pe
 Busybee.shutdown_on_errors = [PG::ConnectionBad, Redis::ConnectionError]
 ```
 
-Entries must be `StandardError` subclasses. Classes that descend from `Exception` without going through `StandardError` (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise `ArgumentError` at assignment because the gem's per-job rescue is `StandardError`-scoped — a non-`StandardError` would never reach the `shutdown_on_errors` check at runtime, so configuring one is meaningless. Signal-class errors (`Interrupt`, `SIGTERM`) are handled separately by the CLI's signal traps, which route through the runner's graceful-shutdown path; there's nothing to configure.
+Entries must be `StandardError` subclasses, since the per-job rescue that checks this list catches only `StandardError`. Anything else (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raises `ArgumentError` at assignment. Signals need no entry: the CLI traps `INT`, `QUIT` and `TERM` and stops workers gracefully.

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support" # the one base-AS site: every core_ext cherry-pick below assumes it (AS load contract)
+require "active_support/core_ext/object/blank"
 require "grpc"
 require "socket"
 
@@ -50,14 +51,14 @@ module Busybee
     end
 
     def cluster_address
-      @cluster_address || ENV.fetch("CLUSTER_ADDRESS", "localhost:26500")
+      @cluster_address || ENV.fetch("CLUSTER_ADDRESS", nil).presence || "localhost:26500"
     end
 
     def credential_type
       return @credential_type if instance_variable_defined?(:@credential_type) && !@credential_type.nil?
 
       # Env var fallback - goes through setter for validation
-      env_value = ENV.fetch("BUSYBEE_CREDENTIAL_TYPE", nil)
+      env_value = ENV.fetch("BUSYBEE_CREDENTIAL_TYPE", nil).presence
       return nil if env_value.nil?
 
       self.credential_type = env_value
@@ -162,10 +163,7 @@ module Busybee
     end
 
     def worker_name
-      return @worker_name if @worker_name
-      return ENV["BUSYBEE_WORKER_NAME"] if ENV["BUSYBEE_WORKER_NAME"]
-
-      Socket.gethostname
+      @worker_name || ENV["BUSYBEE_WORKER_NAME"].presence || Socket.gethostname
     rescue StandardError
       "busybee-worker"
     end
@@ -178,4 +176,10 @@ module Busybee
   end
 end
 
-require "busybee/railtie" if defined?(Rails::Railtie)
+# Rails may load after busybee. :before_configuration fires as the app class is
+# defined, before initialize! collects Railtie initializers.
+if defined?(Rails::Railtie)
+  require "busybee/railtie"
+else
+  ActiveSupport.on_load(:before_configuration) { require "busybee/railtie" }
+end

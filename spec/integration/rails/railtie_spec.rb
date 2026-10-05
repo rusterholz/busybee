@@ -27,8 +27,8 @@ RSpec.describe "Railtie integration with demo Rails app", :rails do
   end
 
   describe "configuration from config.x.busybee" do
-    # The dummy app sets distinct values (not defaults) to verify wiring works.
-    # See spec/demo/config/application.rb for the configured values.
+    # The fixture env sets distinct values (not defaults) to verify wiring works.
+    # See spec/demo/config/environments/railtie_fixture.rb for the configured values.
 
     it "sets cluster_address from config" do
       expect(Busybee.cluster_address).to eq("dummy.zeebe.test:443")
@@ -68,6 +68,10 @@ RSpec.describe "Railtie integration with demo Rails app", :rails do
 
     it "sets log_format from config" do
       expect(Busybee.log_format).to eq(:json)
+    end
+
+    it "sets backpressure_statuses from config" do
+      expect(Busybee.backpressure_statuses).to eq(%i[resource_exhausted unavailable])
     end
 
     it "builds TLS credentials object from config" do
