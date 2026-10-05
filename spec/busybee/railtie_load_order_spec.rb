@@ -7,19 +7,19 @@ require "tmpdir"
 # Each order boots its own Rails app in a fresh process: this suite has already
 # loaded busybee, and a loaded Railtie can't be unloaded.
 RSpec.describe "Busybee::Railtie", :rails do
-  def boot_and_read_worker_name(first, second, before_boot: "",
-                                app_config: 'config.x.busybee.worker_name = "load-order-worker"')
+  def boot_and_read_worker_name(first, second, before_boot: nil, from_rails: nil)
     script = <<~RUBY
       require "logger"
       require #{first.inspect}
       require #{second.inspect}
-      #{before_boot}
+      Busybee.worker_name = #{before_boot.inspect}
 
       class LoadOrderApp < Rails::Application
         config.root = Dir.pwd
         config.eager_load = false
         config.logger = Logger.new(nil)
-        #{app_config}
+        config.x.busybee.grpc_retry_enabled = true
+        config.x.busybee.worker_name = #{from_rails.inspect}
       end
       LoadOrderApp.initialize!
 
@@ -35,19 +35,14 @@ RSpec.describe "Busybee::Railtie", :rails do
   end
 
   it "applies config.x.busybee when busybee is required before Rails" do
-    expect(boot_and_read_worker_name("busybee", "rails")).to eq("load-order-worker")
+    expect(boot_and_read_worker_name("busybee", "rails", from_rails: "load-order-worker")).to eq("load-order-worker")
   end
 
   it "applies config.x.busybee when Rails is required before busybee" do
-    expect(boot_and_read_worker_name("rails", "busybee")).to eq("load-order-worker")
+    expect(boot_and_read_worker_name("rails", "busybee", from_rails: "load-order-worker")).to eq("load-order-worker")
   end
 
   it "keeps what a spec_helper configured before Rails booted, where config.x.busybee is silent" do
-    worker_name = boot_and_read_worker_name(
-      "busybee", "rails",
-      before_boot: 'Busybee.configure { |config| config.worker_name = "spec-helper-worker" }',
-      app_config: "config.x.busybee.grpc_retry_enabled = true"
-    )
-    expect(worker_name).to eq("spec-helper-worker")
+    expect(boot_and_read_worker_name("busybee", "rails", before_boot: "spec-helper-worker")).to eq("spec-helper-worker")
   end
 end
