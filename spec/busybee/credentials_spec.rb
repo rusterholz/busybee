@@ -27,6 +27,14 @@ RSpec.describe Busybee::Credentials do
       expect(creds.cluster_address).to eq("env:26500")
     end
 
+    it "treats empty credential env vars as unset" do
+      stub_credential_env_vars
+      allow(ENV).to receive(:fetch).with("CAMUNDA_CLIENT_ID", nil).and_return("")
+
+      creds = described_class.build
+      expect(creds).to be_a(Busybee::Credentials::Insecure)
+    end
+
     it "allows explicit cluster_address kwarg to override env var" do
       stub_credential_env_vars
       allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return("env:26500")

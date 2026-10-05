@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/blank"
 require "optparse"
 
 require "busybee/client"
@@ -61,7 +62,7 @@ module Busybee
     end
 
     def load_environment!
-      return if ENV["BUSYBEE_SKIP_RAILS"]
+      return if ENV["BUSYBEE_SKIP_RAILS"].present?
 
       begin
         require "rails"

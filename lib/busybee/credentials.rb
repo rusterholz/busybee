@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/blank"
+
 require "busybee/durations"
 require "busybee/error"
 require "busybee/grpc"
@@ -166,7 +168,7 @@ module Busybee
           scope: ENV.fetch("ZEEBE_SCOPE", nil),
           # TLS params
           certificate_file: ENV.fetch("ZEEBE_CERTIFICATE_FILE", nil)
-        }.compact
+        }.reject { |_, value| value.blank? }
       end
     end
 

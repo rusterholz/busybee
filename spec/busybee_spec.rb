@@ -4,6 +4,7 @@ require "active_support/core_ext/numeric/time"
 require "logger"
 require "open3"
 require "rbconfig"
+require "stringio"
 
 RSpec.describe Busybee do
   describe "cold load" do
@@ -109,7 +110,13 @@ RSpec.describe Busybee do
 
     it "falls back to localhost:26500" do
       described_class.cluster_address = nil
-      allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", "localhost:26500").and_return("localhost:26500")
+      allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", anything).and_return(nil)
+      expect(described_class.cluster_address).to eq("localhost:26500")
+    end
+
+    it "falls back to localhost:26500 when CLUSTER_ADDRESS is empty" do
+      described_class.cluster_address = nil
+      allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", anything).and_return("")
       expect(described_class.cluster_address).to eq("localhost:26500")
     end
 
@@ -149,6 +156,14 @@ RSpec.describe Busybee do
     it "falls back to hostname when BUSYBEE_WORKER_NAME not set" do
       described_class.worker_name = nil
       allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return(nil)
+      allow(Socket).to receive(:gethostname).and_return("my-hostname")
+
+      expect(described_class.worker_name).to eq("my-hostname")
+    end
+
+    it "falls back to hostname when BUSYBEE_WORKER_NAME is empty" do
+      described_class.worker_name = nil
+      allow(ENV).to receive(:[]).with("BUSYBEE_WORKER_NAME").and_return("")
       allow(Socket).to receive(:gethostname).and_return("my-hostname")
 
       expect(described_class.worker_name).to eq("my-hostname")
@@ -753,6 +768,16 @@ RSpec.describe Busybee do
       described_class.instance_variable_set(:@credential_type, nil)
       allow(ENV).to receive(:fetch).with("BUSYBEE_CREDENTIAL_TYPE", nil).and_return(nil)
       expect(described_class.credential_type).to be_nil
+    end
+
+    it "treats an empty BUSYBEE_CREDENTIAL_TYPE as unset, without warning" do
+      described_class.instance_variable_set(:@credential_type, nil)
+      allow(ENV).to receive(:fetch).with("BUSYBEE_CREDENTIAL_TYPE", nil).and_return("")
+      log = StringIO.new
+      described_class.logger = Logger.new(log)
+
+      expect(described_class.credential_type).to be_nil
+      expect(log.string).to be_empty
     end
 
     it "allows setting to nil explicitly" do
