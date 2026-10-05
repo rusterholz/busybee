@@ -243,8 +243,7 @@ RSpec.describe Busybee::CLI do
         end
 
         described_class.new(["TestCLIWorker"])
-        # Railtie must load after Rails but before config/environment's initialize!,
-        # or config.x.busybee.* is silently ignored in CLI workers.
+        # The backstop Railtie require lands after Rails and before config/environment's initialize!.
         expect(loaded_paths).to eq(["rails", "busybee/railtie", "./config/environment"])
       end
 

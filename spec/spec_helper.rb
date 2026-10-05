@@ -1,7 +1,12 @@
 # frozen_string_literal: true
 
-# Load Rails before busybee if testing Rails integration
-# This ensures busybee sees Rails::Railtie as defined and loads the railtie
+require "webmock/rspec"
+
+require "busybee"
+require "busybee/testing"
+
+# Rails integration specs boot the demo app under its railtie_fixture env, after
+# busybee: the order an adopter's spec_helper puts them in.
 if ENV["TEST_RAILS_INTEGRATION"]
   begin
     require "rails"
@@ -10,14 +15,9 @@ if ENV["TEST_RAILS_INTEGRATION"]
          "(probably a base appraisal without Rails). Skipping this test run."
     exit 0
   end
-  ENV["RAILS_ENV"] = "test"
+  ENV["RAILS_ENV"] = "railtie_fixture"
   require File.expand_path("demo/config/environment", __dir__)
 end
-
-require "webmock/rspec"
-
-require "busybee"
-require "busybee/testing"
 
 # Load support files
 Dir[File.join(__dir__, "support", "**", "*.rb")].each { |f| require f }

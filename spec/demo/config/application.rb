@@ -11,7 +11,7 @@ Bundler.require(*Rails.groups)
 
 module Demo
   # Per-boot worker identity for the running demo stack (wired in development.rb;
-  # application.rb keeps a fixed name for the test env). The random suffix makes
+  # the test env keeps busybee's default). The random suffix makes
   # each container boot a distinct incarnation in the monitoring control center;
   # DEMO_DOMAIN, when set per service, prefixes it for legibility — the
   # (worker_name, job_type) key already isolates domains without it.
@@ -31,11 +31,10 @@ module Demo
       #{root}/app/workers
     ]
 
-    # Busybee configuration for integration testing
-    # Use TLS (not insecure) to prove credentials are built from config, not defaulted
-    config.x.busybee.cluster_address = "dummy.zeebe.test:443"
-    config.x.busybee.credential_type = :tls
-    config.x.busybee.worker_name = "dummy-test-worker"
+    # The demo's busybee connection and defaults, shared by the running stack and
+    # the test env. (The gem's Railtie specs boot the railtie_fixture env instead.)
+    config.x.busybee.cluster_address = ENV.fetch("CLUSTER_ADDRESS", "localhost:26500")
+    config.x.busybee.credential_type = :insecure
     config.x.busybee.grpc_retry_enabled = true
     config.x.busybee.grpc_retry_delay = 250
     config.x.busybee.default_message_ttl = 30_000

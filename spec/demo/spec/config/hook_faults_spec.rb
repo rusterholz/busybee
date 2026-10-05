@@ -77,19 +77,7 @@ RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
   end
 
   describe "when the broker is under pressure as the job reports back" do
-    # Set directly: under this spec harness busybee loads before Rails, so the
-    # Railtie never applies config.x.busybee's retry settings.
-    around do |example|
-      enabled = Busybee.grpc_retry_enabled
-      delay = Busybee.grpc_retry_delay
-      Busybee.grpc_retry_enabled = true
-      Busybee.grpc_retry_delay = 10
-      example.run
-    ensure
-      Busybee.grpc_retry_enabled = enabled
-      Busybee.grpc_retry_delay = delay
-    end
-
+    # Retry comes from the demo's own config (application.rb).
     it "retries the completion, and the job lands" do
       pressured = false
       client.on(:complete_job) do

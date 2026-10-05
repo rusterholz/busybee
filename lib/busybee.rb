@@ -176,4 +176,10 @@ module Busybee
   end
 end
 
-require "busybee/railtie" if defined?(Rails::Railtie)
+# Rails may load after busybee. :before_configuration fires as the app class is
+# defined, before initialize! collects Railtie initializers.
+if defined?(Rails::Railtie)
+  require "busybee/railtie"
+else
+  ActiveSupport.on_load(:before_configuration) { require "busybee/railtie" }
+end
