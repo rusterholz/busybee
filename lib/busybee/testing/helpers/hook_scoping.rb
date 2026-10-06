@@ -18,20 +18,23 @@ module Busybee
         # @param words [Array<Symbol>] any of :perform, :job, :worker, :call, or :all
         # @return [Object] the block's value
         # @raise [ArgumentError] on an unknown word, before anything is suppressed
-        def without_busybee_hooks(*words, &)
+        def without_busybee_hooks(*words, &) = HookScoping.without(*words, &)
+
+        # Hooks registered inside the block are discarded when it ends.
+        def isolate_busybee_hooks(&) = HookRegistry.isolated(&)
+
+        # Module-level, off the example's namespace, so the without_busybee_hooks:
+        # metadata works in examples that haven't included the helpers.
+        def self.without(*words, &)
           unknown = words - WORDS
           if unknown.any?
             raise ArgumentError, "Unknown hook word(s) #{unknown.map(&:inspect).join(', ')}. " \
                                  "Expected any of #{WORDS.map(&:inspect).join(', ')}"
           end
 
-          HookRegistry.with_only(*Hooks::HOOK_TYPES.reject { |type| HookScoping.named_by?(type, words) }, &)
+          HookRegistry.with_only(*Hooks::HOOK_TYPES.reject { |type| named_by?(type, words) }, &)
         end
 
-        # Hooks registered inside the block are discarded when it ends.
-        def isolate_busybee_hooks(&) = HookRegistry.isolated(&)
-
-        # Kept off the example's namespace, which every helper here shares.
         def self.named_by?(type, words) = words.include?(:all) || type.to_s.split("_").intersect?(words.map(&:to_s))
       end
     end

@@ -10,22 +10,18 @@ end
 
 # Auto-load RSpec integration if RSpec is available
 if defined?(RSpec)
-  require "busybee/testing/helpers"
   require "busybee/testing/activated_job"
-  require "busybee/testing/matchers/have_received_variables"
-  require "busybee/testing/matchers/have_received_headers"
-  require "busybee/testing/matchers/have_activated"
-  require "busybee/testing/matchers/have_available_jobs"
-  require "busybee/testing/matchers/fail_job"
-  require "busybee/testing/matchers/complete_job"
-  require "busybee/testing/matchers/throw_bpmn_error_on"
+  require "busybee/testing/helpers"
+  require "busybee/testing/helpers/hook_scoping"
 
   RSpec.configure do |config|
-    config.include Busybee::Testing::Helpers
+    # Opt in with `:busybee` on a group or example, so busybee's short names
+    # never meet an app's own helpers elsewhere.
+    config.include Busybee::Testing::Helpers, :busybee
 
     # `without_busybee_hooks: [:worker, :call]` on a group or example; innermost wins.
     config.around(:example, :without_busybee_hooks) do |example|
-      without_busybee_hooks(*example.metadata[:without_busybee_hooks]) { example.run }
+      Busybee::Testing::Helpers::HookScoping.without(*example.metadata[:without_busybee_hooks]) { example.run }
     end
   end
 end

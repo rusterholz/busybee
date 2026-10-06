@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
+
 require "busybee/testing"
 
 RSpec.describe Busybee::Testing::Helpers::Builders do
@@ -288,6 +290,11 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
       call = build_test_call(:complete_job)
 
       expect(call.network_ms).to be > 0
+    end
+
+    it "reads network: as a duration, a bare number meaning milliseconds" do
+      expect(build_test_call(:complete_job, network: 5).network_ms).to be_between(5, 1000)
+      expect(build_test_call(:complete_job, network: 0.03.seconds).network_ms).to be_between(30, 1000)
     end
 
     it "leaves an unattempted call with nothing observed" do

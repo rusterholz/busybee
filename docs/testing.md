@@ -29,9 +29,35 @@ require "rspec"
 require "busybee/testing"
 ```
 
-The testing module will automatically include helper methods in all RSpec examples.
-
 In a Rails app, the order doesn't matter: your `config.x.busybee` settings apply once Rails boots, whether `busybee/testing` or Rails is required first.
+
+### Opting In
+
+Busybee's helpers and matchers go only where you ask for them, so names like `execute_worker`, `build_test_job` or `complete_job` never meet a helper of your own with the same name. Tag a group, or a single example, with `:busybee`:
+
+```ruby
+RSpec.describe "Order Fulfillment", :busybee do
+  # deploy_process, activate_job, execute_worker, ... are all available here
+end
+```
+
+To opt in a whole directory, derive the tag from the file path in your spec helper:
+
+```ruby
+RSpec.configure do |config|
+  config.define_derived_metadata(file_path: %r{/spec/workflows/}) do |metadata|
+    metadata[:busybee] = true
+  end
+end
+```
+
+Or, if nothing in your suite shares their names, include them everywhere in one line:
+
+```ruby
+RSpec.configure { |config| config.include Busybee::Testing::Helpers }
+```
+
+`Busybee::Testing::Helpers` carries the matchers too, so the same line works inside a single group as `include Busybee::Testing::Helpers`.
 
 ## Configuration
 
@@ -184,7 +210,7 @@ with_process_instance("order-fulfillment") do
   with_activated_job_instance("process-order") do |job|
     # Test job without worrying about cleanup
     expect(job.variables["order_id"]).to eq("123")
-    client.update_job_retries(job.key, 5)
+    job.update_retries(5)
     # Job is automatically completed after block
   end
 end
@@ -384,7 +410,7 @@ These methods verify job state and return `self` for chaining:
 
 #### `expect_variables(expected)`
 
-Asserts that job variables include the expected key-value pairs.
+Asserts that job variables include the expected key-value pairs. A value may be a Regexp or any RSpec matcher, for a variable whose exact value the test can't know.
 
 **Parameters:**
 - `expected` (Hash) - Expected variable subset (symbol or string keys)
@@ -396,11 +422,13 @@ Asserts that job variables include the expected key-value pairs.
 ```ruby
 job.expect_variables(order_id: "123", total: 99.99)
   .and_complete
+
+job.expect_variables(payment_id: /\Apay-/, charged_at: a_kind_of(String))
 ```
 
 #### `expect_headers(expected)`
 
-Asserts that job headers include the expected key-value pairs.
+Asserts that job headers include the expected key-value pairs. Values may be matchers here too.
 
 **Parameters:**
 - `expected` (Hash) - Expected header subset (symbol or string keys)
@@ -495,7 +523,7 @@ job.update_retries(5)
 
 ### `have_received_variables`
 
-Matches activated jobs with expected variable values.
+Matches activated jobs with expected variable values. As with `expect_variables`, a value may be a Regexp or any RSpec matcher.
 
 **Example:**
 
@@ -503,11 +531,12 @@ Matches activated jobs with expected variable values.
 job = activate_job("my-task")
 expect(job).to have_received_variables(order_id: "123")
 expect(job).to have_received_variables("order_id" => "123", "total" => 99.99)
+expect(job).to have_received_variables(payment_id: /\Apay-/, total: a_value > 0)
 ```
 
 ### `have_received_headers`
 
-Matches activated jobs with expected header values.
+Matches activated jobs with expected header values, which may be matchers too.
 
 **Example:**
 
@@ -515,35 +544,6 @@ Matches activated jobs with expected header values.
 job = activate_job("my-task")
 expect(job).to have_received_headers(priority: "high")
 expect(job).to have_received_headers("workflow_version" => "2")
-```
-
-### `have_activated`
-
-Flexible matcher supporting chained expectations and terminal actions. Can be used standalone or with chains.
-
-**Chains:**
-- `.with_variables(hash)` - Assert expected variables
-- `.with_headers(hash)` - Assert expected headers
-- `.and_complete(vars)` - Complete job with output
-- `.and_fail(message, retries:)` - Fail job
-- `.and_throw_error_event(code, message)` - Throw error
-
-**Examples:**
-
-```ruby
-# Basic activation check
-job = activate_job("my-task")
-expect(job).to have_activated
-
-# With variable assertions
-expect(job).to have_activated.with_variables(order_id: "123")
-
-# Complete workflow with chaining
-expect(activate_job("process-order"))
-  .to have_activated
-  .with_variables(order_id: "123", total: 99.99)
-  .with_headers(priority: "high")
-  .and_complete(processed: true, processed_at: Time.now.iso8601)
 ```
 
 ### `have_available_jobs`
@@ -562,7 +562,7 @@ expect { activate_job("process-order") }.to have_available_jobs
 expect { activate_job("process-order") }.not_to have_available_jobs
 
 # Use case: verify signal didn't create instances
-client.broadcast_signal("non-existent-signal")
+Busybee::Client.new.broadcast_signal("non-existent-signal")
 expect { activate_job("process-order") }.not_to have_an_available_job
 ```
 
@@ -574,7 +574,7 @@ Here's a complete example testing an order fulfillment workflow:
 # spec/workflows/order_fulfillment_spec.rb
 require "spec_helper"
 
-RSpec.describe "Order Fulfillment Workflow" do
+RSpec.describe "Order Fulfillment Workflow", :busybee do
   let(:bpmn_path) { File.expand_path("../fixtures/order_fulfillment.bpmn", __dir__) }
   let(:process_id) { deploy_process(bpmn_path, uniquify: true)[:process_id] }
   let(:order_id) { SecureRandom.uuid }
@@ -583,15 +583,13 @@ RSpec.describe "Order Fulfillment Workflow" do
     it "processes payment and ships order" do
       with_process_instance(process_id, order_id: order_id, items_count: 3) do
         # Verify payment processing job
-        expect(activate_job("process-payment"))
-          .to have_activated
-          .with_variables(order_id: order_id, items_count: 3)
+        activate_job("process-payment")
+          .expect_variables(order_id: order_id, items_count: 3)
           .and_complete(payment_id: "pay-#{SecureRandom.hex(4)}", amount_charged: 149.99)
 
         # Verify shipment preparation
-        expect(activate_job("prepare-shipment"))
-          .to have_activated
-          .with_variables(order_id: order_id, payment_id: /^pay-/)
+        activate_job("prepare-shipment")
+          .expect_variables(order_id: order_id, payment_id: /^pay-/)
           .and_complete(tracking_number: "TRACK123", carrier: "FedEx")
 
         # Verify notification sent
@@ -617,9 +615,8 @@ RSpec.describe "Order Fulfillment Workflow" do
           .and_throw_error_event("PAYMENT_DECLINED", "Insufficient funds")
 
         # Error boundary catches and triggers notification
-        expect(activate_job("send-payment-failed-email"))
-          .to have_activated
-          .with_variables(order_id: order_id)
+        activate_job("send-payment-failed-email")
+          .expect_variables(order_id: order_id)
           .and_complete
 
         assert_process_completed!
@@ -646,12 +643,8 @@ RSpec.describe "Order Fulfillment Workflow" do
         )
 
         # Verify shipment proceeds
-        expect(activate_job("prepare-shipment"))
-          .to have_activated
-          .with_variables(
-            approved_by: "manager@example.com",
-            requires_approval: true
-          )
+        activate_job("prepare-shipment")
+          .expect_variables(approved_by: "manager@example.com", requires_approval: true)
           .and_complete(tracking_number: "TRACK456")
 
         activate_job("send-confirmation-email").and_complete
@@ -691,7 +684,7 @@ RSpec.shared_context "deployed order workflow" do
 end
 
 # Use in specs
-RSpec.describe "Order edge cases" do
+RSpec.describe "Order edge cases", :busybee do
   include_context "deployed order workflow"
 
   it "handles partial shipments" do
@@ -730,9 +723,10 @@ with_process_instance(process_id) do |key|
 end
 
 # Avoid: Manual instance management
-key = create_instance(process_id)
+client = Busybee::Client.new
+key = client.start_instance(process_id)
 # ... test code ...
-cancel_instance(key) # Easy to forget in error paths
+client.cancel_instance(key) # Easy to forget in error paths
 ```
 
 ### 3. Verify Job Variables Before Completing

@@ -10,7 +10,7 @@ require_relative "../rails_helper"
 #
 # Here the faults are injected at the wire, so everything above it is the real
 # thing: translation, retry, autofail, the teardown, and the demo's own hooks.
-RSpec.describe "Busybee hook faults" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "Busybee hook faults", :busybee do # rubocop:disable RSpec/DescribeClass
   let(:client) { build_test_client }
   let(:observed) { [] }
 

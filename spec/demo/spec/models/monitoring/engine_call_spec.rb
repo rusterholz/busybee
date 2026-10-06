@@ -2,7 +2,7 @@
 
 require_relative "../../rails_helper"
 
-RSpec.describe Monitoring::EngineCall do
+RSpec.describe Monitoring::EngineCall, :busybee do
   # EngineCall consumes a Call's high-cardinality projection, so the projection is
   # the contract under test — authoring it here by hand would assert our belief
   # about it rather than the thing itself. These are real Calls, driven through

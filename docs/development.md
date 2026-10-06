@@ -56,6 +56,10 @@ Two different mechanisms decide what runs, and conflating them is how a checkpoi
 
 **An explicit `--tag` overrides an exclusion filter.** That's RSpec's precedence, not ours, and it means a tag can walk a group straight past its own gate: `--tag camunda_cloud` selects those specs whether or not `RUN_CAMUNDA_CLOUD_TESTS` is set. Under `--dry-run` that's harmless and yields an accurate count. Run for real, it isn't — the Camunda Cloud specs enable live network access and would then have no credentials to use it. The `rails:` tag has a `before` hook that converts the override into an explicit skip; no other group has that backstop. **Set a group's gate when you mean "is this green?" Use `--tag` to narrow, never to enable.**
 
+### The Testing Helpers in Our Own Specs
+
+An adopter opts in to `Busybee::Testing::Helpers` per spec, with the `:busybee` tag. Our own suite includes them everywhere instead, in one line of `spec/spec_helper.rb`, so a new spec needs no tag. That line also means nothing in our suite is un-opted, so the opt-in itself is tested from outside it: `spec/busybee/testing_spec.rb` runs the adopter suites in `spec/busybee/testing/adopter_suites/` in their own processes. The demo opts in as an adopter would, by directory and by tag.
+
 ### Testing Error Paths with the Fault-Injection Gateway
 
 Some of busybee's most consequential behavior only appears when the broker misbehaves: a `RESOURCE_EXHAUSTED` during job activation, a stream that dies mid-delivery, a status that arrives while a response enumerator is being read. Those paths are easy to get wrong in a test by stubbing the client, because a stub encodes what you *believe* the gateway does. When the belief is wrong, the test passes and the system is broken.

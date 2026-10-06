@@ -8,7 +8,7 @@ require_relative "../rails_helper"
 # silently inert forever, and here it shows up as a missing effect: the three
 # transactional around_perform hooks name four literal job types, in a file far
 # from the workers that derive them.
-RSpec.describe "Busybee hook wiring" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "Busybee hook wiring", :busybee do # rubocop:disable RSpec/DescribeClass
   def domain_records = [Oms::Record, Logistics::Record, Delivery::Record]
 
   # Every worker the app actually defines, so a newly-added one cannot slip past

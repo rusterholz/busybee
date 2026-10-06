@@ -1,12 +1,7 @@
 # frozen_string_literal: true
 
-# Demo app spec helper
-#
-# Usage: cd spec/demo && bundle exec rspec
-#
-# BPMN specs require a running Zeebe instance and are tagged :zeebe.
-# They are automatically skipped when Zeebe is unavailable.
-# To require Zeebe (e.g., in CI): ZEEBE_REQUIRED=1 bundle exec rspec
+# Loaded for every demo spec, by .rspec. The BPMN specs are tagged :zeebe and
+# skip when Zeebe is down; ZEEBE_REQUIRED=1 makes that an error instead.
 
 require "bundler/setup"
 require "busybee"
@@ -28,10 +23,12 @@ RSpec.configure do |config|
     c.syntax = :expect
   end
 
-  # Include Busybee::Testing::Helpers in all specs
-  config.include Busybee::Testing::Helpers
+  # The BPMN specs opt in to busybee's helpers as a directory; rails_helper opts
+  # in the worker specs the same way.
+  config.define_derived_metadata(file_path: %r{/spec/bpmn/}) do |metadata|
+    metadata[:busybee] = true
+  end
 
-  # Skip BPMN specs when Zeebe is not running, unless ZEEBE_REQUIRED is set
   unless ZEEBE_AVAILABLE
     raise "Zeebe is required but not available. Start with: rake zeebe:start" if ENV["ZEEBE_REQUIRED"]
 

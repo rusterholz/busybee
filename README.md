@@ -177,24 +177,22 @@ Busybee.configure do |config|
 end
 ```
 
-In a Rails app, your `config.x.busybee` settings apply once Rails boots, whether `busybee/testing` or Rails is required first.
+Tag a spec `:busybee` to give it busybee's helpers and matchers; the rest of your suite never sees them, so their names can't collide with your own. In a Rails app, your `config.x.busybee` settings apply once Rails boots, whether `busybee/testing` or Rails is required first.
 
 #### Example
 
 ```ruby
-RSpec.describe "Order Fulfillment" do
+RSpec.describe "Order Fulfillment", :busybee do
   let(:process_id) { deploy_process("spec/fixtures/order.bpmn", uniquify: true)[:process_id] }
 
   it "processes payment and ships order" do
     with_process_instance(process_id, order_id: "123", total: 99.99) do
-      expect(activate_job("process-payment"))
-        .to have_activated
-        .with_variables(order_id: "123", total: 99.99)
+      activate_job("process-payment")
+        .expect_variables(order_id: "123", total: 99.99)
         .and_complete(payment_id: "pay-456")
 
-      expect(activate_job("prepare-shipment"))
-        .to have_activated
-        .with_variables(payment_id: "pay-456")
+      activate_job("prepare-shipment")
+        .expect_variables(payment_id: "pay-456")
         .and_complete(tracking_number: "TRACK789")
 
       assert_process_completed!
@@ -203,15 +201,18 @@ RSpec.describe "Order Fulfillment" do
 end
 ```
 
+Each step activates the job waiting at a task, checks what the process handed it, and completes it with what your worker would have returned.
+
 #### Helpers and Matchers
 
 - `deploy_process(path, uniquify:)` - Deploy BPMN files with optional unique IDs for test isolation
 - `with_process_instance(process_id, variables)` - Create instances with automatic cleanup
 - `activate_job(type)` / `activate_jobs(type, max_jobs:)` - Activate jobs for assertions
+- `expect_variables` / `expect_headers`, then `and_complete` / `and_fail` / `and_throw_error_event` - Check and resolve an activated job, in one chain
 - `publish_message(name, correlation_key:, vars:)` - Trigger message catch events
 - `set_variables(scope_key, variables)` - Update process variables
 - `assert_process_completed!` - Verify workflow reached an end event
-- `have_activated`, `have_received_variables`, `have_received_headers` - RSpec matchers
+- `have_received_variables`, `have_received_headers`, `have_available_jobs` - RSpec matchers
 
 **For more info, see our [full testing documentation here](docs/testing.md).** For unit testing workers, see [Workers: Testing Workers](docs/workers.md#testing-workers).
 

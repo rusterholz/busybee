@@ -19,7 +19,6 @@ if ENV["TEST_RAILS_INTEGRATION"]
   require File.expand_path("demo/config/environment", __dir__)
 end
 
-# Load support files
 Dir[File.join(__dir__, "support", "**", "*.rb")].each { |f| require f }
 
 # Helper to stub all credential-related env vars to nil for test isolation.
@@ -34,10 +33,8 @@ def stub_credential_env_vars
 end
 
 RSpec.configure do |config|
-  # Enable flags like --only-failures and --next-failure
+  config.include Busybee::Testing::Helpers
   config.example_status_persistence_file_path = ".rspec_status"
-
-  # Disable RSpec exposing methods globally on `Module` and `main`
   config.disable_monkey_patching!
 
   config.expect_with :rspec do |c|
