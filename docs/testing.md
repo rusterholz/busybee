@@ -523,7 +523,7 @@ job.update_retries(5)
 
 ### `have_received_variables`
 
-Matches activated jobs with expected variable values.
+Matches activated jobs with expected variable values. As with `expect_variables`, a value may be a Regexp or any RSpec matcher.
 
 **Example:**
 
@@ -531,11 +531,12 @@ Matches activated jobs with expected variable values.
 job = activate_job("my-task")
 expect(job).to have_received_variables(order_id: "123")
 expect(job).to have_received_variables("order_id" => "123", "total" => 99.99)
+expect(job).to have_received_variables(payment_id: /\Apay-/, total: a_value > 0)
 ```
 
 ### `have_received_headers`
 
-Matches activated jobs with expected header values.
+Matches activated jobs with expected header values, which may be matchers too.
 
 **Example:**
 

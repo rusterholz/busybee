@@ -77,6 +77,8 @@
 
 - **Extending a Job's Lock in a Test Accepts a Duration** – the testing module's `update_timeout` read an `ActiveSupport::Duration` as a bare number, so `job.update_timeout(5.minutes)` asked the engine for 300 *milliseconds* and the lock lapsed immediately. It now reads a length of time the way everything else in the gem does
 
+- **Job Matchers Accept a Regexp or Any Matcher** – `have_received_variables` and `have_received_headers` compared each expected value by equality, so `have_received_variables(payment_id: /\Apay-/)` could never pass, though `expect_variables` beside it took the same argument. Both now read an expected value the way RSpec's `include` does: a Regexp, or any matcher, such as `a_value > 0`
+
 - **Error Handling No Longer Depends on Who Happens to Be Listening** – whether an error was suppressed, raised, or escalated to a graceful shutdown could change depending on whether any hook was registered, because a chain assembled from no hooks carried no error policy at all:
   - An error you named in `shutdown_on` that escaped the worker's own handling stopped the process as an unexplained crash — `reason: :crash` rather than the `:unhealthy` you declared — unless some unrelated hook happened to be registered to hold the policy open. (Errors raised by `perform` itself were always escalated correctly.) `shutdown_on` now holds wherever the error comes from
   - An error busybee itself could not handle was swallowed and logged as `Error in hooks (ignored)`, blaming your instrumentation for a fault in the gem and pointing you at a source location in your worker. Such errors now travel, so a defect surfaces where it happened instead of being absorbed by the machinery that noticed it

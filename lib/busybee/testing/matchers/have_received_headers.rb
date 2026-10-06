@@ -7,11 +7,11 @@ module Busybee
     module Matchers
       extend RSpec::Matchers::DSL
 
+      # Expected values compare as in RSpec's include: a Regexp or any matcher works.
       matcher :have_received_headers do |expected|
         match do |job|
-          expected_stringified = expected.transform_keys(&:to_s)
           @actual = job.headers
-          @actual.slice(*expected_stringified.keys) == expected_stringified
+          values_match?(a_hash_including(expected.transform_keys(&:to_s)), @actual)
         end
 
         failure_message do
