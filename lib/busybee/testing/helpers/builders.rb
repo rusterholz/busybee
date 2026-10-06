@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "busybee/client/call"
+require "busybee/durations"
 require "busybee/testing/client"
 require "busybee/testing/hook_registry"
 require "busybee/testing/runner"
@@ -135,12 +136,13 @@ module Busybee
         # @param error [Exception, nil] what the wire raised; defaults to
         #   GRPC::Unavailable when status is :errored
         # @param attempted [Boolean] false leaves it pending, with nothing observed
-        # @param network [Float] seconds to spend "on the wire", so the observed
-        #   network_ms is a real measurement rather than zero
+        # @param network [Integer, ActiveSupport::Duration] how long to spend "on
+        #   the wire" (a bare number is milliseconds), so the observed network_ms
+        #   is a real measurement rather than zero
         # @return [Busybee::Client::Call]
         def build_test_call(rpc, request: nil, job: nil, worker_status: nil, # rubocop:disable Metrics/ParameterLists
                             status: :succeeded, result: nil, error: nil,
-                            attempted: true, network: 0.001)
+                            attempted: true, network: 1)
           correlating(job, worker_status) do
             call = Busybee::Client::Call.new(rpc, request)
             next call unless attempted
@@ -157,7 +159,7 @@ module Busybee
         # swallow here so the builder hands back a settled carrier.
         def attempt_test_call(call, status:, result:, error:, network:)
           call.attempt do
-            sleep network
+            sleep Busybee::Durations.seconds_from(network)
             raise(error || ::GRPC::Unavailable.new("broker unreachable")) if status == :errored
 
             result
