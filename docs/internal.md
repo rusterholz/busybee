@@ -63,7 +63,6 @@ lib/busybee/
 ├── testing/                 # RSpec integration
 │   ├── activated_job.rb     # Fluent job wrapper for tests
 │   ├── client.rb            # Real Client over an in-process stub
-│   ├── error.rb             # NoJobAvailable
 │   ├── helpers.rb           # deploy_process, with_process_instance, etc.
 │   ├── helpers/
 │   │   ├── builders.rb      # build_test_job / _raw_job / _worker_status / _call / _client
@@ -72,6 +71,7 @@ lib/busybee/
 │   │   ├── hook_scoping.rb  # without_busybee_hooks / isolate_busybee_hooks
 │   │   └── support.rb       # Private helper methods
 │   ├── hook_registry.rb     # Snapshots and swaps Hooks' registry for the hook helpers
+│   ├── no_job_available.rb  # Raised when no job is waiting to be activated
 │   ├── runner.rb            # Synchronous test worker (build_test_worker / start_test_worker)
 │   ├── timings.rb           # The harness's own duration defaults, not the gem's
 │   └── matchers/            # Busybee::Testing::Matchers, included by Helpers
@@ -645,7 +645,7 @@ A Call folds a **curated** correlation subset — not the carriers' full `contex
 
 - `testing.rb` — Entry point. When RSpec is defined, loads the helpers, includes `Helpers` into examples tagged `:busybee`, and installs the `around` behind the `without_busybee_hooks:` metadata, which applies to every example whether it opted in or not.
 - `testing/helpers.rb` — Integration test helpers (`deploy_process`, `with_process_instance`, `activate_job`, etc.) that talk to Zeebe via gRPC. `Helpers` also includes the other helper modules and `Matchers`, so it is the one module an example needs.
-- `testing/error.rb` — `NoJobAvailable`, raised by `activate_job` and rescued by `have_available_jobs`.
+- `testing/no_job_available.rb` — `NoJobAvailable`, raised by `activate_job` and rescued by `have_available_jobs`.
 - `testing/helpers/builders.rb` — The carrier builders (`build_test_job`, `build_test_raw_job`, `build_test_worker_status`, `build_test_call`, `build_test_client`). Nothing here is doubled: a real `ActivatedJob` proto, a real `Status`, a real `Call` driven through its underscore seam. Hooks read their carrier's projections, so a double would freeze a spec's belief about those projections into its assertions and stay green when the contract moved. Job fixtures are built under `HookRegistry.with_only` (every hook suppressed), since resolving one runs a real call and would otherwise fire the hooks the spec is about to observe.
 - `testing/client.rb` — `Testing::Client`, a real `Busybee::Client` subclass that overrides the private `stub`. Everything above the wire is genuine: a doubled client sits *above* `run_hooked`, the seam call hooks hang off, so with one in place no call hook can fire. Programming keeps grpc-ruby's contract (`client.on(:rpc) { … }`), matching the internal `FaultInjectionGateway` so both sides teach one vocabulary.
 - `testing/runner.rb` — `Testing::Runner`, the test worker behind `build_test_worker` / `start_test_worker`. A `Runner` subclass run synchronously in the spec's thread: `start` fires T0 through the shared `start!`, `activate(jobs)` runs Polling's per-job intake minus the fetch (`activate_job`, then `execute_job` or the hand-back once stopping), and `stop!` fires T1 and then the shared `Runner#teardown`. Everything past intake is base-class code. It reports no `worker_mode` (overriding `Runner#worker_mode`) and activates with `source: nil`, since no transport stands behind it; `run!` raises.
