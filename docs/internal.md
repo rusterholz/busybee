@@ -76,7 +76,6 @@ lib/busybee/
 │   └── matchers/            # RSpec custom matchers
 │       ├── complete_job.rb  # expect(Worker).to complete_job(job).with_vars(...)
 │       ├── fail_job.rb      # expect(Worker).to fail_job(job).with_error(...)
-│       ├── have_activated.rb
 │       ├── have_available_jobs.rb
 │       ├── have_received_headers.rb
 │       ├── have_received_variables.rb
@@ -677,7 +676,6 @@ The matchers cover the common case: assert job status and optionally verify erro
 | `fail_job(job)` | Worker class | `.with_error(class, msg)` | Asserts job failed with optional error match |
 | `complete_job(job)` | Worker class | `.with_vars(hash)`, `.with_no_vars` | Asserts job completed with optional return value match |
 | `throw_bpmn_error_on(job)` | Worker class | `.with_code(code, message: msg)` | Asserts BPMN error thrown with optional code/message match |
-| `have_activated(type)` | Helper instance | `.with_variables(hash)`, `.with_headers(hash)` | Integration: asserts job activation |
 | `have_available_jobs` | Block | — | Integration: asserts jobs exist |
 | `have_received_variables(hash)` | ActivatedJob | — | Integration: asserts job variables |
 | `have_received_headers(hash)` | ActivatedJob | — | Integration: asserts job headers |

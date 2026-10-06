@@ -14,7 +14,6 @@ if defined?(RSpec)
   require "busybee/testing/activated_job"
   require "busybee/testing/matchers/have_received_variables"
   require "busybee/testing/matchers/have_received_headers"
-  require "busybee/testing/matchers/have_activated"
   require "busybee/testing/matchers/have_available_jobs"
   require "busybee/testing/matchers/fail_job"
   require "busybee/testing/matchers/complete_job"
