@@ -2,7 +2,7 @@
 
 require_relative "../../rails_helper"
 
-RSpec.describe Monitoring::Recorder do
+RSpec.describe Monitoring::Recorder, :busybee do
   # Carriers come from the gem's own builders, which build them the way production
   # does. What stays here is this spec's parameterisation — the Oms worker and its
   # job type — not the mechanics.

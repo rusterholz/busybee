@@ -29,9 +29,35 @@ require "rspec"
 require "busybee/testing"
 ```
 
-The testing module will automatically include helper methods in all RSpec examples.
-
 In a Rails app, the order doesn't matter: your `config.x.busybee` settings apply once Rails boots, whether `busybee/testing` or Rails is required first.
+
+### Opting In
+
+Busybee's helpers and matchers go only where you ask for them, so names like `execute_worker`, `build_test_job` or `complete_job` never meet a helper of your own with the same name. Tag a group, or a single example, with `:busybee`:
+
+```ruby
+RSpec.describe "Order Fulfillment", :busybee do
+  # deploy_process, activate_job, execute_worker, ... are all available here
+end
+```
+
+To opt in a whole directory, derive the tag from the file path in your spec helper:
+
+```ruby
+RSpec.configure do |config|
+  config.define_derived_metadata(file_path: %r{/spec/workflows/}) do |metadata|
+    metadata[:busybee] = true
+  end
+end
+```
+
+Or, if nothing in your suite shares their names, include them everywhere in one line:
+
+```ruby
+RSpec.configure { |config| config.include Busybee::Testing::Helpers }
+```
+
+`Busybee::Testing::Helpers` carries the matchers too, so the same line works inside a single group as `include Busybee::Testing::Helpers`.
 
 ## Configuration
 
@@ -547,7 +573,7 @@ Here's a complete example testing an order fulfillment workflow:
 # spec/workflows/order_fulfillment_spec.rb
 require "spec_helper"
 
-RSpec.describe "Order Fulfillment Workflow" do
+RSpec.describe "Order Fulfillment Workflow", :busybee do
   let(:bpmn_path) { File.expand_path("../fixtures/order_fulfillment.bpmn", __dir__) }
   let(:process_id) { deploy_process(bpmn_path, uniquify: true)[:process_id] }
   let(:order_id) { SecureRandom.uuid }
@@ -657,7 +683,7 @@ RSpec.shared_context "deployed order workflow" do
 end
 
 # Use in specs
-RSpec.describe "Order edge cases" do
+RSpec.describe "Order edge cases", :busybee do
   include_context "deployed order workflow"
 
   it "handles partial shipments" do

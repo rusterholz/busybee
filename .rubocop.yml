@@ -86,6 +86,7 @@ RSpec/DescribeClass:
     - "spec/integration/**/*"
     - "spec/**/matchers/**/*"
     - "spec/demo/spec/bpmn/**/*"
+    - "spec/busybee/testing/adopter_suites/**/*"
 
 RSpec/ExampleLength:
   Max: 15
@@ -95,6 +96,11 @@ RSpec/ExampleLength:
 
 RSpec/MessageSpies:
   EnforcedStyle: have_received
+
+RSpec/MultipleDescribes:
+  # Whole adopter suites, each run in its own process by testing_spec.rb.
+  Exclude:
+    - "spec/busybee/testing/adopter_suites/**/*"
 
 RSpec/MultipleExpectations:
   Max: 6
@@ -117,6 +123,10 @@ RSpec/Output:
 RSpec/SpecFilePathFormat:
   Exclude:
     - "spec/integration/**/*"
+
+RSpec/SpecFilePathSuffix:
+  Exclude:
+    - "spec/busybee/testing/adopter_suites/**/*"
 
 Style/CaseEquality:
   Enabled: false

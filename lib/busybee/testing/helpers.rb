@@ -6,25 +6,32 @@ require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 require "busybee/testing/activated_job"
+require "busybee/testing/error"
 require "busybee/testing/helpers/builders"
 require "busybee/testing/helpers/execution"
 require "busybee/testing/helpers/hook_firing"
 require "busybee/testing/helpers/hook_scoping"
 require "busybee/testing/helpers/support"
+require "busybee/testing/matchers/complete_job"
+require "busybee/testing/matchers/fail_job"
+require "busybee/testing/matchers/have_available_jobs"
+require "busybee/testing/matchers/have_received_headers"
+require "busybee/testing/matchers/have_received_variables"
+require "busybee/testing/matchers/throw_bpmn_error_on"
 require "busybee/testing/timings"
 
 module Busybee
   module Testing
-    # Raised when no job is available for activation
-    NoJobAvailable = Class.new(StandardError)
-
-    # RSpec helper methods for testing BPMN workflows against Zeebe.
+    # RSpec helper methods and matchers for testing BPMN workflows against
+    # Zeebe, and the workers and hooks that serve them. busybee/testing includes
+    # them into examples tagged :busybee.
     module Helpers
       extend Support
       include Builders
       include Execution
       include HookFiring
       include HookScoping
+      include Matchers
 
       # Deploy a BPMN process file to Zeebe.
       #

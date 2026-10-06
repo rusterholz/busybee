@@ -749,7 +749,7 @@ The demo app's recorder uses this exact fold to keep its per-job records accurat
 
 ## Testing Your Hooks
 
-`busybee/testing` gives you two ways to put the hooks you register under test, and [Testing Workers](workers.md#testing-workers) covers the worker side in full.
+`busybee/testing` gives you two ways to put the hooks you register under test, in any spec tagged `:busybee` (see [Opting In](testing.md#opting-in)), and [Testing Workers](workers.md#testing-workers) covers the worker side in full.
 
 **Fire one moment with `fire_busybee_hooks`.** Build the carrier in the state you care about, name the moment, and assert on what your code did. Every hook you registered for that moment whose filters accept the carrier runs, exactly as busybee would run it there, so one example checks both that your filters select the job and that the hook body does the right thing:
 
@@ -772,7 +772,7 @@ end
 - An error your hook raises propagates to the example.
 - It fires only the moment you name, and only your hooks for it. `without_busybee_hooks` still applies; if it has silenced the moment entirely, `fire_busybee_hooks` raises rather than quietly running nothing.
 
-**Run the whole worker with `execute_worker`.** When the question is about your worker, with your middleware around it, `execute_worker` runs it the way a worker process does and every hook fires in the order shown in [Two Lifecycles, One Naming Rule](#two-lifecycles-one-naming-rule) and [The Four Moments](#the-four-moments). Subtract the ones that aren't the point of the spec with `without_busybee_hooks(:job, :worker, :call)`, or the `without_busybee_hooks:` metadata for a whole group; your `perform` hooks keep wrapping `perform`. To see what your hooks do when the broker misbehaves, program the call on a `build_test_client`, as in `client.on(:complete_job) { raise GRPC::Unavailable }`, and build the job on that client.
+**Run the whole worker with `execute_worker`.** When the question is about your worker, with your middleware around it, `execute_worker` runs it the way a worker process does and every hook fires in the order shown in [Two Lifecycles, One Naming Rule](#two-lifecycles-one-naming-rule) and [The Four Moments](#the-four-moments). Subtract the ones that aren't the point of the spec with `without_busybee_hooks(:job, :worker, :call)`, or the `without_busybee_hooks:` metadata for a whole group, which works in any spec, tagged `:busybee` or not; your `perform` hooks keep wrapping `perform`. To see what your hooks do when the broker misbehaves, program the call on a `build_test_client`, as in `client.on(:complete_job) { raise GRPC::Unavailable }`, and build the job on that client.
 
 ### Test Isolation
 

@@ -177,12 +177,12 @@ Busybee.configure do |config|
 end
 ```
 
-In a Rails app, your `config.x.busybee` settings apply once Rails boots, whether `busybee/testing` or Rails is required first.
+Tag a spec `:busybee` to give it busybee's helpers and matchers; the rest of your suite never sees them, so their names can't collide with your own. In a Rails app, your `config.x.busybee` settings apply once Rails boots, whether `busybee/testing` or Rails is required first.
 
 #### Example
 
 ```ruby
-RSpec.describe "Order Fulfillment" do
+RSpec.describe "Order Fulfillment", :busybee do
   let(:process_id) { deploy_process("spec/fixtures/order.bpmn", uniquify: true)[:process_id] }
 
   it "processes payment and ships order" do

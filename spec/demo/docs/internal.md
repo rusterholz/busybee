@@ -179,7 +179,7 @@ This tests busybee end-to-end: process deployment, worker execution, variable pa
 
 ### Worker Unit Tests
 
-Worker specs live in `spec/workers/` and use the busybee gem's testing helpers (`require "busybee/testing"`). Two patterns:
+Worker specs live in `spec/workers/` and use the busybee gem's testing helpers (`require "busybee/testing"`). They opt in to those helpers as a directory, through derived `:busybee` metadata in `rails_helper.rb`; `spec_helper.rb` does the same for `spec/bpmn/`, and the few other specs that use the helpers (the hook specs in `spec/config/`, `engine_call_spec.rb`, `recorder_spec.rb`) carry the `:busybee` tag themselves. Two patterns:
 
 **Matcher pattern** (preferred for most workers): Uses `fail_job`, `complete_job`, and `throw_bpmn_error_on` matchers with `let`-based job setup. See `calculate_distance_worker_spec.rb`, `update_order_status_worker_spec.rb`, and `update_shipment_status_worker_spec.rb`.
 

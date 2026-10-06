@@ -10,7 +10,7 @@ require_relative "../rails_helper"
 # Driven by execute_worker, so activation, perform, auto-completion and the
 # teardown are the runner's own code and every hook level fires. No transport sits
 # behind it: the calls observed are the ones the job itself makes.
-RSpec.describe "Busybee hook choreography" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "Busybee hook choreography", :busybee do # rubocop:disable RSpec/DescribeClass
   let(:client) { build_test_client }
   let(:observed) { [] }
 

@@ -869,7 +869,7 @@ See that link for information about testing the workflow definitions. Read on fo
 
 ### Setup
 
-If you've already set up `busybee/testing` for BPMN workflow tests, worker testing helpers are available automatically. If not:
+If you've already set up `busybee/testing` for BPMN workflow tests, there's nothing more to require. If not:
 
 ```ruby
 # spec/spec_helper.rb or spec/rails_helper.rb
@@ -877,14 +877,32 @@ require "rspec"
 require "busybee/testing"
 ```
 
-This makes `execute_worker`, the `build_test_*` builders, `without_busybee_hooks`, and the worker matchers available in all RSpec examples.
+Then opt in the specs that use them. Tag a worker spec `:busybee`, and `execute_worker`, the `build_test_*` builders, `without_busybee_hooks` and the worker matchers are available in it:
+
+```ruby
+RSpec.describe ProcessOrderWorker, :busybee do
+  # ...
+end
+```
+
+Or opt in a whole directory from your spec helper. If your app has other kinds of workers, give busybee's specs a directory of their own:
+
+```ruby
+RSpec.configure do |config|
+  config.define_derived_metadata(file_path: %r{/spec/zeebe_workers/}) do |metadata|
+    metadata[:busybee] = true
+  end
+end
+```
+
+See [Opting In](testing.md#opting-in) for the one line that includes them everywhere instead.
 
 ### Basic Worker Testing
 
 The simplest way to test a worker is `execute_worker`. It runs your worker the way a running worker process does: the worker starts, the job is activated and executed (input validation, `perform`, output validation, auto-complete), and the worker shuts down. It hands you back the job, carrying everything that happened to it:
 
 ```ruby
-RSpec.describe ProcessOrderWorker do
+RSpec.describe ProcessOrderWorker, :busybee do
   let(:order) { create(:order) }
 
   it "processes the order and returns a confirmation number" do
@@ -941,7 +959,7 @@ The words are `:perform`, `:job`, `:worker` and `:call`, plus `:all`. Blocks nes
 To subtract for a whole file or group, use metadata instead. The innermost setting wins, so an example can restore everything with an empty list:
 
 ```ruby
-RSpec.describe ProcessOrderWorker, without_busybee_hooks: %i[job worker call] do
+RSpec.describe ProcessOrderWorker, :busybee, without_busybee_hooks: %i[job worker call] do
   it "fires only the perform hooks" do
     # ...
   end
