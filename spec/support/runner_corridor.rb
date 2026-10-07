@@ -7,10 +7,15 @@ module RunnerCorridor
   # Gives the runner its own thread and waits for it, rather than wrapping the
   # call in Timeout.timeout — a hang should fail the example loudly, not inject an
   # asynchronous exception at an arbitrary point inside grpc's internals. Returns
-  # the error the runner raised, or nil if it exited cleanly.
+  # the error the runner raised, whatever its class, or nil if it exited cleanly.
   def run_to_completion(seconds: 15)
-    future = Concurrent::Promises.future_on(:io) { runner.run! }
-    return future.reason if future.wait(seconds)
+    raised = nil
+    thread = Thread.new do
+      runner.run!
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      raised = e
+    end
+    return raised if thread.join(seconds)
 
     runner.kill!
     raise "the runner did not finish within #{seconds}s"
