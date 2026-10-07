@@ -70,6 +70,39 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
       end
     end
 
+    # The status arrives while the response is being read, after a job has
+    # already been delivered from it.
+    context "when backpressure arrives partway through a batch" do
+      before do
+        gateway.on(:complete_job) { Busybee::GRPC::CompleteJobResponse.new }
+        polls = 0
+        gateway.on(:activate_jobs) do
+          polls += 1
+          if polls > 1
+            runner.stop!
+            next []
+          end
+
+          Enumerator.new do |yielder|
+            job = FaultInjectionGateway.activated_job(type: "corridor_worker", key: 70)
+            yielder << Busybee::GRPC::ActivateJobsResponse.new(jobs: [job])
+            raise GRPC::ResourceExhausted, "broker under pressure"
+          end
+        end
+      end
+
+      it "works the job already delivered, then backs off and polls again" do
+        brackets = record_job_brackets
+        status = shutdown_status_from { run_to_completion }
+
+        aggregate_failures do
+          expect(gateway.received(:complete_job).map(&:jobKey)).to eq([70])
+          expect(brackets).to eq([[:activated, 70], [:executed, 70]])
+          expect(status).to have_attributes(backpressure_count: 1, reason: :signal)
+        end
+      end
+    end
+
     # The only example here that pays for a real backoff: "backs off" and "backs
     # off for the right length of time" are separate claims.
     #
@@ -159,10 +192,8 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
     end
   end
 
-  # The composed claim, and the reason it gets its own corridor: the container's
-  # cascade is already pinned for an error that escapes a child, and a runner
-  # corridor is already pinned for backpressure. Only driving both together
-  # answers whether one worker's backpressure takes the whole process down.
+  # A child's backoff and the container's cascade, driven together: does one
+  # worker's backpressure take the whole process down?
   describe "a Multi container where one worker meets backpressure" do
     let(:pressured_worker) do
       Class.new(Busybee::Worker) do
@@ -208,6 +239,33 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
 
       expect(statuses.map(&:reason)).to all(eq(:signal))
       expect(statuses.find { |s| s.worker_class == pressured_worker }.backpressure_count).to eq(1)
+    end
+
+    context "when the status is not backpressure" do
+      before do
+        gateway.on(:activate_jobs) do |request|
+          raise GRPC::Unavailable, "broker went away" if request.type == "corridor_pressured"
+
+          []
+        end
+      end
+
+      it "takes the container down on that worker's error, status intact" do
+        raised = run_to_completion
+
+        expect(raised).to be_a(Busybee::GRPC::Error)
+        expect(raised.grpc_status).to eq(:unavailable)
+      end
+
+      it "ends every worker as a gateway event, the error on the one that met it" do
+        statuses = shutdown_statuses_from { run_to_completion }
+
+        aggregate_failures do
+          expect(statuses.map(&:reason)).to all(eq(:gateway_error))
+          expect(statuses.to_h { |s| [s.worker_class, s.error&.class] }).
+            to eq(pressured_worker => Busybee::GRPC::Error, sibling_worker => nil)
+        end
+      end
     end
   end
 end
