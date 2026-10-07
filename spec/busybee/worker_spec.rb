@@ -119,25 +119,29 @@ RSpec.describe Busybee::Worker do
         expect(client).to have_received(:complete_job).once.with(123456, vars: { manual: true })
       end
 
-      it "logs and swallows GRPC errors from complete!" do
-        allow(client).to receive(:complete_job).and_raise(GRPC::Unavailable, "connection lost")
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
+      context "when the engine can't be reached to take the completion" do
+        let(:unreachable) { build_test_client.on(:complete_job) { raise GRPC::Unavailable, "connection lost" } }
+        let(:job) { build_test_job(key: 123456, client: unreachable) }
 
-        expect { performing_worker.perform_job(job) }.not_to raise_error
-        expect(logger).to have_received(:warn).with(/Failed to complete job.*connection lost/)
-      end
+        it "logs and swallows the error" do
+          logger = instance_double(Logger, warn: nil)
+          allow(Busybee).to receive(:logger).and_return(logger)
 
-      it "captures the GRPC error on the Job when auto-complete fails" do
-        allow(client).to receive(:complete_job).and_raise(GRPC::Unavailable, "connection lost")
-        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+          expect { performing_worker.perform_job(job) }.not_to raise_error
+          expect(logger).to have_received(:warn).with(/Failed to complete job.*connection lost/)
+        end
 
-        performing_worker.perform_job(job)
+        it "captures the error on the Job as the client raised it" do
+          allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
 
-        aggregate_failures do
-          expect(job.ready?).to be true                  # status didn't advance — GRPC failed before resolve!
-          expect(job.result).to eq("processed" => true)  # result axis set before GRPC failure
-          expect(job.error).to be_a(GRPC::Unavailable)   # error axis captured for telemetry
+          performing_worker.perform_job(job)
+
+          aggregate_failures do
+            expect(job.ready?).to be true                  # status didn't advance: the call failed before resolve!
+            expect(job.result).to eq("processed" => true)  # result axis set before the call
+            expect(job.error).to be_a(Busybee::GRPC::Error)
+            expect(job.error.grpc_status).to eq(:unavailable)
+          end
         end
       end
     end
@@ -191,7 +195,7 @@ RSpec.describe Busybee::Worker do
       end
 
       it "logs and swallows GRPC errors from fail!" do
-        allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
+        job = build_test_job(client: build_test_client.on(:fail_job) { raise GRPC::Unavailable, "connection lost" })
         logger = instance_double(Logger, warn: nil)
         allow(Busybee).to receive(:logger).and_return(logger)
 
@@ -212,7 +216,7 @@ RSpec.describe Busybee::Worker do
       end
 
       it "captures the perform exception to Resolution even when the auto-fail GRPC fails" do
-        allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")
+        job = build_test_job(client: build_test_client.on(:fail_job) { raise GRPC::Unavailable, "connection lost" })
         allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
 
         worker = stub_const("CaptureWithFailingGrpcWorker", Class.new(described_class) do
