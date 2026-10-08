@@ -20,14 +20,12 @@ module Busybee
         true
       end
 
-      # Override to insert drain phase between pump start and buffer processing.
+      # Inserts the drain phase between pump start and buffer processing. On the
+      # main thread, sequentially: drain the backlog by polling until caught up,
+      # then process from the buffer only until the stream is cancelled.
       def run_with_buffer
         @pump_thread = Thread.new { pump_stream_into_buffer }
-
-        # Phase 2: Drain backlog via polling (main thread, sequential, returns when backlog is empty)
         drain_backlog_while_also_processing_buffer
-
-        # Phase 3: Process from buffer only (main thread, sequential, returns when stream is cancelled)
         process_buffered_jobs(blocking: true)
 
         err = @shutdown_error.get
@@ -38,11 +36,13 @@ module Busybee
         @drain_options ||= @runtime_config.polling_options.merge(request_timeout: -1)
       end
 
+      # Each drain poll is attributed to the worker, as Polling's are. After each
+      # polled job, stream jobs that arrived meanwhile go first: keeping up with
+      # the stream outranks working through the backlog.
       def drain_backlog_while_also_processing_buffer # rubocop:disable Metrics/AbcSize
         loop do
           break if stopping?
 
-          # Attribute this drain cycle's poll to the worker (as Polling does).
           polled_count = Client::Call.with_worker_status(worker_status) do
             @client.with_each_job(job_type, **drain_options) do |job|
               activate_job(job, source: :poll)
@@ -50,8 +50,6 @@ module Busybee
                 handle_shutdown_job(job)
               else
                 execute_job(job)
-                # After each polled job, drain any stream jobs that arrived —
-                # always prioritize keeping up with the stream over working through backlog.
                 process_buffered_jobs(blocking: false)
               end
             rescue Busybee::Worker::Shutdown => e
