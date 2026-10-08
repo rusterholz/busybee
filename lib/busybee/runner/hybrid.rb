@@ -22,7 +22,7 @@ module Busybee
 
       # Inserts the drain phase between pump start and buffer processing. On the
       # main thread, sequentially: drain the backlog by polling until caught up,
-      # then process from the buffer only until the stream is cancelled.
+      # then process from the buffer only until the stream is canceled.
       def run_with_buffer
         @pump_thread = Thread.new { pump_stream_into_buffer }
         drain_backlog_while_also_processing_buffer

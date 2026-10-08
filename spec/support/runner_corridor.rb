@@ -5,7 +5,7 @@ require "concurrent"
 # Driving a real runner to its end from a spec, for the :gateway corridor specs.
 module RunnerCorridor
   # Gives the runner its own thread and waits for it, rather than wrapping the
-  # call in Timeout.timeout — a hang should fail the example loudly, not inject an
+  # call in Timeout.timeout: a hang should fail the example loudly, not inject an
   # asynchronous exception at an arbitrary point inside grpc's internals. Returns
   # the error the runner raised, whatever its class, or nil if it exited cleanly.
   def run_to_completion(seconds: 15)

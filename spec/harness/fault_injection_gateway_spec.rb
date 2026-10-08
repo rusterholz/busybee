@@ -36,9 +36,9 @@ RSpec.describe FaultInjectionGateway do
       gateway.on(:publish_message) { Busybee::GRPC::PublishMessageResponse.new(key: 1) }
 
       gateway.client.publish_message("order-shipped", correlation_key: "A1")
-      gateway.client.publish_message("order-cancelled", correlation_key: "B2")
+      gateway.client.publish_message("order-canceled", correlation_key: "B2")
 
-      expect(gateway.received(:publish_message).map(&:name)).to eq(%w[order-shipped order-cancelled])
+      expect(gateway.received(:publish_message).map(&:name)).to eq(%w[order-shipped order-canceled])
       expect(gateway.received(:publish_message).map(&:correlationKey)).to eq(%w[A1 B2])
     end
 

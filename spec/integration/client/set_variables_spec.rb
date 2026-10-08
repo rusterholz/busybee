@@ -42,12 +42,12 @@ RSpec.describe Busybee::Client, "#set_variables" do
       end
     end
 
-    it "handles errors when setting variables on cancelled process instance" do
+    it "handles errors when setting variables on canceled process instance" do
       with_process_instance(process_id) do |process_instance_key|
         # Cancel the instance
         client.cancel_instance(process_instance_key)
 
-        # Try to set variables on the cancelled instance
+        # Try to set variables on the canceled instance
         expect { client.set_variables(process_instance_key, vars: { test: "value" }) }.
           to raise_error(Busybee::GRPC::Error) do |error|
             expect(error.cause).to be_a(GRPC::NotFound)
