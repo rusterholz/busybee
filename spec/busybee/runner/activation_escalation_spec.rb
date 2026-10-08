@@ -132,6 +132,23 @@ RSpec.describe "an escalation from on_job_activated", :gateway do # rubocop:disa
     before { deliver_by_stream }
 
     it_behaves_like "a job handed back on escalation"
+
+    # The stop wakes the main thread before a slow on_worker_stop_requested
+    # finishes on the pump, so the escalation has to be on record by then.
+    context "when on_worker_stop_requested is slow" do
+      before do
+        Busybee::Hooks.on_worker_stop_requested { sleep 0.2 }
+        Busybee::Hooks.on_job_activated { raise Busybee::Worker::Shutdown, "replica lag too high" }
+      end
+
+      it "ends the worker on the escalation from on_worker_stopping onward" do
+        stopping = nil
+        Busybee::Hooks.on_worker_stopping { |status| stopping = status }
+
+        expect(run_to_completion).to be_a(Busybee::Worker::Shutdown)
+        expect([stopping.reason, stopping.error]).to match([:unhealthy, an_instance_of(Busybee::Worker::Shutdown)])
+      end
+    end
   end
 
   describe "on a hybrid worker draining its backlog" do
