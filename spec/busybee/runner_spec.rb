@@ -265,11 +265,21 @@ RSpec.describe Busybee::Runner do
       expect(job.source).to eq(:poll)
     end
 
-    it "propagates Shutdown errors from hooks" do
+    # The handback needs a runtime config for its backoff; without one it raises
+    # while building its arguments and the handback never reaches the client.
+    it "hands the job back, then propagates, when a hook raises Shutdown" do
+      runner = described_class.new(worker_class, client: client,
+                                                 runtime_config: Busybee::RuntimeConfig.new(worker_mode: :polling))
+      allow(client).to receive(:fail_job)
+      handed_back = nil
       Busybee.on_job_activated { raise Busybee::Worker::Shutdown.new(worker_class: nil) }
+      Busybee.on_job_not_executed { |not_executed| handed_back = not_executed }
+
       expect do
         runner.send(:activate_job, job, source: :poll)
       end.to raise_error(Busybee::Worker::Shutdown)
+      expect(client).to have_received(:fail_job).with(12_345, "Worker shutting down", retries: 3, backoff: anything)
+      expect(handed_back).to be(job)
     end
 
     it "respects prefiltering by source" do
