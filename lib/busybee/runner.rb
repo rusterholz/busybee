@@ -199,6 +199,8 @@ module Busybee
     end
 
     # Stamp activation, capture source/buffered/worker_class, fire on_job_activated.
+    # A hook declaring the worker down leaves this job in hand and unworked, so it
+    # goes back as any job in hand at a stop does, then the escalation carries on.
     #
     # @param job [Busybee::Job]
     # @param source [Symbol] :poll or :stream — the receive path that activated it
@@ -209,7 +211,20 @@ module Busybee
       with_fresh_worker_status(job) do
         Hooks.run(:on_job_activated, job, safe: true)
       end
+    rescue Busybee::Worker::Shutdown => e
+      declare_unhealthy(e)
+      handle_shutdown_job(job)
+      raise
     end
+
+    # The worker declared itself down: keep the error for run! to re-raise, then
+    # stop. Recording first matters on the pump, whose stop wakes the main thread.
+    def declare_unhealthy(error)
+      record_shutdown_error(error)
+      stop!(reason: :unhealthy)
+    end
+
+    def record_shutdown_error(_error); end
 
     # Stamp a fresh Status onto the job, then seed that SAME object for Calls —
     # reading it back off the job rather than passing it twice is what stops a Call

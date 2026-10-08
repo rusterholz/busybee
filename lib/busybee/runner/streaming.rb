@@ -147,7 +147,7 @@ module Busybee
           execute_job(job)
         rescue Busybee::Worker::Shutdown => e
           shutdown_error = e
-          stop!(reason: :unhealthy) # the worker declared itself down
+          declare_unhealthy(e)
           break
         end
 
@@ -199,8 +199,7 @@ module Busybee
         rescue ThreadError
           break # buffer empty (non-blocking only)
         rescue Busybee::Worker::Shutdown => e
-          @shutdown_error.update { |prev| prev || e }
-          stop!(reason: :unhealthy) # the worker declared itself down
+          declare_unhealthy(e)
         end
       end
 
@@ -215,6 +214,11 @@ module Busybee
         rescue ThreadError
           break # buffer empty
         end
+      end
+
+      # First error wins; inline mode keeps its own, so has no reference to fill.
+      def record_shutdown_error(error)
+        @shutdown_error&.update { |prev| prev || error }
       end
 
       def buffer?

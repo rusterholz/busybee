@@ -55,8 +55,7 @@ module Busybee
                 process_buffered_jobs(blocking: false)
               end
             rescue Busybee::Worker::Shutdown => e
-              @shutdown_error.update { |prev| prev || e }
-              stop!(reason: :unhealthy) # the worker declared itself down
+              declare_unhealthy(e)
             end
           end
 
