@@ -11,15 +11,17 @@ module Busybee
     module Teardown
       private
 
-      # run!'s ensure body; exception is what the run exits on, nil when clean. A
-      # contained escalation reaches T3 only where no exit exception explains it.
+      # run!'s ensure body; exception is what the run exits on, nil when clean. T3
+      # reports, where no exit exception explains the shutdown, a late error and
+      # then a contained escalation.
       def teardown(exception)
         cease_intake
         error = Busybee::Worker::Shutdown.unwrap(exception)
         @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
         fire_worker_lifecycle(:stopping_at, :on_worker_stopping, error)
         drain_within_teardown(exception)
-        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error || @teardown_error.get)
+        error ||= Busybee::Worker::Shutdown.unwrap(late_error) || @teardown_error.get
+        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
         @running.make_false
       end
 
@@ -44,6 +46,10 @@ module Busybee
       end
 
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
+
+      # An error that met a stop already under way, so was never raised; only
+      # the streaming pump records one, and only T3 reports it.
+      def late_error = nil
 
       # A worker already tearing down cannot shut down harder, so escalation buys
       # nothing at T1/T2/T3 while costing the drain, the later moments, and the

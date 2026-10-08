@@ -27,9 +27,7 @@ module Busybee
         @pump_thread = Thread.new { pump_stream_into_buffer }
         drain_backlog_while_also_processing_buffer
         process_buffered_jobs(blocking: true)
-
-        err = @shutdown_error.get
-        raise err if err
+        raise_exit_error
       end
 
       def drain_options

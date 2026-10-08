@@ -56,18 +56,12 @@ module Busybee
     end
 
     # Signals graceful shutdown, recording why. Thread-safe — the CLI runs signal
-    # handlers on their own thread. The reason IS the gate: set-once, and reporting
-    # whether this call won, so "is-stopping" and "the reason" are one atomic fact
-    # and T1 fires once. Intake ceases *before* the hook (close-before-fire).
+    # handlers on their own thread. The set-once reason IS the gate: "is-stopping"
+    # and "the reason" are one atomic fact, and only the call setting it announces.
     def stop!(reason: :signal)
       raise ArgumentError, "stop reason must be a Symbol, got #{reason.class}" unless reason.is_a?(Symbol)
-      return unless @stop_reason.compare_and_set(nil, reason)
 
-      @worker_timestamps.stamp!(:stop_requested_at)
-      cease_intake
-      contain_teardown_escalation(:on_worker_stop_requested) do
-        Hooks.run(:on_worker_stop_requested, worker_status, safe: true)
-      end
+      announce_stop if @stop_reason.compare_and_set(nil, reason)
     end
 
     # True if stop! has been called.
@@ -111,6 +105,15 @@ module Busybee
     end
 
     private
+
+    # A won stop's effects: intake ceases *before* T1 fires (close-before-fire).
+    def announce_stop
+      @worker_timestamps.stamp!(:stop_requested_at)
+      cease_intake
+      contain_teardown_escalation(:on_worker_stop_requested) do
+        Hooks.run(:on_worker_stop_requested, worker_status, safe: true)
+      end
+    end
 
     # T0 — try to begin the run. The @running flip doubles as the single-entry
     # gate: lose it and start! returns false BEFORE stamping or firing.
@@ -208,17 +211,14 @@ module Busybee
     def activate_job(job, source:, buffered: false)
       job.timestamps.stamp!(:activated_at)
       job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
-      with_fresh_worker_status(job) do
-        Hooks.run(:on_job_activated, job, safe: true)
-      end
+      with_fresh_worker_status(job) { Hooks.run(:on_job_activated, job, safe: true) }
     rescue Busybee::Worker::Shutdown => e
       declare_unhealthy(e)
       handle_shutdown_job(job)
       raise
     end
 
-    # The worker declared itself down: keep the error for run! to re-raise, then
-    # stop. Recording first matters on the pump, whose stop wakes the main thread.
+    # The worker declared itself down: keep the error for run! to re-raise, then stop.
     def declare_unhealthy(error)
       record_shutdown_error(error)
       stop!(reason: :unhealthy)

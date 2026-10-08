@@ -21,6 +21,10 @@ module Busybee
     # - buffer: false — stream.each calls perform_job inline on the main thread.
     #   Simpler model for workers that don't need buffer features.
     class Streaming < Runner
+      # The thread variable naming the runner a pump thread pumps for.
+      PUMP_OWNER = :"busybee.runner.streaming.pump_owner"
+      private_constant :PUMP_OWNER
+
       # @buffered_job_count tracks real jobs apart from Queue#size, so the depth
       # gauge ignores the :stop control sentinels the queue also carries.
       def initialize(worker_class, runtime_config: nil, client: nil)
@@ -31,6 +35,8 @@ module Busybee
         @buffered_job_count = Concurrent::AtomicFixnum.new(0)
         @peak_buffer_size = Concurrent::AtomicFixnum.new(0)
         @shutdown_error = Concurrent::AtomicReference.new(nil)
+        @late_pump_error = Concurrent::AtomicReference.new(nil)
+        @pump_claim = Mutex.new
       end
 
       def kill!(...)
@@ -85,25 +91,22 @@ module Busybee
         @job_buffer&.push(:stop) if buffer?
       end
 
-      # When buffered, join the pump thread and fail any jobs still in the buffer.
+      # When buffered, join the pump thread and hand back the jobs still buffered.
+      # After a pump error like NoMemoryError they stay put, and the engine's
+      # activation timeout returns them.
       def drain_on_shutdown
         return unless buffer?
 
         @pump_thread&.join(5)
+        return unless pump_errors.all? { |error| recoverable?(error) } # no wire calls from a dying process
+
         handle_remaining_jobs_in_buffer
       end
 
-      def current_buffer_size
-        return nil if @job_buffer.nil?
-
-        @buffered_job_count.value
-      end
-
-      def peak_buffer_size
-        return nil if @job_buffer.nil?
-
-        @peak_buffer_size.value
-      end
+      def pump_errors = [@shutdown_error.get, @late_pump_error.get].compact
+      def late_error = @late_pump_error&.get
+      def current_buffer_size = @buffered_job_count&.value
+      def peak_buffer_size = @peak_buffer_size&.value
 
       # Buffer a real job, keeping @buffered_job_count in step with @job_buffer's
       # real jobs. Increment before the push so the gauge never under-reports, and
@@ -129,8 +132,13 @@ module Busybee
       def run_with_buffer
         @pump_thread = Thread.new { pump_stream_into_buffer }
         process_buffered_jobs(blocking: true)
+        raise_exit_error
+      end
 
-        err = @shutdown_error.get
+      # Called once the loop has seen a stop; the lock waits out a pump still
+      # recording the error behind its claim.
+      def raise_exit_error
+        err = @pump_claim.synchronize { @shutdown_error.get }
         raise err if err
       end
 
@@ -155,15 +163,14 @@ module Busybee
       end
 
       # Pump the stream into the buffer until stopped. Whatever ends the pump,
-      # whatever its class, is stashed for the main thread to re-raise — so the
-      # teardown classifies it as the run's exit error, skipping the drain below
-      # RECOVERABLE_ERRORS — and stops with its discerned reason (Shutdown→
-      # :unhealthy, gRPC→:gateway_error, else :crash) before the ensure's default
-      # can mislabel it. Clean closes arrive as Cancelled and are absorbed.
-      # The ensure is the backstop unblocking the main thread's blocking pop — a
-      # no-op behind any earlier stop!, and reached live only by the gateway
-      # closing the stream cleanly, which is what :gateway_closed names.
+      # whatever its class, goes to end_pump under its discerned reason
+      # (Shutdown→:unhealthy, gRPC→:gateway_error, else :crash), ahead of the
+      # ensure's default. Clean closes arrive as Cancelled and are absorbed. The
+      # ensure is the backstop unblocking the main thread's blocking pop: a no-op
+      # behind any earlier stop!, and reached live only by the gateway closing
+      # the stream cleanly, which is what :gateway_closed names.
       def pump_stream_into_buffer
+        Thread.current.thread_variable_set(PUMP_OWNER, self)
         delay = @runtime_config.buffer_throttle
 
         @stream.each do |job|
@@ -174,11 +181,35 @@ module Busybee
           sleep(Busybee::Durations.seconds_from(delay)) if delay
         end
       rescue Exception => e # rubocop:disable Lint/RescueException
-        @shutdown_error.update { |prev| prev || e }
-        stop!(reason: reason_for(e))
+        end_pump(e, reason_for(e))
       ensure
         stop!(reason: :gateway_closed)
       end
+
+      # An error whose claim wins the stop reason caused the stop: the main
+      # thread raises it as the run's exit error. One meeting a stop already
+      # under way is late: never raised, the winning reason stands, and T3
+      # reports it. A winner finding the exit slot taken goes late too, so no
+      # pump error is lost. A Shutdown from activation arrives twice, declared
+      # and then re-raised; the first record stands.
+      def end_pump(error, reason)
+        return if pump_errors.any? { |recorded| recorded.equal?(error) }
+
+        won = @pump_claim.synchronize do # else raise_exit_error could see the stop before the record
+          claimed = @stop_reason.compare_and_set(nil, reason)
+          exiting = claimed && @shutdown_error.compare_and_set(nil, error)
+          @late_pump_error.compare_and_set(nil, error) unless exiting
+          claimed
+        end
+        announce_stop if won
+      end
+
+      # On the pump, a hook declaring the worker down ends the pump like any error.
+      def declare_unhealthy(error)
+        pumping? ? end_pump(error, :unhealthy) : super
+      end
+
+      def pumping? = Thread.current.thread_variable_get(PUMP_OWNER).equal?(self)
 
       # Process jobs from the buffer.
       # blocking: false — drains all currently-buffered jobs, returns if/when empty.
@@ -217,17 +248,9 @@ module Busybee
       end
 
       # First error wins; inline mode keeps its own, so has no reference to fill.
-      def record_shutdown_error(error)
-        @shutdown_error&.update { |prev| prev || error }
-      end
-
-      def buffer?
-        @runtime_config.buffer
-      end
-
-      def job_type
-        @worker_class.configuration.job_type
-      end
+      def record_shutdown_error(error) = @shutdown_error&.update { |prev| prev || error }
+      def buffer? = @runtime_config.buffer
+      def job_type = @worker_class.configuration.job_type
     end
   end
 end
