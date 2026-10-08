@@ -458,6 +458,35 @@ RSpec.describe Busybee::Runner::Streaming do
         end
       end
 
+      # The stop lands between the consumer's pop and its stopping? check, which
+      # only another thread can do in production. A buffer that stops the runner
+      # as it hands a job out puts the stop there deterministically.
+      def stop_on_pop(runner)
+        buffer = Class.new(Queue) do
+          attr_accessor :runner
+
+          def pop(...) = super.tap { |item| runner.stop! unless item == :stop }
+        end.new
+        buffer.runner = runner
+        runner.instance_variable_set(:@job_buffer, buffer)
+      end
+
+      it "hands back a job it took from the buffer just as the stop arrived" do
+        allow(client).to receive(:fail_job)
+        allow(queue_worker_class).to receive(:perform_job)
+        stop_on_pop(runner)
+        in_hand = build_test_job(key: 77, retries: 2)
+        runner.send(:buffer_job, in_hand)
+
+        runner.send(:process_buffered_jobs, blocking: false)
+
+        aggregate_failures do
+          expect(queue_worker_class).not_to have_received(:perform_job)
+          expect(client).to have_received(:fail_job).with(77, "Worker shutting down", retries: 2, backoff: anything)
+          expect(in_hand.status).to eq(:ready)
+        end
+      end
+
       context "when stream ends without stop!" do
         it "exits cleanly (does not hang)" do
           allow(client).to receive(:open_job_stream) do

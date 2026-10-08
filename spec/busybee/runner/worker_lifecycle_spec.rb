@@ -420,15 +420,26 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
     end
 
-    it "escalates a shutdown_on match at T0 and contains one at T2, alike" do
-      stub_const("LifecycleFatal", Class.new(StandardError))
-      Busybee.shutdown_on_errors = [LifecycleFatal]
-      Busybee.on_worker_stopping { raise LifecycleFatal, "listed" }
+    context "with an error listed in shutdown_on" do
+      before do
+        stub_const("LifecycleFatal", Class.new(StandardError))
+        Busybee.shutdown_on_errors = [LifecycleFatal]
+      end
 
-      expect { runner.run! }.not_to raise_error
-      expect(runner.running?).to be(false)
-    ensure
-      Busybee.shutdown_on_errors = nil
+      after { Busybee.shutdown_on_errors = nil }
+
+      it "escalates it from on_worker_started" do
+        Busybee.on_worker_started { raise LifecycleFatal, "listed" }
+
+        expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown) { |e| expect(e.cause).to be_a(LifecycleFatal) }
+      end
+
+      it "contains it at on_worker_stopping" do
+        Busybee.on_worker_stopping { raise LifecycleFatal, "listed" }
+
+        expect { runner.run! }.not_to raise_error
+        expect(runner.running?).to be(false)
+      end
     end
   end
 
