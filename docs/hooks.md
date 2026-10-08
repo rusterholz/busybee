@@ -272,7 +272,7 @@ around_job_execution ─┘
 on_job_executed             # the runner finished with the job it ran
 ```
 
-A job that never gets that far — one the worker had in hand when a shutdown arrived — ends at `on_job_not_executed` instead. Exactly one of the two fires for every job the runner activated.
+A job that never gets that far, because the worker had it in hand when a shutdown arrived, ends at `on_job_not_executed` instead. Exactly one of the two fires for every job the runner activated, with two exceptions described [below](#watching-the-system-lifecycle): a forced `kill!`, and an error the process can't recover from.
 
 | Hook | Fires | Receives |
 |------|-------|----------|
@@ -363,7 +363,7 @@ config.on_job_not_executed  { |job| Monitoring.job_handed_back(job) }
 
 `on_job_activated` fires before any buffer wait, so on a streaming worker the gap between it and execution is visible as `job.buffer_latency_ms`. `on_job_executed` then fires for every job the worker actually ran, on every exit path — completed, failed, or left unresolved because the resolution call itself failed.
 
-**A job the worker never got to run closes the bracket at `on_job_not_executed`.** When a shutdown arrives with jobs in hand — polled, streamed, or waiting in the buffer — busybee hands each one straight back to the engine rather than starting work it can't finish. Exactly one of `on_job_executed` and `on_job_not_executed` fires for every activated job, which is what makes an in-flight gauge come back to zero across a deploy:
+**A job the worker never got to run closes the bracket at `on_job_not_executed`.** When a shutdown arrives with jobs in hand (polled, streamed, or waiting in the buffer), busybee hands each one straight back to the engine rather than starting work it can't finish. That includes the job whose own `on_job_activated` hook declared the worker unhealthy: it is in hand, and nothing has been tried. Exactly one of `on_job_executed` and `on_job_not_executed` fires for every activated job, which is what makes an in-flight gauge come back to zero across a deploy:
 
 ```ruby
 config.on_job_activated    { Gauge.increment(:in_flight) }
@@ -373,7 +373,10 @@ config.on_job_not_executed { Gauge.decrement(:in_flight) }
 
 A handed-back job is **not** a failed one. Nothing was attempted, so `job.status` is still `:ready` and `job.error` is `nil` — the engine simply gets the job back with its retry count untouched and hands it to whoever picks it up next. If the handback call itself couldn't reach the engine, the job goes back the slower way instead, when its activation times out; you can tell which happened by reading `job.worker_status.error`, because a failure there belongs to the shutting-down worker rather than to the job.
 
-**The one exception is `kill!`**, the forced stop behind a second termination signal. It discards whatever is still buffered without handing anything back and without running any hooks, and logs how many jobs it dropped. Those jobs return to the engine when their activation times out.
+**Two shutdowns skip the handback.** In both, jobs that were activated but not yet started fire no closing hook, and return to the engine when their activation times out:
+
+- **`kill!`**, the forced stop behind a second termination signal, discards whatever is still buffered without running any hooks, and logs how many jobs it dropped.
+- **An error the process can't recover from**, such as a `NoMemoryError` or a `SystemStackError`, skips the handback because the calls it would make are the ones about to fail. The job that was running when it struck still reaches `on_job_executed`.
 
 Whenever a job is buffered — the default on streaming and hybrid workers — the two fire on **different threads**. `on_job_activated` runs on the pump thread pulling jobs off the stream; every later hook runs on the thread that picks that job back out of the buffer. Anything thread-affine — a thread-local, an open span you meant to close, a connection checked out of a pool — will not survive the crossing. Hang it on [`job.context`](#reading-the-job) instead, which travels with the job. (Polling workers, and streaming workers configured `buffer: false`, activate and execute on one thread; `job.buffered?` tells you which case you're in.)
 
