@@ -272,6 +272,8 @@ RSpec.describe Busybee::Runner::Polling do
     end
 
     context "when graceful shutdown is triggered" do
+      around { |example| isolate_busybee_hooks { example.run } }
+
       # Asserted at the client rather than at Job#fail!, which is both where the
       # handback now goes and a layer closer to the wire — and the job's own
       # status is part of the claim: handed back, never failed.
