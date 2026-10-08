@@ -154,10 +154,12 @@ module Busybee
         raise shutdown_error if shutdown_error
       end
 
-      # Pump the stream into the buffer until stopped. A stream error is stashed
-      # for the main thread to re-raise, and stops with its discerned reason
-      # (Shutdown→:unhealthy, gRPC→:gateway_error, else :crash) before the ensure's
-      # default can mislabel it; clean closes arrive as Cancelled and are absorbed.
+      # Pump the stream into the buffer until stopped. Whatever ends the pump,
+      # whatever its class, is stashed for the main thread to re-raise — so the
+      # teardown classifies it as the run's exit error, skipping the drain below
+      # RECOVERABLE_ERRORS — and stops with its discerned reason (Shutdown→
+      # :unhealthy, gRPC→:gateway_error, else :crash) before the ensure's default
+      # can mislabel it. Clean closes arrive as Cancelled and are absorbed.
       # The ensure is the backstop unblocking the main thread's blocking pop — a
       # no-op behind any earlier stop!, and reached live only by the gateway
       # closing the stream cleanly, which is what :gateway_closed names.
@@ -171,7 +173,7 @@ module Busybee
           buffer_job(job)
           sleep(Busybee::Durations.seconds_from(delay)) if delay
         end
-      rescue StandardError => e
+      rescue Exception => e # rubocop:disable Lint/RescueException
         @shutdown_error.update { |prev| prev || e }
         stop!(reason: reason_for(e))
       ensure

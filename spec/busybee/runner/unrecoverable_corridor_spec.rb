@@ -60,4 +60,61 @@ RSpec.describe "a worker meeting an unrecoverable error", :gateway do # rubocop:
                              %i[on_worker_shutdown crash] + [NoMemoryError]])
     end
   end
+
+  # The pump reads the stream on its own thread and activates there, so the
+  # error arrives from the third job's on_job_activated while the first is in
+  # perform and the second waits in the buffer. The stream holds the second job
+  # until the first is in perform.
+  describe "raised on a streaming worker's pump" do
+    let(:performing) { Queue.new }
+    let(:worker_class) do
+      corridor_runner = -> { runner }
+      started = performing
+      Class.new(Busybee::Worker) do
+        job_type "unrecoverable_corridor"
+        worker_mode :streaming
+
+        define_method(:perform) do
+          started << :performing
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+          sleep 0.005 until corridor_runner.call.stopping? || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+          {}
+        end
+      end
+    end
+
+    let(:runner) { Busybee::Runner::Streaming.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
+
+    before do
+      gateway.on(:stream_activated_jobs) do
+        Enumerator.new do |yielder|
+          yielder << wire_job(1)
+          performing.pop
+          yielder << wire_job(2)
+          yielder << wire_job(3)
+        end
+      end
+      Busybee::Hooks.on_job_activated { |job| raise NoMemoryError, "failed to allocate memory" if job.key == 3 }
+    end
+
+    it "ends the worker on that error, through both closing moments" do
+      moments = record_worker_moments
+
+      expect(run_to_completion).to be_a(NoMemoryError)
+      expect(moments).to eq([%i[on_worker_stopping crash] + [NoMemoryError],
+                             %i[on_worker_shutdown crash] + [NoMemoryError]])
+    end
+
+    it "leaves the runner no longer running" do
+      run_to_completion
+
+      expect(runner.running?).to be(false)
+    end
+
+    it "drops the buffered job for the engine to reclaim rather than handing it back" do
+      run_to_completion
+
+      expect(gateway.received(:fail_job)).to be_empty
+    end
+  end
 end
