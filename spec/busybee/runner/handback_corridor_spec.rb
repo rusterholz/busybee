@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "concurrent"
+
 # A stop arriving with a job in hand, on each receive path, with a real client:
 # what the engine is sent for the job handed back, and what hooks see of it. The
 # stop comes from the second job's activation hook, which puts it in hand exactly

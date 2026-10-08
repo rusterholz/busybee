@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "concurrent"
+
 # A worker meeting an error it cannot recover from (NoMemoryError and its kind,
 # below Runner::RECOVERABLE_ERRORS), with a real client: work in hand is dropped
 # for the engine to reclaim on activation timeout, and the worker says why.

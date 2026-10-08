@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "concurrent"
+
 # on_job_activated declaring the worker unhealthy, on each receive path, with a
 # real client. The job it fired for is in hand and was never worked, so it goes
 # back the way any job in hand at a shutdown does.
