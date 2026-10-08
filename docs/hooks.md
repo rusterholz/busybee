@@ -376,7 +376,7 @@ A handed-back job is **not** a failed one. Nothing was attempted, so `job.status
 **Two shutdowns skip the handback.** In both, jobs that were activated but not yet started fire no closing hook, and return to the engine when their activation times out:
 
 - **`kill!`**, the forced stop behind a second termination signal, discards whatever is still buffered without running any hooks, and logs how many jobs it dropped.
-- **An error the process can't recover from**, such as a `NoMemoryError` or a `SystemStackError`, skips the handback because the calls it would make are the ones about to fail. The job that was running when it struck still reaches `on_job_executed`.
+- **Any error outside `StandardError`**, such as a `NoMemoryError` or a `NotImplementedError`, skips the handback rather than make more calls from a process in that state. That holds even when the error arrives after a graceful stop has begun. The job that was running when it struck still reaches `on_job_executed`.
 
 Whenever a job is buffered — the default on streaming and hybrid workers — the two fire on **different threads**. `on_job_activated` runs on the pump thread pulling jobs off the stream; every later hook runs on the thread that picks that job back out of the buffer. Anything thread-affine — a thread-local, an open span you meant to close, a connection checked out of a pool — will not survive the crossing. Hang it on [`job.context`](#reading-the-job) instead, which travels with the job. (Polling workers, and streaming workers configured `buffer: false`, activate and execute on one thread; `job.buffered?` tells you which case you're in.)
 
@@ -486,6 +486,8 @@ Two prefix families make coarse filters easy: `reason: /\Asig/` matches every si
 **Don't build an alert on `:kill`.** The reason is set once, by whoever stops the worker first, and a forced stop almost always follows a graceful one — the CLI only escalates to `kill!` on a *second* signal, by which point `:sigterm` has already claimed the slot. Then the process exits immediately, so no closing hook fires either. In practice a kill shows up as the graceful reason you were already going to see, plus a log line saying how many jobs it discarded.
 
 **`reason` and `error` are independent axes.** The reason classifies the ending; the error, when present, is the exception involved. An `:unhealthy` stop carries the error that triggered it; a `:sigterm` stop usually carries none; and an app-supplied reason may carry either. Don't infer one from the other — read both.
+
+**A graceful stop already under way finishes as one.** On a streaming or hybrid worker, the thread reading the job stream can fail after a stop has begun: an `on_job_activated` hook that raises, say, while a deploy's SIGTERM is being handled. The worker still finishes the stop it was making. The reason stays the one that started it, the error reaches `on_worker_shutdown` as `status.error`, and the worker exits without raising it. That is one way a `:sigterm` stop can carry an error.
 
 ```ruby
 # Page only on stops that weren't asked for
