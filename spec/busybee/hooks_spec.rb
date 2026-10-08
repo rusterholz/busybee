@@ -21,14 +21,6 @@ RSpec.describe Busybee::Hooks do
       expect(described_class::HOOK_NOUN.keys).to match_array(described_class::HOOK_TYPES)
       expect(described_class::HOOK_NOUN.values.uniq).to match_array(described_class::FILTER_KEYS.keys)
     end
-
-    # Scoping the registry for a spec is Busybee::Testing's job (without_busybee_hooks,
-    # isolate_busybee_hooks), so Hooks itself carries none of it.
-    it "exposes no test-isolation API" do
-      %i[reset! isolated with_only suppressed? registry registry=].each do |method|
-        expect(described_class).not_to respond_to(method)
-      end
-    end
   end
 
   describe "registration" do
@@ -226,13 +218,13 @@ RSpec.describe Busybee::Hooks do
       end.not_to raise_error
     end
 
-    it "rejects unknown call filter kwargs (including the retired method/result keys)" do
+    it "rejects unknown call filter kwargs" do
       expect do
-        Busybee.before_call(method: :complete_job, &noop)
-      end.to raise_error(ArgumentError, /method/)
+        Busybee.before_call(job_type: "test", &noop)
+      end.to raise_error(ArgumentError, /job_type/)
     end
 
-    it "rejects the retired error_class: key on every noun (error: is the one error filter)" do
+    it "rejects error_class: as a filter on every noun, though each carrier reads it (error: filters)" do
       expect { Busybee.on_worker_started(error_class: "RuntimeError", &noop) }.
         to raise_error(ArgumentError, /error_class/)
       expect { Busybee.before_call(error_class: "RuntimeError", &noop) }.

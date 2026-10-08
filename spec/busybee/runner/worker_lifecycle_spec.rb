@@ -303,7 +303,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
   # Once teardown has begun the worker cannot be made more stopped, so the
   # special meaning of Shutdown and shutdown_on is already satisfied and an
   # escalation from T1/T2/T3 buys nothing — while costing the rest of the
-  # teardown. T0 is deliberately excluded: a start can still be aborted.
+  # teardown. T0 is excluded: a start can still be aborted.
   describe "escalation from a shutting-down moment" do
     let(:runner_class) do
       Class.new(super()) do
@@ -337,8 +337,8 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       end
     end
 
-    # The wedge is worse than a stale predicate: @running never clears, so the
-    # next run! loses start!'s compare-and-set and returns having done nothing.
+    # Were @running left set, the next run! would lose start!'s compare-and-set
+    # and return having done nothing.
     it "leaves the runner able to run again" do
       isolate_busybee_hooks do
         Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }

@@ -585,9 +585,7 @@ RSpec.describe Busybee::Runner::Streaming do
         end
 
         # Milliseconds and a Duration are two spellings of one throttle, so they
-        # have to reach sleep as the same number of seconds. Only the millisecond
-        # spelling was ever exercised, which is how the pump kept its own
-        # hand-rolled conversion — correct for Integers, off by 1000× otherwise.
+        # have to reach sleep as the same number of seconds.
         {
           "integer milliseconds" => [5, 0.005],
           "a sub-second Duration" => [0.25.seconds, 0.25]

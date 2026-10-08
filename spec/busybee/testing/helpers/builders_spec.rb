@@ -223,7 +223,7 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
       expect(build_test_job(activated: false).activated_at).to be_nil
     end
 
-    it "addresses the fields the old fabricated job hardcoded" do
+    it "carries the element it was given into the job and its logging context" do
       job = build_test_job(element_id: "review-task", tenant_id: "acme")
 
       expect(job.element_id).to eq("review-task")
