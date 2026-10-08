@@ -32,9 +32,10 @@ module Busybee
         contain_teardown_escalation(type) { Hooks.run(type, worker_status(error: error), safe: true) }
       end
 
-      # The ensure's other door: a failing wire call, or the pump join re-raising
-      # what killed the pump, would skip the rest as an escalating hook used to.
-      # Skipped outright on a non-recoverable exit, whose calls are about to fail.
+      # The ensure's other door: a failing wire call would skip the rest as an
+      # escalating hook used to. Skipped outright on a non-recoverable exit, whose
+      # calls are about to fail. What the pump join can re-raise, an error outside
+      # StandardError from a T1 hook on the pump, passes through uncontained.
       def drain_within_teardown(exception)
         return if exception && !recoverable?(exception)
 
@@ -47,8 +48,7 @@ module Busybee
 
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
 
-      # An error that met a stop already under way, so was never raised; only
-      # the streaming pump records one, and only T3 reports it.
+      # An error that met a stop already under way: never raised, reported at T3.
       def late_error = nil
 
       # A worker already tearing down cannot shut down harder, so escalation buys
