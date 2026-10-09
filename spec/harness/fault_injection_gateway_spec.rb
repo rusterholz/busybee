@@ -105,7 +105,7 @@ RSpec.describe FaultInjectionGateway do
     end
 
     # The long-lived stream wraps where the polling fetch does not, and the wrap
-    # keeps grpc_status readable through Ruby's implicit cause — which is exactly
+    # keeps grpc_status readable through Ruby's implicit cause, which is exactly
     # what the runner's backpressure match reads.
     it "wraps a stream status error while preserving grpc_status" do
       gateway.on(:stream_activated_jobs) { raise GRPC::ResourceExhausted, "broker under pressure" }

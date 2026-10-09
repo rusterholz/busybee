@@ -314,7 +314,7 @@ RSpec.describe Busybee::Hooks do
   describe ".matches? with the error: key" do
     let(:target_class) { Struct.new(:error, keyword_init: true) }
 
-    it "routes error: through the bespoke matcher — a Regexp sees the class name" do
+    it "routes error: through the bespoke matcher, so a Regexp sees the class name" do
       # Under the generic layers this was the silent-no-match trap: a Regexp
       # never === an exception instance, and the name fallback needs a Class.
       hook = { filters: { error: /Runtime/ } }
@@ -564,7 +564,7 @@ RSpec.describe Busybee::Hooks do
 
     # The chain always descends: there is one way to short-circuit a job, and
     # it is to resolve it. A middleware that forgets to yield can't cancel the
-    # work — it just gets a warning and the work runs anyway.
+    # work; it just gets a warning and the work runs anyway.
     it "force-runs the core when a propagating middleware returns without yielding" do
       results = []
       Busybee.around_perform { |_job, _perform| results << :hook } # never calls perform
@@ -640,7 +640,7 @@ RSpec.describe Busybee::Hooks do
       end
 
       # safe: describes hook-error policy. An error raised by the work the hook
-      # descended into is not the hook engine's to judge — it travels on, and it
+      # descended into is not the hook engine's to judge: it travels on, and it
       # is never reported as a hook's failure.
       it "does not swallow or misattribute an error raised by the core" do
         logger = instance_double(Logger, error: nil)
@@ -762,7 +762,7 @@ RSpec.describe Busybee::Hooks do
         expect do
           described_class.run_chain(:around_perform, job, safe: true) { results << :core }
         end.to raise_error(Busybee::Worker::Shutdown)
-        # A declared-fatal error stops the work — unlike an ordinary swallow,
+        # A declared-fatal error stops the work, unlike an ordinary swallow,
         # which force-runs the core so an observer can't cancel it.
         expect(results).to eq([])
       end

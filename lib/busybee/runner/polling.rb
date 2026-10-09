@@ -7,7 +7,7 @@ require "busybee/worker/shutdown"
 
 module Busybee
   class Runner
-    # Polling runner — fetches jobs via client.with_each_job in a loop.
+    # Polling runner: fetches jobs via client.with_each_job in a loop.
     # Each iteration long-polls the gateway for available jobs, yields them
     # sequentially to the worker's perform_job, and handles shutdown/errors.
     class Polling < Runner

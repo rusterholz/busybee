@@ -93,7 +93,7 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
 
     # The reason this builder exists. A doubled client sits *above* run_hooked,
     # which is the seam the call hooks hang off, so with one in place no call hook
-    # can fire at all — the gap this whole surface was built to close.
+    # can fire at all: the gap this whole surface was built to close.
     it "fires the call hooks, because everything above the wire is real" do
       observed = []
       Busybee::Hooks.before_call { |call| observed << [:before_call, call.rpc] }

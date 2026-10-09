@@ -430,7 +430,7 @@ RSpec.describe Busybee::Runner do
         Busybee.around_job_execution { |_job, _process| raise "db gone" }
 
         expect { runner.send(:execute_job, job) }.to raise_error(Busybee::Worker::Shutdown)
-        # Raised pre-yield, so the job is never dispatched — the engine re-delivers
+        # Raised pre-yield, so the job is never dispatched: the engine re-delivers
         # it after the activation timeout, same as a hook raising Shutdown directly.
         expect(worker_class).not_to have_received(:perform_job)
       ensure
@@ -533,8 +533,8 @@ RSpec.describe Busybee::Runner do
 
     # Two jobs is what makes this a corridor rather than a unit test: it
     # distinguishes "ends that job" from "ends the worker". Nothing an adopter
-    # writes reaches here — work code, hook code and the gRPC seam are each
-    # contained upstream — so what escapes is a flaw in the gem, and a flaw in
+    # writes reaches here (work code, hook code and the gRPC seam are each
+    # contained upstream), so what escapes is a flaw in the gem, and a flaw in
     # the gem is meant to fail loudly rather than be swallowed by its own
     # instrumentation.
     it "ends the worker rather than the job, with no hooks registered" do
@@ -569,7 +569,7 @@ RSpec.describe Busybee::Runner do
     around { |example| isolate_busybee_hooks { example.run } }
 
     # Resolving from a hook is how a hook short-circuits a job. The claim in
-    # each case is that the engine really was told — not merely that nothing
+    # each case is that the engine really was told, not merely that nothing
     # raised.
     it "lets on_job_activated resolve the job" do
       Busybee.on_job_activated { |job| job.complete!(skipped: true) }
@@ -635,7 +635,7 @@ RSpec.describe Busybee::Runner do
     end
 
     # Deferred resolution is advanced but sanctioned, and nothing on the
-    # runner's path interferes with it — including when the thread finishes
+    # runner's path interferes with it, including when the thread finishes
     # while the runner is still working through the same job's lifecycle.
     it "lets a thread perform handed the work to resolve whenever it finishes" do
       outcome = nil
@@ -675,7 +675,7 @@ RSpec.describe Busybee::Runner do
       captured_call = nil
       status_during = nil
       allow(worker_class).to receive(:perform_job) do
-        status_during = job.worker_status # W_B — before the on_job_executed re-stamp to W_C
+        status_during = job.worker_status # W_B, before the on_job_executed re-stamp to W_C
         captured_call = Busybee::Client::Call.new(:complete_job)
       end
       runner.send(:execute_job, job)
@@ -906,7 +906,7 @@ RSpec.describe Busybee::Runner do
       expect(captured).to be(job)
     end
 
-    # The job is not failed — it was never attempted. Marking it :failed would
+    # The job is not failed: it was never attempted. Marking it :failed would
     # make it indistinguishable from a job that ran and lost.
     it "leaves the job unresolved, because nothing was ever tried" do
       runner.send(:handle_shutdown_job, job)
@@ -933,7 +933,7 @@ RSpec.describe Busybee::Runner do
     end
 
     # The handback is worker-lifecycle work, so its failure is the worker's,
-    # not the job's — the job still did nothing wrong and reports no error.
+    # not the job's; the job still did nothing wrong and reports no error.
     it "records a failed handback on the worker carrier, never on the job" do
       allow(Busybee).to receive(:logger).and_return(nil)
       allow(client).to receive(:fail_job).and_raise(Busybee::GRPC::Error.new("broker gone"))

@@ -7,7 +7,7 @@ require "busybee/worker/shutdown"
 
 module Busybee
   class Runner
-    # Hybrid runner — combines polling and streaming for best-of-both-worlds job processing.
+    # Hybrid runner: combines polling and streaming for best-of-both-worlds job processing.
     # Subclasses Streaming, adding a drain phase: opens a stream first (captures all new jobs),
     # drains the backlog via polling, then transitions to buffer-only processing.
     # The pump thread reads from the stream into a thread-safe buffer; the main thread does
@@ -15,7 +15,7 @@ module Busybee
     class Hybrid < Streaming
       private
 
-      # Always uses pump thread + buffer — the drain phase requires it.
+      # Always uses pump thread + buffer: the drain phase requires it.
       def buffer?
         true
       end

@@ -1155,7 +1155,7 @@ RSpec.describe Busybee::Worker do
         expect(job).to be_completed
         # Set-once on the result axis: the chain's core already captured what
         # perform returned, so the late complete! transmits that rather than its
-        # own vars — and handle_success then finds the job resolved and declines
+        # own vars, and handle_success then finds the job resolved and declines
         # to complete it a second time.
         expect(client).to have_received(:complete_job).with(123456, vars: { "done" => true }).once
       end
@@ -1345,7 +1345,7 @@ RSpec.describe Busybee::Worker do
         expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
       end
 
-      it "prefilters by status — after_perform(status: :failed) skips completed jobs" do
+      it "prefilters by status: after_perform(status: :failed) skips completed jobs" do
         results = []
         Busybee.after_perform(status: :failed) { results << :failed_only }
         Busybee.after_perform { results << :all }
@@ -1354,7 +1354,7 @@ RSpec.describe Busybee::Worker do
         expect(results).to eq([:all])
       end
 
-      it "prefilters by status — after_perform(status: :failed) fires for failed jobs" do
+      it "prefilters by status: after_perform(status: :failed) fires for failed jobs" do
         results = []
         Busybee.after_perform(status: :failed) { results << :failed_only }
         worker = stub_const("PrefilterFailWorker", Class.new(Busybee::Worker) do
@@ -1380,7 +1380,7 @@ RSpec.describe Busybee::Worker do
         expect(received_job.error_message).to eq("missing")
       end
 
-      # The four :ready shapes — perform ran, the engine was never told.
+      # The four :ready shapes: perform ran, the engine was never told.
       it "fires when autofail's own GRPC call failed, with the job still :ready" do
         allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
         allow(client).to receive(:fail_job).and_raise(GRPC::Unavailable, "connection lost")

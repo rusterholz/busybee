@@ -9,16 +9,16 @@ require "busybee/worker/shutdown"
 
 module Busybee
   class Runner
-    # Streaming runner — receives jobs via client.open_job_stream.
+    # Streaming runner: receives jobs via client.open_job_stream.
     # The stream continuously pushes newly-activated jobs from the gateway.
     # Note: streams only receive jobs created after the stream opens;
     # pre-existing jobs require polling to retrieve.
     #
     # Two modes:
-    # - buffer: true (default) — A pump thread reads from the stream into a Queue;
+    # - buffer: true (default). A pump thread reads from the stream into a Queue;
     #   the main thread pops and processes sequentially. Better shutdown responsiveness
     #   and enables pump delay configuration.
-    # - buffer: false — stream.each calls perform_job inline on the main thread.
+    # - buffer: false. stream.each calls perform_job inline on the main thread.
     #   Simpler model for workers that don't need buffer features.
     class Streaming < Runner
       # The thread variable naming the runner a pump thread pumps for.
@@ -52,7 +52,7 @@ module Busybee
 
       private
 
-      # A kill discards these jobs and runs no job hooks to say so — a stuck
+      # A kill discards these jobs and runs no job hooks to say so: a stuck
       # container is a poor place for adopter code. No worker hook fires either on
       # the real path: stop!'s set-once reason was won by the graceful stop, and
       # the CLI's exit! follows. So this is the only record work was dropped, and
@@ -83,7 +83,7 @@ module Busybee
 
       # Stop new jobs arriving: close the stream (unblocking stream.each via
       # GRPC::Cancelled) and drop the :stop sentinel that unblocks a blocking pop.
-      # The single intake-cessation point — #stop! calls it before firing T1
+      # The single intake-cessation point: #stop! calls it before firing T1
       # (close-before-fire), and run!'s ensure again as the error-exit backstop.
       # Idempotent: a second close no-ops and extra sentinels are skipped on drain.
       def cease_intake
@@ -114,7 +114,7 @@ module Busybee
       # (Deliberately not AtomicFixnum#update: under contention its block re-runs
       # in a CAS loop, which would double-push a side-effecting push.)
       #
-      # Take the high-water from increment's own return value, not a later read —
+      # Take the high-water from increment's own return value, not a later read:
       # a consumer pop on another thread can decrement between the push and the
       # peak update, so re-reading would miss the depth this push actually hit.
       def buffer_job(job)
@@ -212,8 +212,8 @@ module Busybee
       def pumping? = Thread.current.thread_variable_get(PUMP_OWNER).equal?(self)
 
       # Process jobs from the buffer.
-      # blocking: false — drains all currently-buffered jobs, returns if/when empty.
-      # blocking: true  — blocks on pop until :stop sentinel or stopping?.
+      # blocking: false drains all currently-buffered jobs, returns if/when empty.
+      # blocking: true blocks on pop until :stop sentinel or stopping?.
       def process_buffered_jobs(blocking:)
         loop do
           break if stopping?

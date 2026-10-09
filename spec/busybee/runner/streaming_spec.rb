@@ -169,7 +169,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
       around { |example| isolate_busybee_hooks { example.run } }
 
-      it "tags the stop :unhealthy — the worker declared itself down" do
+      it "tags the stop :unhealthy (the worker declared itself down)" do
         captured = nil
         Busybee.on_worker_shutdown { |worker| captured = worker }
         allow(client).to receive(:open_job_stream) do
@@ -379,7 +379,7 @@ RSpec.describe Busybee::Runner::Streaming do
         end
         allow(queue_worker_class).to receive(:perform_job) { runner.stop! }
 
-        # Push a job after a short delay — run! must block until this arrives
+        # Push a job after a short delay: run! must block until this arrives
         Thread.new do
           sleep 0.05
           runner.instance_variable_get(:@job_buffer).push(job)
@@ -428,7 +428,7 @@ RSpec.describe Busybee::Runner::Streaming do
         joined = thread.join(3)
 
         aggregate_failures do
-          expect(joined).not_to be_nil, "runner.run! hung — pump ensure did not unblock the main thread"
+          expect(joined).not_to be_nil, "runner.run! hung: pump ensure did not unblock the main thread"
           expect(runner.running?).to be false
           expect(captured.reason).to eq(:gateway_closed)
         end
@@ -443,7 +443,7 @@ RSpec.describe Busybee::Runner::Streaming do
           stream
         end
 
-        # Push a job then stop — the job should be failed during ensure cleanup
+        # Push a job then stop: the job should be failed during ensure cleanup
         Thread.new do
           sleep 0.05
           runner.instance_variable_get(:@job_buffer).push(leftover)
@@ -499,7 +499,7 @@ RSpec.describe Busybee::Runner::Streaming do
           thread = Thread.new { runner.run! }
           joined = thread.join(3)
 
-          expect(joined).not_to be_nil, "runner.run! hung — pump thread did not unblock main thread"
+          expect(joined).not_to be_nil, "runner.run! hung: pump thread did not unblock main thread"
           expect(runner.running?).to be false
           expect(runner.stopping?).to be true
         end
@@ -510,7 +510,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
         around { |example| isolate_busybee_hooks { example.run } }
 
-        it "tags the stop :unhealthy — the worker declared itself down" do
+        it "tags the stop :unhealthy (the worker declared itself down)" do
           captured = nil
           Busybee.on_worker_shutdown { |worker| captured = worker }
           allow(client).to receive(:open_job_stream) do
@@ -719,8 +719,8 @@ RSpec.describe Busybee::Runner::Streaming do
         expect { queue.pop(true) }.to raise_error(ThreadError) # empty
       end
 
-      # A kill runs no job hooks — the container is stuck and adopter code is a
-      # poor bet there — and on the real path (a second signal, then exit!) no
+      # A kill runs no job hooks (the container is stuck and adopter code is a
+      # poor bet there), and on the real path (a second signal, then exit!) no
       # worker hook fires either, because stop!'s set-once reason has already
       # been won. So this line is the only record that work was dropped.
       it "logs how many activated jobs it discarded" do

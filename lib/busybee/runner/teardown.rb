@@ -7,7 +7,7 @@ module Busybee
   class Runner
     # What run!'s ensure does about things that go wrong inside it. The invariant:
     # the ensure always completes, or jobs go unreturned, monitoring goes blind,
-    # and @running wedges true — leaving the runner silently unable to run again.
+    # and @running wedges true, leaving the runner silently unable to run again.
     module Teardown
       private
 

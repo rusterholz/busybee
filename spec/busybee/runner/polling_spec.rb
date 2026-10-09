@@ -148,7 +148,7 @@ RSpec.describe Busybee::Runner::Polling do
 
       around { |example| isolate_busybee_hooks { example.run } }
 
-      it "tags the stop :unhealthy — the worker declared itself down" do
+      it "tags the stop :unhealthy (the worker declared itself down)" do
         captured = nil
         Busybee.on_worker_shutdown { |worker| captured = worker }
         allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
@@ -209,7 +209,7 @@ RSpec.describe Busybee::Runner::Polling do
 
         # The configured default is 2_000 milliseconds and Kernel#sleep takes
         # seconds, so 2.0 is the claim. Asserting runtime_config.backpressure_delay
-        # here — the value we passed in — is what let the conversion go missing.
+        # here (the value we passed in) is what let the conversion go missing.
         expect(runner).to have_received(:sleep).with(2.0) # rubocop:disable RSpec/SubjectStub
         expect(call_count).to eq(2)
         expect(runner.send(:worker_status).backpressure_count).to eq(1)
@@ -275,7 +275,7 @@ RSpec.describe Busybee::Runner::Polling do
       around { |example| isolate_busybee_hooks { example.run } }
 
       # Asserted at the client rather than at Job#fail!, which is both where the
-      # handback now goes and a layer closer to the wire — and the job's own
+      # handback now goes and a layer closer to the wire, and the job's own
       # status is part of the claim: handed back, never failed.
       it "hands remaining yielded jobs back with preserved retries, unworked" do # rubocop:disable RSpec/ExampleLength
         jobs = [

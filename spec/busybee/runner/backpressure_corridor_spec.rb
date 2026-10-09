@@ -52,7 +52,7 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
       end
     end
 
-    # Unavailable is nothing special here — it stands in for any status absent
+    # Unavailable is nothing special here: it stands in for any status absent
     # from Busybee.backpressure_statuses. Which statuses back off is configuration,
     # not a property of the status; the translation below is neither.
     context "when the gateway reports a status outside Busybee.backpressure_statuses" do
@@ -144,7 +144,7 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
 
   # Hybrid meets the same gateway on the same fetch call, through its own loop:
   # the drain phase polls with_each_job while the pump thread holds the stream
-  # open. The stream has to stay open for the drain to be reached at all — a
+  # open. The stream has to stay open for the drain to be reached at all: a
   # stream that ends stops the runner from the pump's ensure.
   describe "the hybrid runner's drain phase" do
     let(:worker_class) do

@@ -15,7 +15,7 @@ module Busybee
   # Base class for all runner types: the shared lifecycle, the Runner.for factory,
   # and #run! as a template method (started → loop → stopping → drain → shutdown)
   # that subclasses fill via #run_loop and optionally #drain_on_shutdown. Multi
-  # overrides #run! — it manages child runners rather than being a worker.
+  # overrides #run!: it manages child runners rather than being a worker.
   class Runner
     # Errors after which tearing down gracefully is still worth attempting; below
     # it, drop work and leave fast. Deliberately NOT shared with the identically-
@@ -42,7 +42,7 @@ module Busybee
     # Blocks until stopped or until #run_loop raises; the teardown then runs on every
     # exit path, on the runner thread. Fires T0 here and T2/T3 in the teardown, each
     # with a fresh Worker::Status; T1 fires from #stop!. Single-entry: start!'s
-    # compare-and-set reports whether this call won, so a second run! is a no-op —
+    # compare-and-set reports whether this call won, so a second run! is a no-op,
     # and sitting before the begin/ensure makes T0/T2/T3 all-or-none.
     def run!
       return if stopping?
@@ -55,7 +55,7 @@ module Busybee
       end
     end
 
-    # Signals graceful shutdown, recording why. Thread-safe — the CLI runs signal
+    # Signals graceful shutdown, recording why. Thread-safe: the CLI runs signal
     # handlers on their own thread. The set-once reason IS the gate: "is-stopping"
     # and "the reason" are one atomic fact, and only the call setting it announces.
     def stop!(reason: :signal)
@@ -115,7 +115,7 @@ module Busybee
       end
     end
 
-    # T0 — try to begin the run. The @running flip doubles as the single-entry
+    # T0: try to begin the run. The @running flip doubles as the single-entry
     # gate: lose it and start! returns false BEFORE stamping or firing.
     def start! # rubocop:disable Naming/PredicateMethod
       return false unless @running.make_true
@@ -178,7 +178,7 @@ module Busybee
     def drain_on_shutdown; end
 
     # Hand a job back to the engine unworked, then say so. Worker-lifecycle work,
-    # so a failure rides the worker carrier — the job did nothing, reports nothing.
+    # so a failure rides the worker carrier; the job did nothing, reports nothing.
     # Firing from the ensure means the hook fires however the handback went.
     def handle_shutdown_job(job)
       error = nil
@@ -206,7 +206,7 @@ module Busybee
     # goes back as any job in hand at a stop does, then the escalation carries on.
     #
     # @param job [Busybee::Job]
-    # @param source [Symbol] :poll or :stream — the receive path that activated it
+    # @param source [Symbol] :poll or :stream, the receive path that activated it
     # @param buffered [Boolean] true from buffered call sites, false from direct ones
     def activate_job(job, source:, buffered: false)
       job.timestamps.stamp!(:activated_at)
@@ -226,7 +226,7 @@ module Busybee
 
     def record_shutdown_error(_error); end
 
-    # Stamp a fresh Status onto the job, then seed that SAME object for Calls —
+    # Stamp a fresh Status onto the job, then seed that SAME object for Calls:
     # reading it back off the job rather than passing it twice is what stops a Call
     # correlating to two statuses. Each window re-stamps, so gauges are current.
     def with_fresh_worker_status(job, error: nil, &)
@@ -236,7 +236,7 @@ module Busybee
 
     # perform_job inside the around_job_execution chain; the ensure then stamps
     # executed_at and fires on_job_executed. The chain always descends, even for a
-    # job a hook already resolved — middleware brackets every activated job, and
+    # job a hook already resolved: middleware brackets every activated job, and
     # only the innermost gate decides whether work happens. The ensure runs even
     # under run_chain's Shutdown re-raise, and re-stamps, so the final activation
     # stays observable and its gauges read as of completion.
@@ -265,7 +265,7 @@ module Busybee
 end
 
 # Direct subclasses load after the class body; each requires this file back.
-# Hybrid rides at the bottom of streaming.rb — it subclasses Streaming.
+# Hybrid rides at the bottom of streaming.rb, since it subclasses Streaming.
 require "busybee/runner/multi"
 require "busybee/runner/polling"
 require "busybee/runner/streaming"

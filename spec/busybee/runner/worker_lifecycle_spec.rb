@@ -95,7 +95,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     end
   end
 
-  describe "#stop!(reason:) — the caller-supplied stop reason" do
+  describe "#stop!(reason:), the caller-supplied stop reason" do
     it "carries a caller-supplied reason onto on_worker_stop_requested" do
       captured = nil
       Busybee.on_worker_stop_requested { |worker| captured = worker }
@@ -114,7 +114,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect { runner.stop!(reason: "rollover") }.to raise_error(ArgumentError, /symbol/i)
     end
 
-    it "records the reason once — the first stop! wins (set-once)" do
+    it "records the reason once: the first stop! wins (set-once)" do
       reasons = Concurrent::Array.new
       Busybee.on_worker_stop_requested { |worker| reasons << worker.reason }
       runner.stop!(reason: :rollover)
@@ -302,7 +302,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
   # Once teardown has begun the worker cannot be made more stopped, so the
   # special meaning of Shutdown and shutdown_on is already satisfied and an
-  # escalation from T1/T2/T3 buys nothing — while costing the rest of the
+  # escalation from T1/T2/T3 buys nothing, while costing the rest of the
   # teardown. T0 is excluded: a start can still be aborted.
   describe "escalation from a shutting-down moment" do
     let(:runner_class) do
