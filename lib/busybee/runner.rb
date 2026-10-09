@@ -69,7 +69,7 @@ module Busybee
     # True if run! is actively executing.
     def running? = @running.true?
 
-    # Force shutdown; Multi overrides to also kill the pool. Parameterised because
+    # Force shutdown; Multi overrides to also kill the pool. Parameterized because
     # a hard teardown is not always operator-initiated (see Multi's cascade).
     def kill!(reason: :kill) = stop!(reason: reason)
 

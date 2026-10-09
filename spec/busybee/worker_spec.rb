@@ -697,7 +697,7 @@ RSpec.describe Busybee::Worker do
     end
 
     # The documented idiom: a hook declaring the worker unhealthy on its own
-    # judgement, with no error to wrap. `raise Klass, msg` calls Klass.new(msg),
+    # judgment, with no error to wrap. `raise Klass, msg` calls Klass.new(msg),
     # so a required keyword makes the sentence in docs/hooks.md unwritable.
     it "can be raised the way the documentation says to raise it" do
       error = begin

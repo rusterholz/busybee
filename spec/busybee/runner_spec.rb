@@ -886,7 +886,7 @@ RSpec.describe Busybee::Runner do
     let(:job) { build_test_job(type: worker_class.job_type, key: 4242, retries: 2) }
     # A runtime config is load-bearing here: without one the backoff lookup
     # raises while building the handback's arguments, and the rescue swallows it
-    # before any of this behaviour runs.
+    # before any of this behavior runs.
     let(:runner) do
       described_class.new(worker_class, client: client,
                                         runtime_config: Busybee::RuntimeConfig.new(worker_mode: :polling).
