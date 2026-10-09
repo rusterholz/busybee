@@ -18,10 +18,9 @@ module Busybee
   # overrides #run!: it manages child runners rather than being a worker.
   class Runner
     # Errors after which tearing down gracefully is still worth attempting; below
-    # it, drop work and leave fast. Deliberately NOT shared with the identically-
-    # named constant on Client::Call — they coincide today but ask different
-    # questions (record fidelity there, teardown viability here), so widening one
-    # must not silently decide the other. Same name so one grep finds both.
+    # it, drop work and leave fast. Client::Call's constant of the same name asks
+    # about record fidelity, this one about teardown viability: they coincide
+    # today and widen separately. The shared name lets one grep find both.
     RECOVERABLE_ERRORS = [StandardError].freeze
 
     include Teardown
@@ -192,8 +191,8 @@ module Busybee
       end
     end
 
-    # Deliberately not Job#fail!: handed back, not failed, so nothing is resolved
-    # and status stays :ready — :failed would look like a job that ran and lost.
+    # Calls Client#fail_job directly: a handback is not a failure, so nothing is
+    # resolved and status stays :ready, never the :failed of a job that ran and lost.
     def return_job_unworked(job)
       Client::Call.with_job(job) do
         @client.fail_job(job.key, "Worker shutting down",

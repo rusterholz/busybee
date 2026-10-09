@@ -111,8 +111,8 @@ module Busybee
       # Buffer a real job, keeping @buffered_job_count in step with @job_buffer's
       # real jobs. Increment before the push so the gauge never under-reports, and
       # roll back if the push raises, so a failed push can't leak phantom depth.
-      # (Deliberately not AtomicFixnum#update: under contention its block re-runs
-      # in a CAS loop, which would double-push a side-effecting push.)
+      # Increment and decrement, not AtomicFixnum#update, whose block re-runs in a
+      # CAS loop under contention and would push twice.
       #
       # Take the high-water from increment's own return value, not a later read:
       # a consumer pop on another thread can decrement between the push and the
