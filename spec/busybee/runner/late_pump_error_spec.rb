@@ -100,4 +100,48 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
       expect(gateway.received(:fail_job).map(&:jobKey)).to contain_exactly(2, 3)
     end
   end
+
+  # Here the error is on record before job 1's perform returns, so before the
+  # main thread looks for an exit error at all.
+  context "when it lands before the main thread reads" do
+    let(:error_class) { NoMemoryError }
+    let(:stopped) { Concurrent::Event.new }
+    let(:worker_class) do
+      corridor_runner = -> { runner }
+      second_activating = activating
+      stop_made = stopped
+      Class.new(Busybee::Worker) do
+        job_type "late_pump_error"
+        worker_mode :streaming
+
+        define_method(:perform) do
+          second_activating.pop(timeout: 5)
+          corridor_runner.call.stop!(reason: :signal)
+          stop_made.set
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+          sleep 0.005 until corridor_runner.call.send(:late_error) ||
+                            Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+          {}
+        end
+      end
+    end
+
+    before do
+      Busybee::Hooks.on_job_activated do |job|
+        next unless job.key == 2
+
+        activating << :activating
+        stopped.wait(5)
+        raise NoMemoryError, "out of room"
+      end
+    end
+
+    it_behaves_like "a graceful stop that stands"
+
+    it "hands nothing back, leaving the activated jobs for the engine to reclaim" do
+      run_to_completion
+
+      expect(gateway.received(:fail_job)).to be_empty
+    end
+  end
 end
