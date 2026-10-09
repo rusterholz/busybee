@@ -101,6 +101,20 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     end
   end
 
+  context "when it is a shutdown_on match" do
+    let(:error_class) { ReplicaLagging }
+
+    before do
+      stub_const("ReplicaLagging", Class.new(StandardError))
+      Busybee.shutdown_on_errors = [ReplicaLagging]
+      raise_late_from_activation(ReplicaLagging.new("replica lag too high"))
+    end
+
+    after { Busybee.shutdown_on_errors = nil }
+
+    it_behaves_like "a graceful stop that stands"
+  end
+
   # Here the error is on record before job 1's perform returns, so before the
   # main thread looks for an exit error at all.
   context "when it lands before the main thread reads" do
