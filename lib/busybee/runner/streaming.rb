@@ -189,11 +189,8 @@ module Busybee
       # An error whose claim wins the stop reason caused the stop: the main
       # thread raises it as the run's exit error. One meeting a stop already
       # under way is late: never raised, the winning reason stands, and T3
-      # reports it. A Shutdown from activation arrives twice, declared and then
-      # re-raised; the first record stands.
+      # reports it.
       def end_pump(error, reason)
-        return if pump_errors.any? { |recorded| recorded.equal?(error) }
-
         claim_stop(reason) { |won| (won ? @shutdown_error : @late_pump_error).compare_and_set(nil, error) }
       end
 
