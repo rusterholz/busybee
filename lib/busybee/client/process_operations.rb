@@ -74,7 +74,7 @@ module Busybee
       #
       # @param process_instance_key [Integer, String] The process instance key to cancel
       # @param ignore_missing [Boolean] If true, return false instead of raising when instance not found
-      # @return [Boolean] true if cancelled, false if not found and ignore_missing is true
+      # @return [Boolean] true if canceled, false if not found and ignore_missing is true
       # @raise [Busybee::GRPC::Error] if cancellation fails (unless ignore_missing for NotFound)
       #
       # @example Cancel an instance

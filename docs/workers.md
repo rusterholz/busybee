@@ -638,7 +638,7 @@ The worker process responds to standard Unix signals:
 | `TERM` | Same as INT | Same as INT |
 | `QUIT` | Same as INT | Same as INT |
 
-During graceful shutdown, any jobs that were received from the workflow engine but not yet started are failed back to the workflow engine with their retry count preserved, so they'll be picked up by another worker.
+During graceful shutdown, any jobs that were received from the workflow engine but not yet started are handed back to the workflow engine unworked, with their retry count preserved, so they'll be picked up by another worker. Two cases leave them to come back when their activation times out instead: the forced second-signal shutdown, and any error outside `StandardError` (such as `NoMemoryError`), including one that arrives while the graceful shutdown is under way. On a streaming or hybrid worker, an error on the thread reading the job stream that arrives once the shutdown is under way doesn't turn it into a crash: the shutdown finishes as the graceful stop it was, and the error reaches `on_worker_shutdown` (see [Stop Reasons](hooks.md#stop-reasons)). Such a late error affects only the worker it struck: in a [multi-worker process](#when-one-worker-fails), that worker leaves its jobs to time out while its siblings still hand theirs back.
 
 ### Worker Modes
 
@@ -764,7 +764,7 @@ Jobs of the *same* type are always processed sequentially. That is, only one ins
 
 **One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. Every worker's `on_worker_shutdown` fires with the crash's reason — so a container of five workers produces five shutdown events, one of which carries the error.
 
-How hard the shutdown is depends on what went wrong. An ordinary error leaves the process healthy enough to be polite, so each worker drains: jobs in hand go back to the engine promptly and are picked up by whoever replaces you. Something the process can't recover from — `NoMemoryError`, `SystemStackError` — skips the drain, because the calls a graceful shutdown makes are exactly the ones about to fail again. Those jobs come back to the engine the slower way, when their activation times out.
+How hard the shutdown is depends on what went wrong. An ordinary error leaves the process healthy enough to be polite, so each worker drains: jobs in hand go back to the engine promptly and are picked up by whoever replaces you. Any error outside `StandardError`, such as a `NoMemoryError` or a `NotImplementedError`, skips the drain, so busybee makes no more calls from a process in that state. Those jobs come back to the engine the slower way, when their activation times out.
 
 Worth knowing when planning capacity: with one poison worker class deployed across a hundred containers, that's a hundred containers churning, not one.
 

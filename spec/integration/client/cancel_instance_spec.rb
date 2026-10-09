@@ -45,7 +45,7 @@ RSpec.describe Busybee::Client, "#cancel_instance" do
         expect(result).to be(false)
       end
 
-      it "returns false when canceling already cancelled instance with ignore_missing" do
+      it "returns false when canceling already canceled instance with ignore_missing" do
         process_instance_key = client.start_instance("slow-process")
         client.cancel_instance(process_instance_key)
 

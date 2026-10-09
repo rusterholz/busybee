@@ -7,7 +7,7 @@ require "busybee/worker/shutdown"
 
 module Busybee
   class Runner
-    # Polling runner — fetches jobs via client.with_each_job in a loop.
+    # Polling runner: fetches jobs via client.with_each_job in a loop.
     # Each iteration long-polls the gateway for available jobs, yields them
     # sequentially to the worker's perform_job, and handles shutdown/errors.
     class Polling < Runner
@@ -33,8 +33,7 @@ module Busybee
       private
 
       def process_all_available_jobs
-        # Attribute this cycle's long-poll fetch to the worker: a fresh snapshot
-        # (current counters) so a starved worker still reports health via its poll.
+        # A fresh snapshot per poll, so a starved worker still reports via its fetch.
         Client::Call.with_worker_status(worker_status) do
           @client.with_each_job(job_type, **@runtime_config.polling_options) do |job|
             activate_job(job, source: :poll)
@@ -44,10 +43,13 @@ module Busybee
               execute_job(job)
             end
           rescue Busybee::Worker::Shutdown => e
-            @shutdown_error = e
-            stop!(reason: :unhealthy) # the worker declared itself down
+            declare_unhealthy(e)
           end
         end
+      end
+
+      def record_shutdown_error(error)
+        @shutdown_error = error
       end
 
       def job_type

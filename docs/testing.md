@@ -154,7 +154,7 @@ Creates a process instance, yields its key, and automatically cancels it when th
 ```ruby
 with_process_instance("order-fulfillment") do |key|
   # Test process behavior
-  # Instance is automatically cancelled after block
+  # Instance is automatically canceled after block
 end
 
 # With initial variables

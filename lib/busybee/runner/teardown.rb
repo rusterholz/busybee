@@ -7,19 +7,21 @@ module Busybee
   class Runner
     # What run!'s ensure does about things that go wrong inside it. The invariant:
     # the ensure always completes, or jobs go unreturned, monitoring goes blind,
-    # and @running wedges true — leaving the runner silently unable to run again.
+    # and @running wedges true, leaving the runner silently unable to run again.
     module Teardown
       private
 
-      # run!'s ensure body; exception is what the run exits on, nil when clean. A
-      # contained escalation reaches T3 only where no exit exception explains it.
+      # run!'s ensure body; exception is what the run exits on, nil when clean. T3
+      # reports, where no exit exception explains the shutdown, a late error and
+      # then a contained escalation.
       def teardown(exception)
         cease_intake
         error = Busybee::Worker::Shutdown.unwrap(exception)
         @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
         fire_worker_lifecycle(:stopping_at, :on_worker_stopping, error)
         drain_within_teardown(exception)
-        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error || @teardown_error.get)
+        error ||= Busybee::Worker::Shutdown.unwrap(late_error) || @teardown_error.get
+        fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
         @running.make_false
       end
 
@@ -30,9 +32,10 @@ module Busybee
         contain_teardown_escalation(type) { Hooks.run(type, worker_status(error: error), safe: true) }
       end
 
-      # The ensure's other door: a failing wire call, or the pump join re-raising
-      # what killed the pump, would skip the rest as an escalating hook used to.
-      # Skipped outright on a non-recoverable exit, whose calls are about to fail.
+      # The ensure's other door: a failing wire call would skip the rest as an
+      # escalating hook used to. Skipped outright on a non-recoverable exit, whose
+      # calls are about to fail. The pump join re-raises only a non-StandardError
+      # from T1 fired in the pump's rescue or ensure, and it passes uncontained.
       def drain_within_teardown(exception)
         return if exception && !recoverable?(exception)
 
@@ -44,6 +47,9 @@ module Busybee
       end
 
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
+
+      # An error that met a stop already under way: never raised, reported at T3.
+      def late_error = nil
 
       # A worker already tearing down cannot shut down harder, so escalation buys
       # nothing at T1/T2/T3 while costing the drain, the later moments, and the
