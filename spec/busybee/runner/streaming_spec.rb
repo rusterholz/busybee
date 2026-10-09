@@ -353,6 +353,8 @@ RSpec.describe Busybee::Runner::Streaming do
     end
 
     describe "#run!" do
+      around { |example| isolate_busybee_hooks { example.run } }
+
       it "processes jobs pumped from stream through the buffer" do
         streamed_job = build_test_job(key: 42, retries: 1)
 
