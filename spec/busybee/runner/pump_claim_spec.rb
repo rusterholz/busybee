@@ -25,11 +25,11 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
     end
   end
 
-  # An exit slot that pauses after a write made through method_name.
-  def exit_slot_pausing_after(method_name, &pause)
+  # An exit slot whose method_name runs inside around, handed the real write.
+  def exit_slot_wrapping(method_name, &around)
     Class.new(Concurrent::AtomicReference) do
       define_method(method_name) do |*args, &block|
-        super(*args, &block).tap { pause.call }
+        around.call(-> { super(*args, &block) })
       end
     end.new(nil)
   end
@@ -59,7 +59,8 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
 
     before do
       paused = recording
-      runner.instance_variable_set(:@shutdown_error, exit_slot_pausing_after(:update) { paused.set.then { sleep 0.2 } })
+      slot = exit_slot_wrapping(:update) { |write| write.call.tap { paused.set.then { sleep 0.2 } } }
+      runner.instance_variable_set(:@shutdown_error, slot)
       stream_jobs(1, 3, 2)
       Busybee::Hooks.on_job_activated do |job|
         next unless job.key == 2
@@ -84,6 +85,47 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
       run_to_completion
 
       expect(gateway.received(:fail_job).map(&:jobKey)).not_to include(3)
+    end
+  end
+
+  # Job 2's activation hook fails while job 1 is in perform, which returns once
+  # the pump has claimed the stop; the pump's record of its error is slow.
+  describe "when the main thread sees the pump's claim before its record lands" do
+    let(:worker_class) do
+      corridor_runner = -> { runner }
+      second_activating = activating
+      Class.new(Busybee::Worker) do
+        job_type "pump_claim"
+        worker_mode :streaming
+
+        define_method(:perform) do
+          second_activating.wait(5)
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+          sleep 0.005 until corridor_runner.call.stopping? || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+          {}
+        end
+      end
+    end
+
+    before do
+      slot = exit_slot_wrapping(:compare_and_set) { |write| sleep(0.3).then { write.call } }
+      runner.instance_variable_set(:@shutdown_error, slot)
+      stream_jobs(1, 2)
+      Busybee::Hooks.on_job_activated do |job|
+        next unless job.key == 2
+
+        activating.set
+        raise NoMemoryError, "out of room"
+      end
+    end
+
+    it "waits for the record, and ends the run on the error that claimed the stop" do
+      raised, status = run_with_shutdown_status
+
+      aggregate_failures do
+        expect(raised).to be_a(NoMemoryError)
+        expect([status.reason, status.error]).to match([:crash, an_instance_of(NoMemoryError)])
+      end
     end
   end
 end
