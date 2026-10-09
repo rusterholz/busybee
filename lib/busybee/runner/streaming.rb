@@ -189,24 +189,31 @@ module Busybee
       # An error whose claim wins the stop reason caused the stop: the main
       # thread raises it as the run's exit error. One meeting a stop already
       # under way is late: never raised, the winning reason stands, and T3
-      # reports it. A winner finding the exit slot taken goes late too, so no
-      # pump error is lost. A Shutdown from activation arrives twice, declared
-      # and then re-raised; the first record stands.
+      # reports it. A Shutdown from activation arrives twice, declared and then
+      # re-raised; the first record stands.
       def end_pump(error, reason)
         return if pump_errors.any? { |recorded| recorded.equal?(error) }
 
-        won = @pump_claim.synchronize do # else raise_exit_error could see the stop before the record
-          claimed = @stop_reason.compare_and_set(nil, reason)
-          exiting = claimed && @shutdown_error.compare_and_set(nil, error)
-          @late_pump_error.compare_and_set(nil, error) unless exiting
-          claimed
-        end
-        announce_stop if won
+        claim_stop(reason) { |won| (won ? @shutdown_error : @late_pump_error).compare_and_set(nil, error) }
       end
 
-      # On the pump, a hook declaring the worker down ends the pump like any error.
+      # When buffered, a declaration claims the stop as the pump does, so the
+      # reason and the exit error come from one claimant. On the main thread a
+      # lost claim still records the error to raise.
       def declare_unhealthy(error)
-        pumping? ? end_pump(error, :unhealthy) : super
+        return super unless buffer?
+        return end_pump(error, :unhealthy) if pumping?
+
+        claim_stop(:unhealthy) { record_shutdown_error(error) }
+      end
+
+      # Every write to the exit slot happens inside this step, which leaves the
+      # reason set, so a winning claim always finds the slot empty.
+      def claim_stop(reason, &record)
+        won = @pump_claim.synchronize do # else raise_exit_error could see the stop before the record
+          @stop_reason.compare_and_set(nil, reason).tap(&record)
+        end
+        announce_stop if won
       end
 
       def pumping? = Thread.current.thread_variable_get(PUMP_OWNER).equal?(self)
