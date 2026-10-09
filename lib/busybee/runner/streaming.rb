@@ -83,7 +83,7 @@ module Busybee
 
       # Stop new jobs arriving: close the stream (unblocking stream.each via
       # GRPC::Cancelled) and drop the :stop sentinel that unblocks a blocking pop.
-      # The single intake-cessation point: #stop! calls it before firing T1
+      # The single intake-cessation point: announce_stop calls it before firing T1
       # (close-before-fire), and run!'s ensure again as the error-exit backstop.
       # Idempotent: a second close no-ops and extra sentinels are skipped on drain.
       def cease_intake

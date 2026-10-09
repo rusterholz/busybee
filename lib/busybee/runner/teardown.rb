@@ -34,8 +34,8 @@ module Busybee
 
       # The ensure's other door: a failing wire call would skip the rest as an
       # escalating hook used to. Skipped outright on a non-recoverable exit, whose
-      # calls are about to fail. What the pump join can re-raise, an error outside
-      # StandardError from a T1 hook on the pump, passes through uncontained.
+      # calls are about to fail. The pump join re-raises only a non-StandardError
+      # from T1 fired in the pump's rescue or ensure, and it passes uncontained.
       def drain_within_teardown(exception)
         return if exception && !recoverable?(exception)
 

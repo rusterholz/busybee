@@ -40,7 +40,7 @@ module Busybee
 
     # Blocks until stopped or until #run_loop raises; the teardown then runs on every
     # exit path, on the runner thread. Fires T0 here and T2/T3 in the teardown, each
-    # with a fresh Worker::Status; T1 fires from #stop!. Single-entry: start!'s
+    # with a fresh Worker::Status; T1 fires from announce_stop. Single-entry: start!'s
     # compare-and-set reports whether this call won, so a second run! is a no-op,
     # and sitting before the begin/ensure makes T0/T2/T3 all-or-none.
     def run!
@@ -63,7 +63,7 @@ module Busybee
       announce_stop if @stop_reason.compare_and_set(nil, reason)
     end
 
-    # True if stop! has been called.
+    # True once a stop reason is set.
     def stopping? = !@stop_reason.get.nil?
 
     # True if run! is actively executing.

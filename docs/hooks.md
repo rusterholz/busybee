@@ -487,7 +487,7 @@ Two prefix families make coarse filters easy: `reason: /\Asig/` matches every si
 
 **`reason` and `error` are independent axes.** The reason classifies the ending; the error, when present, is the exception involved. An `:unhealthy` stop carries the error that triggered it; a `:sigterm` stop usually carries none; and an app-supplied reason may carry either. Don't infer one from the other — read both.
 
-**A graceful stop already under way finishes as one.** On a streaming or hybrid worker, the thread reading the job stream can fail after a stop has begun: an `on_job_activated` hook that raises, say, while a deploy's SIGTERM is being handled. The worker still finishes the stop it was making. The reason stays the one that started it, the error reaches `on_worker_shutdown` as `status.error`, and the worker exits without raising it. That is one way a `:sigterm` stop can carry an error.
+**A graceful stop already under way finishes as one.** On a streaming or hybrid worker, the thread reading the job stream can fail after a stop has begun, while a deploy's SIGTERM is being handled, say: the stream itself errors, or an `on_job_activated` hook raises a `Busybee::Worker::Shutdown`, an error matching `shutdown_on`, or an error outside `StandardError`. (Any other error from that hook is logged and swallowed, as usual.) The worker still finishes the stop it was making. The reason stays the one that started it, the error reaches `on_worker_shutdown` as `status.error`, and the worker exits without raising it. That is one way a `:sigterm` stop can carry an error.
 
 ```ruby
 # Page only on stops that weren't asked for
