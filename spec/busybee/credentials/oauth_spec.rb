@@ -28,8 +28,9 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
     }
   end
 
-  # TimeHelpers resets only from Minitest's teardown, so a travel would outlive its example.
-  after { travel_back }
+  # TimeHelpers resets only from Minitest's teardown, so the block undoes every
+  # travel instead; frozen on a whole second, as travel lands on one.
+  around { |example| freeze_time { example.run } }
 
   before do
     stub_request(:post, token_url).
@@ -71,10 +72,6 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
   end
 
   describe "token refresh behavior" do
-    # travel lands on whole seconds, so the clock starts on one: a fetch at a
-    # fractional second would expire a fraction later than the examples count.
-    before { freeze_time }
-
     # Helper to prime the cache with learned expiry (for Rails < 7.1 compatibility)
     # In Rails < 7.1, the first fetch uses default expiry but learns the actual value.
     # Clearing and re-fetching ensures subsequent fetches use the learned expiry.
