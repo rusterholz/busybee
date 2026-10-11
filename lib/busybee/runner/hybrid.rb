@@ -53,7 +53,7 @@ module Busybee
                 process_buffered_jobs(blocking: false)
               end
             rescue Busybee::Worker::Shutdown => e
-              declare_unhealthy(e)
+              declare_unhealthy_and_keep(e)
             end
           end
 

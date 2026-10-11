@@ -43,7 +43,7 @@ module Busybee
               execute_job(job)
             end
           rescue Busybee::Worker::Shutdown => e
-            declare_unhealthy(e)
+            declare_unhealthy_and_keep(e)
           end
         end
       end

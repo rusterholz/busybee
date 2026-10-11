@@ -109,9 +109,8 @@ module Busybee
     def announce_stop
       @worker_timestamps.stamp!(:stop_requested_at)
       cease_intake
-      contain_teardown_escalation(:on_worker_stop_requested) do
-        Hooks.run(:on_worker_stop_requested, worker_status, safe: true)
-      end
+      t1 = :on_worker_stop_requested
+      contain_teardown_escalation(t1) { Hooks.run(t1, worker_status, safe: true) }
     end
 
     # T0: try to begin the run. The @running flip doubles as the single-entry
@@ -217,12 +216,18 @@ module Busybee
       raise
     end
 
-    # The worker declared itself down: keep the error for run! to re-raise, then stop.
-    def declare_unhealthy(error)
-      record_shutdown_error(error)
-      stop!(reason: :unhealthy)
+    # The worker declared itself down: claim the stop; a winner keeps the error to raise.
+    def declare_unhealthy(error) = claim_stop(:unhealthy) { |won| record_shutdown_error(error) if won }
+
+    # Main-thread rescues: the error is still raised if an earlier stop claimed the reason.
+    def declare_unhealthy_and_keep(error) = declare_unhealthy(error) || record_shutdown_error(error)
+
+    # Set the reason if unset; record sees the outcome before any announcement.
+    def claim_stop(reason, &record)
+      synchronize_claim { @stop_reason.compare_and_set(nil, reason).tap(&record) }.tap { |won| announce_stop if won }
     end
 
+    def synchronize_claim = yield
     def record_shutdown_error(_error); end
 
     # Stamp a fresh Status onto the job, then seed that SAME object for Calls:

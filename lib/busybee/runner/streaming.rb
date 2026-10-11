@@ -21,10 +21,6 @@ module Busybee
     # - buffer: false. stream.each calls perform_job inline on the main thread.
     #   Simpler model for workers that don't need buffer features.
     class Streaming < Runner
-      # The thread variable naming the runner a pump thread pumps for.
-      PUMP_OWNER = :"busybee.runner.streaming.pump_owner"
-      private_constant :PUMP_OWNER
-
       # @buffered_job_count tracks real jobs apart from Queue#size, so the depth
       # gauge ignores the :stop control sentinels the queue also carries.
       def initialize(worker_class, runtime_config: nil, client: nil)
@@ -170,7 +166,6 @@ module Busybee
       # behind any earlier stop!, and reached live only by the gateway closing
       # the stream cleanly, which is what :gateway_closed names.
       def pump_stream_into_buffer
-        Thread.current.thread_variable_set(PUMP_OWNER, self)
         delay = @runtime_config.buffer_throttle
 
         @stream.each do |job|
@@ -189,31 +184,21 @@ module Busybee
       # An error whose claim wins the stop reason caused the stop: the main
       # thread raises it as the run's exit error. One meeting a stop already
       # under way is late: never raised, the winning reason stands, and T3
-      # reports it.
+      # reports it. An activation escalation that already won its own claim
+      # arrives here re-raised, and is the exit error already.
       def end_pump(error, reason)
+        return if @shutdown_error.get.equal?(error)
+
         claim_stop(reason) { |won| (won ? @shutdown_error : @late_pump_error).compare_and_set(nil, error) }
       end
 
-      # When buffered, a declaration claims the stop as the pump does, so the
-      # reason and the exit error come from one claimant. On the main thread a
-      # lost claim still records the error to raise.
-      def declare_unhealthy(error)
-        return super unless buffer?
-        return end_pump(error, :unhealthy) if pumping?
+      # Every exit-slot write happens inside a claim, which leaves the reason set,
+      # so a winning claim always finds the slot empty.
+      def synchronize_claim(&)
+        return yield unless buffer?
 
-        claim_stop(:unhealthy) { record_shutdown_error(error) }
+        @pump_claim.synchronize(&) # else raise_exit_error could see the stop before the record
       end
-
-      # Every write to the exit slot happens inside this step, which leaves the
-      # reason set, so a winning claim always finds the slot empty.
-      def claim_stop(reason, &record)
-        won = @pump_claim.synchronize do # else raise_exit_error could see the stop before the record
-          @stop_reason.compare_and_set(nil, reason).tap(&record)
-        end
-        announce_stop if won
-      end
-
-      def pumping? = Thread.current.thread_variable_get(PUMP_OWNER).equal?(self)
 
       # Process jobs from the buffer.
       # blocking: false drains all currently-buffered jobs, returns if/when empty.
@@ -234,7 +219,7 @@ module Busybee
         rescue ThreadError
           break # buffer empty (non-blocking only)
         rescue Busybee::Worker::Shutdown => e
-          declare_unhealthy(e)
+          declare_unhealthy_and_keep(e)
         end
       end
 
