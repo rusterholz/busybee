@@ -14,8 +14,7 @@ module Busybee
       # Fills Runner#run!'s loop: long-poll for jobs and process them until
       # stopped. Gateway backpressure backs off and retries. A per-job Shutdown
       # is stashed in @shutdown_error and re-raised once the loop exits, so the
-      # drain runs before it propagates. Single-threaded, so a plain ivar suffices
-      # (Streaming's cross-thread pump needs an AtomicReference; polling doesn't).
+      # drain runs before it propagates. Single-threaded, so the ivar needs no lock.
       def run_loop
         @shutdown_error = nil
 

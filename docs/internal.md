@@ -319,9 +319,10 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 
 | Primitive | Used For |
 |-----------|----------|
-| `Concurrent::AtomicBoolean` | `@stop_requested`, `@running` — thread-safe state flags (the CAS on each is a single-entry gate; see Run Lifecycle) |
+| `Concurrent::AtomicBoolean` | `@running`: the CAS on it is the single-entry gate (see Run Lifecycle) |
 | `Concurrent::AtomicFixnum` | Job counters (`@total_job_count`, `@failed_job_count`, `@backpressure_count`) and the streaming buffer gauge (`@buffered_job_count`, `@peak_buffer_size`) |
-| `Concurrent::AtomicReference` | `@shutdown_error` (Streaming/Hybrid), `@thread_error` (Multi) — first-error-wins |
+| `Concurrent::AtomicReference` | `@stop_reason` (set once; the stop gate), `@teardown_error` and `@thread_error` (Multi), first-error-wins |
+| Ruby `Monitor` | `@pump_claim` (Streaming/Hybrid): a stop claim and its record as one step, and the only access to the exit and post-stop error slots, which are plain ivars |
 | Ruby `Queue` | Job queue between pump thread and main thread (thread-safe) |
 | `Concurrent::FixedThreadPool` | Multi runner — one thread per child runner |
 

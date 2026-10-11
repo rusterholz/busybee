@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "concurrent"
+require "monitor"
 
 require "busybee/client/call"
 require "busybee/durations"
@@ -25,14 +26,14 @@ module Busybee
       # gauge ignores the :stop control sentinels the queue also carries.
       def initialize(worker_class, runtime_config: nil, client: nil)
         super
+        @pump_claim = Monitor.new # reentrant: a claim's record takes it again
+        @shutdown_error = nil # plain ivars, not atomics: only touched inside @pump_claim
+        @late_pump_error = nil
         return unless buffer?
 
         @job_buffer = Queue.new
         @buffered_job_count = Concurrent::AtomicFixnum.new(0)
         @peak_buffer_size = Concurrent::AtomicFixnum.new(0)
-        @shutdown_error = Concurrent::AtomicReference.new(nil)
-        @late_pump_error = Concurrent::AtomicReference.new(nil)
-        @pump_claim = Mutex.new
       end
 
       def kill!(...)
@@ -99,8 +100,8 @@ module Busybee
         handle_remaining_jobs_in_buffer
       end
 
-      def pump_errors = [@shutdown_error.get, @late_pump_error.get].compact
-      def late_error = @late_pump_error&.get
+      def pump_errors = @pump_claim.synchronize { [@shutdown_error, @late_pump_error].compact }
+      def late_error = @pump_claim.synchronize { @late_pump_error }
       def current_buffer_size = @buffered_job_count&.value
       def peak_buffer_size = @peak_buffer_size&.value
 
@@ -134,7 +135,7 @@ module Busybee
       # Called once the loop has seen a stop; the lock waits out a pump still
       # recording the error behind its claim.
       def raise_exit_error
-        err = @pump_claim.synchronize { @shutdown_error.get }
+        err = @pump_claim.synchronize { @shutdown_error }
         raise err if err
       end
 
@@ -187,18 +188,13 @@ module Busybee
       # reports it. An activation escalation that already won its own claim
       # arrives here re-raised, and is the exit error already.
       def end_pump(error, reason)
-        return if @shutdown_error.get.equal?(error)
+        return if @pump_claim.synchronize { @shutdown_error.equal?(error) }
 
-        claim_stop(reason) { |won| (won ? @shutdown_error : @late_pump_error).compare_and_set(nil, error) }
+        claim_stop(reason) { |won| won ? (@shutdown_error = error) : (@late_pump_error ||= error) }
       end
 
-      # Every exit-slot write happens inside a claim, which leaves the reason set,
-      # so a winning claim always finds the slot empty.
-      def synchronize_claim(&)
-        return yield unless buffer?
-
-        @pump_claim.synchronize(&) # else raise_exit_error could see the stop before the record
-      end
+      # A winning claim records under the lock, so it finds the exit slot empty.
+      def synchronize_claim(&) = @pump_claim.synchronize(&)
 
       # Process jobs from the buffer.
       # blocking: false drains all currently-buffered jobs, returns if/when empty.
@@ -236,8 +232,8 @@ module Busybee
         end
       end
 
-      # First error wins; inline mode keeps its own, so has no reference to fill.
-      def record_shutdown_error(error) = @shutdown_error&.update { |prev| prev || error }
+      # First error wins. Inline mode raises its own, so never reads this one.
+      def record_shutdown_error(error) = @pump_claim.synchronize { @shutdown_error = error if @shutdown_error.nil? }
       def buffer? = @runtime_config.buffer
       def job_type = @worker_class.configuration.job_type
     end

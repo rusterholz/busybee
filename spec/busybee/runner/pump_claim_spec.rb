@@ -4,8 +4,8 @@ require "concurrent"
 
 # The buffered streaming worker's stop is claimed by whichever thread gets
 # there first, the pump or the main thread, and that claim's reason and error
-# must stay one fact. Each example widens one window with an injected exit slot
-# that pauses inside a write, so the race lands the same way every run.
+# must stay one fact. Each example widens one window by pausing the runner
+# inside one real step, so the race lands the same way every run.
 RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:disable RSpec/DescribeClass
   let(:activating) { Concurrent::Event.new }
   let(:recording) { Concurrent::Event.new }
@@ -25,13 +25,20 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
     end
   end
 
-  # An exit slot whose method_name runs inside around, handed the real write.
-  def exit_slot_wrapping(method_name, &around)
-    Class.new(Concurrent::AtomicReference) do
-      define_method(method_name) do |*args, &block|
-        around.call(-> { super(*args, &block) })
-      end
-    end.new(nil)
+  # Pauses the runner after it records an exit error, the record itself intact.
+  def pause_after_recording(&pause)
+    runner.singleton_class.prepend(Module.new do
+      define_method(:record_shutdown_error) { |error| super(error).tap { pause.call } }
+      private :record_shutdown_error
+    end)
+  end
+
+  # A stop reason that pauses after a winning claim, before anything else runs.
+  def pause_after_claiming(seconds)
+    reason = Class.new(Concurrent::AtomicReference) do
+      define_method(:compare_and_set) { |*args| super(*args).tap { |won| sleep(seconds) if won } }
+    end
+    runner.instance_variable_set(:@stop_reason, reason.new(nil))
   end
 
   def run_with_shutdown_status
@@ -59,8 +66,7 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
 
     before do
       paused = recording
-      slot = exit_slot_wrapping(:update) { |write| write.call.tap { paused.set.then { sleep 0.2 } } }
-      runner.instance_variable_set(:@shutdown_error, slot)
+      pause_after_recording { paused.set.then { sleep 0.2 } }
       stream_jobs(1, 3, 2)
       Busybee::Hooks.on_job_activated do |job|
         next unless job.key == 2
@@ -108,8 +114,7 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
     end
 
     before do
-      slot = exit_slot_wrapping(:compare_and_set) { |write| sleep(0.3).then { write.call } }
-      runner.instance_variable_set(:@shutdown_error, slot)
+      pause_after_claiming(0.3)
       stream_jobs(1, 2)
       Busybee::Hooks.on_job_activated do |job|
         next unless job.key == 2

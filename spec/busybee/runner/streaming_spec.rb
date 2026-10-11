@@ -344,12 +344,6 @@ RSpec.describe Busybee::Runner::Streaming do
       it "creates a thread-safe job buffer" do
         expect(runner.instance_variable_get(:@job_buffer)).to be_a(Queue)
       end
-
-      it "creates an AtomicReference for shutdown error" do
-        ref = runner.instance_variable_get(:@shutdown_error)
-        expect(ref).to be_a(Concurrent::AtomicReference)
-        expect(ref.get).to be_nil
-      end
     end
 
     describe "#run!" do
