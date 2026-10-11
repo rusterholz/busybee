@@ -13,7 +13,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     corridor_runner = -> { runner }
     second_activating = activating
     Class.new(Busybee::Worker) do
-      job_type "late_pump_error"
+      job_type "post_stop_pump_error"
       worker_mode :streaming
 
       define_method(:perform) do
@@ -33,16 +33,16 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     gateway.on(:complete_job) { Busybee::GRPC::CompleteJobResponse.new }
     gateway.on(:fail_job) { Busybee::GRPC::FailJobResponse.new }
     gateway.on(:stream_activated_jobs) do
-      [1, 3, 2].map { |key| FaultInjectionGateway.activated_job(type: "late_pump_error", key: key) }
+      [1, 3, 2].map { |key| FaultInjectionGateway.activated_job(type: "post_stop_pump_error", key: key) }
     end
     Busybee::Hooks.on_worker_stopping { teardown_begun.set }
   end
 
-  def raise_late_from_activation(error)
-    Busybee::Hooks.on_job_activated(&late_activation_hook(error))
+  def raise_post_stop_from_activation(error)
+    Busybee::Hooks.on_job_activated(&post_stop_activation_hook(error))
   end
 
-  def late_activation_hook(error)
+  def post_stop_activation_hook(error)
     lambda do |job|
       next unless job.key == 2
 
@@ -75,7 +75,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     context "when it is a #{unrecoverable}" do
       let(:error_class) { unrecoverable }
 
-      before { raise_late_from_activation(unrecoverable.new("out of room")) }
+      before { raise_post_stop_from_activation(unrecoverable.new("out of room")) }
 
       it_behaves_like "a graceful stop that stands"
 
@@ -90,7 +90,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
   context "when it is a Shutdown" do
     let(:error_class) { Busybee::Worker::Shutdown }
 
-    before { raise_late_from_activation(Busybee::Worker::Shutdown.new("replica lag too high")) }
+    before { raise_post_stop_from_activation(Busybee::Worker::Shutdown.new("replica lag too high")) }
 
     it_behaves_like "a graceful stop that stands"
 
@@ -107,7 +107,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     before do
       stub_const("ReplicaLagging", Class.new(StandardError))
       Busybee.shutdown_on_errors = [ReplicaLagging]
-      raise_late_from_activation(ReplicaLagging.new("replica lag too high"))
+      raise_post_stop_from_activation(ReplicaLagging.new("replica lag too high"))
     end
 
     after { Busybee.shutdown_on_errors = nil }
@@ -125,7 +125,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
       second_activating = activating
       stop_made = stopped
       Class.new(Busybee::Worker) do
-        job_type "late_pump_error"
+        job_type "post_stop_pump_error"
         worker_mode :streaming
 
         define_method(:perform) do
@@ -133,7 +133,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
           corridor_runner.call.stop!(reason: :signal)
           stop_made.set
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
-          sleep 0.005 until corridor_runner.call.send(:late_error) ||
+          sleep 0.005 until corridor_runner.call.send(:post_stop_error) ||
                             Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
           {}
         end

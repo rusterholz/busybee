@@ -28,7 +28,7 @@ module Busybee
         super
         @pump_claim = Monitor.new # reentrant: a claim's record takes it again
         @shutdown_error = nil # plain ivars, not atomics: only touched inside @pump_claim
-        @late_pump_error = nil
+        @post_stop_error = nil
         return unless buffer?
 
         @job_buffer = Queue.new
@@ -100,8 +100,8 @@ module Busybee
         handle_remaining_jobs_in_buffer
       end
 
-      def pump_errors = @pump_claim.synchronize { [@shutdown_error, @late_pump_error].compact }
-      def late_error = @pump_claim.synchronize { @late_pump_error }
+      def pump_errors = @pump_claim.synchronize { [@shutdown_error, @post_stop_error].compact }
+      def post_stop_error = @pump_claim.synchronize { @post_stop_error }
       def current_buffer_size = @buffered_job_count&.value
       def peak_buffer_size = @peak_buffer_size&.value
 
@@ -184,13 +184,13 @@ module Busybee
 
       # An error whose claim wins the stop reason caused the stop: the main
       # thread raises it as the run's exit error. One meeting a stop already
-      # under way is late: never raised, the winning reason stands, and T3
+      # under way is a post-stop error: never raised, the winning reason stands, and T3
       # reports it. An activation escalation that already won its own claim
       # arrives here re-raised, and is the exit error already.
       def end_pump(error, reason)
         return if @pump_claim.synchronize { @shutdown_error.equal?(error) }
 
-        claim_stop(reason) { |won| won ? (@shutdown_error = error) : (@late_pump_error ||= error) }
+        claim_stop(reason) { |won| won ? (@shutdown_error = error) : (@post_stop_error ||= error) }
       end
 
       # A winning claim records under the lock, so it finds the exit slot empty.

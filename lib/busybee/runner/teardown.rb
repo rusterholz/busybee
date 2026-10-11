@@ -12,7 +12,7 @@ module Busybee
       private
 
       # run!'s ensure body; exception is what the run exits on, nil when clean. T3
-      # reports, where no exit exception explains the shutdown, a late error and
+      # reports, where no exit exception explains the shutdown, a post-stop error and
       # then a contained escalation.
       def teardown(exception)
         cease_intake
@@ -20,7 +20,7 @@ module Busybee
         @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
         fire_worker_lifecycle(:stopping_at, :on_worker_stopping, error)
         drain_within_teardown(exception)
-        error ||= Busybee::Worker::Shutdown.unwrap(late_error) || @teardown_error.get
+        error ||= Busybee::Worker::Shutdown.unwrap(post_stop_error) || @teardown_error.get
         fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
         @running.make_false
       end
@@ -49,7 +49,7 @@ module Busybee
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
 
       # An error that met a stop already under way: never raised, reported at T3.
-      def late_error = nil
+      def post_stop_error = nil
 
       # A worker already tearing down cannot shut down harder, so escalation buys
       # nothing at T1/T2/T3 while costing the drain, the later moments, and the
