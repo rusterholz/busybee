@@ -6,6 +6,7 @@ require "busybee/client"
 require "busybee/durations"
 require "busybee/grpc/error"
 require "busybee/hooks"
+require "busybee/runner/stopping"
 require "busybee/runner/teardown"
 require "busybee/runtime_config"
 require "busybee/worker/shutdown"
@@ -23,6 +24,7 @@ module Busybee
     # today and widen separately. The shared name lets one grep find both.
     RECOVERABLE_ERRORS = [StandardError].freeze
 
+    include Stopping
     include Teardown
 
     def initialize(worker_class = nil, runtime_config: nil, client: nil)
@@ -104,14 +106,6 @@ module Busybee
     end
 
     private
-
-    # A won stop's effects: intake ceases *before* T1 fires (close-before-fire).
-    def announce_stop
-      @worker_timestamps.stamp!(:stop_requested_at)
-      cease_intake
-      t1 = :on_worker_stop_requested
-      contain_teardown_escalation(t1) { Hooks.run(t1, worker_status, safe: true) }
-    end
 
     # T0: try to begin the run. The @running flip doubles as the single-entry
     # gate: lose it and start! returns false BEFORE stamping or firing.
@@ -215,20 +209,6 @@ module Busybee
       handle_shutdown_job(job)
       raise
     end
-
-    # The worker declared itself down: claim the stop; a winner keeps the error to raise.
-    def declare_unhealthy(error) = claim_stop(:unhealthy) { |won| record_shutdown_error(error) if won }
-
-    # Main-thread rescues: the error is still raised if an earlier stop claimed the reason.
-    def declare_unhealthy_and_keep(error) = declare_unhealthy(error) || record_shutdown_error(error)
-
-    # Set the reason if unset; record sees the outcome before any announcement.
-    def claim_stop(reason, &record)
-      synchronize_claim { @stop_reason.compare_and_set(nil, reason).tap(&record) }.tap { |won| announce_stop if won }
-    end
-
-    def synchronize_claim = yield
-    def record_shutdown_error(_error); end
 
     # Stamp a fresh Status onto the job, then seed that SAME object for Calls:
     # reading it back off the job rather than passing it twice is what stops a Call
