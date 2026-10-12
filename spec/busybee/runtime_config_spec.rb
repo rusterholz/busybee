@@ -14,7 +14,7 @@ RSpec.describe Busybee::RuntimeConfig do
   around do |example|
     saved = %i[
       @default_worker_mode @default_backpressure_delay @default_buffer_throttle
-      @log_format @worker_name @cluster_address
+      @default_shutdown_wait_timeout @log_format @worker_name @cluster_address
     ].to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
     example.run
   ensure
@@ -37,13 +37,15 @@ RSpec.describe Busybee::RuntimeConfig do
         backpressure_delay: 3000,
         max_jobs: 10,
         request_timeout: 30_000,
-        buffer_throttle: 500
+        buffer_throttle: 500,
+        shutdown_wait_timeout: 7000
       )
       expect(config).to have_attributes(
         backpressure_delay: 3000,
         max_jobs: 10,
         request_timeout: 30_000,
-        buffer_throttle: 500
+        buffer_throttle: 500,
+        shutdown_wait_timeout: 7000
       )
     end
 
@@ -71,6 +73,7 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer_throttle: nil,
         job_timeout: nil,
         fail_job_backoff: nil,
+        shutdown_wait_timeout: nil,
         log_format: nil,
         worker_name: nil,
         cluster_address: nil
@@ -209,6 +212,41 @@ RSpec.describe Busybee::RuntimeConfig do
         config = described_class.new
         expect(config.resolve_for(worker_class).backpressure_delay).to eq(
           Busybee::Defaults::DEFAULT_BACKPRESSURE_DELAY_MS
+        )
+      end
+    end
+
+    context "with shutdown_wait_timeout precedence (4-level: RC per-worker → RC global → DSL → gem)" do
+      it "uses per-worker override" do
+        worker_class.shutdown_wait_timeout 8000
+        config = described_class.new(
+          shutdown_wait_timeout: 6000,
+          workers: { "TestWorker" => { shutdown_wait_timeout: 2000 } }
+        )
+        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(2000)
+      end
+
+      it "uses global RC override" do
+        config = described_class.new(shutdown_wait_timeout: 6000)
+        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(6000)
+      end
+
+      it "falls back to worker DSL" do
+        worker_class.shutdown_wait_timeout 8000
+        config = described_class.new
+        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(8000)
+      end
+
+      it "falls back to the gem-level default" do
+        Busybee.default_shutdown_wait_timeout = 9000
+        config = described_class.new
+        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(9000)
+      end
+
+      it "falls back to gem default" do
+        config = described_class.new
+        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(
+          Busybee::Defaults::DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS
         )
       end
     end
@@ -454,6 +492,7 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer_throttle: 500
         job_timeout: 90000
         fail_job_backoff: 15000
+        shutdown_wait_timeout: 8000
       YAML
       result = described_class.parse_yaml(path)
       expect(result).to include(
@@ -464,7 +503,8 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer: true,
         buffer_throttle: 500,
         job_timeout: 90_000,
-        fail_job_backoff: 15_000
+        fail_job_backoff: 15_000,
+        shutdown_wait_timeout: 8000
       )
     end
 

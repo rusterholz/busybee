@@ -231,6 +231,7 @@ RuntimeConfig fields are divided into two categories:
 - `buffer_throttle` — pump thread delay in ms (`false` = no throttle)
 - `job_timeout` — job lock timeout in ms
 - `fail_job_backoff` — fail-job backoff in ms
+- `shutdown_wait_timeout` — the bound, in ms, on every teardown wait for another thread's share of the shutdown (today the pump join)
 
 **Process-wide** — apply globally, no per-worker overrides (global RC → gem default):
 - `log_format` — `:text` or `:json`
@@ -265,7 +266,7 @@ Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit va
 
 `RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `worker_mode`).
 
-**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `buffer`, `buffer_throttle`, `job_timeout`, `fail_job_backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
+**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `buffer`, `buffer_throttle`, `job_timeout`, `fail_job_backoff`, `shutdown_wait_timeout`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
 
 **Workers format:** The `workers` key is a YAML list. Each entry is either a bare string (worker class name, no overrides) or a mapping with the worker name as key and overrides nested beneath it:
 
@@ -428,7 +429,7 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 
 ### CLI Flags
 
-The CLI exposes 5 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
+The CLI exposes 5 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff, shutdown_wait_timeout) are YAML-only — they're per-worker concerns that don't belong on a command line.
 
 - `--config` / `-c` — YAML configuration file path
 - `--worker-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "busybee/durations"
 require "busybee/hooks"
 require "busybee/worker/shutdown"
 
@@ -47,6 +48,9 @@ module Busybee
       end
 
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
+
+      # The bound on waiting for another thread's share of the shutdown.
+      def shutdown_wait_seconds = Busybee::Durations.seconds_from(@runtime_config.shutdown_wait_timeout)
 
       # An error that met a stop already under way: never raised, reported at T3.
       def post_stop_error = nil

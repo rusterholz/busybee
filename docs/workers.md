@@ -568,6 +568,7 @@ See [Worker Modes](#worker-modes) for what these options mean and when to use ea
 | `job_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | `60_000` | Job lock timeout (ms) |
 | `fail_job_backoff` | A [duration](configuration.md#how-busybee-reads-durations) | `5_000` | Retry backoff delay (ms) |
 | `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | `2_000` | Delay after backpressure error (ms) |
+| `shutdown_wait_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | `5_000` | How long a stopping worker waits on its other threads (ms) |
 | `complete_job_on_success` | Boolean | `true` | Auto-complete on success |
 | `strict_outputs` | Boolean | `Busybee.default_strict_outputs` (`true`) | Raise [`UndeclaredOutput`](#strict-output-validation) on undeclared return keys |
 | `shutdown_on` | Exception class(es) | `[]` | Exceptions that trigger shutdown |
@@ -638,7 +639,7 @@ The worker process responds to standard Unix signals:
 | `TERM` | Same as INT | Same as INT |
 | `QUIT` | Same as INT | Same as INT |
 
-During graceful shutdown, any jobs that were received from the workflow engine but not yet started are handed back to the workflow engine unworked, with their retry count preserved, so they'll be picked up by another worker. Two cases leave them to come back when their activation times out instead: the forced second-signal shutdown, and any error outside `StandardError` (such as `NoMemoryError`), including one that arrives while the graceful shutdown is under way. On a streaming or hybrid worker, an error on the thread reading the job stream that arrives once the shutdown is under way doesn't turn it into a crash: the shutdown finishes as the graceful stop it was, and the error reaches `on_worker_shutdown` (see [Stop Reasons](hooks.md#stop-reasons)). Such a post-stop error affects only the worker it struck: in a [multi-worker process](#when-one-worker-fails), that worker leaves its jobs to time out while its siblings still hand theirs back.
+During graceful shutdown, any jobs that were received from the workflow engine but not yet started are handed back to the workflow engine unworked, with their retry count preserved, so they'll be picked up by another worker. A streaming or hybrid worker first waits for the thread reading its job stream to finish, for up to `shutdown_wait_timeout` (5 seconds by default). Two cases leave them to come back when their activation times out instead: the forced second-signal shutdown, and any error outside `StandardError` (such as `NoMemoryError`), including one that arrives while the graceful shutdown is under way. On a streaming or hybrid worker, an error on the thread reading the job stream that arrives once the shutdown is under way doesn't turn it into a crash: the shutdown finishes as the graceful stop it was, and the error reaches `on_worker_shutdown` (see [Stop Reasons](hooks.md#stop-reasons)). Such a post-stop error affects only the worker it struck: in a [multi-worker process](#when-one-worker-fails), that worker leaves its jobs to time out while its siblings still hand theirs back.
 
 ### Worker Modes
 
@@ -823,6 +824,7 @@ workers:
 | `job_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | Job lock timeout (ms) |
 | `fail_job_backoff` | A [duration](configuration.md#how-busybee-reads-durations) | Retry backoff (ms) |
 | `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | Delay after backpressure error (ms) |
+| `shutdown_wait_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | How long a stopping worker waits on its other threads (ms) |
 | `buffer` | Boolean | Enable job buffering in streaming mode |
 | `buffer_throttle` | A [duration](configuration.md#how-busybee-reads-durations), or Boolean | Job buffer delay (ms). `false` to disable |
 | `workers` | Array | Worker class names, with optional per-worker overrides |
@@ -851,7 +853,7 @@ Gem Configuration & Defaults   (lowest priority)    `Busybee.default_max_jobs` (
 
 The first non-nil value wins. This means `0` and `false` are valid explicit values -- for example, `buffer_throttle: false` explicitly disables throttling even if a lower level sets it.
 
-The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
+The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `shutdown_wait_timeout`, `buffer`, and `buffer_throttle`.
 
 **Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process.
 

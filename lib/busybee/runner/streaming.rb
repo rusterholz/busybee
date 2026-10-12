@@ -94,7 +94,7 @@ module Busybee
       def drain_on_shutdown
         return unless buffer?
 
-        @pump_thread&.join(5)
+        @pump_thread&.join(shutdown_wait_seconds)
         return unless pump_errors.all? { |error| recoverable?(error) } # no wire calls from a dying process
 
         handle_remaining_jobs_in_buffer

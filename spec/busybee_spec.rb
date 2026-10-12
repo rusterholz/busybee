@@ -371,6 +371,11 @@ RSpec.describe Busybee do
                     :DEFAULT_BACKPRESSURE_DELAY_MS
   end
 
+  describe ".default_shutdown_wait_timeout" do
+    it_behaves_like "a duration config setter", :default_shutdown_wait_timeout, :default_shutdown_wait_timeout,
+                    :DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS
+  end
+
   describe ".default_max_jobs" do
     around do |example|
       original = described_class.instance_variable_get(:@default_max_jobs)

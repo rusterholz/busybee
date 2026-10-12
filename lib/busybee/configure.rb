@@ -112,6 +112,10 @@ module Busybee
       @default_backpressure_delay = value.nil? ? nil : validate_duration!(:default_backpressure_delay, value)
     end
 
+    def default_shutdown_wait_timeout=(value)
+      @default_shutdown_wait_timeout = value.nil? ? nil : validate_duration!(:default_shutdown_wait_timeout, value)
+    end
+
     # Keepalive durations carry one extra state beyond the usual nil-resets-to-default:
     # an explicit false disables keepalive. false is stored verbatim (not routed through
     # validate_duration!, which rejects it); nil and everything else behave as normal.

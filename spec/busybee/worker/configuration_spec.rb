@@ -466,6 +466,25 @@ RSpec.describe Busybee::Worker::Configuration do
     end
   end
 
+  describe "#shutdown_wait_timeout=" do
+    let(:config) { configuration_for("TestWorker") }
+
+    it "defaults to nil" do
+      expect(config.shutdown_wait_timeout).to be_nil
+    end
+
+    it "accepts an Integer" do
+      config.shutdown_wait_timeout = 10_000
+      expect(config.shutdown_wait_timeout).to eq(10_000)
+    end
+
+    it "raises on non-Integer, non-Duration" do
+      expect { config.shutdown_wait_timeout = "5 seconds" }.to raise_error(
+        Busybee::InvalidWorkerDefinition, /shutdown_wait_timeout.*number.*ActiveSupport::Duration/
+      )
+    end
+  end
+
   describe Busybee::Worker::Configuration::Input do
     subject(:input) do
       described_class.new(
@@ -536,6 +555,7 @@ RSpec.describe Busybee::Worker::Configuration do
         c.job_timeout = 300_000
         c.fail_job_backoff = 30_000
         c.backpressure_delay = 10_000
+        c.shutdown_wait_timeout = 7_000
       end
     end
 
@@ -548,13 +568,10 @@ RSpec.describe Busybee::Worker::Configuration do
     end
 
     it "includes runner configuration" do
-      result = config.to_h
-      expect(result[:worker_mode]).to eq(:polling)
-      expect(result[:polling_config]).to eq(max_jobs: 10)
-      expect(result[:streaming_config]).to eq({})
-      expect(result[:job_timeout]).to eq(300_000)
-      expect(result[:fail_job_backoff]).to eq(30_000)
-      expect(result[:backpressure_delay]).to eq(10_000)
+      expect(config.to_h).to include(
+        worker_mode: :polling, polling_config: { max_jobs: 10 }, streaming_config: {},
+        job_timeout: 300_000, fail_job_backoff: 30_000, backpressure_delay: 10_000, shutdown_wait_timeout: 7_000
+      )
     end
 
     it "includes lifecycle defaults" do

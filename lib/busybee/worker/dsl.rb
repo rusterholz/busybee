@@ -107,6 +107,14 @@ module Busybee
         end
       end
 
+      def shutdown_wait_timeout(value = nil)
+        if value.nil?
+          configuration.shutdown_wait_timeout
+        else
+          configuration.shutdown_wait_timeout = value
+        end
+      end
+
       def complete_job_on_success(value = nil)
         if value.nil?
           configuration.complete_job_on_success

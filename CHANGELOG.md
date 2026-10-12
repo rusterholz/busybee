@@ -22,6 +22,8 @@
 
 - **Configurable Backpressure Statuses** – `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) names the gRPC status codes that mean the gateway is applying backpressure. Polling and hybrid workers back off (sleeping `backpressure_delay`) and retry the fetch when a job-activation call resolves to one of these — matched by status code, independent of which gRPC exception class the gateway raised. In a Rails app, set it as `config.x.busybee.backpressure_statuses`
 
+- **Tunable Shutdown Waits** – `shutdown_wait_timeout` (default 5 seconds) sets how long a stopping worker waits for its other threads to finish their part of the shutdown before carrying on without them, such as a streaming worker's stream reader still inside a slow hook. Set it per worker in the DSL or YAML, or for every worker with `Busybee.default_shutdown_wait_timeout` (`config.x.busybee.default_shutdown_wait_timeout` in Rails)
+
 - **gRPC Channel Keepalive** – HTTP/2 keepalive pings now guard the streaming worker's deadline-less job-activation stream, so a silently-dropped transport (a suspended host, a connection a proxy reset) surfaces as a recoverable gateway error instead of leaving the worker blocked forever. Tunable via `Busybee.grpc_keepalive_interval` (default 45s) and `Busybee.grpc_keepalive_timeout` (default 20s); set both to `false` to disable. Enabled by default
 
 - **Timestamped JSON Logs** – every JSON-format log line now carries a `time` field (ISO8601 UTC, millisecond precision), so structured logs stay self-ordering even where the host logger's formatter — which normally supplies the timestamp — is bypassed or absent

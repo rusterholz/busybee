@@ -87,7 +87,6 @@ module Busybee
       unless busybee_conf.default_input_required.nil?
         config.default_input_required = !!busybee_conf.default_input_required
       end
-      config.default_max_jobs = busybee_conf.default_max_jobs if busybee_conf.default_max_jobs.presence
       unless busybee_conf.default_output_required.nil?
         config.default_output_required = !!busybee_conf.default_output_required
       end
@@ -98,9 +97,9 @@ module Busybee
       unless busybee_conf.default_buffer_throttle.nil?
         config.default_buffer_throttle = busybee_conf.default_buffer_throttle
       end
-      config.default_worker_mode = busybee_conf.default_worker_mode if busybee_conf.default_worker_mode.presence
-      if busybee_conf.default_backpressure_delay.presence
-        config.default_backpressure_delay = busybee_conf.default_backpressure_delay
+      %i[default_max_jobs default_worker_mode default_backpressure_delay default_shutdown_wait_timeout].each do |attr|
+        value = busybee_conf.public_send(attr)
+        config.public_send(:"#{attr}=", value) if value.presence
       end
       config.backpressure_statuses = busybee_conf.backpressure_statuses if busybee_conf.backpressure_statuses.present?
       config.shutdown_on_errors = busybee_conf.shutdown_on_errors if busybee_conf.shutdown_on_errors.presence
