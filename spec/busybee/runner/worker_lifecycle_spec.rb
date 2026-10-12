@@ -516,10 +516,17 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect(moments).to eq(%i[started stopping shutdown])
     end
 
-    it "lets a non-recoverable failure raised by the drain itself out" do
+    it "finishes the stop when the drain itself fails unrecoverably, and says to exit immediately" do
+      captured = nil
+      Busybee.on_worker_shutdown { |worker| captured = worker }
       runner.test_drain = -> { raise NoMemoryError, "out of memory mid-drain" }
 
-      expect { runner.run! }.to raise_error(NoMemoryError)
+      aggregate_failures do
+        expect { runner.run! }.not_to raise_error
+        expect(captured.error).to be_a(NoMemoryError)
+        expect(runner.running?).to be(false)
+        expect(Busybee::Runner.exit_immediately?).to be(true)
+      end
     end
   end
 

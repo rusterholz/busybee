@@ -24,6 +24,11 @@ module Busybee
     # today and widen separately. The shared name lets one grep find both.
     RECOVERABLE_ERRORS = [StandardError].freeze
 
+    # The fire alarm, set once by an unrecoverable error or a kill: every runner in the
+    # process then skips handbacks, drains and job hooks. Preallocated: raising it allocates nothing.
+    EXIT_IMMEDIATELY = Concurrent::AtomicBoolean.new(false)
+    private_constant :EXIT_IMMEDIATELY
+
     include Stopping
     include Teardown
 
@@ -65,10 +70,7 @@ module Busybee
       announce_stop if @stop_reason.compare_and_set(nil, reason)
     end
 
-    # True once a stop reason is set.
     def stopping? = !@stop_reason.get.nil?
-
-    # True if run! is actively executing.
     def running? = @running.true?
 
     # Force shutdown; Multi overrides to also kill the pool. Parameterized because
@@ -76,6 +78,8 @@ module Busybee
     def kill!(reason: :kill) = stop!(reason: reason)
 
     class << self
+      def exit_immediately? = EXIT_IMMEDIATELY.true?
+
       # Resolves worker mode and returns the matching runner. Mode precedence,
       # lowest first: Busybee.default_worker_mode, the worker DSL's worker_mode,
       # then a RuntimeConfig override (global or per-worker).
@@ -103,6 +107,9 @@ module Busybee
                 "Invalid worker mode: #{resolved_config.worker_mode.inspect}. Valid: :polling, :streaming, :hybrid"
         end
       end
+
+      # The seam Busybee::Testing lowers the alarm through between examples.
+      def lower_exit_immediately = EXIT_IMMEDIATELY.make_false
     end
 
     private
@@ -169,18 +176,20 @@ module Busybee
     # join the pump and hand back jobs still sitting in the buffer.
     def drain_on_shutdown; end
 
-    # Hand a job back to the engine unworked, then say so. Worker-lifecycle work,
-    # so a failure rides the worker carrier; the job did nothing, reports nothing.
-    # Firing from the ensure means the hook fires however the handback went.
+    # Hand a job back unworked, then say so (the ensure: however the handback
+    # went), unless the process must exit immediately. Worker-lifecycle work, so
+    # a failure rides the worker carrier; the job did nothing, reports nothing.
     def handle_shutdown_job(job)
+      return if exit_immediately?
+
       error = nil
       with_fresh_worker_status(job) { return_job_unworked(job) }
     rescue StandardError => e
       error = e
       Busybee.logger&.warn("Failed to hand job #{job.key} back during shutdown: #{e.message}")
     ensure
-      with_fresh_worker_status(job, error: error) do
-        Hooks.run(:on_job_not_executed, job, safe: true)
+      unless exit_immediately?
+        with_fresh_worker_status(job, error: error) { Hooks.run(:on_job_not_executed, job, safe: true) }
       end
     end
 
@@ -197,13 +206,12 @@ module Busybee
     # A hook declaring the worker down leaves this job in hand and unworked, so it
     # goes back as any job in hand at a stop does, then the escalation carries on.
     #
-    # @param job [Busybee::Job]
     # @param source [Symbol] :poll or :stream, the receive path that activated it
     # @param buffered [Boolean] true from buffered call sites, false from direct ones
     def activate_job(job, source:, buffered: false)
       job.timestamps.stamp!(:activated_at)
       job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
-      with_fresh_worker_status(job) { Hooks.run(:on_job_activated, job, safe: true) }
+      with_fresh_worker_status(job) { Hooks.run(:on_job_activated, job, safe: true) } unless exit_immediately?
     rescue Busybee::Worker::Shutdown => e
       declare_unhealthy(e)
       handle_shutdown_job(job)
@@ -224,8 +232,6 @@ module Busybee
     # only the innermost gate decides whether work happens. The ensure runs even
     # under run_chain's Shutdown re-raise, and re-stamps, so the final activation
     # stays observable and its gauges read as of completion.
-    #
-    # @param job [Busybee::Job]
     def execute_job(job)
       with_fresh_worker_status(job) do
         Hooks.run_chain(:around_job_execution, job, safe: true) do
@@ -235,9 +241,7 @@ module Busybee
         job.timestamps.stamp!(:executed_at)
         @total_job_count.increment
         @failed_job_count.increment if job.failed?
-        with_fresh_worker_status(job) do
-          Hooks.run(:on_job_executed, job, safe: true)
-        end
+        with_fresh_worker_status(job) { Hooks.run(:on_job_executed, job, safe: true) } unless exit_immediately?
       end
     end
 

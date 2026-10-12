@@ -16,11 +16,12 @@ module Busybee
       # reports, where no exit exception explains the shutdown, a post-stop error and
       # then a contained escalation.
       def teardown(exception)
+        exit_immediately! if exception && !recoverable?(exception) # its wire calls are the ones about to fail
         cease_intake
         error = Busybee::Worker::Shutdown.unwrap(exception)
         @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
         fire_worker_lifecycle(:stopping_at, :on_worker_stopping, error)
-        drain_within_teardown(exception)
+        drain_within_teardown
         error ||= Busybee::Worker::Shutdown.unwrap(post_stop_error) || @teardown_error.get
         fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
         @running.make_false
@@ -34,17 +35,21 @@ module Busybee
       end
 
       # The ensure's other door: a failing wire call would skip the rest as an
-      # escalating hook used to. Skipped outright on a non-recoverable exit, whose
-      # calls are about to fail. The pump join re-raises only a non-StandardError
-      # from T1 fired in the pump's rescue or ensure, and it passes uncontained.
-      def drain_within_teardown(exception)
-        return if exception && !recoverable?(exception)
+      # escalating hook used to. Skipped outright once the process must exit
+      # immediately; an unrecoverable error inside it says so, unlogged, and
+      # abandons the rest. The pump join re-raises only a non-StandardError
+      # from T1 fired in the pump's rescue or ensure.
+      def drain_within_teardown
+        return if exit_immediately?
 
         drain_on_shutdown
       rescue *RECOVERABLE_ERRORS => e
         @teardown_error.compare_and_set(nil, e)
         Busybee.logger&.error("[busybee] Drain failed during shutdown, continuing teardown: " \
                               "[#{e.class}] #{e.message}")
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        exit_immediately!
+        @teardown_error.compare_and_set(nil, e)
       end
 
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }

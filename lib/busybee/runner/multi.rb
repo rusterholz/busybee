@@ -72,15 +72,19 @@ module Busybee
       # SystemStackError — a graceful stop would spend its time on the very
       # calls about to fail again, so the siblings are killed instead. Without
       # the second layer the pool thread simply died: nothing logged anywhere,
-      # no cascade, and wait_for_termination never returning.
+      # no cascade, and wait_for_termination never returning. A child whose run
+      # returns with the process told to exit immediately takes the siblings
+      # down too: its own error never left it.
       def post_runners_to_pool
         @runners.each do |runner|
           @thread_pool.post do
             runner.run!
+            kill_children(:crash) if exit_immediately?
           rescue *RECOVERABLE_ERRORS => e
             record_child_failure(runner, e)
             stop!(reason: reason_for(e)) # container adopts the crash's reason (:crash/:gateway_error/:unhealthy)
           rescue Exception => e # rubocop:disable Lint/RescueException
+            exit_immediately!
             record_child_failure(runner, e)
             kill_children(reason_for(e))
           end

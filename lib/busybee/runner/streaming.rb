@@ -89,18 +89,15 @@ module Busybee
       end
 
       # When buffered, join the pump thread and hand back the jobs still buffered.
-      # After a pump error like NoMemoryError they stay put, and the engine's
-      # activation timeout returns them.
+      # A pump error like NoMemoryError says to exit immediately, so each handback
+      # declines and the engine's activation timeout returns those jobs.
       def drain_on_shutdown
         return unless buffer?
 
         @pump_thread&.join(shutdown_wait_seconds)
-        return unless pump_errors.all? { |error| recoverable?(error) } # no wire calls from a dying process
-
         handle_remaining_jobs_in_buffer
       end
 
-      def pump_errors = @pump_claim.synchronize { [@shutdown_error, @post_stop_error].compact }
       def post_stop_error = @pump_claim.synchronize { @post_stop_error }
       def current_buffer_size = @buffered_job_count&.value
       def peak_buffer_size = @peak_buffer_size&.value
@@ -188,6 +185,7 @@ module Busybee
       # reports it. An activation escalation that already won its own claim
       # arrives here re-raised, and is the exit error already.
       def end_pump(error, reason)
+        exit_immediately! unless recoverable?(error) # whether or not its claim wins
         return if @pump_claim.synchronize { @shutdown_error.equal?(error) }
 
         claim_stop(reason) { |won| won ? (@shutdown_error = error) : (@post_stop_error ||= error) }

@@ -30,6 +30,10 @@ module Busybee
 
       def synchronize_claim = yield
       def record_shutdown_error(_error); end
+
+      # The fire alarm (the building is burning): raising it flags, exiting nothing.
+      def exit_immediately! = EXIT_IMMEDIATELY.make_true
+      def exit_immediately? = EXIT_IMMEDIATELY.true?
     end
   end
 end
