@@ -95,7 +95,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     end
   end
 
-  describe "#stop!(reason:) — the caller-supplied stop reason" do
+  describe "#stop!(reason:), the caller-supplied stop reason" do
     it "carries a caller-supplied reason onto on_worker_stop_requested" do
       captured = nil
       Busybee.on_worker_stop_requested { |worker| captured = worker }
@@ -114,7 +114,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect { runner.stop!(reason: "rollover") }.to raise_error(ArgumentError, /symbol/i)
     end
 
-    it "records the reason once — the first stop! wins (set-once)" do
+    it "records the reason once: the first stop! wins (set-once)" do
       reasons = Concurrent::Array.new
       Busybee.on_worker_stop_requested { |worker| reasons << worker.reason }
       runner.stop!(reason: :rollover)
@@ -302,8 +302,8 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
   # Once teardown has begun the worker cannot be made more stopped, so the
   # special meaning of Shutdown and shutdown_on is already satisfied and an
-  # escalation from T1/T2/T3 buys nothing — while costing the rest of the
-  # teardown. T0 is deliberately excluded: a start can still be aborted.
+  # escalation from T1/T2/T3 buys nothing, while costing the rest of the
+  # teardown. T0 is excluded: a start can still be aborted.
   describe "escalation from a shutting-down moment" do
     let(:runner_class) do
       Class.new(super()) do
@@ -337,8 +337,8 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       end
     end
 
-    # The wedge is worse than a stale predicate: @running never clears, so the
-    # next run! loses start!'s compare-and-set and returns having done nothing.
+    # Were @running left set, the next run! would lose start!'s compare-and-set
+    # and return having done nothing.
     it "leaves the runner able to run again" do
       isolate_busybee_hooks do
         Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
@@ -420,15 +420,26 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
     end
 
-    it "escalates a shutdown_on match at T0 and contains one at T2, alike" do
-      stub_const("LifecycleFatal", Class.new(StandardError))
-      Busybee.shutdown_on_errors = [LifecycleFatal]
-      Busybee.on_worker_stopping { raise LifecycleFatal, "listed" }
+    context "with an error listed in shutdown_on" do
+      before do
+        stub_const("LifecycleFatal", Class.new(StandardError))
+        Busybee.shutdown_on_errors = [LifecycleFatal]
+      end
 
-      expect { runner.run! }.not_to raise_error
-      expect(runner.running?).to be(false)
-    ensure
-      Busybee.shutdown_on_errors = nil
+      after { Busybee.shutdown_on_errors = nil }
+
+      it "escalates it from on_worker_started" do
+        Busybee.on_worker_started { raise LifecycleFatal, "listed" }
+
+        expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown) { |e| expect(e.cause).to be_a(LifecycleFatal) }
+      end
+
+      it "contains it at on_worker_stopping" do
+        Busybee.on_worker_stopping { raise LifecycleFatal, "listed" }
+
+        expect { runner.run! }.not_to raise_error
+        expect(runner.running?).to be(false)
+      end
     end
   end
 

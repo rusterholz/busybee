@@ -28,6 +28,10 @@ RSpec.describe Busybee::Credentials::OAuth do # rubocop:disable RSpec/SpecFilePa
     }
   end
 
+  # TimeHelpers resets only from Minitest's teardown, so the block undoes every
+  # travel instead; frozen on a whole second, as travel lands on one.
+  around { |example| freeze_time { example.run } }
+
   before do
     stub_request(:post, token_url).
       with(

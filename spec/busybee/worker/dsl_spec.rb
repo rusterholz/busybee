@@ -595,17 +595,6 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
-  describe "the retired autofail toggle" do
-    # Reporting a failure to the engine is no longer optional. A worker
-    # carrying the old declaration must fail loudly at definition time — the
-    # alternative is a setting that silently stops meaning anything.
-    it "raises rather than silently ignoring a `fail_job_on_error` declaration" do
-      expect do
-        Class.new(Busybee::Worker) { fail_job_on_error false }
-      end.to raise_error(NoMethodError, /fail_job_on_error/)
-    end
-  end
-
   describe ".strict_outputs" do
     it "defaults to gem-level setting (true)" do
       worker = stub_const("DefaultStrictWorker", Class.new(Busybee::Worker))

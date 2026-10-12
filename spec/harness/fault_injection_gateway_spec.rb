@@ -36,9 +36,9 @@ RSpec.describe FaultInjectionGateway do
       gateway.on(:publish_message) { Busybee::GRPC::PublishMessageResponse.new(key: 1) }
 
       gateway.client.publish_message("order-shipped", correlation_key: "A1")
-      gateway.client.publish_message("order-cancelled", correlation_key: "B2")
+      gateway.client.publish_message("order-canceled", correlation_key: "B2")
 
-      expect(gateway.received(:publish_message).map(&:name)).to eq(%w[order-shipped order-cancelled])
+      expect(gateway.received(:publish_message).map(&:name)).to eq(%w[order-shipped order-canceled])
       expect(gateway.received(:publish_message).map(&:correlationKey)).to eq(%w[A1 B2])
     end
 
@@ -105,7 +105,7 @@ RSpec.describe FaultInjectionGateway do
     end
 
     # The long-lived stream wraps where the polling fetch does not, and the wrap
-    # keeps grpc_status readable through Ruby's implicit cause — which is exactly
+    # keeps grpc_status readable through Ruby's implicit cause, which is exactly
     # what the runner's backpressure match reads.
     it "wraps a stream status error while preserving grpc_status" do
       gateway.on(:stream_activated_jobs) { raise GRPC::ResourceExhausted, "broker under pressure" }

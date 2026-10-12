@@ -445,7 +445,7 @@ cancel_instance(process_instance_key, ignore_missing: false) → Boolean
 | `process_instance_key` | `Integer` | The process instance key to cancel |
 | `ignore_missing:` | `Boolean` | Return `false` instead of raising if instance not found (default: `false`) |
 
-**Returns:** `true` if cancelled, `false` if not found and `ignore_missing: true`.
+**Returns:** `true` if canceled, `false` if not found and `ignore_missing: true`.
 
 **Raises:** `Busybee::GRPC::Error` if cancellation fails (unless instance not found and `ignore_missing: true`).
 
@@ -454,8 +454,8 @@ cancel_instance(process_instance_key, ignore_missing: false) → Boolean
 client.cancel_instance(2251799813685300)
 # => true
 
-# Cancel without raising if already completed/cancelled
-cancelled = client.cancel_instance(2251799813685300, ignore_missing: true)
+# Cancel without raising if already completed/canceled
+canceled = client.cancel_instance(2251799813685300, ignore_missing: true)
 # => false (if instance was already gone)
 
 # Alias: cancel_process_instance

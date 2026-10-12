@@ -52,7 +52,7 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
       end
     end
 
-    # Unavailable is nothing special here — it stands in for any status absent
+    # Unavailable is nothing special here: it stands in for any status absent
     # from Busybee.backpressure_statuses. Which statuses back off is configuration,
     # not a property of the status; the translation below is neither.
     context "when the gateway reports a status outside Busybee.backpressure_statuses" do
@@ -70,17 +70,46 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
       end
     end
 
-    # The only example here that pays for a real backoff. Every other one
-    # configures no delay at all; this one times an actual pause, because "backs
-    # off" and "backs off for the right length of time" are separate claims and
-    # until now only the first had anything holding it.
+    # The status arrives while the response is being read, after a job has
+    # already been delivered from it.
+    context "when backpressure arrives partway through a batch" do
+      before do
+        gateway.on(:complete_job) { Busybee::GRPC::CompleteJobResponse.new }
+        polls = 0
+        gateway.on(:activate_jobs) do
+          polls += 1
+          if polls > 1
+            runner.stop!
+            next []
+          end
+
+          Enumerator.new do |yielder|
+            job = FaultInjectionGateway.activated_job(type: "corridor_worker", key: 70)
+            yielder << Busybee::GRPC::ActivateJobsResponse.new(jobs: [job])
+            raise GRPC::ResourceExhausted, "broker under pressure"
+          end
+        end
+      end
+
+      it "works the job already delivered, then backs off and polls again" do
+        brackets = record_job_brackets
+        status = shutdown_status_from { run_to_completion }
+
+        aggregate_failures do
+          expect(gateway.received(:complete_job).map(&:jobKey)).to eq([70])
+          expect(brackets).to eq([[:activated, 70], [:executed, 70]])
+          expect(status).to have_attributes(backpressure_count: 1, reason: :signal)
+        end
+      end
+    end
+
+    # The only example here that pays for a real backoff: "backs off" and "backs
+    # off for the right length of time" are separate claims.
     #
-    # 250ms rather than the 2_000ms default, deliberately. A regression here
-    # sleeps the configured number as *seconds*, and nothing can interrupt it —
-    # kill! doesn't reach a sleeping thread — so the value chosen is also the
-    # number of seconds a broken build hangs after this example has already
-    # failed. The default's own magnitude is cheap to pin without waiting for
-    # it, and is pinned in durations_spec.rb.
+    # Kept small because a regression sleeps the configured number as *seconds*,
+    # uninterruptibly (kill! doesn't reach a sleeping thread), so this value is
+    # also how long a broken build hangs. The default's magnitude is pinned
+    # without waiting, in durations_spec.rb.
     context "with a backpressure_delay long enough to measure" do
       let(:worker_class) do
         Class.new(Busybee::Worker) do
@@ -115,7 +144,7 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
 
   # Hybrid meets the same gateway on the same fetch call, through its own loop:
   # the drain phase polls with_each_job while the pump thread holds the stream
-  # open. The stream has to stay open for the drain to be reached at all — a
+  # open. The stream has to stay open for the drain to be reached at all: a
   # stream that ends stops the runner from the pump's ensure.
   describe "the hybrid runner's drain phase" do
     let(:worker_class) do
@@ -163,10 +192,8 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
     end
   end
 
-  # The composed claim, and the reason it gets its own corridor: the container's
-  # cascade is already pinned for an error that escapes a child, and a runner
-  # corridor is already pinned for backpressure. Only driving both together
-  # answers whether one worker's backpressure takes the whole process down.
+  # A child's backoff and the container's cascade, driven together: does one
+  # worker's backpressure take the whole process down?
   describe "a Multi container where one worker meets backpressure" do
     let(:pressured_worker) do
       Class.new(Busybee::Worker) do
@@ -213,29 +240,32 @@ RSpec.describe "gateway backpressure reaching a runner", :gateway do # rubocop:d
       expect(statuses.map(&:reason)).to all(eq(:signal))
       expect(statuses.find { |s| s.worker_class == pressured_worker }.backpressure_count).to eq(1)
     end
+
+    context "when the status is not backpressure" do
+      before do
+        gateway.on(:activate_jobs) do |request|
+          raise GRPC::Unavailable, "broker went away" if request.type == "corridor_pressured"
+
+          []
+        end
+      end
+
+      it "takes the container down on that worker's error, status intact" do
+        raised = run_to_completion
+
+        expect(raised).to be_a(Busybee::GRPC::Error)
+        expect(raised.grpc_status).to eq(:unavailable)
+      end
+
+      it "ends every worker as a gateway event, the error on the one that met it" do
+        statuses = shutdown_statuses_from { run_to_completion }
+
+        aggregate_failures do
+          expect(statuses.map(&:reason)).to all(eq(:gateway_error))
+          expect(statuses.to_h { |s| [s.worker_class, s.error&.class] }).
+            to eq(pressured_worker => Busybee::GRPC::Error, sibling_worker => nil)
+        end
+      end
+    end
   end
-
-  # Gives the runner its own thread and waits for it, rather than wrapping the
-  # call in Timeout.timeout — a hang should fail the example loudly, not inject an
-  # asynchronous exception at an arbitrary point inside grpc's internals. Returns
-  # the error the runner raised, or nil if it exited cleanly.
-  def run_to_completion(seconds: 15)
-    future = Concurrent::Promises.future_on(:io) { runner.run! }
-    return future.reason if future.wait(seconds)
-
-    runner.kill!
-    raise "the runner did not finish within #{seconds}s"
-  end
-
-  # The shutdown hook is the public window onto a runner's final counters, and it
-  # fires from run!'s ensure on every exit path, including this one. Multi's
-  # children fire it from their own threads, hence the concurrent collection.
-  def shutdown_statuses_from
-    captured = Concurrent::Array.new
-    Busybee::Hooks.on_worker_shutdown { |status| captured << status }
-    yield
-    captured
-  end
-
-  def shutdown_status_from(&block) = shutdown_statuses_from(&block).first
 end

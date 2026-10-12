@@ -136,7 +136,7 @@ RSpec.describe Busybee::Job::Activation do
       expect(activation.logging_context).to eq({})
     end
 
-    it "mirrors context_tags (depth is no longer on the job; it lives on Worker::Status)" do
+    it "mirrors context_tags" do
       worker_class = stub_const("MyWorker", Class.new)
       activation.harvest!(source: :stream, buffered: true, worker: worker_class.allocate)
 

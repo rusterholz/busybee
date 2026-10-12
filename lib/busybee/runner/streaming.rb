@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "concurrent"
+require "monitor"
 
 require "busybee/client/call"
 require "busybee/durations"
@@ -9,28 +10,30 @@ require "busybee/worker/shutdown"
 
 module Busybee
   class Runner
-    # Streaming runner — receives jobs via client.open_job_stream.
+    # Streaming runner: receives jobs via client.open_job_stream.
     # The stream continuously pushes newly-activated jobs from the gateway.
     # Note: streams only receive jobs created after the stream opens;
     # pre-existing jobs require polling to retrieve.
     #
     # Two modes:
-    # - buffer: true (default) — A pump thread reads from the stream into a Queue;
+    # - buffer: true (default). A pump thread reads from the stream into a Queue;
     #   the main thread pops and processes sequentially. Better shutdown responsiveness
     #   and enables pump delay configuration.
-    # - buffer: false — stream.each calls perform_job inline on the main thread.
+    # - buffer: false. stream.each calls perform_job inline on the main thread.
     #   Simpler model for workers that don't need buffer features.
     class Streaming < Runner
       # @buffered_job_count tracks real jobs apart from Queue#size, so the depth
       # gauge ignores the :stop control sentinels the queue also carries.
       def initialize(worker_class, runtime_config: nil, client: nil)
         super
+        @pump_claim = Monitor.new # reentrant: a claim's record takes it again
+        @shutdown_error = nil # plain ivars, not atomics: only touched inside @pump_claim
+        @post_stop_error = nil
         return unless buffer?
 
         @job_buffer = Queue.new
         @buffered_job_count = Concurrent::AtomicFixnum.new(0)
         @peak_buffer_size = Concurrent::AtomicFixnum.new(0)
-        @shutdown_error = Concurrent::AtomicReference.new(nil)
       end
 
       def kill!(...)
@@ -46,7 +49,7 @@ module Busybee
 
       private
 
-      # A kill discards these jobs and runs no job hooks to say so — a stuck
+      # A kill discards these jobs and runs no job hooks to say so: a stuck
       # container is a poor place for adopter code. No worker hook fires either on
       # the real path: stop!'s set-once reason was won by the graceful stop, and
       # the CLI's exit! follows. So this is the only record work was dropped, and
@@ -77,7 +80,7 @@ module Busybee
 
       # Stop new jobs arriving: close the stream (unblocking stream.each via
       # GRPC::Cancelled) and drop the :stop sentinel that unblocks a blocking pop.
-      # The single intake-cessation point — #stop! calls it before firing T1
+      # The single intake-cessation point: announce_stop calls it before firing T1
       # (close-before-fire), and run!'s ensure again as the error-exit backstop.
       # Idempotent: a second close no-ops and extra sentinels are skipped on drain.
       def cease_intake
@@ -85,33 +88,30 @@ module Busybee
         @job_buffer&.push(:stop) if buffer?
       end
 
-      # When buffered, join the pump thread and fail any jobs still in the buffer.
+      # When buffered, join the pump thread and hand back the jobs still buffered.
+      # After a pump error like NoMemoryError they stay put, and the engine's
+      # activation timeout returns them.
       def drain_on_shutdown
         return unless buffer?
 
         @pump_thread&.join(5)
+        return unless pump_errors.all? { |error| recoverable?(error) } # no wire calls from a dying process
+
         handle_remaining_jobs_in_buffer
       end
 
-      def current_buffer_size
-        return nil if @job_buffer.nil?
-
-        @buffered_job_count.value
-      end
-
-      def peak_buffer_size
-        return nil if @job_buffer.nil?
-
-        @peak_buffer_size.value
-      end
+      def pump_errors = @pump_claim.synchronize { [@shutdown_error, @post_stop_error].compact }
+      def post_stop_error = @pump_claim.synchronize { @post_stop_error }
+      def current_buffer_size = @buffered_job_count&.value
+      def peak_buffer_size = @peak_buffer_size&.value
 
       # Buffer a real job, keeping @buffered_job_count in step with @job_buffer's
       # real jobs. Increment before the push so the gauge never under-reports, and
       # roll back if the push raises, so a failed push can't leak phantom depth.
-      # (Deliberately not AtomicFixnum#update: under contention its block re-runs
-      # in a CAS loop, which would double-push a side-effecting push.)
+      # Increment and decrement, not AtomicFixnum#update, whose block re-runs in a
+      # CAS loop under contention and would push twice.
       #
-      # Take the high-water from increment's own return value, not a later read —
+      # Take the high-water from increment's own return value, not a later read:
       # a consumer pop on another thread can decrement between the push and the
       # peak update, so re-reading would miss the depth this push actually hit.
       def buffer_job(job)
@@ -129,8 +129,13 @@ module Busybee
       def run_with_buffer
         @pump_thread = Thread.new { pump_stream_into_buffer }
         process_buffered_jobs(blocking: true)
+        raise_exit_error
+      end
 
-        err = @shutdown_error.get
+      # Called once the loop has seen a stop; the lock waits out a pump still
+      # recording the error behind its claim.
+      def raise_exit_error
+        err = @pump_claim.synchronize { @shutdown_error }
         raise err if err
       end
 
@@ -147,20 +152,20 @@ module Busybee
           execute_job(job)
         rescue Busybee::Worker::Shutdown => e
           shutdown_error = e
-          stop!(reason: :unhealthy) # the worker declared itself down
+          declare_unhealthy(e)
           break
         end
 
         raise shutdown_error if shutdown_error
       end
 
-      # Pump the stream into the buffer until stopped. A stream error is stashed
-      # for the main thread to re-raise, and stops with its discerned reason
-      # (Shutdown→:unhealthy, gRPC→:gateway_error, else :crash) before the ensure's
-      # default can mislabel it; clean closes arrive as Cancelled and are absorbed.
-      # The ensure is the backstop unblocking the main thread's blocking pop — a
-      # no-op behind any earlier stop!, and reached live only by the gateway
-      # closing the stream cleanly, which is what :gateway_closed names.
+      # Pump the stream into the buffer until stopped. Whatever ends the pump,
+      # whatever its class, goes to end_pump under its discerned reason
+      # (Shutdown→:unhealthy, gRPC→:gateway_error, else :crash), ahead of the
+      # ensure's default. Clean closes arrive as Cancelled and are absorbed. The
+      # ensure is the backstop unblocking the main thread's blocking pop: a no-op
+      # behind any earlier stop!, and reached live only by the gateway closing
+      # the stream cleanly, which is what :gateway_closed names.
       def pump_stream_into_buffer
         delay = @runtime_config.buffer_throttle
 
@@ -171,16 +176,29 @@ module Busybee
           buffer_job(job)
           sleep(Busybee::Durations.seconds_from(delay)) if delay
         end
-      rescue StandardError => e
-        @shutdown_error.update { |prev| prev || e }
-        stop!(reason: reason_for(e))
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        end_pump(e, reason_for(e))
       ensure
         stop!(reason: :gateway_closed)
       end
 
+      # An error whose claim wins the stop reason caused the stop: the main
+      # thread raises it as the run's exit error. One meeting a stop already
+      # under way is a post-stop error: never raised, the winning reason stands, and T3
+      # reports it. An activation escalation that already won its own claim
+      # arrives here re-raised, and is the exit error already.
+      def end_pump(error, reason)
+        return if @pump_claim.synchronize { @shutdown_error.equal?(error) }
+
+        claim_stop(reason) { |won| won ? (@shutdown_error = error) : (@post_stop_error ||= error) }
+      end
+
+      # A winning claim records under the lock, so it finds the exit slot empty.
+      def synchronize_claim(&) = @pump_claim.synchronize(&)
+
       # Process jobs from the buffer.
-      # blocking: false — drains all currently-buffered jobs, returns if/when empty.
-      # blocking: true  — blocks on pop until :stop sentinel or stopping?.
+      # blocking: false drains all currently-buffered jobs, returns if/when empty.
+      # blocking: true blocks on pop until :stop sentinel or stopping?.
       def process_buffered_jobs(blocking:)
         loop do
           break if stopping?
@@ -197,8 +215,7 @@ module Busybee
         rescue ThreadError
           break # buffer empty (non-blocking only)
         rescue Busybee::Worker::Shutdown => e
-          @shutdown_error.update { |prev| prev || e }
-          stop!(reason: :unhealthy) # the worker declared itself down
+          declare_unhealthy_and_keep(e)
         end
       end
 
@@ -215,13 +232,10 @@ module Busybee
         end
       end
 
-      def buffer?
-        @runtime_config.buffer
-      end
-
-      def job_type
-        @worker_class.configuration.job_type
-      end
+      # First error wins. Inline mode raises its own, so never reads this one.
+      def record_shutdown_error(error) = @pump_claim.synchronize { @shutdown_error = error if @shutdown_error.nil? }
+      def buffer? = @runtime_config.buffer
+      def job_type = @worker_class.configuration.job_type
     end
   end
 end
