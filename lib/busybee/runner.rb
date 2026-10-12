@@ -73,9 +73,12 @@ module Busybee
     def stopping? = !@stop_reason.get.nil?
     def running? = @running.true?
 
-    # Force shutdown; Multi overrides to also kill the pool. Parameterized because
-    # a hard teardown is not always operator-initiated (see Multi's cascade).
-    def kill!(reason: :kill) = stop!(reason: reason)
+    # Force shutdown: the fire alarm, then a stop. Multi overrides to also kill the
+    # pool. Parameterized: a hard teardown is not always operator-initiated.
+    def kill!(reason: :kill)
+      exit_immediately!
+      stop!(reason: reason)
+    end
 
     class << self
       def exit_immediately? = EXIT_IMMEDIATELY.true?

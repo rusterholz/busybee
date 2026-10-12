@@ -142,6 +142,40 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
     end
   end
 
+  # The graceful stop is already under way when the kill lands, with the
+  # batch's second job still in hand.
+  describe "a kill" do
+    let(:worker_class) do
+      corridor_runner = -> { runner }
+      Class.new(Busybee::Worker) do
+        job_type "exit_immediately"
+        worker_mode :polling
+
+        define_method(:perform) do
+          corridor_runner.call.stop!(reason: :sigterm)
+          corridor_runner.call.kill!
+          {}
+        end
+      end
+    end
+
+    let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
+    let(:runner) { Busybee::Runner::Polling.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
+
+    before { poll_for("exit_immediately", 1, 2) }
+
+    it "runs no job hooks and hands nothing back" do
+      brackets = record_job_brackets
+      run_to_completion
+
+      aggregate_failures do
+        expect(brackets).to eq([[:activated, 1]])
+        expect(gateway.received(:fail_job)).to be_empty
+        expect(Busybee::Runner.exit_immediately?).to be(true)
+      end
+    end
+  end
+
   # Three jobs wait in the buffer when the stop lands; the first one handed
   # back trips an unrecoverable error in its on_job_not_executed hook.
   describe "an unrecoverable error during the drain" do
