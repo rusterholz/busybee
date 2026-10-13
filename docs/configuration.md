@@ -596,7 +596,7 @@ See [Workers: Buffer Throttle](workers.md#buffer-throttle) for guidance on choos
 
 #### `default_backpressure_delay`
 
-How long to wait after a backpressure error (any status in [`backpressure_statuses`](#backpressure_statuses)) before retrying.
+How long to wait after a backpressure error (any status in [`backpressure_statuses`](#backpressure_statuses)) before retrying. A stop ends the wait early.
 
 | | |
 |--|--|

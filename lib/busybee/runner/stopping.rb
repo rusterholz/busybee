@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
+require "busybee/durations"
+require "busybee/grpc/error"
 require "busybee/hooks"
+require "busybee/worker/shutdown"
 
 module Busybee
   class Runner
@@ -26,6 +29,35 @@ module Busybee
       end
 
       def declare_unhealthy(error) = claim_stop(:unhealthy, error)
+
+      # A fetch loop's wrapped gRPC error, matched by grpc_status against
+      # Busybee.backpressure_statuses whatever class the gateway raised: backpressure
+      # backs off so the loop retries; anything else claims the stop, raised if the
+      # claim wins. ms→s converts here.
+      def handle_grpc_error(error)
+        unless Busybee.backpressure_statuses.include?(error.grpc_status)
+          raise error if claim_stop(:gateway_error, error)
+
+          return
+        end
+
+        @backpressure_count.increment
+        back_off(Busybee::Durations.seconds_from(@runtime_config.backpressure_delay))
+      end
+
+      # Waits out backpressure, waking as soon as a stop is announced.
+      def back_off(seconds) = @stop_announced.wait(seconds)
+
+      # Discern a stop reason from an exit error, never fabricated. reason ⊥ error:
+      # this names the trigger, the exception rides its own axis. gateway_* groups the
+      # engine-driven endings as a filterable family, like sig*.
+      def reason_for(error)
+        case error
+        when Busybee::Worker::Shutdown then :unhealthy
+        when Busybee::GRPC::Error then :gateway_error
+        else :crash
+        end
+      end
 
       # Claim the stop for an error. A won claim caused the stop: its error is the
       # exit error, raised at loop exit, recorded before the announcement wakes

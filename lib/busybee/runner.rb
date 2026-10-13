@@ -3,8 +3,6 @@
 require "concurrent"
 
 require "busybee/client"
-require "busybee/durations"
-require "busybee/grpc/error"
 require "busybee/hooks"
 require "busybee/runner/stopping"
 require "busybee/runner/teardown"
@@ -129,27 +127,6 @@ module Busybee
       @worker_timestamps.stamp!(:started_at)
       Hooks.run(:on_worker_started, worker_status, safe: true)
       true
-    end
-
-    # A fetch loop's wrapped gRPC error, matched by grpc_status against
-    # Busybee.backpressure_statuses whatever class the gateway raised: backpressure
-    # backs off so the loop retries, anything else propagates. ms→s converts here.
-    def handle_grpc_error(error)
-      raise error unless Busybee.backpressure_statuses.include?(error.grpc_status)
-
-      @backpressure_count.increment
-      sleep Busybee::Durations.seconds_from(@runtime_config.backpressure_delay)
-    end
-
-    # Discern a stop reason from an exit error, never fabricated. reason ⊥ error:
-    # this names the trigger, the exception rides its own axis. gateway_* groups the
-    # engine-driven endings as a filterable family, like sig*.
-    def reason_for(error)
-      case error
-      when Busybee::Worker::Shutdown then :unhealthy
-      when Busybee::GRPC::Error then :gateway_error
-      else :crash
-      end
     end
 
     # A fresh point-in-time snapshot: the carrier worker hooks receive and job

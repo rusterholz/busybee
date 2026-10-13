@@ -142,6 +142,8 @@ module Busybee
 
         stop!(reason: :gateway_closed) # the gateway ended the stream, unless a stop came first
         raise_exit_error
+      rescue Busybee::GRPC::Error => e
+        raise if claim_stop(:gateway_error, e)
       end
 
       # Pump the stream into the buffer until stopped. Whatever ends the pump,

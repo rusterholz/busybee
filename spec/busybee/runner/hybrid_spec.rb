@@ -290,13 +290,13 @@ RSpec.describe Busybee::Runner::Hybrid do
           runner.stop!
           0
         end
-        allow(runner).to receive(:sleep) # rubocop:disable RSpec/SubjectStub
+        allow(runner).to receive(:back_off) # rubocop:disable RSpec/SubjectStub
 
         runner.run!
 
-        # 2_000 ms configured, and sleep takes seconds. See polling_spec for why
+        # 2_000 ms configured, and the back-off takes seconds. See polling_spec for why
         # asserting the configured value instead is what hid the missing conversion.
-        expect(runner).to have_received(:sleep).with(2.0) # rubocop:disable RSpec/SubjectStub
+        expect(runner).to have_received(:back_off).with(2.0) # rubocop:disable RSpec/SubjectStub
         expect(call_count).to eq(2)
       end
     end
