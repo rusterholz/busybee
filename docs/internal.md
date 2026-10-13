@@ -383,7 +383,7 @@ From the Runner's perspective, `perform_job` has a simple two-outcome contract (
 
 **Forced (`kill!`):** Base raises the fire alarm, so no runner in the process hands back or runs job hooks after it, then calls `stop!` with the reason it was given (`:kill` by default; `Multi`'s non-recoverable cascade passes the crash's reason instead). Streaming also kills the pump thread, logs how many activated jobs it is discarding, and flushes the queue (resetting the buffer gauge). Multi kills all child runners and the thread pool.
 
-The log line is the only record a kill leaves: on the real path — `cli.rb`'s second signal, guarded by `if @runner.stopping?` — `stop!`'s reason CAS has already been won by the graceful stop, so T1 does not re-fire, and the `exit!(1)` on the next line skips every `at_exit` and `ensure`, so T2/T3 never fire either. That is also why `:kill` is a stop reason alerts effectively never see. The buffer clear doubles as the drain's early exit: a graceful drain running when the kill lands finds nothing on its next non-blocking pop and breaks, so no separate guard is needed in the loop.
+The log line is the only record a kill leaves: on the real path (`cli.rb`'s second signal, past its `@signalled` flag) `stop!`'s reason CAS has almost always been won already by the first signal's graceful stop, so T1 does not re-fire, and the `exit!(1)` on the next line skips every `at_exit` and `ensure`, so T2/T3 never fire either. That is also why `:kill` is a stop reason alerts effectively never see. The buffer clear doubles as the drain's early exit: a graceful drain running when the kill lands finds nothing on its next non-blocking pop and breaks, so no separate guard is needed in the loop.
 
 ### Buffer Throttle
 
@@ -452,7 +452,9 @@ Traps `INT`, `QUIT`, `TERM`, all mapped to the same handler. The trap block hand
 
 **Two-signal pattern:**
 - First signal → `runner.stop!` (graceful shutdown)
-- Second signal (while `stopping?`) → `runner.kill!` + `exit!(1)` (forced shutdown, non-zero exit code, skips at_exit handlers)
+- Any later signal → `runner.kill!` + `exit!(1)` (forced shutdown, non-zero exit code, skips at_exit handlers)
+
+The CLI tells them apart by its own set-once `@signalled` flag, created in `initialize` before any trap can fire, not by `runner.stopping?`: with no join in the trap, a second signal can arrive while the first's stop is still under way, and `Multi#stopping?` (every child stopping) stays false until the last child's T1 has begun.
 
 ### Rails Environment Loading
 

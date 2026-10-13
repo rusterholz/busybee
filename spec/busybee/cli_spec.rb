@@ -458,7 +458,6 @@ RSpec.describe Busybee::CLI do
     end
 
     it "calls kill! and exit! on second signal" do
-      allow(runner).to receive(:stopping?).and_return(false, true)
       allow(cli).to receive(:exit!)
 
       cli.send(:handle_signal, "TERM")
@@ -467,6 +466,47 @@ RSpec.describe Busybee::CLI do
       expect(runner).to have_received(:stop!).once
       expect(runner).to have_received(:kill!).once
       expect(cli).to have_received(:exit!).with(1)
+    end
+
+    # A real multi-worker runner: the first signal's stop is still inside the
+    # first worker's on_worker_stop_requested when the second signal arrives, so
+    # the other worker is not yet stopping either.
+    context "when the second signal arrives while the first's stop is still under way" do
+      let(:release) { Concurrent::Event.new }
+      let(:announcing) { Concurrent::Event.new }
+      let(:runner) do
+        workers = %w[FirstSignalledWorker SecondSignalledWorker].map do |name|
+          stub_const(name, Class.new(Busybee::Worker) { job_type name })
+        end
+        Busybee::Runner::Multi.new(workers, client: instance_double(Busybee::Client))
+      end
+
+      around { |example| isolate_busybee_hooks { example.run } }
+
+      before do
+        busy = announcing
+        held = release
+        Busybee.on_worker_stop_requested do |_status|
+          busy.set
+          held.wait(2)
+        end
+        allow(cli).to receive(:exit!)
+      end
+
+      after { release.set }
+
+      it "forces the shutdown" do
+        first = Thread.new { cli.send(:handle_signal, "TERM") }
+        announcing.wait(2)
+        cli.send(:handle_signal, "TERM")
+        release.set
+        first.join(2)
+
+        aggregate_failures do
+          expect(cli).to have_received(:exit!).with(1)
+          expect(Busybee::Runner.exit_immediately?).to be(true)
+        end
+      end
     end
   end
 

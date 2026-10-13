@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/object/blank"
+require "concurrent"
 require "optparse"
 
 require "busybee/client"
@@ -22,6 +23,7 @@ module Busybee
     end
 
     def initialize(args)
+      @signalled = Concurrent::AtomicBoolean.new(false) # before any trap can fire
       @worker_class_names = []
       @parsed_options = {}
       parse_options!(args.dup)
@@ -46,12 +48,14 @@ module Busybee
       @client ||= Busybee::Client.new
     end
 
+    # The first signal stops; any later one forces. The CLI's own set-once flag
+    # decides, since a runner's stopping? can lag a stop still under way.
     def handle_signal(signal)
-      if @runner.stopping?
+      if @signalled.make_true
+        @runner.stop!(reason: :"sig#{signal.downcase}")
+      else
         @runner.kill!
         exit!(1)
-      else
-        @runner.stop!(reason: :"sig#{signal.downcase}")
       end
     end
 
