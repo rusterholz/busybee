@@ -62,15 +62,17 @@ module Busybee
     end
 
     # Signals graceful shutdown, recording why. Thread-safe: the CLI runs signal
-    # handlers on their own thread. The set-once reason IS the gate: "is-stopping"
-    # and "the reason" are one atomic fact, and only the call setting it announces.
+    # handlers on their own thread. The set-once reason is the gate: only the call
+    # setting it announces.
     def stop!(reason: :signal)
       raise ArgumentError, "stop reason must be a Symbol, got #{reason.class}" unless reason.is_a?(Symbol)
 
       announce_stop if @stop_reason.compare_and_set(nil, reason)
     end
 
-    def stopping? = !@stop_reason.get.nil?
+    # True once a stop has begun, or once the process must exit immediately,
+    # which may come before this runner has a reason; stop_reason waits for one.
+    def stopping? = !@stop_reason.get.nil? || exit_immediately?
     def stop_reason = @stop_reason.get
     def running? = @running.true?
 

@@ -95,7 +95,8 @@ module Busybee
       def end_with(runner)
         return kill_children(:crash) if exit_immediately?
 
-        stop!(reason: runner.stop_reason) if runner.stopping?
+        reason = runner.stop_reason # the reason itself: stopping? also counts the alarm
+        stop!(reason: reason) if reason
       end
 
       # Record before cascading, always: a cascade can end this very thread, and

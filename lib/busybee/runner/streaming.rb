@@ -90,11 +90,11 @@ module Busybee
       # A stop landing while the stream opened found nothing to close. Under the
       # lock cease_intake takes, either it sees this stream or the stop shows here,
       # and nil sends the run to the teardown, whose cease_intake closes it. The
-      # alarm does too, claiming a stop as Multi's kill cascade would (:crash).
+      # alarm alone claims a stop as Multi's kill cascade would (:crash).
       def adopt_stream(stream)
         halted = @pump_claim.synchronize do
           @stream = stream
-          stopping? || exit_immediately?
+          stopping?
         end
         stop!(reason: :crash) if halted # a no-op behind a stop already claimed
         stream unless halted
