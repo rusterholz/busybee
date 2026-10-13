@@ -134,6 +134,33 @@ RSpec.describe "the reason a process must exit immediately", :gateway do # ruboc
 
       expect(runner.stop_reason).to eq(:kill)
     end
+
+    # The first worker's long poll fails once the process is told to exit, so
+    # that worker's run ends in an ordinary gateway error.
+    context "when a worker's run then fails with an ordinary error" do
+      before do
+        waiter = method(:wait_until)
+        gateway.on(:activate_jobs) do |request|
+          if request.type == "QuietOne"
+            waiter.call { Busybee::Runner.exit_immediately? }
+            raise GRPC::Internal, "the gateway gave up"
+          end
+          sleep 0.3 # the second worker leaves well after the first one's error
+          [Busybee::GRPC::ActivateJobsResponse.new(jobs: [])]
+        end
+      end
+
+      it "still takes the fire's reason" do
+        killer = Thread.new do
+          wait_until { runner.runners.all?(&:running?) }
+          kill_a_sibling
+        end
+        raised = run_to_completion(seconds: 5)
+        killer.join(5)
+
+        expect([raised.class, runner.stop_reason]).to eq([Busybee::GRPC::Error, :kill])
+      end
+    end
   end
 
   # The alarm is process-wide, so Busybee::Testing clears it, reason and all,

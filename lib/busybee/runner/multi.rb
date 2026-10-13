@@ -80,7 +80,7 @@ module Busybee
             end_with(runner)
           rescue *RECOVERABLE_ERRORS => e
             record_child_failure(runner, e)
-            stop!(reason: reason_for(e)) # container adopts the crash's reason (:crash/:gateway_error/:unhealthy)
+            end_on(e)
           rescue Exception => e # rubocop:disable Lint/RescueException
             exit_immediately!(reason_for(e))
             record_child_failure(runner, e)
@@ -97,6 +97,15 @@ module Busybee
 
         reason = runner.stop_reason # the reason itself: stopping? also counts the alarm
         stop!(reason: reason) if reason
+      end
+
+      # A child's recoverable error stops the rest gracefully, the container adopting
+      # its reason (:crash/:gateway_error/:unhealthy), unless the process must exit
+      # immediately: then the fire decides, as for any other child ending.
+      def end_on(error)
+        return kill_children(ending_reason(nil)) if exit_immediately?
+
+        stop!(reason: reason_for(error))
       end
 
       # Record before cascading, always: a cascade can end this very thread, and
