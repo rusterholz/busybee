@@ -272,7 +272,7 @@ around_job_execution ─┘
 on_job_executed             # the runner finished with the job it ran
 ```
 
-A job that never gets that far, because the worker had it in hand when a shutdown arrived, ends at `on_job_not_executed` instead. Exactly one of the two fires for every job the runner activated, with two exceptions described [below](#watching-the-system-lifecycle): a forced `kill!`, and an error the process can't recover from.
+A job that never gets that far, because the worker had it in hand when a shutdown arrived, ends at `on_job_not_executed` instead. Exactly one of the two fires for every job the runner activated, except after a forced `kill!` or an error the process can't recover from, when busybee may skip hooks to get out fast (see [below](#watching-the-system-lifecycle)).
 
 | Hook | Fires | Receives |
 |------|-------|----------|
@@ -281,7 +281,7 @@ A job that never gets that far, because the worker had it in hand when a shutdow
 | `before_perform` | after input validation, just before `perform` | `job` |
 | `around_perform` | wrapped immediately around `perform` | `job, perform` |
 | `after_perform` | when the perform envelope exits, **however it exited** | `job` |
-| `on_job_executed` | when the runner finishes with a job it ran — on every exit path | `job` |
+| `on_job_executed` | when the runner finishes with a job it ran — on every exit path short of a kill or an unrecoverable error | `job` |
 | `on_job_not_executed` | when the runner hands a job back unworked instead of running it — a shutdown reached it first | `job` |
 
 **`after_perform` is an `ensure` on your code.** It fires on one condition — `perform` was attempted — and then it fires however the attempt turned out: completed, failed, BPMN-errored, or still unresolved because the resolution call itself didn't reach the engine. It runs *after* automatic completion and failure, so the outcome is already on the job when you read `status` and `error`.
@@ -373,10 +373,10 @@ config.on_job_not_executed { Gauge.decrement(:in_flight) }
 
 A handed-back job is **not** a failed one. Nothing was attempted, so `job.status` is still `:ready` and `job.error` is `nil` — the engine simply gets the job back with its retry count untouched and hands it to whoever picks it up next. If the handback call itself couldn't reach the engine, the job goes back the slower way instead, when its activation times out; you can tell which happened by reading `job.worker_status.error`, because a failure there belongs to the shutting-down worker rather than to the job.
 
-**Two shutdowns skip the handback.** In both, jobs that were activated but not yet started fire no closing hook, and return to the engine when their activation times out:
+**Two shutdowns skip the handback, and may skip hooks.** In both, jobs that were activated but not yet started return to the engine only when their activation times out, and busybee may skip hooks of any kind, closing hooks included, rather than run more code in that state. Don't count on a particular hook firing then:
 
-- **`kill!`**, the forced stop behind a second termination signal, hands nothing back and runs no job hooks, not even the closing hook of a job still running. It discards whatever is still buffered, and logs how many jobs it dropped.
-- **Any error outside `StandardError`**, such as a `NoMemoryError` or a `NotImplementedError`, tells every worker in the process to exit immediately rather than make more calls or run more code in that state: no more handbacks, and no more job hooks, including the closing hook of a job still running elsewhere in the process. That holds even when the error arrives after a graceful stop has begun. That includes the job whose own `perform` raised the error, which reaches `after_perform` but not `on_job_executed`.
+- **`kill!`**, the forced stop behind a second termination signal, hands nothing back. It discards whatever is still buffered, and logs how many jobs it dropped.
+- **Any error outside `StandardError`**, such as a `NoMemoryError` or a `NotImplementedError`, tells every worker in the process to exit immediately rather than make more calls in that state, so no worker hands anything back. That holds even when the error arrives after a graceful stop has begun.
 
 Whenever a job is buffered — the default on streaming and hybrid workers — the two fire on **different threads**. `on_job_activated` runs on the pump thread pulling jobs off the stream; every later hook runs on the thread that picks that job back out of the buffer. Anything thread-affine — a thread-local, an open span you meant to close, a connection checked out of a pool — will not survive the crossing. Hang it on [`job.context`](#reading-the-job) instead, which travels with the job. (Polling workers, and streaming workers configured `buffer: false`, activate and execute on one thread; `job.buffered?` tells you which case you're in.)
 
@@ -441,9 +441,11 @@ A worker process run has four observable moments, in order:
 | Hook | Fires when |
 |------|-----------|
 | `on_worker_started` | the run began — the worker is about to start fetching jobs |
-| `on_worker_stop_requested` | the worker's stop began, whatever began it: a signal, a health trigger, your code, the gateway ending the stream, or a crash; fires once per run, on the thread that began the stop; `on_worker_stopping` waits for it, for up to [`shutdown_wait_timeout`](configuration.md#shutdown_wait_timeout), unless the process must exit immediately |
+| `on_worker_stop_requested` | the worker's stop began, whatever began it: a signal, a health trigger, your code, the gateway ending the stream, or a crash; fires once per run, on the thread that began the stop; `on_worker_stopping` waits for it, for up to [`shutdown_wait_timeout`](configuration.md#shutdown_wait_timeout) |
 | `on_worker_stopping` | the worker began its shutdown drain — intake is closed, in-flight work finishing |
 | `on_worker_shutdown` | the run is over; the closing snapshot carries the final counters, `reason`, and `error` |
+
+After a forced `kill!` or an error the process can't recover from, busybee may skip any of them, or let them overlap, to get out fast.
 
 Each firing receives a **fresh, frozen `Busybee::Worker::Status`** snapshot. When several workers run in one process, each worker's runner fires its own hooks — filter on `worker_class:` or `job_type:` to scope.
 
@@ -483,7 +485,7 @@ The closing snapshot answers *why* the worker stopped, as a machine-readable Sym
 
 Two prefix families make coarse filters easy: `reason: /\Asig/` matches every signal-driven stop, and `reason: /\Agateway/` matches both engine-driven endings.
 
-**Don't build an alert on `:kill`.** The reason is set once, by whoever stops the worker first, and a forced stop almost always follows a graceful one — the CLI only escalates to `kill!` on a *second* signal, by which point `:sigterm` has already claimed the slot. Then the process exits immediately, so no closing hook fires either. In practice a kill shows up as the graceful reason you were already going to see, plus a log line saying how many jobs it discarded.
+**Don't build an alert on `:kill`.** The reason is set once, by whoever stops the worker first, and a forced stop almost always follows a graceful one — the CLI only escalates to `kill!` on a *second* signal, by which point `:sigterm` has already claimed the slot. Then the process exits immediately, and may skip the closing hooks too. In practice a kill shows up as the graceful reason you were already going to see, plus a log line saying how many jobs it discarded.
 
 **`reason` and `error` are independent axes.** The reason classifies the ending; the error, when present, is the exception involved. An `:unhealthy` stop carries the error that triggered it; a `:sigterm` stop usually carries none; and an app-supplied reason may carry either. Don't infer one from the other — read both.
 
@@ -644,7 +646,7 @@ Two exceptions to the swallowing:
 
   Escalation reads the *worker's* `shutdown_on` list plus the gem-wide [`Busybee.shutdown_on_errors`](configuration.md#shutdown_on_errors). Call hooks have no worker to read — a client call can be made from a web request or a background job, where "shut this worker down" means nothing — so only the gem-wide list escalates from `before_call`, `around_call`, and `after_call`. Put an error class in `Busybee.shutdown_on_errors` if you want it to escalate from anywhere.
 
-**Both exceptions stop applying once the worker is already shutting down.** `on_worker_stop_requested`, `on_worker_stopping` and `on_worker_shutdown` all fire during teardown, and nothing raised in them leaves the worker, whatever its class. A `Shutdown` and a `shutdown_on` match are logged and swallowed like any other hook error. An error outside `StandardError`, such as a `NoMemoryError`, is swallowed without a log line, and tells every worker in the process to exit immediately, as that error does anywhere (see [Watching the System Lifecycle](#watching-the-system-lifecycle)). The error is handed to `on_worker_shutdown` as `status.error` when the exception the worker is actually exiting on isn't already there; one raised by `on_worker_shutdown` itself has nowhere further to go. The rest of the shutdown still runs: the drain that hands jobs back (unless the process must exit immediately), the moments after it, and the worker's own record of having stopped. `on_worker_started` is unaffected: an escalation there still aborts the start.
+**Both exceptions stop applying once the worker is already shutting down.** `on_worker_stop_requested`, `on_worker_stopping` and `on_worker_shutdown` all fire during teardown, and nothing raised in them leaves the worker, whatever its class. A `Shutdown` and a `shutdown_on` match are logged and swallowed like any other hook error, and handed to `on_worker_shutdown` as `status.error` when the exception the worker is actually exiting on isn't already there. The rest of the shutdown still runs: the drain that hands jobs back, the moments after it, and the worker's own record of having stopped. An error outside `StandardError`, such as a `NoMemoryError`, doesn't escape either, but it is swallowed without a log line and tells every worker in the process to exit immediately, as that error does anywhere, after which busybee may skip the drain and any hooks (see [Watching the System Lifecycle](#watching-the-system-lifecycle)). `on_worker_started` is unaffected: an escalation there still aborts the start.
 
 **An escalation ends that moment's run.** Hooks registered for the same moment run in registration order, and one that escalates — or raises anything that propagates — stops the ones after it from firing at all. If you rely on an observer seeing every event, don't register it behind a hook that might declare the worker unhealthy.
 
