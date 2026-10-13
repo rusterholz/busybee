@@ -69,4 +69,29 @@ RSpec.describe "a stop while the job stream is opening", :gateway do # rubocop:d
 
     it_behaves_like "a stop that finishes cleanly"
   end
+
+  # The stop lands once the worker holds its stream, before it reads from it:
+  # the stop closes a stream the worker has yet to read.
+  describe "just after the stream is adopted" do
+    before do
+      allow(gateway.client).to receive(:open_job_stream).and_call_original
+      stopping = runner
+      runner.singleton_class.prepend(Module.new do
+        define_method(:adopt_stream) { |stream| super(stream).tap { stopping.stop!(reason: :sigterm) } }
+        private :adopt_stream
+      end)
+    end
+
+    describe "on an inline streaming worker" do
+      let(:runtime_config) { Busybee::RuntimeConfig.new(buffer: false).resolve_for(worker_class) }
+
+      it_behaves_like "a stop that finishes cleanly"
+    end
+
+    describe "on a buffered streaming worker" do
+      let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
+
+      it_behaves_like "a stop that finishes cleanly"
+    end
+  end
 end

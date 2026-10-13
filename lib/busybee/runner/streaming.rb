@@ -5,6 +5,8 @@ require "monitor"
 
 require "busybee/client/call"
 require "busybee/durations"
+require "busybee/error"
+require "busybee/grpc/error"
 require "busybee/runner"
 require "busybee/worker/shutdown"
 
@@ -89,13 +91,22 @@ module Busybee
 
       # A stop landing while the stream opened found nothing to close. Under the
       # lock cease_intake takes, either it sees this stream or the stop shows here,
-      # and nil sends the run to the teardown, whose cease_intake closes it.
+      # and nil sends the run to the teardown, whose cease_intake closes it. A stop
+      # just after this closes a stream not yet read: read_stream's clean end.
       def adopt_stream(stream)
         halted = @pump_claim.synchronize do
           @stream = stream
           stopping?
         end
         stream unless halted
+      end
+
+      # Only our own close makes a stream refuse its first read, so that is a
+      # clean end like any other.
+      def read_stream(&)
+        @stream.each(&)
+      rescue Busybee::StreamAlreadyClosed
+        nil
       end
 
       # When buffered, join the pump thread and hand back the jobs still buffered.
@@ -139,7 +150,7 @@ module Busybee
       end
 
       def run_inline
-        @stream.each do |job|
+        read_stream do |job|
           activate_job(job, source: :stream)
           if stopping?
             handle_shutdown_job(job)
@@ -168,7 +179,7 @@ module Busybee
       def pump_stream_into_buffer
         delay = @runtime_config.buffer_throttle
 
-        @stream.each do |job|
+        read_stream do |job|
           break if stopping?
 
           activate_job(job, source: :stream, buffered: true)
