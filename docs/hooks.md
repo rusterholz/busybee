@@ -85,7 +85,7 @@ Hooks attach to three subjects, and every hook receives its subject's **carrier*
 | **Worker** | `on_worker_started`, `on_worker_stop_requested`, `on_worker_stopping`, `on_worker_shutdown` | `Busybee::Worker::Status` — a frozen snapshot | Observation only |
 | **Call** | `before_call`, `around_call`, `after_call` | `Busybee::Client::Call` — a per-operation record | Observation, plus a gate before the call |
 
-Job hooks get the **live Job** because they are a control seam where middleware participates — wrap `perform` in a transaction, annotate the job's context, let an error propagate to fail the job. Worker hooks get the **frozen Worker::Status** because they are pure observation: the snapshot carries no `stop!`/`kill!` controls and is frozen, so a hook cannot steer the runner from inside an observation. Each firing gets a fresh snapshot; a `nil` reader means "not known yet" (for example, `reason` before the run ends).
+Job hooks get the **live Job** because they are a control seam where middleware participates — wrap `perform` in a transaction, annotate the job's context, let an error propagate to fail the job. Worker hooks get the **frozen Worker::Status** because they are pure observation: the snapshot carries no `stop!`/`kill!` controls and is frozen, so a hook cannot steer the runner from inside an observation. Each firing gets a fresh snapshot; a `nil` reader means "not known yet" (for example, `reason` before the worker's stop begins).
 
 ## Metrics and Logs: The Two Projections
 
@@ -441,7 +441,7 @@ A worker process run has four observable moments, in order:
 | Hook | Fires when |
 |------|-----------|
 | `on_worker_started` | the run began — the worker is about to start fetching jobs |
-| `on_worker_stop_requested` | the worker's stop began, whatever began it: a signal, a health trigger, your code, the gateway ending the stream, or a crash; fires once per run, on the thread that began the stop, and finishes before `on_worker_stopping` fires |
+| `on_worker_stop_requested` | the worker's stop began, whatever began it: a signal, a health trigger, your code, the gateway ending the stream, or a crash; fires once per run, on the thread that began the stop; `on_worker_stopping` waits for it, for up to [`shutdown_wait_timeout`](configuration.md#shutdown_wait_timeout), unless the process must exit immediately |
 | `on_worker_stopping` | the worker began its shutdown drain — intake is closed, in-flight work finishing |
 | `on_worker_shutdown` | the run is over; the closing snapshot carries the final counters, `reason`, and `error` |
 
@@ -686,7 +686,7 @@ Every hook runs synchronously, in the middle of something. A body that takes *t*
 - **Perform hooks** spend *t* inside the job's lock. Enough of it and the job outlives its `job_timeout`, the engine decides the worker is gone, and the same job gets handed to somebody else while your worker is still busy with it. This is the one that costs correctness rather than throughput.
 - **Call hooks** pay *t* on every one of busybee's client calls — including the long-poll that fetches work — and `around_call` pays it **per attempt**, so a retried call pays twice.
 - **Job hooks** pay *t* per job. `on_job_activated` is worse than it looks on a buffered worker: it fires on the pump thread, so a slow one throttles everything coming off the stream, not just its own job.
-- **Worker hooks** are once per worker per run, except under [`Multi`](workers.md#multiple-workers-in-one-process). There, a stop signal visits each child in turn on one thread, and each child fires `on_worker_stop_requested` before the next is reached — so with *N* workers the last one keeps accepting jobs for about *(N−1)·t*, all of it inside the window your orchestrator gave you to shut down. **If you have slow teardown work, put it in `on_worker_stopping` instead**, which runs on each worker's own thread and so runs concurrently across children.
+- **Worker hooks** are once per worker per run, except under [`Multi`](workers.md#multiple-workers-in-one-process). There, a stop signal visits each child in turn on one thread, and each child fires `on_worker_stop_requested` before the next is reached — so with *N* workers the last one keeps accepting jobs for about *(N−1)·t*, all of it inside the window your orchestrator gave you to shut down. **If you have slow teardown work, put it in `on_worker_stopping` instead**, which runs on each worker's own thread and so runs concurrently across children. A worker waits for its `on_worker_stop_requested` before `on_worker_stopping` for no longer than [`shutdown_wait_timeout`](configuration.md#shutdown_wait_timeout) (5 seconds by default); one that runs longer overlaps the moments after it.
 - **The handback shares that window.** Between `on_worker_stopping` and `on_worker_shutdown`, a worker hands each job it never started back to the engine, one call at a time, and those calls carry no deadline: a gateway that is slow to answer stretches the shutdown call by call. Time your teardown hooks spend comes out of the same budget.
 
 ## Hooks and Threads: Own What You Spawn

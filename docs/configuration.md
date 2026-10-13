@@ -607,7 +607,6 @@ How long to wait after a backpressure error (any status in [`backpressure_status
 Busybee.default_backpressure_delay = 10_000
 ```
 
-
 #### `default_input_required`
 
 Whether worker inputs are required by default.
