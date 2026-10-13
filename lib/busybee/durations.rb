@@ -31,7 +31,6 @@ module Busybee
       fail_job_backoff: 100,
       default_backpressure_delay: 100,
       backpressure_delay: 100,
-      default_shutdown_wait_timeout: 1_000,
       shutdown_wait_timeout: 1_000,
       grpc_retry_delay: 50
     }.freeze

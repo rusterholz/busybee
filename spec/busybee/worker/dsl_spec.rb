@@ -394,29 +394,6 @@ RSpec.describe Busybee::Worker::DSL do
     end
   end
 
-  describe ".shutdown_wait_timeout" do
-    it "sets shutdown_wait_timeout on configuration" do
-      worker = stub_const("ShutdownWaitWorker", Class.new(Busybee::Worker) do
-        shutdown_wait_timeout 10_000
-      end)
-
-      expect(worker.configuration.shutdown_wait_timeout).to eq(10_000)
-    end
-
-    it "returns current value when called without arguments" do
-      worker = stub_const("ShutdownWaitGetterWorker", Class.new(Busybee::Worker) do
-        shutdown_wait_timeout 10_000
-      end)
-
-      expect(worker.shutdown_wait_timeout).to eq(10_000)
-    end
-
-    it "returns nil when not set" do
-      worker = stub_const("NoShutdownWaitWorker", Class.new(Busybee::Worker))
-      expect(worker.shutdown_wait_timeout).to be_nil
-    end
-  end
-
   describe "load-time validation" do
     it "raises on input without source" do
       expect do
@@ -564,14 +541,6 @@ RSpec.describe Busybee::Worker::DSL do
           backpressure_delay "5 seconds"
         end)
       end.to raise_error(Busybee::InvalidWorkerDefinition, /backpressure_delay.*number.*ActiveSupport::Duration/)
-    end
-
-    it "raises on shutdown_wait_timeout with invalid type" do
-      expect do
-        stub_const("BadShutdownWaitWorker", Class.new(Busybee::Worker) do
-          shutdown_wait_timeout "5 seconds"
-        end)
-      end.to raise_error(Busybee::InvalidWorkerDefinition, /shutdown_wait_timeout.*number.*ActiveSupport::Duration/)
     end
 
     it "deduplicates sources silently" do

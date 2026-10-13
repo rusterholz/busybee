@@ -88,7 +88,7 @@ module Busybee
       if @yaml_kwargs
         kwargs = @yaml_kwargs.dup
         # Merge CLI process-wide flags into YAML-sourced kwargs
-        %i[log_format worker_name cluster_address].each do |field|
+        %i[log_format worker_name cluster_address shutdown_wait_timeout].each do |field|
           kwargs[field] = @parsed_options[field] if @parsed_options[field]
         end
         @runtime_config = RuntimeConfig.new(**kwargs)
@@ -127,7 +127,7 @@ module Busybee
                            "List workers in the YAML config file instead."
     end
 
-    def option_parser # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+    def option_parser
       OptionParser.new do |opts|
         opts.banner = "Usage: busybee [options] WorkerClass [WorkerClass ...]"
 
@@ -149,17 +149,25 @@ module Busybee
           @parsed_options[:worker_mode] = mode.to_sym
         end
 
-        opts.on("-l", "--log-format FORMAT", "Log format (text, json)") do |format|
-          @parsed_options[:log_format] = format.to_sym
-        end
+        process_wide_options(opts)
+      end
+    end
 
-        opts.on("-n", "--worker-name NAME", "Worker name for identification") do |name|
-          @parsed_options[:worker_name] = name
-        end
+    def process_wide_options(opts)
+      opts.on("-l", "--log-format FORMAT", "Log format (text, json)") do |format|
+        @parsed_options[:log_format] = format.to_sym
+      end
 
-        opts.on("-a", "--cluster-address ADDR", "Cluster address (host:port)") do |addr|
-          @parsed_options[:cluster_address] = addr
-        end
+      opts.on("-n", "--worker-name NAME", "Worker name for identification") do |name|
+        @parsed_options[:worker_name] = name
+      end
+
+      opts.on("-a", "--cluster-address ADDR", "Cluster address (host:port)") do |addr|
+        @parsed_options[:cluster_address] = addr
+      end
+
+      opts.on("--shutdown-wait-timeout MS", Integer, "Shutdown's wait on other threads, in ms") do |ms|
+        @parsed_options[:shutdown_wait_timeout] = ms
       end
     end
 
@@ -170,6 +178,7 @@ module Busybee
       apply_global_setting!(:log_format)
       apply_global_setting!(:worker_name)
       apply_global_setting!(:cluster_address)
+      apply_global_setting!(:shutdown_wait_timeout)
     end
 
     def apply_global_setting!(field)

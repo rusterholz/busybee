@@ -371,8 +371,8 @@ RSpec.describe Busybee do
                     :DEFAULT_BACKPRESSURE_DELAY_MS
   end
 
-  describe ".default_shutdown_wait_timeout" do
-    it_behaves_like "a duration config setter", :default_shutdown_wait_timeout, :default_shutdown_wait_timeout,
+  describe ".shutdown_wait_timeout" do
+    it_behaves_like "a duration config setter", :shutdown_wait_timeout, :shutdown_wait_timeout,
                     :DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS
   end
 

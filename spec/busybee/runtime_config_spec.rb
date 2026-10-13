@@ -14,7 +14,7 @@ RSpec.describe Busybee::RuntimeConfig do
   around do |example|
     saved = %i[
       @default_worker_mode @default_backpressure_delay @default_buffer_throttle
-      @default_shutdown_wait_timeout @log_format @worker_name @cluster_address
+      @shutdown_wait_timeout @log_format @worker_name @cluster_address
     ].to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
     example.run
   ensure
@@ -37,15 +37,13 @@ RSpec.describe Busybee::RuntimeConfig do
         backpressure_delay: 3000,
         max_jobs: 10,
         request_timeout: 30_000,
-        buffer_throttle: 500,
-        shutdown_wait_timeout: 7000
+        buffer_throttle: 500
       )
       expect(config).to have_attributes(
         backpressure_delay: 3000,
         max_jobs: 10,
         request_timeout: 30_000,
-        buffer_throttle: 500,
-        shutdown_wait_timeout: 7000
+        buffer_throttle: 500
       )
     end
 
@@ -53,12 +51,14 @@ RSpec.describe Busybee::RuntimeConfig do
       config = described_class.new(
         log_format: :json,
         worker_name: "my-worker",
-        cluster_address: "zeebe.example.com:26500"
+        cluster_address: "zeebe.example.com:26500",
+        shutdown_wait_timeout: 7000
       )
       expect(config).to have_attributes(
         log_format: :json,
         worker_name: "my-worker",
-        cluster_address: "zeebe.example.com:26500"
+        cluster_address: "zeebe.example.com:26500",
+        shutdown_wait_timeout: 7000
       )
     end
 
@@ -216,29 +216,15 @@ RSpec.describe Busybee::RuntimeConfig do
       end
     end
 
-    context "with shutdown_wait_timeout precedence (4-level: RC per-worker → RC global → DSL → gem)" do
-      it "uses per-worker override" do
-        worker_class.shutdown_wait_timeout 8000
-        config = described_class.new(
-          shutdown_wait_timeout: 6000,
-          workers: { "TestWorker" => { shutdown_wait_timeout: 2000 } }
-        )
-        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(2000)
-      end
-
-      it "uses global RC override" do
+    context "with shutdown_wait_timeout precedence (2-level: RC global → gem)" do
+      it "uses the RC value" do
+        Busybee.shutdown_wait_timeout = 9000
         config = described_class.new(shutdown_wait_timeout: 6000)
         expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(6000)
       end
 
-      it "falls back to worker DSL" do
-        worker_class.shutdown_wait_timeout 8000
-        config = described_class.new
-        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(8000)
-      end
-
-      it "falls back to the gem-level default" do
-        Busybee.default_shutdown_wait_timeout = 9000
+      it "falls back to gem config" do
+        Busybee.shutdown_wait_timeout = 9000
         config = described_class.new
         expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(9000)
       end
@@ -492,7 +478,6 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer_throttle: 500
         job_timeout: 90000
         fail_job_backoff: 15000
-        shutdown_wait_timeout: 8000
       YAML
       result = described_class.parse_yaml(path)
       expect(result).to include(
@@ -503,9 +488,22 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer: true,
         buffer_throttle: 500,
         job_timeout: 90_000,
-        fail_job_backoff: 15_000,
-        shutdown_wait_timeout: 8000
+        fail_job_backoff: 15_000
       )
+    end
+
+    it "parses a top-level shutdown_wait_timeout" do
+      path = write_yaml("shutdown_wait.yml", "shutdown_wait_timeout: 8000\n")
+      expect(described_class.parse_yaml(path)).to eq(shutdown_wait_timeout: 8000)
+    end
+
+    it "rejects shutdown_wait_timeout as a per-worker override" do
+      path = write_yaml("per_worker_shutdown_wait.yml", <<~YAML)
+        workers:
+          - OrderProcessor:
+              shutdown_wait_timeout: 8000
+      YAML
+      expect { described_class.parse_yaml(path) }.to raise_error(ArgumentError, /shutdown_wait_timeout/)
     end
 
     it "parses workers list into per-worker overrides" do

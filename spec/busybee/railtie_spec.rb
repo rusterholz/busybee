@@ -14,7 +14,7 @@ def busybee_config_ivars
     @default_message_ttl @default_buffer @default_buffer_throttle
     @grpc_retry_delay @grpc_retry_enabled @grpc_retry_errors
     @grpc_keepalive_interval @grpc_keepalive_timeout
-    @log_format @logger @default_backpressure_delay @default_shutdown_wait_timeout
+    @log_format @logger @default_backpressure_delay @shutdown_wait_timeout
     @worker_name @backpressure_statuses
   ]
 end
@@ -291,16 +291,16 @@ RSpec.describe "Busybee::Railtie", :rails do
       end
     end
 
-    describe "default_shutdown_wait_timeout" do
-      it "sets default_shutdown_wait_timeout when configured" do
-        configure_and_initialize(default_shutdown_wait_timeout: 15_000)
-        expect(Busybee.instance_variable_get(:@default_shutdown_wait_timeout)).to eq(15_000)
+    describe "shutdown_wait_timeout" do
+      it "sets shutdown_wait_timeout when configured" do
+        configure_and_initialize(shutdown_wait_timeout: 15_000)
+        expect(Busybee.instance_variable_get(:@shutdown_wait_timeout)).to eq(15_000)
       end
 
       it "leaves nil when not configured (uses default from Defaults)" do
         configure_and_initialize
-        expect(Busybee.instance_variable_get(:@default_shutdown_wait_timeout)).to be_nil
-        expect(Busybee.default_shutdown_wait_timeout).to eq(Busybee::Defaults::DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS)
+        expect(Busybee.instance_variable_get(:@shutdown_wait_timeout)).to be_nil
+        expect(Busybee.shutdown_wait_timeout).to eq(Busybee::Defaults::DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS)
       end
     end
 

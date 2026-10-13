@@ -359,6 +359,21 @@ Identifier for this worker instance, used in job activation. Useful for debuggin
 Busybee.worker_name = "worker-#{Process.pid}"
 ```
 
+#### `shutdown_wait_timeout`
+
+How long a stopping worker waits for its other threads to finish their part of the shutdown before carrying on without them. On a streaming or hybrid worker, that is the thread reading the job stream, which the worker waits for before handing its buffered jobs back. One value serves every worker in the process: set it to the longest wait any of them needs. The CLI's `--shutdown-wait-timeout` flag and a top-level `shutdown_wait_timeout` in [YAML](workers.md#yaml-configuration) set it too.
+
+| | |
+|--|--|
+| **Type** | A [duration](#how-busybee-reads-durations) |
+| **Default** | `5_000` (5 seconds) |
+
+```ruby
+Busybee.shutdown_wait_timeout = 10_000
+```
+
+See [Workers: Signal Handling](workers.md#signal-handling) for how a worker shuts down.
+
 ## Rails Integration
 
 In a Rails app, Busybee loads a Railtie, whether busybee or Rails is required first. The Railtie:
@@ -435,7 +450,7 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_buffer` | `Busybee.default_buffer` |
 | `config.x.busybee.default_buffer_throttle` | `Busybee.default_buffer_throttle` |
 | `config.x.busybee.default_backpressure_delay` | `Busybee.default_backpressure_delay` |
-| `config.x.busybee.default_shutdown_wait_timeout` | `Busybee.default_shutdown_wait_timeout` |
+| `config.x.busybee.shutdown_wait_timeout` | `Busybee.shutdown_wait_timeout` |
 | `config.x.busybee.backpressure_statuses` | `Busybee.backpressure_statuses` |
 | `config.x.busybee.default_input_required` | `Busybee.default_input_required` |
 | `config.x.busybee.default_output_required` | `Busybee.default_output_required` |
@@ -592,20 +607,6 @@ How long to wait after a backpressure error (any status in [`backpressure_status
 Busybee.default_backpressure_delay = 10_000
 ```
 
-#### `default_shutdown_wait_timeout`
-
-How long a stopping worker waits for its other threads to finish their part of the shutdown before carrying on without them. On a streaming or hybrid worker, that is the thread reading the job stream, which the worker waits for before handing its buffered jobs back.
-
-| | |
-|--|--|
-| **Type** | A [duration](#how-busybee-reads-durations) |
-| **Default** | `5_000` (5 seconds) |
-
-```ruby
-Busybee.default_shutdown_wait_timeout = 10_000
-```
-
-See [Workers: Signal Handling](workers.md#signal-handling) for how a worker shuts down.
 
 #### `default_input_required`
 

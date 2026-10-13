@@ -568,7 +568,6 @@ See [Worker Modes](#worker-modes) for what these options mean and when to use ea
 | `job_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | `60_000` | Job lock timeout (ms) |
 | `fail_job_backoff` | A [duration](configuration.md#how-busybee-reads-durations) | `5_000` | Retry backoff delay (ms) |
 | `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | `2_000` | Delay after backpressure error (ms) |
-| `shutdown_wait_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | `5_000` | How long a stopping worker waits on its other threads (ms) |
 | `complete_job_on_success` | Boolean | `true` | Auto-complete on success |
 | `strict_outputs` | Boolean | `Busybee.default_strict_outputs` (`true`) | Raise [`UndeclaredOutput`](#strict-output-validation) on undeclared return keys |
 | `shutdown_on` | Exception class(es) | `[]` | Exceptions that trigger shutdown |
@@ -609,6 +608,7 @@ Usage: busybee [options] WorkerClass [WorkerClass ...]
 | `--log-format FORMAT` | `-l` | String | Log format: `text` or `json` |
 | `--worker-name NAME` | `-n` | String | Worker process identifier (default: hostname) |
 | `--cluster-address ADDR` | `-a` | String | Zeebe gateway address as `host:port` |
+| `--shutdown-wait-timeout MS` | | Integer | How long a stopping worker waits on its other threads, in milliseconds (default: `5000`) |
 | `--version` | `-v` | | Print version and exit |
 | `--help` | `-h` | | Print help and exit |
 
@@ -824,7 +824,7 @@ workers:
 | `job_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | Job lock timeout (ms) |
 | `fail_job_backoff` | A [duration](configuration.md#how-busybee-reads-durations) | Retry backoff (ms) |
 | `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | Delay after backpressure error (ms) |
-| `shutdown_wait_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | How long a stopping worker waits on its other threads (ms) |
+| `shutdown_wait_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | How long a stopping worker waits on its other threads (ms); for the whole process, so top level only |
 | `buffer` | Boolean | Enable job buffering in streaming mode |
 | `buffer_throttle` | A [duration](configuration.md#how-busybee-reads-durations), or Boolean | Job buffer delay (ms). `false` to disable |
 | `workers` | Array | Worker class names, with optional per-worker overrides |
@@ -834,6 +834,8 @@ workers:
 ```bash
 bundle exec busybee --config config/busybee.yml --log-format json --worker-name "prod-worker-1"
 ```
+
+`shutdown_wait_timeout` is process-wide too, but YAML may set it at the top level; its `--shutdown-wait-timeout` flag wins over YAML.
 
 > For a realistic example, see the [Dropship Co. demo app's busybee config files](../spec/demo/config/busybee/).
 
@@ -853,9 +855,9 @@ Gem Configuration & Defaults   (lowest priority)    `Busybee.default_max_jobs` (
 
 The first non-nil value wins. This means `0` and `false` are valid explicit values -- for example, `buffer_throttle: false` explicitly disables throttling even if a lower level sets it.
 
-The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `shutdown_wait_timeout`, `buffer`, and `buffer_throttle`.
+The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
-**Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process.
+**Process-wide settings** (like `--log-format`, `--worker-name`, `--cluster-address` and `--shutdown-wait-timeout`) follow a simpler 2-level chain: the CLI flag (or, for `shutdown_wait_timeout`, top-level YAML), then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
 

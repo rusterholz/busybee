@@ -19,7 +19,7 @@ RSpec.describe Busybee::CLI do
 
   # Save/restore gem-level config that apply_global_config! may modify
   around do |example|
-    saved = %i[@log_format @worker_name @cluster_address].to_h do |ivar|
+    saved = %i[@log_format @worker_name @cluster_address @shutdown_wait_timeout].to_h do |ivar|
       [ivar, Busybee.instance_variable_get(ivar)]
     end
     example.run
@@ -81,6 +81,11 @@ RSpec.describe Busybee::CLI do
       it "parses --cluster-address and its short form -a" do
         cli = described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
         expect(cli.runtime_config.cluster_address).to eq("zeebe.example.com:26500")
+      end
+
+      it "parses --shutdown-wait-timeout as milliseconds" do
+        cli = described_class.new(["--shutdown-wait-timeout", "8000", "TestCLIWorker"])
+        expect(cli.runtime_config.shutdown_wait_timeout).to eq(8000)
       end
 
       it "collects remaining positional args as worker class names" do
@@ -197,12 +202,25 @@ RSpec.describe Busybee::CLI do
           workers:
             - TestCLIWorker
         YAML
-        cli = described_class.new(["-c", path, "-l", "json", "-n", "my-worker", "-a", "zeebe:26500"])
+        cli = described_class.new(["-c", path, "-l", "json", "-n", "my-worker", "-a", "zeebe:26500",
+                                   "--shutdown-wait-timeout", "8000"])
         expect(cli.runtime_config).to have_attributes(
           log_format: :json,
           worker_name: "my-worker",
-          cluster_address: "zeebe:26500"
+          cluster_address: "zeebe:26500",
+          shutdown_wait_timeout: 8000
         )
+      end
+
+      it "takes shutdown_wait_timeout from the top of the YAML, the flag taking precedence" do
+        path = write_yaml("shutdown_wait.yml", <<~YAML)
+          shutdown_wait_timeout: 8000
+          workers:
+            - TestCLIWorker
+        YAML
+        from_yaml = described_class.new(["-c", path]).runtime_config
+        from_flag = described_class.new(["-c", path, "--shutdown-wait-timeout", "9000"]).runtime_config
+        expect([from_yaml, from_flag].map(&:shutdown_wait_timeout)).to eq([8000, 9000])
       end
 
       it "applies process-wide flags to gem config" do
@@ -339,6 +357,11 @@ RSpec.describe Busybee::CLI do
       it "applies cluster_address to gem config" do
         described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
         expect(Busybee.cluster_address).to eq("zeebe.example.com:26500")
+      end
+
+      it "applies shutdown_wait_timeout to gem config" do
+        described_class.new(["--shutdown-wait-timeout", "8000", "TestCLIWorker"])
+        expect(Busybee.shutdown_wait_timeout).to eq(8000)
       end
 
       it "does not override gem config when flags are not provided" do

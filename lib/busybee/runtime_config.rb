@@ -21,11 +21,11 @@ module Busybee
     VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
     VALID_LOG_FORMATS = %i[text json].freeze
 
-    # Top-level keys allowed in YAML config (worker-scoped fields + workers).
+    # Top-level keys allowed in YAML config: worker-scoped fields, the one
+    # process-wide field YAML may set, and workers.
     WORKER_SCOPED_KEYS = %i[worker_mode backpressure_delay max_jobs request_timeout
-                            buffer buffer_throttle job_timeout fail_job_backoff
-                            shutdown_wait_timeout].freeze
-    VALID_YAML_KEYS = (WORKER_SCOPED_KEYS + %i[workers]).freeze
+                            buffer buffer_throttle job_timeout fail_job_backoff].freeze
+    VALID_YAML_KEYS = (WORKER_SCOPED_KEYS + %i[shutdown_wait_timeout workers]).freeze
     PROCESS_WIDE_KEYS = %i[log_format worker_name cluster_address].freeze
 
     # Parses a YAML config file and returns a kwargs hash suitable for
@@ -99,15 +99,15 @@ module Busybee
 
     # Worker-scoped fields (CLI: worker_mode only; all configurable via YAML)
     attr_reader :worker_mode, :backpressure_delay, :max_jobs, :request_timeout,
-                :buffer, :buffer_throttle, :job_timeout, :fail_job_backoff, :shutdown_wait_timeout
+                :buffer, :buffer_throttle, :job_timeout, :fail_job_backoff
 
     # Process-wide fields
-    attr_reader :log_format, :worker_name, :cluster_address
+    attr_reader :log_format, :worker_name, :cluster_address, :shutdown_wait_timeout
 
     def initialize(worker_mode: nil, backpressure_delay: nil, max_jobs: nil, # rubocop:disable Metrics/AbcSize,Metrics/ParameterLists
                    request_timeout: nil, buffer: nil, buffer_throttle: nil,
-                   job_timeout: nil, fail_job_backoff: nil, shutdown_wait_timeout: nil,
-                   log_format: nil, worker_name: nil, cluster_address: nil,
+                   job_timeout: nil, fail_job_backoff: nil,
+                   log_format: nil, worker_name: nil, cluster_address: nil, shutdown_wait_timeout: nil,
                    workers: {})
       @worker_mode = coerce_symbol!(worker_mode, VALID_WORKER_MODES, "worker mode") if worker_mode
       @backpressure_delay = backpressure_delay
@@ -156,10 +156,10 @@ module Busybee
         buffer_throttle:    first_non_nil(wo[:buffer_throttle], @buffer_throttle, dsl.streaming_config[:buffer_throttle], Busybee.default_buffer_throttle),
         job_timeout:        first_non_nil(wo[:job_timeout], @job_timeout, dsl.job_timeout, Busybee.default_job_timeout),
         fail_job_backoff:            first_non_nil(wo[:fail_job_backoff], @fail_job_backoff, dsl.fail_job_backoff, Busybee.default_fail_job_backoff),
-        shutdown_wait_timeout: first_non_nil(wo[:shutdown_wait_timeout], @shutdown_wait_timeout, dsl.shutdown_wait_timeout, Busybee.default_shutdown_wait_timeout),
         log_format:         first_non_nil(@log_format, Busybee.log_format),
         worker_name:        first_non_nil(@worker_name, Busybee.worker_name),
-        cluster_address:    first_non_nil(@cluster_address, Busybee.cluster_address)
+        cluster_address:    first_non_nil(@cluster_address, Busybee.cluster_address),
+        shutdown_wait_timeout: first_non_nil(@shutdown_wait_timeout, Busybee.shutdown_wait_timeout)
       )
       # rubocop:enable Layout/HashAlignment, Layout/LineLength
     end

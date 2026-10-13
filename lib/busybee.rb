@@ -158,8 +158,8 @@ module Busybee
       @default_backpressure_delay || Defaults::DEFAULT_BACKPRESSURE_DELAY_MS
     end
 
-    def default_shutdown_wait_timeout
-      @default_shutdown_wait_timeout || Defaults::DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS
+    def shutdown_wait_timeout
+      @shutdown_wait_timeout || Defaults::DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS
     end
 
     def shutdown_on_errors
