@@ -57,10 +57,10 @@ RSpec.describe "a stop while the job stream is opening", :gateway do # rubocop:d
   end
 
   # Instead of this worker stopping, another worker in the process is killed,
-  # which tells every worker to exit immediately.
+  # which tells every worker to exit immediately, naming the kill.
   describe "when the process is told to exit immediately instead" do
     let(:runtime_config) { Busybee::RuntimeConfig.new(buffer: false).resolve_for(worker_class) }
-    let(:expected_reason) { :crash }
+    let(:expected_reason) { :kill }
     let(:sibling) do
       Busybee::Runner::Polling.new(worker_class, runtime_config: runtime_config, client: gateway.client)
     end

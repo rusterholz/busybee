@@ -89,9 +89,18 @@ module Busybee
         raise error if error
       end
 
-      # The fire alarm (the building is burning): raising it flags, exiting nothing.
-      def exit_immediately! = EXIT_IMMEDIATELY.make_true
+      # The fire alarm (the building is burning): raising it flags, exiting nothing,
+      # and names the fire; the first fire's reason stands. Claims no runner's stop.
+      def exit_immediately!(reason = :crash)
+        EXIT_IMMEDIATELY_REASON.compare_and_set(nil, reason)
+        EXIT_IMMEDIATELY.make_true
+      end
+
       def exit_immediately? = EXIT_IMMEDIATELY.true?
+
+      # The reason a runner claims for its own stop on the way out: the fire's,
+      # once the process must exit immediately.
+      def ending_reason(default) = exit_immediately? ? EXIT_IMMEDIATELY_REASON.get : default
     end
   end
 end

@@ -89,14 +89,12 @@ module Busybee
 
       # A stop landing while the stream opened found nothing to close. Under the
       # lock cease_intake takes, either it sees this stream or the stop shows here,
-      # and nil sends the run to the teardown, whose cease_intake closes it. The
-      # alarm alone claims a stop as Multi's kill cascade would (:crash).
+      # and nil sends the run to the teardown, whose cease_intake closes it.
       def adopt_stream(stream)
         halted = @pump_claim.synchronize do
           @stream = stream
           stopping?
         end
-        stop!(reason: :crash) if halted # a no-op behind a stop already claimed
         stream unless halted
       end
 
@@ -154,7 +152,7 @@ module Busybee
           break
         end
 
-        stop!(reason: :gateway_closed) # the gateway ended the stream, unless a stop came first
+        stop!(reason: ending_reason(:gateway_closed)) # a no-op behind a stop already claimed
         raise_exit_error
       rescue Busybee::GRPC::Error => e
         raise if claim_stop(:gateway_error, e)
@@ -166,7 +164,7 @@ module Busybee
       # ensure's default. Clean closes arrive as Cancelled and are absorbed. The
       # ensure is the backstop unblocking the main thread's blocking pop: a no-op
       # behind any earlier stop!, and reached live only by the gateway closing
-      # the stream cleanly, which is what :gateway_closed names.
+      # the stream cleanly (:gateway_closed) or the loop leaving on the fire alarm.
       def pump_stream_into_buffer
         delay = @runtime_config.buffer_throttle
 
@@ -180,14 +178,14 @@ module Busybee
       rescue Exception => e # rubocop:disable Lint/RescueException
         end_pump(e, reason_for(e))
       ensure
-        stop!(reason: :gateway_closed)
+        stop!(reason: ending_reason(:gateway_closed))
       end
 
       # Whatever ends the pump claims the stop like any other error (see
       # Stopping#claim_stop): the main thread raises a winner as the run's exit
       # error; a loser is a post-stop error.
       def end_pump(error, reason)
-        exit_immediately! unless recoverable?(error) # whether or not its claim wins
+        exit_immediately!(reason) unless recoverable?(error) # whether or not its claim wins
         claim_stop(reason, error)
       end
 

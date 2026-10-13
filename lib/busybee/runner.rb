@@ -25,7 +25,8 @@ module Busybee
     # The fire alarm, set once by an unrecoverable error or a kill: every runner in the
     # process then skips handbacks, drains and job hooks. Preallocated: raising it allocates nothing.
     EXIT_IMMEDIATELY = Concurrent::AtomicBoolean.new(false)
-    private_constant :EXIT_IMMEDIATELY
+    EXIT_IMMEDIATELY_REASON = Concurrent::AtomicReference.new(nil) # the first fire's, set before the flag
+    private_constant :EXIT_IMMEDIATELY, :EXIT_IMMEDIATELY_REASON
 
     include Stopping
     include Teardown
@@ -79,7 +80,7 @@ module Busybee
     # Force shutdown: the fire alarm, then a stop. Multi overrides to also kill the
     # pool. Parameterized: a hard teardown is not always operator-initiated.
     def kill!(reason: :kill)
-      exit_immediately!
+      exit_immediately!(reason)
       stop!(reason: reason)
       @stop_announced.set # a teardown waiting on another thread's T1 goes on
     end
@@ -116,7 +117,10 @@ module Busybee
       end
 
       # The seam Busybee::Testing lowers the alarm through between examples.
-      def lower_exit_immediately = EXIT_IMMEDIATELY.make_false
+      def lower_exit_immediately
+        EXIT_IMMEDIATELY.make_false
+        EXIT_IMMEDIATELY_REASON.set(nil)
+      end
     end
 
     private
@@ -224,7 +228,7 @@ module Busybee
           @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
         end
       ensure
-        exit_immediately! if $! && !recoverable?($!) # the first point its error passes
+        exit_immediately!(reason_for($!)) if $! && !recoverable?($!) # the first point its error passes
         job.timestamps.stamp!(:executed_at)
         @total_job_count.increment
         @failed_job_count.increment if job.failed?
