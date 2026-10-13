@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "fileutils"
+require "tmpdir"
+
 RSpec.describe Busybee::RuntimeConfig do
   let(:worker_class) do
     Class.new(Busybee::Worker) do
@@ -446,9 +449,7 @@ RSpec.describe Busybee::RuntimeConfig do
   end
 
   describe ".parse_yaml" do
-    let(:yaml_dir) { File.join(__dir__, "..", "..", "tmp", "yaml_fixtures") }
-
-    before { FileUtils.mkdir_p(yaml_dir) }
+    let(:yaml_dir) { Dir.mktmpdir("busybee-runtime-config-yaml") }
 
     def write_yaml(filename, content)
       path = File.join(yaml_dir, filename)

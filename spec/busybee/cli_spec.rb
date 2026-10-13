@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "fileutils"
+require "tmpdir"
+
 RSpec.describe Busybee::CLI do
   let(:worker_class) do
     Class.new(Busybee::Worker) do
@@ -107,9 +110,7 @@ RSpec.describe Busybee::CLI do
     end
 
     context "with --config flag" do
-      let(:yaml_dir) { File.join(__dir__, "..", "..", "tmp", "yaml_fixtures") }
-
-      before { FileUtils.mkdir_p(yaml_dir) }
+      let(:yaml_dir) { Dir.mktmpdir("busybee-cli-yaml") }
 
       after { FileUtils.rm_rf(yaml_dir) }
 
@@ -373,9 +374,8 @@ RSpec.describe Busybee::CLI do
     end
 
     context "with shutdown_wait_timeout spelled as a String in YAML" do
-      let(:yaml_dir) { File.join(__dir__, "..", "..", "tmp", "cli_shutdown_wait_yaml") }
+      let(:yaml_dir) { Dir.mktmpdir("busybee-cli-yaml") }
 
-      before { FileUtils.mkdir_p(yaml_dir) }
       after { FileUtils.rm_rf(yaml_dir) }
 
       def config_with(value)
