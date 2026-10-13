@@ -70,6 +70,16 @@ RSpec.describe Busybee::Runner do
     end
   end
 
+  describe "#stop_reason" do
+    it "is nil until a stop is asked for, then the reason it was asked for with" do
+      runner = described_class.new(client: client)
+      before_stop = runner.stop_reason
+      runner.stop!(reason: :rollover)
+
+      expect([before_stop, runner.stop_reason]).to eq([nil, :rollover])
+    end
+  end
+
   describe "#stopping?" do
     it "returns false initially" do
       runner = described_class.new(client: client)

@@ -73,6 +73,7 @@ module Busybee
     end
 
     def stopping? = !@stop_reason.get.nil?
+    def stop_reason = @stop_reason.get
     def running? = @running.true?
 
     # Force shutdown: the fire alarm, then a stop. Multi overrides to also kill the

@@ -298,7 +298,7 @@ Runners are long-lived processes that fetch jobs and dispatch them to Workers. A
 ### Class Hierarchy
 
 ```
-Runner                    # Base class: run!, stop!, stopping?, running?, kill!, factory
+Runner                    # Base class: run!, stop!, stopping?, stop_reason, running?, kill!, factory
 ├── Runner::Polling       # Loop using client.with_each_job
 ├── Runner::Streaming     # Loop using client.open_job_stream (dual-mode: inline or pump+queue)
 │   └── Runner::Hybrid    # Subclass of Streaming, adds poll-drain phase before buffer processing
@@ -401,7 +401,7 @@ Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` — works
 
 **Threading model:** A `Concurrent::FixedThreadPool` sized to the number of worker classes. Each thread calls `runner.run!` on its child runner. The main thread calls `thread_pool.wait_for_termination` and blocks until all child threads exit.
 
-**Error handling:** A `Concurrent::AtomicReference` captures the first error from any child thread (first-error-wins via `update { |prev| prev || e }`). When a child thread raises, Multi logs the error and cascades to the siblings, and after the pool terminates, re-raises the captured error. A recoverable error cascades a graceful `stop!`; anything else raises the fire alarm and kills them (`kill_children`, which keeps the crash's reason). A child whose `run!` returns normally with the fire alarm raised kills them too, as `:crash`, since its own error never left it; nothing is re-raised then.
+**Error handling:** A `Concurrent::AtomicReference` captures the first error from any child thread (first-error-wins via `update { |prev| prev || e }`). When a child thread raises, Multi logs the error and cascades to the siblings, and after the pool terminates, re-raises the captured error. A recoverable error cascades a graceful `stop!`; anything else raises the fire alarm and kills them (`kill_children`, which keeps the crash's reason). A child whose `run!` returns normally ends them too (`end_with`): it kills them, as `:crash`, if the fire alarm is raised, since its own error never left it; otherwise it stops them gracefully under its own `stop_reason` (a clean stream close, say), so a job type is never left unworked while its siblings keep the process alive. Nothing is re-raised either way.
 
 **Shutdown sequence:**
 - `stop!` — stops all child runners, then `thread_pool.shutdown` (waits for in-progress jobs to finish)
