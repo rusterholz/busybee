@@ -154,8 +154,8 @@ The Railtie passes Rails config values through these setters. It pre-coerces boo
 
 Consumers then convert for their own destination:
 
-- `milliseconds_from` — every protobuf duration field. Truncates, because those fields are `int64` milliseconds.
-- `seconds_from` — every wait (the backpressure back-off in `handle_grpc_error`, the teardown's `shutdown_wait_timeout` waits, `ErrorHandling#with_retry`, the streaming pump's throttle) and `Job#update_timeout`'s deadline arithmetic. Returns a Float; it must, since `0.25.seconds` truncated to `0` is the difference between waiting and not.
+- `milliseconds_from`: every protobuf duration field. Truncates, because those fields are `int64` milliseconds.
+- `seconds_from`: every wait (the backpressure back-off in `handle_grpc_error`, the teardown's `shutdown_wait_timeout` waits, `ErrorHandling#with_retry`, the streaming pump's throttle) and `Job#update_timeout`'s deadline arithmetic. Returns a Float; it must, since `0.25.seconds` truncated to `0` is the difference between waiting and not.
 
 A hand-rolled conversion at a sleep site goes wrong for some shape the config layer accepts: milliseconds taken as seconds, or an `ActiveSupport::Duration`, already in seconds, divided again. That bug lives at the *consumption* end, so a spec that exercises only the *input* end, or asserts the value it just passed in, cannot catch it.
 
@@ -222,21 +222,21 @@ Runners hold the resolved config at runtime. The resolved config is a flat Runti
 
 RuntimeConfig fields are divided into two categories:
 
-**Worker-scoped** — participate in the full 4-level precedence chain (per-worker RC → global RC → worker DSL → gem default). Only `worker_mode` has a CLI flag (`-m`); the rest are YAML-only:
-- `worker_mode` — `:polling`, `:streaming`, or `:hybrid`
-- `backpressure_delay` — how long to back off on a backpressure status, unless a stop comes first (see Durations Module)
-- `max_jobs` — max jobs per poll request
-- `request_timeout` — long-poll timeout in ms
-- `buffer` — whether the streaming pump+buffer is used (`true` by default)
-- `buffer_throttle` — pump thread delay in ms (`false` = no throttle)
-- `job_timeout` — job lock timeout in ms
-- `fail_job_backoff` — fail-job backoff in ms
+**Worker-scoped**: participate in the full 4-level precedence chain (per-worker RC → global RC → worker DSL → gem default). Only `worker_mode` has a CLI flag (`-m`); the rest are YAML-only:
+- `worker_mode`: `:polling`, `:streaming`, or `:hybrid`
+- `backpressure_delay`: how long to back off on a backpressure status, unless a stop comes first (see Durations Module)
+- `max_jobs`: max jobs per poll request
+- `request_timeout`: long-poll timeout in ms
+- `buffer`: whether the streaming pump+buffer is used (`true` by default)
+- `buffer_throttle`: pump thread delay in ms (`false` = no throttle)
+- `job_timeout`: job lock timeout in ms
+- `fail_job_backoff`: fail-job backoff in ms
 
-**Process-wide** — apply globally, no per-worker overrides (global RC → gem default):
-- `log_format` — `:text` or `:json`
-- `worker_name` — identifier for this worker process
-- `cluster_address` — Zeebe gateway address
-- `shutdown_wait_timeout` — the bound, in ms, on every teardown wait for another thread's share of the shutdown (the T1 wait and the pump join); one value for every runner in the process, `Multi`'s children included
+**Process-wide**: apply globally, no per-worker overrides (global RC → gem default):
+- `log_format`: `:text` or `:json`
+- `worker_name`: identifier for this worker process
+- `cluster_address`: Zeebe gateway address
+- `shutdown_wait_timeout`: the bound, in ms, on every teardown wait for another thread's share of the shutdown (the T1 wait and the pump join); one value for every runner in the process, `Multi`'s children included
 
 ### Precedence Chains
 
@@ -350,7 +350,7 @@ The pump never dies by exception: T1 fired from its `rescue` (its own error won 
 
 **Single-entry gate.** `start!` flips `@running` with an atomic compare-and-set and reports whether *this* call won it; `run!` does `return unless start!` before its `begin/ensure`. A second `run!` on an already-running runner is a no-op (without it, both callers would block their own `run_loop`). The same CAS placement makes the T0/T2/T3 set fire all-or-none — the `ensure` is reached only once `start!` has won.
 
-**Close-before-fire.** `stop!(reason:)` gates on `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate, so `stopping?` and the reason are one atomic fact (no window where a reader sees `stopping?` true but the reason unset), and T1 fires once across repeated signals / per-job `Shutdown`s. Then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires — so a propagating observer can never skip the close and wedge shutdown. The teardown claims the reason for its exit exception *before* anything of its own closes intake, since closing the stream wakes the pump, whose clean-close claim (`:gateway_closed`) would otherwise race it; its own `cease_intake` call is an idempotent backstop for an announcement still under way on another thread.
+**Close-before-fire.** `stop!(reason:)` gates on `@stop_reason.compare_and_set(nil, reason)`: the set-once reason *is* the gate, so `stopping?` and the reason are one atomic fact (no window where a reader sees `stopping?` true but the reason unset), and T1 fires once across repeated signals / per-job `Shutdown`s. Then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires, so a propagating observer can never skip the close and wedge shutdown. The teardown claims the reason for its exit exception *before* anything of its own closes intake, since closing the stream wakes the pump, whose clean-close claim (`:gateway_closed`) would otherwise race it; its own `cease_intake` call is an idempotent backstop for an announcement still under way on another thread.
 
 **Stop reason (`reason` ⊥ `error`).** The closing `Worker::Status` carries two independent axes: `reason` names *why* the run stopped (a low-cardinality Symbol); `error` carries the exception, if any. They don't collapse into one another — a `:rollover` that errors mid-drain reports `reason: :rollover, error: <exception>`. The reason is set once, through the `@stop_reason` gate; `stop!` defaults it to `:signal` and accepts only a Symbol (`ArgumentError` otherwise). Canonical values and who sets each:
 
@@ -373,13 +373,13 @@ The pump never dies by exception: T1 fired from its `rescue` (its own error won 
 
 From the Runner's perspective, `perform_job` has a simple two-outcome contract (returns or raises `Shutdown`). All other exceptions are handled inside `perform_job`. In the fetch loop:
 
-- **Backpressure** — a wrapped `Busybee::GRPC::Error` whose `grpc_status` is in `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) is handled by the shared `handle_grpc_error` (in `Runner::Stopping`): increment `@backpressure_count`, back off for `backpressure_delay` (converted to seconds at `back_off`), retry the fetch. The back-off waits on `@stop_announced`, so a stop ends it early. Matched by status *symbol*, so it catches the backpressure outcome however the gateway raised it. Any other gRPC error claims the stop as `:gateway_error` (`claim_stop`): a won claim announces the stop, T1 firing on the fetching thread, then raises the error; a lost one met a stop under way and becomes a post-stop error. Inline streaming's stream errors take the same claim. Fetch needs *two* translation points rather than one: the dispatch runs through the call seam, but `ActivateJobs` is server-streaming, and grpc hands back a lazy enumerator whose status error surfaces while the responses are read — after the seam has closed. So `with_each_job` rescues `::GRPC::BadStatus` around the enumeration itself. Without that second point the raw status matches neither fetch loop's rescue, and backpressure reads as a crash.
+- **Backpressure**: a wrapped `Busybee::GRPC::Error` whose `grpc_status` is in `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) is handled by the shared `handle_grpc_error` (in `Runner::Stopping`): increment `@backpressure_count`, back off for `backpressure_delay` (converted to seconds at `back_off`), retry the fetch. The back-off waits on `@stop_announced`, so a stop ends it early. Matched by status *symbol*, so it catches the backpressure outcome however the gateway raised it. Any other gRPC error claims the stop as `:gateway_error` (`claim_stop`): a won claim announces the stop, T1 firing on the fetching thread, then raises the error; a lost one met a stop under way and becomes a post-stop error. Inline streaming's stream errors take the same claim. Fetch needs *two* translation points rather than one: the dispatch runs through the call seam, but `ActivateJobs` is server-streaming, and grpc hands back a lazy enumerator whose status error surfaces while the responses are read, after the seam has closed. So `with_each_job` rescues `::GRPC::BadStatus` around the enumeration itself. Without that second point the raw status matches neither fetch loop's rescue, and backpressure reads as a crash.
 - **`Worker::Shutdown`** → `declare_unhealthy` claims the stop as `:unhealthy` and returns whether the claim won. A winner keeps the error for the run to re-raise, recorded through `claim_stop` before the stop is announced, since the announcement wakes the main thread (on a buffered streaming worker, under the lock that thread reads by; see Run Lifecycle). A loser met a stop already under way, so it is a post-stop error: never raised, reported at T3, the winning reason standing. A winner is raised at loop exit and reaches `run!`'s `ensure`, where `error` is recorded as its unwrapped cause (see Stop reason). One raised from `on_job_activated` is declared in `activate_job` first, so the job in hand goes back through `handle_shutdown_job` already reading `reason: :unhealthy`, then re-raised for the caller's rescue. On the pump that rescue is `end_pump`: an escalation whose claim won is already the exit error and is skipped, and one whose claim lost becomes a post-stop error.
 - **Other errors** → propagate up (to Multi/CLI). Likely fatal (auth, config).
 
 ### Shutdown Sequence
 
-**Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate — stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), then fire T1. In-progress `perform_job` completes; `run!`'s `ensure` waits for T1 to finish, then drains — remaining queued/yielded jobs are handed back via `handle_shutdown_job`, preserving the retry count — and fires T2/T3.
+**Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` (the set-once reason *is* the gate), then stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), and fire T1. In-progress `perform_job` completes; `run!`'s `ensure` waits for T1 to finish, fires T2, drains (remaining queued/yielded jobs are handed back via `handle_shutdown_job`, preserving the retry count), and fires T3.
 
 **Forced (`kill!`):** Base raises the fire alarm, so no runner in the process hands back or runs job hooks after it, then calls `stop!` with the reason it was given (`:kill` by default; `Multi`'s non-recoverable cascade passes the crash's reason instead). Streaming also kills the pump thread, logs how many activated jobs it is discarding, and flushes the queue (resetting the buffer gauge). Multi kills all child runners and the thread pool.
 
@@ -431,14 +431,14 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 
 ### CLI Flags
 
-The CLI exposes 6 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
+The CLI exposes 6 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff) are YAML-only: they're per-worker concerns that don't belong on a command line.
 
-- `--config` / `-c` — YAML configuration file path
-- `--worker-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`
-- `--log-format` / `-l` — `:text` or `:json`
-- `--worker-name` / `-n` — worker process identifier
-- `--cluster-address` / `-a` — Zeebe gateway address
-- `--shutdown-wait-timeout` — `shutdown_wait_timeout` in ms, parsed as an Integer
+- `--config` / `-c`: YAML configuration file path
+- `--worker-mode` / `-m`: `:polling`, `:streaming`, or `:hybrid`
+- `--log-format` / `-l`: `:text` or `:json`
+- `--worker-name` / `-n`: worker process identifier
+- `--cluster-address` / `-a`: Zeebe gateway address
+- `--shutdown-wait-timeout`: `shutdown_wait_timeout` in ms, parsed as an Integer
 
 **Mutual exclusions:** `--config` is mutually exclusive with `--worker-mode` (set worker_mode in YAML instead) and with positional worker args (list workers in YAML instead). Process-wide flags (`-l`, `-n`, `-a`, `--shutdown-wait-timeout`) are allowed alongside `--config`, and win over the YAML's top-level `shutdown_wait_timeout`.
 
@@ -448,7 +448,7 @@ The CLI exposes 6 flags. Worker-scoped tuning knobs (backpressure_delay, max_job
 
 ### Signal Handling
 
-Traps `INT`, `QUIT`, `TERM` — all mapped to the same handler. The trap block hands the handling to a thread of its own (Ruby forbids mutex and thread-pool operations in trap context) and returns **without joining it**. Ruby runs the trap on the main thread on top of whatever it interrupted, a write holding the logger's lock included, and the handler's `stop!`, its T1 hooks and their log lines may need that very lock; joining from the trap would deadlock the process. `CLI#run` keeps those threads and joins them after `run!` returns, since Ruby kills unjoined threads at exit and T1 may still be running on one past `shutdown_wait_timeout`; it skips the join when `Runner.exit_immediately?`. A T1 hook that never returns is the adopter's, and a second signal's `exit!(1)` escapes it.
+Traps `INT`, `QUIT`, `TERM`, all mapped to the same handler. The trap block hands the handling to a thread of its own (Ruby forbids mutex and thread-pool operations in trap context) and returns **without joining it**. Ruby runs the trap on the main thread on top of whatever it interrupted, a write holding the logger's lock included, and the handler's `stop!`, its T1 hooks and their log lines may need that very lock; joining from the trap would deadlock the process. `CLI#run` keeps those threads and joins them after `run!` returns, since Ruby kills unjoined threads at exit and T1 may still be running on one past `shutdown_wait_timeout`; it skips the join when `Runner.exit_immediately?`. A T1 hook that never returns is the adopter's, and a second signal's `exit!(1)` escapes it.
 
 **Two-signal pattern:**
 - First signal → `runner.stop!` (graceful shutdown)

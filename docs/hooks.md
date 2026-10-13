@@ -464,7 +464,7 @@ config.on_worker_shutdown { |worker| Monitoring.worker_down(worker) }
 | Outcome | `reason`, `error`, `error_class`, `error_message` |
 | Projections | `context_tags`, `logging_context` |
 
-A `nil` reader means "not known yet": `reason` is `nil` until the worker's stop begins, `error` until a closing moment has one to report, `stop_duration_ms` until the drain finishes, and so on. Every run stamps all four moments, so `stop_requested_at` and `stop_latency_ms` are there even for a worker that crashed. `uptime_s` is live — it reads the clock each call, so it keeps ticking even on a snapshot taken earlier.
+A `nil` reader means "not known yet": `reason` is `nil` until the worker's stop begins, `error` until a closing moment has one to report, `stop_duration_ms` until the drain finishes, and so on. Every run stamps all four moments, so `stop_requested_at` and `stop_latency_ms` are there even for a worker that crashed. `uptime_s` is live: it reads the clock each call, so it keeps ticking even on a snapshot taken earlier.
 
 ### Stop Reasons
 
