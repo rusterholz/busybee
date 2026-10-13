@@ -235,7 +235,7 @@ Busybee.backpressure_statuses = %i[resource_exhausted unavailable]
 
 ### GRPC Keepalive
 
-HTTP/2 keepalive pings on the gRPC channel. Their purpose is the streaming worker's job-activation stream: it has no request deadline, so a transport that dies silently — a suspended host, a connection reset a proxy swallowed — would otherwise leave the worker blocked on the stream forever, healthy to a liveness probe but activating nothing. Keepalive pings detect the dead transport and raise it as a gateway error the runner recovers from. (Unary calls already recover on their own deadlines; keepalive is what protects the deadline-less stream.) Enabled by default.
+HTTP/2 keepalive pings on the gRPC channel. Their purpose is the streaming worker's job-activation stream: it has no request deadline, so a transport that dies silently (a suspended host, a connection reset a proxy swallowed) would otherwise leave the worker blocked on the stream forever, healthy to a liveness probe but activating nothing. Keepalive pings detect the dead transport and raise it as a gateway error the runner recovers from. Busybee's other calls, such as completing or failing a job, carry no deadline either, so keepalive is what ends a wait on a dead transport for them too: within about one interval plus one timeout. Enabled by default.
 
 Both knobs take a [duration](#how-busybee-reads-durations); `nil` restores the default. Setting **both** to `false` disables keepalive; setting only one is an error.
 

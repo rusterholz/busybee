@@ -106,15 +106,15 @@ module Busybee
       config.shutdown_on_errors = busybee_conf.shutdown_on_errors if busybee_conf.shutdown_on_errors.presence
     end
 
+    # An explicit credentials object, else credentials built from type + params
+    # (or autodetected from params alone).
     # @api private
     def self.configure_credentials(config, busybee_conf)
-      # Option 1: Explicit credentials object
       if busybee_conf.credentials.is_a?(Busybee::Credentials)
         config.credentials = busybee_conf.credentials
         return
       end
 
-      # Option 2: Build credentials from type + params (or autodetect from params alone)
       credential_type = busybee_conf.credential_type.presence
       credential_params = extract_credential_params(busybee_conf)
 

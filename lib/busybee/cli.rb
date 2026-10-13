@@ -82,9 +82,7 @@ module Busybee
         return
       end
 
-      # Defensive: busybee.rb's :before_configuration hook should already register
-      # the Railtie as config/environment defines the app.
-      require "busybee/railtie"
+      require "busybee/railtie" # defensive: busybee.rb's :before_configuration hook registers it already
       require "./config/environment"
     rescue StandardError, LoadError => e
       Busybee.logger&.error("Failed to load Rails environment: [#{e.class}] #{e.message}. " \
