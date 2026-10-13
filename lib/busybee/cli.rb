@@ -36,6 +36,8 @@ module Busybee
       @runner = Runner.for(*@worker_classes, runtime_config: @runtime_config, client: client)
       setup_signal_handlers!
       @runner.run!
+    ensure
+      join_signal_threads
     end
 
     private
@@ -53,12 +55,22 @@ module Busybee
       end
     end
 
+    # The trap runs on the main thread, on top of whatever it interrupted, a
+    # write holding the logger's lock included; so the handling happens on a
+    # thread of its own, and the trap returns without waiting for it.
     def setup_signal_handlers!
+      @signal_threads = []
       STOP_SIGNALS.each do |signal|
-        trap(signal) do
-          Thread.new { handle_signal(signal) }.join
-        end
+        trap(signal) { @signal_threads << Thread.new { handle_signal(signal) } }
       end
+    end
+
+    # Ruby kills unjoined threads at exit, so a stop announcement still running
+    # on a signal's thread is waited for, unless the process must exit immediately.
+    def join_signal_threads
+      return if Runner.exit_immediately?
+
+      @signal_threads&.each(&:join)
     end
 
     def load_environment!
