@@ -65,9 +65,10 @@ module Busybee
       # The worker snapshot attributing the stream-open fetch goes stale over the
       # stream's life; execute-time re-seeding keeps the per-job worker current.
       def run_loop
-        @stream = Client::Call.with_worker_status(worker_status) do
+        stream = Client::Call.with_worker_status(worker_status) do
           @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
         end
+        return unless adopt_stream(stream)
 
         if buffer?
           run_with_buffer
@@ -82,8 +83,21 @@ module Busybee
       # (close-before-fire), and run!'s ensure again as the error-exit backstop.
       # Idempotent: a second close no-ops and extra sentinels are skipped on drain.
       def cease_intake
-        @stream&.close
+        @pump_claim.synchronize { @stream&.close }
         @job_buffer&.push(:stop) if buffer?
+      end
+
+      # A stop landing while the stream opened found nothing to close. Under the
+      # lock cease_intake takes, either it sees this stream or the stop shows here,
+      # and nil sends the run to the teardown, whose cease_intake closes it. The
+      # alarm does too, claiming a stop as Multi's kill cascade would (:crash).
+      def adopt_stream(stream)
+        halted = @pump_claim.synchronize do
+          @stream = stream
+          stopping? || exit_immediately?
+        end
+        stop!(reason: :crash) if halted # a no-op behind a stop already claimed
+        stream unless halted
       end
 
       # When buffered, join the pump thread and hand back the jobs still buffered.

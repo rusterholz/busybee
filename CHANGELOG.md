@@ -92,6 +92,8 @@
 
 - **A Deploy's Shutdown Stays Graceful** – a worker already stopping for a deploy's SIGTERM, which then met a gateway error on a fetch or was declared unhealthy by a job, exited raising that error, so a routine deploy read as a crash. It now finishes the graceful stop it was making and reports the error to `on_worker_shutdown` instead. A worker backing off from gateway backpressure also stops waiting as soon as it is told to stop, rather than sitting out the rest of `backpressure_delay`
 
+- **A Streaming Worker Stops Even While It Connects** – a stop that arrived while a streaming worker was still opening its job stream found nothing to close yet, so a worker with buffering off waited for the next job before stopping, which on an idle job type meant indefinitely, and its process never exited. It now stops at once
+
 - **A Worker Whose Stream Ends Takes the Process Down With It** – in a multi-worker process, a worker that stopped on its own, most often because the engine closed its job stream, simply ended while the others ran on, so its job type went unworked until someone restarted the process, and a process whose workers all ended that way never exited. Now the rest stop with it, gracefully and under the same reason, so the process exits and your orchestrator replaces it
 
 - **A Forced Shutdown Says What It Threw Away** – `kill!`, the forced stop behind a second termination signal, discarded whatever jobs were still buffered without a word. It now logs how many it dropped before the process goes, which is the only record available: by that point the graceful stop has already claimed the stop reason, and the immediate exit means no shutdown hook will fire either
