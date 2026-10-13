@@ -224,7 +224,7 @@ A filter key belongs to a subject, but what the carrier can *hold* depends on wh
 
 **The around-hooks are the ones that surprise people.** Filters are evaluated when busybee *selects* which hooks to run, which for an around-hook is before its block is entered — so an `around_call` sees a pending call, never a succeeded one. To act on an outcome, filter the matching `after_` hook, or branch on the carrier inside your block.
 
-Three keys have **open** vocabularies and are only shape-checked: `job_type:` and `bpmn_process_id:` are yours, and so is `reason:` — the [stop reasons](#stop-reasons) busybee provides are a documented set, but `runner.stop!(reason: :rollover)` lets you supply your own, and you can filter on those too.
+Three keys have **open** vocabularies and are only shape-checked: `job_type:` and `bpmn_process_id:` are yours, and `reason:` takes any Symbol, though the [stop reasons](#stop-reasons) busybee sets are a documented set.
 
 ### When a Filter Is Refused
 
@@ -474,20 +474,19 @@ The closing snapshot answers *why* the worker stopped, as a machine-readable Sym
 
 | `reason` | Meaning |
 |----------|---------|
-| `:signal` | a graceful stop with no stated cause — the programmatic default |
+| `:signal` | a graceful stop with no stated cause, such as a [test worker's](workers.md#holding-the-worker-open) `stop!` |
 | `:sigint` / `:sigterm` / `:sigquit` | the CLI received that signal |
 | `:unhealthy` | the worker declared itself down — an error matched [`shutdown_on`](workers.md#shutdown-handling) |
 | `:gateway_error` | an unrecovered gRPC failure — busybee couldn't reach the engine |
 | `:gateway_closed` | the engine closed the job stream cleanly on its own |
 | `:crash` | any other unhandled error ended the run |
 | `:kill` | forced shutdown (`kill!`, or the CLI's second signal) |
-| *anything else* | app-supplied — any Symbol your own code passes to `stop!(reason:)` |
 
 Two prefix families make coarse filters easy: `reason: /\Asig/` matches every signal-driven stop, and `reason: /\Agateway/` matches both engine-driven endings.
 
 **Don't build an alert on `:kill`.** The reason is set once, by whoever stops the worker first, and a forced stop almost always follows a graceful one — the CLI only escalates to `kill!` on a *second* signal, by which point `:sigterm` has already claimed the slot. Then the process exits immediately, and may skip the closing hooks too. In practice a kill shows up as the graceful reason you were already going to see, plus a log line saying how many jobs it discarded.
 
-**`reason` and `error` are independent axes.** The reason classifies the ending; the error, when present, is the exception involved. An `:unhealthy` stop carries the error that triggered it; a `:sigterm` stop usually carries none; and an app-supplied reason may carry either. Don't infer one from the other — read both.
+**`reason` and `error` are independent axes.** The reason classifies the ending; the error, when present, is the exception involved. An `:unhealthy` stop carries the error that triggered it, and a `:sigterm` stop usually carries none. Don't infer one from the other — read both.
 
 **A graceful stop already under way finishes as one.** Once a stop has begun, while a deploy's SIGTERM is being handled, say, a worker declared unhealthy by `perform` or a hook (a `Busybee::Worker::Shutdown`, or an error matching `shutdown_on`) doesn't turn it into a crash, on any kind of worker. Neither does the gateway failing the worker's fetch or its job stream, nor an `on_job_activated` hook raising an error outside `StandardError` on a streaming or hybrid worker's thread reading the job stream. (Any other error from a hook is logged and swallowed, as usual.) The worker still finishes the stop it was making. The reason stays the one that started it, the error reaches `on_worker_shutdown` as `status.error`, and the worker exits without raising it. That is one way a `:sigterm` stop can carry an error. An error outside `StandardError` from `perform`, or from a hook on the thread running your jobs, is still raised: it has already cut that stop short.
 
