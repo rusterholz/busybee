@@ -109,6 +109,33 @@ RSpec.describe "the reason a process must exit immediately", :gateway do # ruboc
     end
   end
 
+  # Two quiet polling workers in one process; a kill elsewhere in the process
+  # ends them both, and the container takes the fire's reason.
+  describe "in a multi-worker process" do
+    let(:runner) do
+      workers = %w[QuietOne QuietTwo].map do |name|
+        stub_const(name, Class.new(Busybee::Worker) do
+          job_type name
+          worker_mode :polling
+
+          def perform = {}
+        end)
+      end
+      Busybee::Runner::Multi.new(workers, client: gateway.client)
+    end
+
+    it "is the container's reason too" do
+      killer = Thread.new do
+        wait_until { runner.runners.all?(&:running?) }
+        kill_a_sibling
+      end
+      run_to_completion(seconds: 5)
+      killer.join(5)
+
+      expect(runner.stop_reason).to eq(:kill)
+    end
+  end
+
   # The alarm is process-wide, so Busybee::Testing clears it, reason and all,
   # between examples.
   describe "between examples", order: :defined do
