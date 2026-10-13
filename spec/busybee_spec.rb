@@ -374,6 +374,15 @@ RSpec.describe Busybee do
   describe ".shutdown_wait_timeout" do
     it_behaves_like "a duration config setter", :shutdown_wait_timeout, :shutdown_wait_timeout,
                     :DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS
+
+    it "warns when set under a second" do
+      allow(Busybee::Logging).to receive(:warn)
+      original = described_class.instance_variable_get(:@shutdown_wait_timeout)
+      described_class.shutdown_wait_timeout = 500
+      described_class.shutdown_wait_timeout = original
+
+      expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
+    end
   end
 
   describe ".default_max_jobs" do

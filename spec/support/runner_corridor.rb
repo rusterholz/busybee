@@ -33,6 +33,16 @@ module RunnerCorridor
 
   def shutdown_status_from(&) = shutdown_statuses_from(&).first
 
+  # shutdown_wait_timeout is process-wide, so an example sets it on Busybee and
+  # puts it back.
+  def with_shutdown_wait_timeout(milliseconds)
+    saved = Busybee.instance_variable_get(:@shutdown_wait_timeout)
+    Busybee.instance_variable_set(:@shutdown_wait_timeout, milliseconds)
+    yield
+  ensure
+    Busybee.instance_variable_set(:@shutdown_wait_timeout, saved)
+  end
+
   # A job's activation and closing hooks, in firing order, keyed by job.
   def record_job_brackets
     Concurrent::Array.new.tap do |brackets|

@@ -236,7 +236,7 @@ RuntimeConfig fields are divided into two categories:
 - `log_format`: `:text` or `:json`
 - `worker_name`: identifier for this worker process
 - `cluster_address`: Zeebe gateway address
-- `shutdown_wait_timeout`: the bound, in ms, on every teardown wait for another thread's share of the shutdown (the T1 wait and the pump join); one value for every runner in the process, `Multi`'s children included
+- `shutdown_wait_timeout`: the bound, in ms, on every teardown wait for another thread's share of the shutdown (the T1 wait and the pump join); one value for every runner in the process, `Multi`'s children included. Runners read `Busybee.shutdown_wait_timeout`, never this field: the field only carries a YAML or flag value to the CLI's `apply_global_config!`, whose validating setter converts a String and warns under the floor
 
 ### Precedence Chains
 

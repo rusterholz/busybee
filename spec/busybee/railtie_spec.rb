@@ -297,6 +297,18 @@ RSpec.describe "Busybee::Railtie", :rails do
         expect(Busybee.instance_variable_get(:@shutdown_wait_timeout)).to eq(15_000)
       end
 
+      it "converts a String, as an environment variable delivers it" do
+        configure_and_initialize(shutdown_wait_timeout: "15000")
+        expect(Busybee.shutdown_wait_timeout).to eq(15_000)
+      end
+
+      it "warns on one under a second" do
+        allow(Busybee::Logging).to receive(:warn)
+        configure_and_initialize(shutdown_wait_timeout: 500)
+
+        expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
+      end
+
       it "leaves nil when not configured (uses default from Defaults)" do
         configure_and_initialize
         expect(Busybee.instance_variable_get(:@shutdown_wait_timeout)).to be_nil

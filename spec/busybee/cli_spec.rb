@@ -364,6 +364,38 @@ RSpec.describe Busybee::CLI do
         expect(Busybee.shutdown_wait_timeout).to eq(8000)
       end
 
+      it "warns on a --shutdown-wait-timeout under a second" do
+        allow(Busybee::Logging).to receive(:warn)
+        described_class.new(["--shutdown-wait-timeout", "500", "TestCLIWorker"])
+
+        expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
+      end
+    end
+
+    context "with shutdown_wait_timeout spelled as a String in YAML" do
+      let(:yaml_dir) { File.join(__dir__, "..", "..", "tmp", "cli_shutdown_wait_yaml") }
+
+      before { FileUtils.mkdir_p(yaml_dir) }
+      after { FileUtils.rm_rf(yaml_dir) }
+
+      def config_with(value)
+        File.join(yaml_dir, "config.yml").tap do |path|
+          File.write(path, "shutdown_wait_timeout: \"#{value}\"\nworkers:\n  - TestCLIWorker\n")
+        end
+      end
+
+      it "converts it to milliseconds for every worker in the process" do
+        described_class.new(["-c", config_with(8000)])
+        expect(Busybee.shutdown_wait_timeout).to eq(8000)
+      end
+
+      it "warns on one under a second" do
+        allow(Busybee::Logging).to receive(:warn)
+        described_class.new(["-c", config_with(500)])
+
+        expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
+      end
+
       it "does not override gem config when flags are not provided" do
         original_format = Busybee.log_format
         described_class.new(["TestCLIWorker"])

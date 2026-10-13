@@ -8,9 +8,11 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
   let(:stream_gate) { Queue.new }
   let(:release) { Concurrent::Event.new }
   let(:moments) { Concurrent::Array.new }
-  let(:runtime_config) { Busybee::RuntimeConfig.new(shutdown_wait_timeout: 3000).resolve_for(worker_class) }
+  let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
+  let(:shutdown_wait_timeout) { 3000 }
 
   around { |example| isolate_busybee_hooks { example.run } }
+  around { |example| with_shutdown_wait_timeout(shutdown_wait_timeout) { example.run } }
 
   before do
     gateway.on(:complete_job) { Busybee::GRPC::CompleteJobResponse.new }
@@ -75,7 +77,7 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
     end
 
     context "when it takes longer than shutdown_wait_timeout" do
-      let(:runtime_config) { Busybee::RuntimeConfig.new(shutdown_wait_timeout: 100).resolve_for(worker_class) }
+      let(:shutdown_wait_timeout) { 100 }
 
       before { hold_stop_requested(1.5) }
 

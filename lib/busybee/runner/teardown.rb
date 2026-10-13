@@ -62,10 +62,8 @@ module Busybee
 
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
 
-      # The bound on waiting for another thread's share of the shutdown.
-      def shutdown_wait_seconds
-        Busybee::Durations.seconds_from(@runtime_config&.shutdown_wait_timeout || Busybee.shutdown_wait_timeout)
-      end
+      # Process-wide: read where the validating setter put it, never off a runtime config.
+      def shutdown_wait_seconds = Busybee::Durations.seconds_from(Busybee.shutdown_wait_timeout)
 
       # Nothing a T1/T2/T3 hook raises leaves this: a worker already tearing down
       # cannot shut down harder, and an escape would cost the drain, the later
