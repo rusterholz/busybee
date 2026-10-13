@@ -14,7 +14,7 @@ module Busybee
         @worker_timestamps.stamp!(:stop_requested_at)
         cease_intake
         t1 = :on_worker_stop_requested
-        contain_teardown_escalation(t1) { Hooks.run(t1, worker_status, safe: true) }
+        contain_teardown_hooks(t1) { Hooks.run(t1, worker_status, safe: true) }
       end
 
       # The worker declared itself down: claim the stop; a winner keeps the error to raise.

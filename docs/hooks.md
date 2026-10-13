@@ -628,7 +628,7 @@ What happens when a hook itself raises an error depends on the hook's character:
 
 Every swallowed error is logged with its class, message, and origin, so a broken hook is visible without being fatal.
 
-The swallow covers `StandardError`, which is every error you would normally raise or rescue. It does not cover the rest of Ruby's exception hierarchy: a `NoMemoryError` or a `SystemStackError` from an observation hook propagates like any other.
+The swallow covers `StandardError`, which is every error you would normally raise or rescue. It does not cover the rest of Ruby's exception hierarchy: a `NoMemoryError` or a `SystemStackError` from an observation hook propagates like any other, except from the three moments of a worker's shutdown (below).
 
 Two exceptions to the swallowing:
 
@@ -644,7 +644,7 @@ Two exceptions to the swallowing:
 
   Escalation reads the *worker's* `shutdown_on` list plus the gem-wide [`Busybee.shutdown_on_errors`](configuration.md#shutdown_on_errors). Call hooks have no worker to read — a client call can be made from a web request or a background job, where "shut this worker down" means nothing — so only the gem-wide list escalates from `before_call`, `around_call`, and `after_call`. Put an error class in `Busybee.shutdown_on_errors` if you want it to escalate from anywhere.
 
-**Both exceptions stop applying once the worker is already shutting down.** `on_worker_stop_requested`, `on_worker_stopping` and `on_worker_shutdown` all fire during teardown. There, a `Shutdown` and a `shutdown_on` match are logged and swallowed like any other hook error, and handed to `on_worker_shutdown` as `status.error` when the exception the worker is actually exiting on isn't already there. The rest of the shutdown still runs: the drain that hands jobs back, the moments after it, and the worker's own record of having stopped. `on_worker_started` is unaffected: an escalation there still aborts the start.
+**Both exceptions stop applying once the worker is already shutting down.** `on_worker_stop_requested`, `on_worker_stopping` and `on_worker_shutdown` all fire during teardown, and nothing raised in them leaves the worker, whatever its class. A `Shutdown` and a `shutdown_on` match are logged and swallowed like any other hook error. An error outside `StandardError`, such as a `NoMemoryError`, is swallowed without a log line, and tells every worker in the process to exit immediately, as that error does anywhere (see [Watching the System Lifecycle](#watching-the-system-lifecycle)). The error is handed to `on_worker_shutdown` as `status.error` when the exception the worker is actually exiting on isn't already there; one raised by `on_worker_shutdown` itself has nowhere further to go. The rest of the shutdown still runs: the drain that hands jobs back (unless the process must exit immediately), the moments after it, and the worker's own record of having stopped. `on_worker_started` is unaffected: an escalation there still aborts the start.
 
 **An escalation ends that moment's run.** Hooks registered for the same moment run in registration order, and one that escalates — or raises anything that propagates — stops the ones after it from firing at all. If you rely on an observer seeing every event, don't register it behind a hook that might declare the worker unhealthy.
 

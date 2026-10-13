@@ -31,14 +31,13 @@ module Busybee
       # fresh Status. error is the classified in-flight exception, shared by both.
       def fire_worker_lifecycle(stamp, type, error)
         @worker_timestamps.stamp!(stamp)
-        contain_teardown_escalation(type) { Hooks.run(type, worker_status(error: error), safe: true) }
+        contain_teardown_hooks(type) { Hooks.run(type, worker_status(error: error), safe: true) }
       end
 
       # The ensure's other door: a failing wire call would skip the rest as an
       # escalating hook used to. Skipped outright once the process must exit
       # immediately; an unrecoverable error inside it says so, unlogged, and
-      # abandons the rest. The pump join re-raises only a non-StandardError
-      # from T1 fired in the pump's rescue or ensure.
+      # abandons the rest.
       def drain_within_teardown
         return if exit_immediately?
 
@@ -60,15 +59,20 @@ module Busybee
       # An error that met a stop already under way: never raised, reported at T3.
       def post_stop_error = nil
 
-      # A worker already tearing down cannot shut down harder, so escalation buys
-      # nothing at T1/T2/T3 while costing the drain, the later moments, and the
-      # exception it was exiting on. T0 is excluded by not being wrapped.
-      def contain_teardown_escalation(type)
+      # Nothing a T1/T2/T3 hook raises leaves this: a worker already tearing down
+      # cannot shut down harder, and an escape would cost the drain, the later
+      # moments and the exit exception. What safe: true lets past is recorded for
+      # T3; past StandardError it also raises the fire alarm, unlogged. T0 is
+      # excluded by not being wrapped.
+      def contain_teardown_hooks(type)
         yield
       rescue Busybee::Worker::Shutdown => e
         @teardown_error.compare_and_set(nil, e)
         Busybee.logger&.error("[busybee] Shutdown from #{type} ignored, already shutting down: " \
                               "[#{e.class}] #{e.message}")
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        exit_immediately! unless recoverable?(e)
+        @teardown_error.compare_and_set(nil, e)
       end
     end
   end
