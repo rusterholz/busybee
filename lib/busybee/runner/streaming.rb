@@ -153,6 +153,7 @@ module Busybee
           break
         end
 
+        stop!(reason: :gateway_closed) # the gateway ended the stream, unless a stop came first
         raise shutdown_error if shutdown_error
       end
 

@@ -16,15 +16,24 @@ module Busybee
       # reports, where no exit exception explains the shutdown, a post-stop error and
       # then a contained escalation.
       def teardown(exception)
-        exit_immediately! if exception && !recoverable?(exception) # its wire calls are the ones about to fail
-        cease_intake
+        begin_teardown(exception)
         error = Busybee::Worker::Shutdown.unwrap(exception)
-        @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
         fire_worker_lifecycle(:stopping_at, :on_worker_stopping, error)
         drain_within_teardown
         error ||= Busybee::Worker::Shutdown.unwrap(post_stop_error) || @teardown_error.get
         fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
         @running.make_false
+      end
+
+      # Claim for the exit exception before intake closes, or the stream reader's
+      # clean-close claim could take the reason; announce unless something already
+      # has; let that announcement finish, so T1 precedes T2.
+      def begin_teardown(exception)
+        exit_immediately! if exception && !recoverable?(exception) # its wire calls are the ones about to fail
+        @stop_reason.compare_and_set(nil, reason_for(exception)) if exception
+        announce_stop
+        cease_intake # idempotent backstop for an announcement still under way elsewhere
+        @stop_announced.wait(shutdown_wait_seconds) unless exit_immediately?
       end
 
       # Stamp a closing moment (T2/T3) and fire its observation-only hook with a
@@ -54,7 +63,9 @@ module Busybee
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
 
       # The bound on waiting for another thread's share of the shutdown.
-      def shutdown_wait_seconds = Busybee::Durations.seconds_from(@runtime_config.shutdown_wait_timeout)
+      def shutdown_wait_seconds
+        Busybee::Durations.seconds_from(@runtime_config&.shutdown_wait_timeout || Busybee.shutdown_wait_timeout)
+      end
 
       # An error that met a stop already under way: never raised, reported at T3.
       def post_stop_error = nil

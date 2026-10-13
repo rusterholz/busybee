@@ -9,12 +9,20 @@ module Busybee
     module Stopping
       private
 
-      # A won stop's effects: intake ceases *before* T1 fires (close-before-fire).
+      # A stop's effects, once per run on whichever thread gets here first:
+      # intake ceases *before* T1 fires (close-before-fire), and the teardown
+      # waits on @stop_announced, so T1 also comes before T2.
       def announce_stop
-        @worker_timestamps.stamp!(:stop_requested_at)
-        cease_intake
-        t1 = :on_worker_stop_requested
-        contain_teardown_hooks(t1) { Hooks.run(t1, worker_status, safe: true) }
+        return unless @announcing.make_true
+
+        begin
+          @worker_timestamps.stamp!(:stop_requested_at)
+          cease_intake
+          t1 = :on_worker_stop_requested
+          contain_teardown_hooks(t1) { Hooks.run(t1, worker_status, safe: true) }
+        ensure
+          @stop_announced.set
+        end
       end
 
       # The worker declared itself down: claim the stop; a winner keeps the error to raise.

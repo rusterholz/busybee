@@ -236,7 +236,7 @@ RuntimeConfig fields are divided into two categories:
 - `log_format` — `:text` or `:json`
 - `worker_name` — identifier for this worker process
 - `cluster_address` — Zeebe gateway address
-- `shutdown_wait_timeout` — the bound, in ms, on every teardown wait for another thread's share of the shutdown (today the pump join); one value for every runner in the process, `Multi`'s children included
+- `shutdown_wait_timeout` — the bound, in ms, on every teardown wait for another thread's share of the shutdown (the T1 wait and the pump join); one value for every runner in the process, `Multi`'s children included
 
 ### Precedence Chains
 
@@ -332,7 +332,7 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 `Runner#run!` is a template method owning the run lifecycle; subclasses fill `run_loop` (the fetch loop) and optionally `cease_intake` / `drain_on_shutdown`. It fires the four observation-only worker hooks, each with a fresh frozen `Worker::Status` snapshot (identity, timing, counters, buffer gauges, outcome):
 
 - **T0 `on_worker_started`** — in `run!` via the private `start!`, once the run is accepted.
-- **T1 `on_worker_stop_requested`**: in `announce_stop`, on the thread whose claim won the stop reason, through `stop!` or a buffered streaming worker's `claim_stop`.
+- **T1 `on_worker_stop_requested`**: in `announce_stop`, exactly once per run (an `@announcing` flag), on the thread whose claim won the stop reason, through `stop!` or `claim_stop`. Every run passes it: a teardown that finds nothing announced (a crash claimed only there, or a loop returning without a stop) announces on its own thread. `announce_stop` sets `@stop_announced` (a `Concurrent::Event`) when it finishes, and the teardown waits on it before T2, bounded by `shutdown_wait_timeout` and skipped once the process must exit immediately, so T1 precedes T2 even when another thread announced. `kill!` sets it too, releasing a teardown still waiting on a T1 running elsewhere.
 - **T2 `on_worker_stopping`** and **T3 `on_worker_shutdown`** — in `run!`'s `ensure`, around the drain.
 
 **The ensure always completes.** T1, T2 and T3 all fire inside `contain_teardown_hooks`, which rescues everything a `safe: true` run lets past and records it in `@teardown_error` (first wins): `Worker::Shutdown`, whether raised outright or wrapped around a `shutdown_on` match, which it logs; and anything outside `StandardError`, which it leaves unlogged (logging allocates) and answers by raising the fire alarm. Once teardown has begun the worker cannot be made more stopped, so escalation buys nothing while costing the drain, the later moments and the `@running` clear, and it would *replace* the exception the worker was exiting on, losing it with no `cause` link. The recorded error is handed to T3 as `Worker::Status#error` only where the exit exception is not already there. T0 is not wrapped: aborting a start is a real outcome.
@@ -350,7 +350,7 @@ The pump never dies by exception: T1 fired from its `rescue` (its own error won 
 
 **Single-entry gate.** `start!` flips `@running` with an atomic compare-and-set and reports whether *this* call won it; `run!` does `return unless start!` before its `begin/ensure`. A second `run!` on an already-running runner is a no-op (without it, both callers would block their own `run_loop`). The same CAS placement makes the T0/T2/T3 set fire all-or-none — the `ensure` is reached only once `start!` has won.
 
-**Close-before-fire.** `stop!(reason:)` gates on `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate, so `stopping?` and the reason are one atomic fact (no window where a reader sees `stopping?` true but the reason unset), and T1 fires once across repeated signals / per-job `Shutdown`s. Then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires — so a propagating observer can never skip the close and wedge shutdown. The `ensure`'s `cease_intake` is the backstop for the uncaught-error exit where `stop!` was never called.
+**Close-before-fire.** `stop!(reason:)` gates on `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate, so `stopping?` and the reason are one atomic fact (no window where a reader sees `stopping?` true but the reason unset), and T1 fires once across repeated signals / per-job `Shutdown`s. Then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires — so a propagating observer can never skip the close and wedge shutdown. The teardown claims the reason for its exit exception *before* anything of its own closes intake, since closing the stream wakes the pump, whose clean-close claim (`:gateway_closed`) would otherwise race it; its own `cease_intake` call is an idempotent backstop for an announcement still under way on another thread.
 
 **Stop reason (`reason` ⊥ `error`).** The closing `Worker::Status` carries two independent axes: `reason` names *why* the run stopped (a low-cardinality Symbol); `error` carries the exception, if any. They don't collapse into one another — a `:rollover` that errors mid-drain reports `reason: :rollover, error: <exception>`. The reason is set once, through the `@stop_reason` gate; `stop!` defaults it to `:signal` and accepts only a Symbol (`ArgumentError` otherwise). Canonical values and who sets each:
 
@@ -379,7 +379,7 @@ From the Runner's perspective, `perform_job` has a simple two-outcome contract (
 
 ### Shutdown Sequence
 
-**Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate — stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), then fire T1. In-progress `perform_job` completes; `run!`'s `ensure` then drains — remaining queued/yielded jobs are handed back via `handle_shutdown_job`, preserving the retry count — and fires T2/T3.
+**Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate — stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), then fire T1. In-progress `perform_job` completes; `run!`'s `ensure` waits for T1 to finish, then drains — remaining queued/yielded jobs are handed back via `handle_shutdown_job`, preserving the retry count — and fires T2/T3.
 
 **Forced (`kill!`):** Base raises the fire alarm, so no runner in the process hands back or runs job hooks after it, then calls `stop!` with the reason it was given (`:kill` by default; `Multi`'s non-recoverable cascade passes the crash's reason instead). Streaming also kills the pump thread, logs how many activated jobs it is discarding, and flushes the queue (resetting the buffer gauge). Multi kills all child runners and the thread pool.
 

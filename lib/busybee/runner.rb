@@ -43,6 +43,8 @@ module Busybee
       @failed_job_count = Concurrent::AtomicFixnum.new(0)
       @backpressure_count = Concurrent::AtomicFixnum.new(0)
       @teardown_error = Concurrent::AtomicReference.new(nil)
+      @announcing = Concurrent::AtomicBoolean.new(false)
+      @stop_announced = Concurrent::Event.new
     end
 
     # Blocks until stopped or until #run_loop raises; the teardown then runs on every
@@ -78,6 +80,7 @@ module Busybee
     def kill!(reason: :kill)
       exit_immediately!
       stop!(reason: reason)
+      @stop_announced.set # a teardown waiting on another thread's T1 goes on
     end
 
     class << self

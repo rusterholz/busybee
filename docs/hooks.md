@@ -441,7 +441,7 @@ A worker process run has four observable moments, in order:
 | Hook | Fires when |
 |------|-----------|
 | `on_worker_started` | the run began — the worker is about to start fetching jobs |
-| `on_worker_stop_requested` | something asked the worker to stop (signal, health trigger, code); fires on the requesting thread |
+| `on_worker_stop_requested` | the worker's stop began, whatever began it: a signal, a health trigger, your code, the gateway ending the stream, or a crash; fires once per run, on the thread that began the stop, and finishes before `on_worker_stopping` fires |
 | `on_worker_stopping` | the worker began its shutdown drain — intake is closed, in-flight work finishing |
 | `on_worker_shutdown` | the run is over; the closing snapshot carries the final counters, `reason`, and `error` |
 
@@ -464,7 +464,7 @@ config.on_worker_shutdown { |worker| Monitoring.worker_down(worker) }
 | Outcome | `reason`, `error`, `error_class`, `error_message` |
 | Projections | `context_tags`, `logging_context` |
 
-A `nil` reader means "not known yet": `reason` and `error` are `nil` until the run ends, `stop_duration_ms` until the drain finishes, and so on. `uptime_s` is live — it reads the clock each call, so it keeps ticking even on a snapshot taken earlier.
+A `nil` reader means "not known yet": `reason` is `nil` until the worker's stop begins, `error` until a closing moment has one to report, `stop_duration_ms` until the drain finishes, and so on. Every run stamps all four moments, so `stop_requested_at` and `stop_latency_ms` are there even for a worker that crashed. `uptime_s` is live — it reads the clock each call, so it keeps ticking even on a snapshot taken earlier.
 
 ### Stop Reasons
 

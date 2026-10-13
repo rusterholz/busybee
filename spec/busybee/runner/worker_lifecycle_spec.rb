@@ -54,10 +54,10 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
   end
 
   describe "firing order" do
-    it "fires started → stopping → shutdown on a clean run (no stop signal)" do
+    it "fires all four moments in order on a clean run with no stop signal" do
       record_all_lifecycle_hooks
       runner.run!
-      expect(moments).to eq(%i[started stopping shutdown])
+      expect(moments).to eq(%i[started stop_requested stopping shutdown])
     end
 
     it "fires all four moments, started first and shutdown last, when stopped mid-loop" do
@@ -331,7 +331,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect { runner.run! }.not_to raise_error
 
       aggregate_failures do
-        expect(moments).to eq(%i[started stopping shutdown])
+        expect(moments).to eq(%i[started stop_requested stopping shutdown])
         expect(runner.drained).to be(true)
         expect(runner.running?).to be(false)
       end
@@ -471,7 +471,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect { runner.run! }.not_to raise_error
 
       aggregate_failures do
-        expect(moments).to eq(%i[started stopping shutdown])
+        expect(moments).to eq(%i[started stop_requested stopping shutdown])
         expect(runner.running?).to be(false)
       end
     end
@@ -505,7 +505,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect(runner.drained).to be_falsey
     end
 
-    it "still fires both closing moments on that path" do
+    it "still fires the stop announcement and both closing moments on that path" do
       record_all_lifecycle_hooks
       runner.test_run_loop = -> { raise NoMemoryError, "out of memory" }
       begin
@@ -513,7 +513,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       rescue NoMemoryError # rubocop:disable Lint/SuppressedException
       end
 
-      expect(moments).to eq(%i[started stopping shutdown])
+      expect(moments).to eq(%i[started stop_requested stopping shutdown])
     end
 
     it "finishes the stop when the drain itself fails unrecoverably, and says to exit immediately" do
