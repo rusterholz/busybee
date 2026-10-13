@@ -361,7 +361,7 @@ Busybee.worker_name = "worker-#{Process.pid}"
 
 #### `shutdown_wait_timeout`
 
-How long a stopping worker waits for its other threads to finish their part of the shutdown before carrying on without them: for `on_worker_stop_requested` to finish where another thread is running it (a signal handler, say), and on a streaming or hybrid worker for the thread reading the job stream, before buffered jobs are handed back. One value serves every worker in the process: set it to the longest wait any of them needs. The CLI's `--shutdown-wait-timeout` flag and a top-level `shutdown_wait_timeout` in [YAML](workers.md#yaml-configuration) set it too.
+How long a stopping worker waits for its other threads to finish their part of the shutdown before carrying on without them: for `on_worker_stop_requested` to finish where another thread is running it (a signal handler, say), and on a streaming or hybrid worker for the thread reading the job stream, before buffered jobs are handed back. It also bounds how long a second termination signal waits for the forced stop before the process exits. One value serves every worker in the process: set it to the longest wait any of them needs. The CLI's `--shutdown-wait-timeout` flag and a top-level `shutdown_wait_timeout` in [YAML](workers.md#yaml-configuration) set it too.
 
 | | |
 |--|--|

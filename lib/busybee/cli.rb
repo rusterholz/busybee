@@ -5,6 +5,7 @@ require "concurrent"
 require "optparse"
 
 require "busybee/client"
+require "busybee/durations"
 require "busybee/error"
 require "busybee/runner"
 require "busybee/runtime_config"
@@ -51,12 +52,16 @@ module Busybee
     # The first signal stops; any later one forces. The CLI's own set-once flag
     # decides, since a runner's stopping? can lag a stop still under way.
     def handle_signal(signal)
-      if @signalled.make_true
-        @runner.stop!(reason: :"sig#{signal.downcase}")
-      else
-        @runner.kill!
-        exit!(1)
-      end
+      return @runner.stop!(reason: :"sig#{signal.downcase}") if @signalled.make_true
+
+      force_exit
+    end
+
+    # A kill's own stop can reach a worker not yet stopped and hang in its
+    # on_worker_stop_requested, so it gets a bounded wait, then the exit regardless.
+    def force_exit
+      Thread.new { @runner.kill! }.join(Busybee::Durations.seconds_from(Busybee.shutdown_wait_timeout))
+      exit!(1)
     end
 
     # The trap runs on the main thread, on top of whatever it interrupted, a

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "concurrent"
 require "fileutils"
 require "tmpdir"
 
@@ -468,9 +469,9 @@ RSpec.describe Busybee::CLI do
       expect(cli).to have_received(:exit!).with(1)
     end
 
-    # A real multi-worker runner: the first signal's stop is still inside the
-    # first worker's on_worker_stop_requested when the second signal arrives, so
-    # the other worker is not yet stopping either.
+    # A real multi-worker runner whose on_worker_stop_requested hangs: the first
+    # signal's stop is stuck inside it for the first worker when the second signal
+    # arrives, and the kill's own stop reaches the second worker's.
     context "when the second signal arrives while the first's stop is still under way" do
       let(:release) { Concurrent::Event.new }
       let(:announcing) { Concurrent::Event.new }
@@ -488,21 +489,29 @@ RSpec.describe Busybee::CLI do
         held = release
         Busybee.on_worker_stop_requested do |_status|
           busy.set
-          held.wait(2)
+          held.wait(3)
         end
+        Busybee.instance_variable_set(:@shutdown_wait_timeout, 200) # restored by the file's around
         allow(cli).to receive(:exit!)
       end
 
       after { release.set }
 
-      it "forces the shutdown" do
+      def elapsed
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        yield
+        Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+      end
+
+      it "forces the shutdown within shutdown_wait_timeout, however long the hooks hang" do
         first = Thread.new { cli.send(:handle_signal, "TERM") }
         announcing.wait(2)
-        cli.send(:handle_signal, "TERM")
+        took = elapsed { cli.send(:handle_signal, "TERM") }
         release.set
-        first.join(2)
+        first.join(3)
 
         aggregate_failures do
+          expect(took).to be < 1.5 # well short of the 3s hang
           expect(cli).to have_received(:exit!).with(1)
           expect(Busybee::Runner.exit_immediately?).to be(true)
         end

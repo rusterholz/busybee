@@ -452,7 +452,7 @@ Traps `INT`, `QUIT`, `TERM`, all mapped to the same handler. The trap block hand
 
 **Two-signal pattern:**
 - First signal → `runner.stop!` (graceful shutdown)
-- Any later signal → `runner.kill!` + `exit!(1)` (forced shutdown, non-zero exit code, skips at_exit handlers)
+- Any later signal → `runner.kill!` on a thread of its own, waited for no longer than `shutdown_wait_timeout`, then `exit!(1)` whatever it did (forced shutdown, non-zero exit code, skips at_exit handlers). The kill's own `stop!` can claim a `Multi` child the first signal hasn't reached and run that child's T1 hooks; the bound keeps a hung one from holding the exit.
 
 The CLI tells them apart by its own set-once `@signalled` flag, created in `initialize` before any trap can fire, not by `runner.stopping?`: with no join in the trap, a second signal can arrive while the first's stop is still under way, and `Multi#stopping?` (every child stopping) stays false until the last child's T1 has begun.
 
