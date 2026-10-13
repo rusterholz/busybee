@@ -67,9 +67,6 @@ module Busybee
         Busybee::Durations.seconds_from(@runtime_config&.shutdown_wait_timeout || Busybee.shutdown_wait_timeout)
       end
 
-      # An error that met a stop already under way: never raised, reported at T3.
-      def post_stop_error = nil
-
       # Nothing a T1/T2/T3 hook raises leaves this: a worker already tearing down
       # cannot shut down harder, and an escape would cost the drain, the later
       # moments and the exit exception. What safe: true lets past is recorded for

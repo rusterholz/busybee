@@ -26,9 +26,7 @@ module Busybee
       # gauge ignores the :stop control sentinels the queue also carries.
       def initialize(worker_class, runtime_config: nil, client: nil)
         super
-        @pump_claim = Monitor.new # reentrant: a claim's record takes it again
-        @shutdown_error = nil # plain ivars, not atomics: only touched inside @pump_claim
-        @post_stop_error = nil
+        @pump_claim = Monitor.new # the claim's lock, shared by the pump and the main thread
         return unless buffer?
 
         @job_buffer = Queue.new
@@ -98,7 +96,6 @@ module Busybee
         handle_remaining_jobs_in_buffer
       end
 
-      def post_stop_error = @pump_claim.synchronize { @post_stop_error }
       def current_buffer_size = @buffered_job_count&.value
       def peak_buffer_size = @peak_buffer_size&.value
 
@@ -129,16 +126,7 @@ module Busybee
         raise_exit_error
       end
 
-      # Called once the loop has seen a stop; the lock waits out a pump still
-      # recording the error behind its claim.
-      def raise_exit_error
-        err = @pump_claim.synchronize { @shutdown_error }
-        raise err if err
-      end
-
       def run_inline
-        shutdown_error = nil
-
         @stream.each do |job|
           activate_job(job, source: :stream)
           if stopping?
@@ -148,13 +136,12 @@ module Busybee
 
           execute_job(job)
         rescue Busybee::Worker::Shutdown => e
-          shutdown_error = e
           declare_unhealthy(e)
           break
         end
 
         stop!(reason: :gateway_closed) # the gateway ended the stream, unless a stop came first
-        raise shutdown_error if shutdown_error
+        raise_exit_error
       end
 
       # Pump the stream into the buffer until stopped. Whatever ends the pump,
@@ -180,19 +167,15 @@ module Busybee
         stop!(reason: :gateway_closed)
       end
 
-      # An error whose claim wins the stop reason caused the stop: the main
-      # thread raises it as the run's exit error. One meeting a stop already
-      # under way is a post-stop error: never raised, the winning reason stands, and T3
-      # reports it. An activation escalation that already won its own claim
-      # arrives here re-raised, and is the exit error already.
+      # Whatever ends the pump claims the stop like any other error (see
+      # Stopping#claim_stop): the main thread raises a winner as the run's exit
+      # error; a loser is a post-stop error.
       def end_pump(error, reason)
         exit_immediately! unless recoverable?(error) # whether or not its claim wins
-        return if @pump_claim.synchronize { @shutdown_error.equal?(error) }
-
-        claim_stop(reason) { |won| won ? (@shutdown_error = error) : (@post_stop_error ||= error) }
+        claim_stop(reason, error)
       end
 
-      # A winning claim records under the lock, so it finds the exit slot empty.
+      # Reentrant, so a claim's own record may take it again.
       def synchronize_claim(&) = @pump_claim.synchronize(&)
 
       # Process jobs from the buffer.
@@ -214,7 +197,7 @@ module Busybee
         rescue ThreadError
           break # buffer empty (non-blocking only)
         rescue Busybee::Worker::Shutdown => e
-          declare_unhealthy_and_keep(e)
+          declare_unhealthy(e)
         end
       end
 
@@ -231,8 +214,6 @@ module Busybee
         end
       end
 
-      # First error wins. Inline mode raises its own, so never reads this one.
-      def record_shutdown_error(error) = @pump_claim.synchronize { @shutdown_error = error if @shutdown_error.nil? }
       def buffer? = @runtime_config.buffer
       def job_type = @worker_class.configuration.job_type
     end

@@ -369,7 +369,7 @@ HOOK: on_job_executed (safe)
     - TIMESTAMP: `executed_at`.
     - Job counters increment; fresh `Worker::Status` re-stamp.
     - HOOK: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe).
-  - Shutdown bubbles out of `Runner#execute_job` to the Runner's run loop, which begins terminating.
+  - Shutdown bubbles out of `Runner#execute_job` to the Runner's run loop, whose rescue claims the stop as `:unhealthy` (`declare_unhealthy`). A won claim begins terminating and raises the Shutdown at loop exit; one meeting a stop already under way is a post-stop error, never raised, reported at T3.
 
 **E2. Raised from an unsafe hook (`before_perform`, `around_perform` pre-yield, `around_perform` post-yield).**
 
@@ -392,7 +392,7 @@ Important asymmetry: in the perform-side path, **autofail runs before the Shutdo
 
 `Hooks.run(safe: true)` and `Chain.build_safe` both have explicit `rescue Busybee::Worker::Shutdown; raise` clauses — Shutdown bypasses the swallow-errors logic at every layer. Surface point depends on origin site:
 
-  - `on_job_activated`: raised inside `Runner#activate_job`, whose rescue stops the worker `:unhealthy`, hands the job back through `handle_shutdown_job`, and re-raises. The job is unworked: no `executed_at`, no `on_job_executed`, and it closes at `on_job_not_executed` still `:ready`, with the stop reason already on its worker carrier. From there the Shutdown propagates past whichever receive path activated this job (`Polling`, `Streaming` inline or pump, `Hybrid`) into the Runner's run loop, as from any other site. On the pump, that holds only when its stop wins the reason; one meeting a stop already under way is a post-stop error, and reaches only T3's `status.error`.
+  - `on_job_activated`: raised inside `Runner#activate_job`, whose rescue stops the worker `:unhealthy`, hands the job back through `handle_shutdown_job`, and re-raises. The job is unworked: no `executed_at`, no `on_job_executed`, and it closes at `on_job_not_executed` still `:ready`, with the stop reason already on its worker carrier. From there the Shutdown propagates past whichever receive path activated this job (`Polling`, `Streaming` inline or pump, `Hybrid`) into the Runner's run loop, as from any other site. That holds only when its claim wins the stop reason, on any receive path; one meeting a stop already under way is a post-stop error, never raised, and reaches only T3's `status.error`.
   - `after_perform`: raised inside `run_perform_envelope`'s ensure. The run is propagating, so the classification happens in `protect_allowing_shutdowns` exactly as above and the Shutdown emerges into `perform_job`'s outer rescue, which passes Shutdowns through untouched — an ordinary error from the same hook would instead be routed back through `handle_perform_exception` there. **The trace continues as E1** from "MIDDLEWARE: `around_job_execution` finish".
   - `on_job_executed`: raised inside `Runner#execute_job`'s ensure, after the runner-level safe around chain already completed. `executed_at` and the counter/status updates both happened before this point. Shutdown propagates past the receive path into the Runner's run loop.
   - `around_job_execution`: raised inside the runner-level safe around chain. `Chain.build_safe` re-raises Shutdown. Same downstream as E1's tail (Shutdown exits `Runner#execute_job` after the ensure runs).

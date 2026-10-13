@@ -25,19 +25,37 @@ module Busybee
         end
       end
 
-      # The worker declared itself down: claim the stop; a winner keeps the error to raise.
-      def declare_unhealthy(error) = claim_stop(:unhealthy) { |won| record_shutdown_error(error) if won }
+      def declare_unhealthy(error) = claim_stop(:unhealthy, error)
 
-      # Main-thread rescues: the error is still raised if an earlier stop claimed the reason.
-      def declare_unhealthy_and_keep(error) = declare_unhealthy(error) || record_shutdown_error(error)
-
-      # Set the reason if unset; record sees the outcome before any announcement.
-      def claim_stop(reason, &record)
-        synchronize_claim { @stop_reason.compare_and_set(nil, reason).tap(&record) }.tap { |won| announce_stop if won }
+      # Claim the stop for an error. A won claim caused the stop: its error is the
+      # exit error, raised at loop exit, recorded before the announcement wakes
+      # anyone. A lost one met a stop under way: a post-stop error, never raised,
+      # reported at T3, unless it is the exit error already (a re-raised claim).
+      def claim_stop(reason, error)
+        won = synchronize_claim do
+          @stop_reason.compare_and_set(nil, reason).tap do |claimed|
+            if claimed
+              record_shutdown_error(error)
+            elsif !@shutdown_error.equal?(error)
+              @post_stop_error ||= error
+            end
+          end
+        end
+        announce_stop if won
+        won
       end
 
+      # The exit and post-stop slots are plain ivars, read and written only inside this.
       def synchronize_claim = yield
-      def record_shutdown_error(_error); end
+      def record_shutdown_error(error) = (@shutdown_error = error if @shutdown_error.nil?)
+      def post_stop_error = synchronize_claim { @post_stop_error }
+
+      # Raised once the loop has seen the stop; the claim's lock waits out a
+      # record still landing behind it.
+      def raise_exit_error
+        error = synchronize_claim { @shutdown_error }
+        raise error if error
+      end
 
       # The fire alarm (the building is burning): raising it flags, exiting nothing.
       def exit_immediately! = EXIT_IMMEDIATELY.make_true
