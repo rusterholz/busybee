@@ -136,6 +136,7 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
       end
 
       took = elapsed { run_to_completion }
+      release.set
       [stopper, killer].each { |thread| thread.join(3) }
 
       expect(took).to be < 1.5

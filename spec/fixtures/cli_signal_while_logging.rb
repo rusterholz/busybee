@@ -1,19 +1,22 @@
 # frozen_string_literal: true
 
-# Spawned by spec/busybee/cli_signal_spec.rb. Runs the real CLI against an
-# in-process gateway; on_worker_started's log line sends the process SIGTERM
-# from inside the logger's write, and holds the write open while the signal is
-# handled. on_worker_stop_requested logs too, so handling the signal needs the
-# lock the interrupted write holds. Prints "exited" once the CLI returns.
+# Spawned by spec/busybee/cli_signal_spec.rb. Runs the real CLI three times
+# against an in-process gateway, printing "<scenario> exited" after each. In
+# each, on_worker_started's log line sends the process SIGTERM from inside the
+# logger's write, and holds the write open while the signal is handled;
+# on_worker_stop_requested logs too, so handling the signal needs the lock the
+# interrupted write holds.
 #
-# SCENARIO=slow_stop_requested: that hook finishes after shutdown_wait_timeout.
-# SCENARIO=hung_stop_requested: it hangs, and on_worker_stopping then fails
-# unrecoverably, so the process must exit immediately.
+# deadlock: nothing more.
+# slow_stop_requested: that hook finishes after shutdown_wait_timeout.
+# hung_stop_requested: it hangs, and on_worker_stopping fails unrecoverably, so
+# the process must exit immediately. Last, since that lasts the process's life.
 require "concurrent"
 require "logger"
 
 require "busybee"
 require "busybee/cli"
+require "busybee/testing/hook_registry"
 require_relative "../support/fault_injection_gateway"
 
 ARMED = Concurrent::AtomicBoolean.new(false)
@@ -31,8 +34,27 @@ class SignallingDevice
   def close; end
 end
 
+def register_hooks(scenario)
+  Busybee.on_worker_started do |_status|
+    ARMED.make_true
+    Busybee.logger.info("#{scenario} started")
+  end
+  Busybee.on_worker_stop_requested do |status|
+    sleep({ "slow_stop_requested" => 0.5, "hung_stop_requested" => 30 }.fetch(scenario, 0))
+    Busybee.logger.info("#{scenario} stop requested: #{status.reason}")
+  end
+  Busybee.on_worker_stopping { |_status| raise NoMemoryError, "out of memory" } if scenario == "hung_stop_requested"
+end
+
+def run_scenario(scenario, gateway)
+  Busybee::Testing::HookRegistry.isolated do
+    register_hooks(scenario)
+    Busybee::CLI.new(["-a", gateway.address, "--shutdown-wait-timeout", "100", "SignalledWorker"]).run
+    puts "#{scenario} exited" # rubocop:disable RSpec/Output
+  end
+end
+
 $stdout.sync = true
-scenario = ENV.fetch("SCENARIO", "deadlock")
 gateway = FaultInjectionGateway.new.start
 gateway.on(:activate_jobs) do
   sleep 0.05
@@ -48,16 +70,5 @@ end)
 
 Busybee.logger = Logger.new(SignallingDevice.new)
 Busybee.credential_type = :insecure
-Busybee.on_worker_started do |_status|
-  ARMED.make_true
-  Busybee.logger.info("started")
-end
-Busybee.on_worker_stop_requested do |status|
-  sleep({ "slow_stop_requested" => 0.5, "hung_stop_requested" => 30 }.fetch(scenario, 0))
-  Busybee.logger.info("stop requested: #{status.reason}")
-end
-Busybee.on_worker_stopping { |_status| raise NoMemoryError, "out of memory" } if scenario == "hung_stop_requested"
-
-Busybee::CLI.new(["-a", gateway.address, "--shutdown-wait-timeout", "100", "SignalledWorker"]).run
-puts "exited" # rubocop:disable RSpec/Output
+%w[deadlock slow_stop_requested hung_stop_requested].each { |scenario| run_scenario(scenario, gateway) }
 gateway.stop
