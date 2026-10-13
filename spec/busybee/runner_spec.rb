@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "concurrent"
-
 RSpec.describe Busybee::Runner do
   let(:client) { instance_double(Busybee::Client) }
 

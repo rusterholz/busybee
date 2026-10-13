@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "concurrent"
-
 # A worker declared down after a stop has already claimed the reason, on the
 # main thread of each receive path, with a real client. The stop finishes as
 # the graceful stop it was, and reports the Shutdown rather than raising it.

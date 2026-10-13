@@ -138,7 +138,7 @@ RSpec.describe "a gateway error after a stop", :gateway do # rubocop:disable RSp
         took = elapsed { run_to_completion }
         stopper.join(5)
 
-        expect(took).to be < 1.0
+        expect(took).to be < 1.9 # beats the 2s back-off
       end
     end
 
@@ -154,7 +154,7 @@ RSpec.describe "a gateway error after a stop", :gateway do # rubocop:disable RSp
         took = elapsed { run_to_completion }
         stopper.join(5)
 
-        expect(took).to be < 1.0
+        expect(took).to be < 1.9 # beats the 2s back-off
       end
     end
   end

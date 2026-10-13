@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "concurrent"
-
 # A worker lifecycle hook at stop requested, stopping or shutdown failing in a
 # way the process can't recover from, with a real client: nothing it raises
 # leaves the worker or changes how the shutdown ends.

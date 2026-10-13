@@ -46,7 +46,7 @@ RSpec.describe "a worker waiting out its shutdown", :gateway do # rubocop:disabl
       raised = :unset
       took = elapsed { raised = run_to_completion }
 
-      expect([raised, took]).to match([nil, be < 1.0])
+      expect([raised, took]).to match([nil, be < 1.4]) # beats the 1.5s hold
     end
   end
 

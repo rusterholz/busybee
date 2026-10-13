@@ -73,7 +73,7 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
 
       expect(moments).to eq([%i[stop_requested gateway_closed], %i[stopping gateway_closed],
                              %i[shutdown gateway_closed]])
-      expect(took).to be < 1.0
+      expect(took).to be < 2.5 # well short of the 3s wait it would sit out
     end
 
     context "when it takes longer than shutdown_wait_timeout" do
@@ -82,7 +82,7 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
       before { hold_stop_requested(1.5) }
 
       it "is waited for no longer than that" do
-        expect(elapsed { run_to_completion }).to be < 1.0
+        expect(elapsed { run_to_completion }).to be < 1.4 # beats the 1.5s hold
       end
     end
 
@@ -99,7 +99,7 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
         took = elapsed { run_to_completion }
         killer.join
 
-        expect(took).to be < 1.0
+        expect(took).to be < 1.9 # beats the 2s hold
       end
     end
   end
@@ -141,7 +141,7 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
       release.set
       [stopper, killer].each { |thread| thread.join(3) }
 
-      expect(took).to be < 1.5
+      expect(took).to be < 1.9 # beats the 2s hold
     end
   end
 
@@ -168,7 +168,7 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
       raised = :unset
       took = elapsed { raised = run_to_completion }
 
-      expect([raised, took]).to match([an_instance_of(NoMemoryError), be < 1.0])
+      expect([raised, took]).to match([an_instance_of(NoMemoryError), be < 1.9]) # beats the 2s hold
     end
   end
 

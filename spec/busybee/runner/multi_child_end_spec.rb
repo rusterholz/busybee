@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "concurrent"
-
 # One worker of a multi-worker process stops on its own while the process
 # isn't stopping, with a real client: its stream closes cleanly, and its
 # sibling is idle, polling an empty queue.

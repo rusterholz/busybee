@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/numeric/time"
-require "concurrent"
 
 RSpec.describe Busybee::Runner::Polling do
   subject(:runner) { described_class.new(worker_class, runtime_config: runtime_config, client: client) }
