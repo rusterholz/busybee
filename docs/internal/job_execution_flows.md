@@ -323,7 +323,7 @@ The categories below trace what happens at the boundaries of the four typical-li
 So **every activated job fires exactly one of `on_job_executed` / `on_job_not_executed`**, with two exceptions, in both of which the jobs not yet started fire no closer and return to the engine when their activation times out:
 
 - `kill!` raises the fire alarm (below), so no job hook runs after it, the in-flight job's `on_job_executed` included, on the grounds that a stuck process is the worst place to run adopter code. `Streaming#kill!` also clears the buffer and logs the discarded count, which is the only record, since `kill!`'s own `stop!` loses the set-once reason CAS on the real path and the CLI's `exit!` follows immediately.
-- An error outside `Runner::RECOVERABLE_ERRORS`, anywhere in the process, raises the fire alarm ([internal.md](../internal.md#run-lifecycle--worker-hooks)), after which every runner skips the drain, every handback and the job hooks, since its wire calls are the ones about to fail. Buffered jobs are left where they are, and so is a job whose `on_job_activated` raised the error (H3). The job whose own `perform` raised it still unwinds through `execute_job`'s ensure and fires `on_job_executed` (H1), because the teardown raises the alarm only after that unwind; another job still in flight once the alarm is up ends with no closer. An error of any class that ends the streaming pump raises it from `end_pump`, whether its claim wins the stop reason or it is a post-stop error. So does such an error from a teardown hook (T1, T2 or T3), which is contained and reported at T3 rather than ending the teardown.
+- An error outside `Runner::RECOVERABLE_ERRORS`, anywhere in the process, raises the fire alarm ([internal.md](../internal.md#run-lifecycle--worker-hooks)), after which every runner skips the drain, every handback and the job hooks, since its wire calls are the ones about to fail. Buffered jobs are left where they are, and so is a job whose `on_job_activated` raised the error (H3). The job whose own `perform` raised it raises the alarm in `execute_job`'s ensure and ends with no closer (H1), as does any other job still in flight once the alarm is up. An error of any class that ends the streaming pump raises it from `end_pump`, whether its claim wins the stop reason or it is a post-stop error. So does such an error from a teardown hook (T1, T2 or T3), which is contained and reported at T3 rather than ending the teardown.
 
 ### E. `Busybee::Worker::Shutdown` propagation
 
@@ -638,7 +638,7 @@ Same shape as G4; the deltas:
 Two consequences shape every trace below:
 
 1. **Worker.perform_job's `rescue StandardError` does NOT catch.** `handle_perform_exception` does not run; no early error capture, no autofail, no `Shutdown.triggered_by?` check (and therefore no `Shutdown` wrap — Category E's perform-side path is unreachable from H). The error simply propagates out.
-2. **Every `ensure` block still fires.** `timed_perform`'s ensure stamps `perform_finished_at`, `run_perform_envelope`'s ensure fires `after_perform` (perform was attempted, so it runs here too), and `execute_job`'s ensure stamps `executed_at`, updates the counters and status snapshot, and fires `on_job_executed`. Observability of the abandoned activation survives.
+2. **Every `ensure` block still runs, and the last one raises the fire alarm.** `timed_perform`'s ensure stamps `perform_finished_at`, `run_perform_envelope`'s ensure fires `after_perform` (perform was attempted, so it runs here too), and `execute_job`'s ensure, the first runner code the error passes, raises the alarm, stamps `executed_at` and updates the counters, then skips `on_job_executed` because the alarm is up.
 
 Once a non-`StandardError` exits `Runner#execute_job`, it propagates past the runner's run-loop `rescue Busybee::Worker::Shutdown` (which matches Shutdown only) and into whatever process supervises the runner. That's outside per-job-lifecycle scope; H traces end at the `Runner#execute_job` exit.
 
@@ -654,8 +654,9 @@ TIMESTAMP: perform_finished_at
 -- autofail NOT attempted (handle_perform_exception did not run) --
 HOOK: after_perform (unsafe — the ensure runs for a non-StandardError too; job is :ready with no error captured)
 -- around_job_execution post-yield NOT run (build_safe's rescue is StandardError-only) --
+-- fire alarm raised (exit immediately) --
 TIMESTAMP: executed_at
-HOOK: on_job_executed (safe — its own StandardError errors swallowed; the original non-StandardError keeps propagating once the hook returns)
+-- on_job_executed NOT fired (the alarm is up) --
 -- non-StandardError exits Runner#execute_job; bubbles past the runner loop's Shutdown-scoped rescue (no match), into the supervising process --
 -- engine still sees the job as ACTIVATED; activation times out; re-yield as a fresh Job --
 ```
@@ -670,9 +671,10 @@ HOOK: on_job_executed (safe — its own StandardError errors swallowed; the orig
     - HOOK: `after_perform` — **fires**. A Ruby `ensure` runs for a non-`StandardError` too, and `perform_started_at` is set. The Job it receives is `:ready` with neither axis set, since the capture at C10 was never reached. **One consequence worth knowing:** a hook raising a `StandardError` here *replaces* the in-flight non-`StandardError`, which `perform_job`'s outer rescue then catches and autofails — so a misbehaving hook converts a poison-pill escape into an ordinary reported failure. Rare, and arguably an improvement, but it is a real change from the swallow this hook used to do.
   - MIDDLEWARE: `around_job_execution` finish (safe) — does NOT run. `Chain.build_safe`'s `rescue StandardError` does NOT match; non-`StandardError` propagates through.
   - `execute_job`'s ensure block (always runs):
+    - The in-flight error is outside `Runner::RECOVERABLE_ERRORS`, so the fire alarm is raised here, the first runner code it passes.
     - TIMESTAMP: `executed_at`.
-    - Job counters increment; fresh `Worker::Status` re-stamp.
-    - HOOK: `on_job_executed` via `Hooks.run(:on_job_executed, job, safe: true)` (safe). If the hook itself raises a `StandardError`, that's swallowed by `Hooks.run`'s safe-mode rescue; the original non-`StandardError` from perform keeps propagating once the hook returns.
+    - Job counters increment.
+    - HOOK: `on_job_executed`, **skipped**: the alarm is up.
   - The non-`StandardError` exits `Runner#execute_job` and propagates past the runner's run-loop `rescue Busybee::Worker::Shutdown` — which matches Shutdown only, not arbitrary `Exception` descendants. The supervising process (typically `bin/busybee` or whatever embeds the runner) is the next catch site.
   - Engine-side, the activation lock was never released; the job remains ACTIVATED until the activation times out, then is re-yielded as a fresh Job. Retries count is intact (no `fail_job` call landed). If the supervising process restarts the runner cleanly, the next attempt at this same job picks up from the engine's untouched count.
 

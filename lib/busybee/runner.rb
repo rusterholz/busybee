@@ -222,6 +222,7 @@ module Busybee
           @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
         end
       ensure
+        exit_immediately! if $! && !recoverable?($!) # the first point its error passes
         job.timestamps.stamp!(:executed_at)
         @total_job_count.increment
         @failed_job_count.increment if job.failed?
