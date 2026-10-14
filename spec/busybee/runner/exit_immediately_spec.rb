@@ -226,6 +226,43 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
     end
   end
 
+  # Job 1's perform stops the worker, so the batch's job 2, already in hand,
+  # goes back, and its on_job_not_executed hook fails unrecoverably.
+  describe "an unrecoverable error handing back the job in hand" do
+    let(:worker_class) do
+      corridor_runner = -> { runner }
+      Class.new(Busybee::Worker) do
+        job_type "exit_immediately"
+        worker_mode :polling
+
+        define_method(:perform) do
+          corridor_runner.call.stop!(reason: :sigterm)
+          {}
+        end
+      end
+    end
+
+    let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
+    let(:runner) { Busybee::Runner::Polling.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
+
+    before do
+      poll_for("exit_immediately", 1, 2)
+      Busybee::Hooks.on_job_not_executed { |_job| raise NoMemoryError, "failed to allocate memory" }
+    end
+
+    it "finishes the stop it was making, and says to exit immediately" do
+      raised = :unset
+      status = shutdown_status_from { raised = run_to_completion }
+
+      aggregate_failures do
+        expect(raised).to be_nil
+        expect([status&.reason, status&.error]).to match([:sigterm, an_instance_of(NoMemoryError)])
+        expect(runner.running?).to be(false)
+        expect(Busybee::Runner.exit_immediately?).to be(true)
+      end
+    end
+  end
+
   describe "in a multi-worker process" do
     let(:stream_gate) { Queue.new }
     let(:alpha_class) { stub_const("AlphaWorker", worker("alpha", alpha_mode, &alpha_perform)) }
@@ -343,28 +380,79 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
     # Alpha's stream closes cleanly with jobs still buffered, and its drain
     # meets an unrecoverable error; its run still returns normally. Beta is
     # idle, polling an empty queue.
-    context "when one worker's run ends normally with the process told to exit" do
-      let(:alpha_mode) { :streaming }
-      let(:alpha_perform) do
-        sibling = -> { alpha }
-        waiter = method(:wait_until)
-        proc do
-          waiter.call { sibling.call.stopping? }
-          {}
-        end
-      end
-      let(:beta_perform) { proc { {} } }
-
-      before do
-        gateway.on(:stream_activated_jobs) { (1..3).map { |key| wire_job(key, "alpha") } }
-        poll_for("beta")
-        Busybee::Hooks.on_job_not_executed(job_type: "alpha") { |_job| raise NoMemoryError, "failed to allocate memory" }
-      end
-
+    # Alpha's stop finds jobs it never started, and handing one back fails
+    # unrecoverably in its on_job_not_executed hook; its run still returns
+    # normally. Beta is idle, polling an empty queue. The handback happens in
+    # one of two places, and both must end the same way.
+    shared_examples "a handback failure that ends the process" do
       it "kills the other workers too" do
         statuses = shutdown_statuses_from { expect(run_to_completion(seconds: 5)).to be_nil }
 
         expect(statuses.find { |status| status.worker_class == beta_class }.reason).to eq(:crash)
+      end
+    end
+
+    context "when one worker hands a job back unrecoverably" do
+      let(:alpha_mode) { :streaming }
+      let(:beta_perform) { proc { {} } }
+
+      before do
+        poll_for("beta")
+        Busybee::Hooks.on_job_not_executed(job_type: "alpha") { |_job| raise NoMemoryError, "failed to allocate memory" }
+      end
+
+      # Job 1 is in perform when the stream sends jobs 2 and 3 and ends; perform
+      # returns once that close has stopped Alpha, so 2 and 3 go back in the drain.
+      context "when it goes back in the drain" do
+        let(:alpha_perform) do
+          gate = stream_gate
+          sibling = -> { alpha }
+          waiter = method(:wait_until)
+          proc do
+            gate << :performing
+            waiter.call { sibling.call.stopping? }
+            {}
+          end
+        end
+
+        before do
+          gate = stream_gate
+          gateway.on(:stream_activated_jobs) do
+            Enumerator.new do |yielder|
+              yielder << wire_job(1, "alpha")
+              gate.pop
+              yielder << wire_job(2, "alpha")
+              yielder << wire_job(3, "alpha")
+            end
+          end
+        end
+
+        it_behaves_like "a handback failure that ends the process"
+      end
+
+      # The stop lands between Alpha's loop checking for one and taking job 1
+      # off its buffer, so job 1 goes back from the loop itself.
+      context "when it goes back from the run loop" do
+        let(:alpha_perform) { proc { {} } }
+
+        before do
+          gate = stream_gate
+          gateway.on(:stream_activated_jobs) do
+            Enumerator.new do |yielder|
+              yielder << wire_job(1, "alpha")
+              gate.pop
+            end
+          end
+          stopping = -> { alpha }
+          stop_on_first_take = Class.new(Queue) do
+            define_method(:pop) do |*args, **options|
+              super(*args, **options).tap { |item| stopping.call.stop!(reason: :sigterm) unless item == :stop }
+            end
+          end
+          alpha.instance_variable_set(:@job_buffer, stop_on_first_take.new)
+        end
+
+        it_behaves_like "a handback failure that ends the process"
       end
     end
   end

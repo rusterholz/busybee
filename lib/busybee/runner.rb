@@ -166,21 +166,28 @@ module Busybee
     # join the pump and hand back jobs still sitting in the buffer.
     def drain_on_shutdown; end
 
-    # Hand a job back unworked, then say so (the ensure: however the handback
-    # went), unless the process must exit immediately. Worker-lifecycle work, so
-    # a failure rides the worker carrier; the job did nothing, reports nothing.
+    # Hand a job back unworked, then say so however the handback went, unless the
+    # process must exit immediately. Worker-lifecycle work, so a failure rides the
+    # worker carrier; the job did nothing, reports nothing.
     def handle_shutdown_job(job)
       return if exit_immediately?
 
-      error = nil
+      error = hand_back(job)
+      with_fresh_worker_status(job, error: error) { Hooks.run(:on_job_not_executed, job, safe: true) }
+    rescue *RECOVERABLE_ERRORS
+      raise # a hook's Shutdown, propagating as from any hook
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      exit_immediately!(reason_for(e)) # a handback is bookkeeping: contained wherever it runs, unlogged
+      @teardown_error.compare_and_set(nil, e)
+    end
+
+    # The wire call; a failure it can recover from is the handback's error to report.
+    def hand_back(job)
       with_fresh_worker_status(job) { return_job_unworked(job) }
-    rescue StandardError => e
-      error = e
+      nil
+    rescue *RECOVERABLE_ERRORS => e
       Busybee.logger&.warn("Failed to hand job #{job.key} back during shutdown: #{e.message}")
-    ensure
-      unless exit_immediately?
-        with_fresh_worker_status(job, error: error) { Hooks.run(:on_job_not_executed, job, safe: true) }
-      end
+      e
     end
 
     # Calls Client#fail_job directly: a handback is not a failure, so nothing is

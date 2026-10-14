@@ -629,7 +629,7 @@ What happens when a hook itself raises an error depends on the hook's character:
 
 Every swallowed error is logged with its class, message, and origin, so a broken hook is visible without being fatal.
 
-The swallow covers `StandardError`, which is every error you would normally raise or rescue. It does not cover the rest of Ruby's exception hierarchy: a `NoMemoryError` or a `SystemStackError` from an observation hook propagates like any other, except from the three moments of a worker's shutdown (below).
+The swallow covers `StandardError`, which is every error you would normally raise or rescue. It does not cover the rest of Ruby's exception hierarchy: a `NoMemoryError` or a `SystemStackError` from an observation hook propagates like any other, except from `on_job_not_executed` and the three moments of a worker's shutdown, where it doesn't escape but tells every worker in the process to exit immediately (below).
 
 Two exceptions to the swallowing:
 
