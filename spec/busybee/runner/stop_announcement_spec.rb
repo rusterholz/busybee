@@ -145,12 +145,15 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
     end
   end
 
-  # The stream reader announces a clean close, slowly; job 1's perform then
-  # fails unrecoverably, so the process must exit immediately.
+  # Once job 1's perform has begun, the gateway ends the stream and the stream
+  # reader announces that close, slowly; perform then fails unrecoverably, so
+  # the process must exit immediately.
   describe "still under way when the process must exit immediately" do
     let(:worker_class) do
       corridor_runner = -> { runner }
+      gate = stream_gate
       streaming_worker do
+        gate << :performing # the gateway may end the stream only now
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
         sleep 0.005 until corridor_runner.call.stopping? || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
         raise NoMemoryError, "failed to allocate memory"
@@ -160,7 +163,13 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
     let(:runner) { Busybee::Runner::Streaming.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
 
     before do
-      gateway.on(:stream_activated_jobs) { [wire_job(1)] }
+      gate = stream_gate
+      gateway.on(:stream_activated_jobs) do
+        Enumerator.new do |yielder|
+          yielder << wire_job(1)
+          gate.pop
+        end
+      end
       hold_stop_requested(2)
     end
 
