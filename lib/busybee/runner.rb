@@ -174,9 +174,11 @@ module Busybee
 
       error = hand_back(job)
       with_fresh_worker_status(job, error: error) { Hooks.run(:on_job_not_executed, job, safe: true) }
-    rescue *RECOVERABLE_ERRORS
-      raise # a hook's Shutdown, propagating as from any hook
+    rescue Busybee::Worker::Shutdown => e
+      declare_unhealthy(e) # a stop is already under way: post-stop, and the handbacks carry on
     rescue Exception => e # rubocop:disable Lint/RescueException
+      raise if recoverable?(e)
+
       exit_immediately!(reason_for(e)) # a handback is bookkeeping: contained wherever it runs, unlogged
       @teardown_error.compare_and_set(nil, e)
     end
