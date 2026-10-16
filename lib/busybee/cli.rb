@@ -57,10 +57,11 @@ module Busybee
       force_exit
     end
 
-    # A kill's own stop can reach a worker not yet stopped and hang in its
+    # A kill's own stop can reach a worker not yet stopped and hang or fail in its
     # on_worker_stop_requested, so it gets a bounded wait, then the exit regardless.
     def force_exit
       Thread.new { @runner.kill! }.join(Busybee::Durations.seconds_from(Busybee.shutdown_wait_timeout))
+    ensure
       exit!(1)
     end
 
@@ -76,10 +77,10 @@ module Busybee
 
     # Ruby kills unjoined threads at exit, so a stop announcement still running
     # on a signal's thread is waited for, unless the process must exit immediately.
+    # Either way, joining re-raises the error a thread already died of.
     def join_signal_threads
-      return if Runner.exit_immediately?
-
-      @signal_threads&.each(&:join)
+      wait = Runner.exit_immediately? ? 0 : nil
+      @signal_threads&.each { |thread| thread.join(wait) }
     end
 
     def load_environment!

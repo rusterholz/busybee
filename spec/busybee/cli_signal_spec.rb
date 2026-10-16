@@ -33,12 +33,15 @@ RSpec.describe "the CLI receiving a signal mid-log-write" do # rubocop:disable R
     expect(output).to match(/slow_stop_requested stop requested: sigterm.*^slow_stop_requested exited$/m)
   end
 
-  it "exits without waiting for a stop announcement once the process must exit immediately" do
-    expect(output).to match(/^hung_stop_requested exited$/)
-    expect(output).not_to include("hung_stop_requested stop requested")
+  it "crashes on the error that says to exit immediately, without waiting for a stop announcement" do
+    aggregate_failures do
+      expect(output).to include("out of memory (NoMemoryError)")
+      expect(output).not_to include("hung_stop_requested stop requested")
+      expect(output).not_to include("hung_stop_requested exited")
+    end
   end
 
-  it "ends the process cleanly" do
-    expect(status&.success?).to be(true), "the process #{status ? 'failed' : 'hung'}:\n#{output}"
+  it "ends the process with a failing status rather than hanging" do
+    expect(status&.exitstatus).to eq(1), "the process #{status ? "exited #{status.exitstatus}" : 'hung'}:\n#{output}"
   end
 end

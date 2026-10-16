@@ -517,6 +517,33 @@ RSpec.describe Busybee::CLI do
         end
       end
     end
+
+    # A real worker no signal has stopped yet, so the kill's own stop announces,
+    # and its on_worker_stop_requested fails unrecoverably.
+    context "when the kill's stop announcement fails unrecoverably" do
+      let(:runner) do
+        resolved = Busybee::RuntimeConfig.new.resolve_for(TestCLIWorker)
+        Busybee::Runner::Polling.new(TestCLIWorker, runtime_config: resolved, client: instance_double(Busybee::Client))
+      end
+
+      around do |example|
+        reporting = Thread.report_on_exception
+        Thread.report_on_exception = false
+        isolate_busybee_hooks { example.run }
+      ensure
+        Thread.report_on_exception = reporting
+      end
+
+      before do
+        Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
+        allow(cli).to receive(:exit!).and_raise(SystemExit) # exit! never returns
+      end
+
+      it "still exits" do
+        expect { cli.send(:force_exit) }.to raise_error(SystemExit)
+        expect(cli).to have_received(:exit!).with(1)
+      end
+    end
   end
 
   describe "#run" do
@@ -582,6 +609,47 @@ RSpec.describe Busybee::CLI do
           runtime_config: having_attributes(worker_mode: :polling),
           client: an_instance_of(Busybee::Client)
         )
+      end
+    end
+
+    # A real worker, stopped by a trapped TERM whose stop announcement fails on
+    # the signal's thread. The worker's run itself ends cleanly; its shutdown
+    # hook holds the run until that thread has died.
+    context "when a signal's stop announcement fails unrecoverably", :gateway do
+      let(:cli) { described_class.new(["--worker-mode", "polling", "TestCLIWorker"]) }
+      let(:traps) { {} }
+      let(:started) { Concurrent::Event.new }
+
+      around do |example|
+        reporting = Thread.report_on_exception
+        Thread.report_on_exception = false
+        isolate_busybee_hooks { example.run }
+      ensure
+        Thread.report_on_exception = reporting
+      end
+
+      before do
+        gateway.on(:activate_jobs) do
+          sleep 0.05
+          [Busybee::GRPC::ActivateJobsResponse.new(jobs: [])]
+        end
+        allow(cli).to receive(:client).and_return(gateway.client)
+        allow(cli).to receive(:trap) { |signal, &handler| traps[signal] = handler }
+        signal_threads = -> { cli.instance_variable_get(:@signal_threads) }
+        on_start = started
+        Busybee.on_worker_started { |_status| on_start.set }
+        Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
+        Busybee.on_worker_shutdown { |_status| sleep 0.005 while signal_threads.call.any?(&:alive?) }
+      end
+
+      it "raises that thread's error out of the run" do
+        Thread.new do
+          started.wait(5)
+          traps.fetch("TERM").call
+        end
+
+        expect { cli.run }.to raise_error(NoMemoryError, "failed to allocate memory")
+        expect(Busybee::Runner.exit_immediately?).to be(true)
       end
     end
   end

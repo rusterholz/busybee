@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 # Spawned by spec/busybee/cli_signal_spec.rb. Runs the real CLI three times
-# against an in-process gateway, printing "<scenario> exited" after each. In
+# against an in-process gateway, printing "<scenario> exited" after each run
+# that returns. In
 # each, on_worker_started's log line sends the process SIGTERM from inside the
 # logger's write, and holds the write open while the signal is handled;
 # on_worker_stop_requested logs too, so handling the signal needs the lock the
@@ -9,8 +10,8 @@
 #
 # deadlock: nothing more.
 # slow_stop_requested: that hook finishes after shutdown_wait_timeout.
-# hung_stop_requested: it hangs, and on_worker_stopping fails unrecoverably, so
-# the process must exit immediately. Last, since that lasts the process's life.
+# hung_stop_requested: it hangs, and on_worker_stopping fails unrecoverably,
+# which crashes the process. Last, since nothing runs after it.
 require "concurrent"
 require "logger"
 
@@ -70,5 +71,8 @@ end)
 
 Busybee.logger = Logger.new(SignallingDevice.new)
 Busybee.credential_type = :insecure
-%w[deadlock slow_stop_requested hung_stop_requested].each { |scenario| run_scenario(scenario, gateway) }
-gateway.stop
+begin
+  %w[deadlock slow_stop_requested hung_stop_requested].each { |scenario| run_scenario(scenario, gateway) }
+ensure
+  gateway.stop # a gRPC server still serving at exit segfaults the interpreter's teardown
+end
