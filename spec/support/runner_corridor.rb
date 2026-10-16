@@ -17,7 +17,11 @@ module RunnerCorridor
     end
     return raised if thread.join(seconds)
 
-    runner.kill!
+    begin
+      runner.kill!
+    rescue Exception # rubocop:disable Lint/RescueException
+      nil # a hook failing on the kill's own stop; the hang is what to report
+    end
     raise "the runner did not finish within #{seconds}s"
   end
 

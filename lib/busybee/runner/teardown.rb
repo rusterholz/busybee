@@ -7,14 +7,15 @@ require "busybee/worker/shutdown"
 module Busybee
   class Runner
     # What run!'s ensure does about things that go wrong inside it. The invariant:
-    # the ensure always completes, or jobs go unreturned, monitoring goes blind,
-    # and @running wedges true, leaving the runner silently unable to run again.
+    # short of an error the process can't recover from, the ensure completes, or
+    # jobs go unreturned and monitoring goes blind. @running clears whatever happens,
+    # or the runner is silently unable to run again.
     module Teardown
       private
 
       # run!'s ensure body; exception is what the run exits on, nil when clean. T3
       # reports, where no exit exception explains the shutdown, a post-stop error and
-      # then a contained escalation.
+      # then a contained one.
       def teardown(exception)
         begin_teardown(exception)
         error = Busybee::Worker::Shutdown.unwrap(exception)
@@ -22,6 +23,7 @@ module Busybee
         drain_within_teardown
         error ||= Busybee::Worker::Shutdown.unwrap(post_stop_error) || @teardown_error.get
         fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
+      ensure
         @running.make_false
       end
 
@@ -45,8 +47,8 @@ module Busybee
 
       # The ensure's other door: a failing wire call would skip the rest as an
       # escalating hook used to. Skipped outright once the process must exit
-      # immediately; an unrecoverable error inside it says so, unlogged, and
-      # abandons the rest.
+      # immediately; an unrecoverable error inside it says so and propagates,
+      # abandoning the rest of the teardown.
       def drain_within_teardown
         return if exit_immediately?
 
@@ -57,7 +59,7 @@ module Busybee
                               "[#{e.class}] #{e.message}")
       rescue Exception => e # rubocop:disable Lint/RescueException
         exit_immediately!(reason_for(e))
-        @teardown_error.compare_and_set(nil, e)
+        raise
       end
 
       def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
@@ -65,10 +67,10 @@ module Busybee
       # Process-wide: read where the validating setter put it, never off a runtime config.
       def shutdown_wait_seconds = Busybee::Durations.seconds_from(Busybee.shutdown_wait_timeout)
 
-      # Nothing a T1/T2/T3 hook raises leaves this: a worker already tearing down
-      # cannot shut down harder, and an escape would cost the drain, the later
-      # moments and the exit exception. What safe: true lets past is recorded for
-      # T3; past StandardError it also raises the fire alarm, unlogged. T0 is
+      # A Shutdown from a T1/T2/T3 hook stays here, as does a recoverable error
+      # safe: true lets past, each recorded for T3: a worker already tearing down
+      # cannot shut down harder. Past RECOVERABLE_ERRORS, an error raises the fire
+      # alarm and propagates, taking the rest of the teardown with it. T0 is
       # excluded by not being wrapped.
       def contain_teardown_hooks(type)
         yield
@@ -76,9 +78,11 @@ module Busybee
         @teardown_error.compare_and_set(nil, e)
         Busybee.logger&.error("[busybee] Shutdown from #{type} ignored, already shutting down: " \
                               "[#{e.class}] #{e.message}")
-      rescue Exception => e # rubocop:disable Lint/RescueException
-        exit_immediately!(reason_for(e)) unless recoverable?(e)
+      rescue *RECOVERABLE_ERRORS => e
         @teardown_error.compare_and_set(nil, e)
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        exit_immediately!(reason_for(e))
+        raise
       end
     end
   end

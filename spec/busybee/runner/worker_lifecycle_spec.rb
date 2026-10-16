@@ -298,6 +298,23 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       Busybee.on_worker_started { raise "broken hook" }
       expect { runner.run! }.not_to raise_error
     end
+
+    # The swallow logs the hook's error, and the log write fails too.
+    it "contains an ordinary error escaping a teardown hook's swallow, and finishes the shutdown" do
+      logger = instance_double(Logger, info: nil, warn: nil)
+      allow(logger).to receive(:error).and_raise(IOError, "log device closed")
+      allow(Busybee).to receive(:logger).and_return(logger)
+      captured = nil
+      Busybee.on_worker_stopping { raise "broken hook" }
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+
+      aggregate_failures do
+        expect { runner.run! }.not_to raise_error
+        expect(captured&.error).to be_a(IOError)
+        expect(runner.running?).to be(false)
+        expect(Busybee::Runner.exit_immediately?).to be(false)
+      end
+    end
   end
 
   # Once teardown has begun the worker cannot be made more stopped, so the
@@ -445,8 +462,8 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
   # The drain is the ensure's other door. A hook is the obvious way to blow up
   # mid-teardown, but a failing wire call or the pump join's re-raise does the
-  # same damage, so the invariant is that run!'s ensure always completes rather
-  # than that hook errors are contained.
+  # same damage, so the invariant is that run!'s ensure completes, short of an
+  # error the process can't recover from, rather than that hook errors are contained.
   describe "the drain inside the teardown" do
     let(:runner_class) do
       Class.new(super()) do
@@ -516,14 +533,13 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect(moments).to eq(%i[started stop_requested stopping shutdown])
     end
 
-    it "finishes the stop when the drain itself fails unrecoverably, and says to exit immediately" do
-      captured = nil
-      Busybee.on_worker_shutdown { |worker| captured = worker }
+    it "raises a drain's unrecoverable failure out of run!, skipping on_worker_shutdown, and says to exit" do
+      record_all_lifecycle_hooks
       runner.test_drain = -> { raise NoMemoryError, "out of memory mid-drain" }
 
       aggregate_failures do
-        expect { runner.run! }.not_to raise_error
-        expect(captured.error).to be_a(NoMemoryError)
+        expect { runner.run! }.to raise_error(NoMemoryError, "out of memory mid-drain")
+        expect(moments).to eq(%i[started stop_requested stopping])
         expect(runner.running?).to be(false)
         expect(Busybee::Runner.exit_immediately?).to be(true)
       end

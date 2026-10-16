@@ -212,14 +212,14 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
 
     after { stream_gate.close }
 
-    it "abandons the rest of the drain and finishes the stop it was making" do
+    it "abandons the rest of the drain and the shutdown, raising the error out of run!" do
       raised = :unset
       status = shutdown_status_from { raised = run_to_completion }
 
       aggregate_failures do
-        expect(raised).to be_nil
+        expect(raised).to be_an_instance_of(NoMemoryError)
         expect(gateway.received(:fail_job).map(&:jobKey)).to eq([2])
-        expect([status.reason, status.error]).to match([:sigterm, an_instance_of(NoMemoryError)])
+        expect(status).to be_nil
         expect(runner.running?).to be(false)
         expect(Busybee::Runner.exit_immediately?).to be(true)
       end
@@ -250,12 +250,13 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
       Busybee::Hooks.on_job_not_executed { |_job| raise NoMemoryError, "failed to allocate memory" }
     end
 
-    it "finishes the stop it was making, and says to exit immediately" do
+    it "ends the run on it, raising it out of run!, and says to exit immediately" do
       raised = :unset
       status = shutdown_status_from { raised = run_to_completion }
 
       aggregate_failures do
-        expect(raised).to be_nil
+        expect(raised).to be_an_instance_of(NoMemoryError)
+        expect(gateway.received(:fail_job).map(&:jobKey)).to eq([2])
         expect([status&.reason, status&.error]).to match([:sigterm, an_instance_of(NoMemoryError)])
         expect(runner.running?).to be(false)
         expect(Busybee::Runner.exit_immediately?).to be(true)
@@ -377,18 +378,19 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
       end
     end
 
-    # Alpha's stream closes cleanly with jobs still buffered, and its drain
-    # meets an unrecoverable error; its run still returns normally. Beta is
-    # idle, polling an empty queue.
     # Alpha's stop finds jobs it never started, and handing one back fails
-    # unrecoverably in its on_job_not_executed hook; its run still returns
-    # normally. Beta is idle, polling an empty queue. The handback happens in
-    # one of two places, and both must end the same way.
+    # unrecoverably in its on_job_not_executed hook. Beta is idle, polling an
+    # empty queue. The handback happens in one of two places, and both must end
+    # the same way.
     shared_examples "a handback failure that ends the process" do
-      it "kills the other workers too" do
-        statuses = shutdown_statuses_from { expect(run_to_completion(seconds: 5)).to be_nil }
+      it "kills the other workers too, raising the error out of the process's run" do
+        raised = :unset
+        statuses = shutdown_statuses_from { raised = run_to_completion(seconds: 5) }
 
-        expect(statuses.find { |status| status.worker_class == beta_class }.reason).to eq(:crash)
+        aggregate_failures do
+          expect(raised).to be_an_instance_of(NoMemoryError)
+          expect(statuses.find { |status| status.worker_class == beta_class }&.reason).to eq(:crash)
+        end
       end
     end
 

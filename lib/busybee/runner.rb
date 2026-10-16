@@ -168,7 +168,8 @@ module Busybee
 
     # Hand a job back unworked, then say so however the handback went, unless the
     # process must exit immediately. Worker-lifecycle work, so a failure rides the
-    # worker carrier; the job did nothing, reports nothing.
+    # worker carrier; the job did nothing, reports nothing. An unrecoverable error
+    # says so, then propagates from wherever the handback runs.
     def handle_shutdown_job(job)
       return if exit_immediately?
 
@@ -177,10 +178,8 @@ module Busybee
     rescue Busybee::Worker::Shutdown => e
       declare_unhealthy(e) # a stop is already under way: post-stop, and the handbacks carry on
     rescue Exception => e # rubocop:disable Lint/RescueException
-      raise if recoverable?(e)
-
-      exit_immediately!(reason_for(e)) # a handback is bookkeeping: contained wherever it runs, unlogged
-      @teardown_error.compare_and_set(nil, e)
+      exit_immediately!(reason_for(e)) unless recoverable?(e)
+      raise
     end
 
     # The wire call; a failure it can recover from is the handback's error to report.

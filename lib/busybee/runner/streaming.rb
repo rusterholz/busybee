@@ -169,14 +169,21 @@ module Busybee
         raise if claim_stop(:gateway_error, e)
       end
 
-      # Pump the stream into the buffer until stopped. Whatever ends the pump,
-      # whatever its class, goes to end_pump under its discerned reason
-      # (Shutdown→:unhealthy, gRPC→:gateway_error, else :crash), ahead of the
-      # ensure's default. Clean closes arrive as Cancelled and are absorbed. The
-      # ensure is the backstop unblocking the main thread's blocking pop: a no-op
-      # behind any earlier stop!, and reached live only by the gateway closing
-      # the stream cleanly (:gateway_closed) or the loop leaving on the fire alarm.
+      # The pump thread's body. The ensure is the backstop unblocking the main
+      # thread's blocking pop: a no-op behind any earlier stop!, and reached live
+      # only by the gateway closing the stream cleanly (:gateway_closed) or the
+      # loop leaving on the fire alarm.
       def pump_stream_into_buffer
+        contain_pump { pump_jobs }
+      ensure
+        contain_pump { stop!(reason: ending_reason(:gateway_closed)) }
+      end
+
+      # Pump the stream into the buffer until stopped. Whatever ends it, whatever
+      # its class, goes to end_pump under its discerned reason (Shutdown→:unhealthy,
+      # gRPC→:gateway_error, else :crash), ahead of the ensure's default. Clean
+      # closes arrive as Cancelled and are absorbed.
+      def pump_jobs
         delay = @runtime_config.buffer_throttle
 
         read_stream do |job|
@@ -186,18 +193,25 @@ module Busybee
           buffer_job(job)
           sleep(Busybee::Durations.seconds_from(delay)) if delay
         end
+      end
+
+      # The pump's thread ends on nothing it raises: a stop announced here runs
+      # on_worker_stop_requested on it, so even that hook's error comes to end_pump.
+      def contain_pump
+        yield
       rescue Exception => e # rubocop:disable Lint/RescueException
         end_pump(e, reason_for(e))
-      ensure
-        stop!(reason: ending_reason(:gateway_closed))
       end
 
       # Whatever ends the pump claims the stop like any other error (see
       # Stopping#claim_stop): the main thread raises a winner as the run's exit
-      # error; a loser is a post-stop error.
+      # error; a loser is a post-stop error. A won claim announces the stop, and
+      # what that announcement raises meets a stop already claimed: post-stop.
       def end_pump(error, reason)
         exit_immediately!(reason) unless recoverable?(error) # whether or not its claim wins
         claim_stop(reason, error)
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        end_pump(e, reason_for(e))
       end
 
       # Reentrant, so a claim's own record may take it again.
