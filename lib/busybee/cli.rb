@@ -35,12 +35,17 @@ module Busybee
       apply_global_config!
     end
 
+    # Exits 1 once the run has returned if the process must exit immediately, an
+    # error having struck somewhere that raised nothing here.
     def run
       @runner = Runner.for(*@worker_classes, runtime_config: @runtime_config, client: client)
       setup_signal_handlers!
-      @runner.run!
-    ensure
-      join_signal_threads
+      begin
+        @runner.run!
+      ensure
+        join_signal_threads
+      end
+      exit(1) if Runner.exit_immediately?
     end
 
     private

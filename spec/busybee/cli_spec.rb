@@ -612,10 +612,10 @@ RSpec.describe Busybee::CLI do
       end
     end
 
-    # A real worker, stopped by a trapped TERM whose stop announcement fails on
-    # the signal's thread. The worker's run itself ends cleanly; its shutdown
-    # hook holds the run until that thread has died.
-    context "when a signal's stop announcement fails unrecoverably", :gateway do
+    # A real worker whose stop announcement fails on the thread asking for the
+    # stop. The worker's run itself ends cleanly; its shutdown hook holds the run
+    # until any signal's thread has died.
+    context "when a stop announcement fails unrecoverably", :gateway do
       let(:cli) { described_class.new(["--worker-mode", "polling", "TestCLIWorker"]) }
       let(:traps) { {} }
       let(:started) { Concurrent::Event.new }
@@ -642,7 +642,7 @@ RSpec.describe Busybee::CLI do
         Busybee.on_worker_shutdown { |_status| sleep 0.005 while signal_threads.call.any?(&:alive?) }
       end
 
-      it "raises that thread's error out of the run" do
+      it "raises a signal thread's error out of the run" do
         Thread.new do
           started.wait(5)
           traps.fetch("TERM").call
@@ -650,6 +650,17 @@ RSpec.describe Busybee::CLI do
 
         expect { cli.run }.to raise_error(NoMemoryError, "failed to allocate memory")
         expect(Busybee::Runner.exit_immediately?).to be(true)
+      end
+
+      # The stop comes from a thread of the adopter's own, which the CLI never
+      # joins, so no error reaches the CLI.
+      it "exits 1 when the error never reaches the run" do
+        Thread.new do
+          started.wait(5)
+          cli.instance_variable_get(:@runner).stop!(reason: :sigterm)
+        end
+
+        expect { cli.run }.to raise_error(SystemExit) { |exit| expect(exit.status).to eq(1) }
       end
     end
   end
