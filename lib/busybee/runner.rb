@@ -80,7 +80,7 @@ module Busybee
     # Force shutdown: the fire alarm, then a stop. Multi overrides to also kill the
     # pool. Parameterized: a hard teardown is not always operator-initiated.
     def kill!(reason: :kill)
-      exit_immediately!(reason)
+      exit_immediately!(reason: reason)
       stop!(reason: reason)
       @stop_announced.set # a teardown waiting on another thread's T1 goes on
     end
@@ -178,7 +178,7 @@ module Busybee
     rescue Busybee::Worker::Shutdown => e
       declare_unhealthy(e) # a stop is already under way: post-stop, and the handbacks carry on
     rescue Exception => e # rubocop:disable Lint/RescueException
-      exit_immediately!(reason_for(e)) unless recoverable?(e)
+      exit_immediately!(reason: reason_for(e)) unless recoverable?(e)
       raise
     end
 
@@ -236,7 +236,7 @@ module Busybee
           @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
         end
       ensure
-        exit_immediately!(reason_for($!)) if $! && !recoverable?($!) # the first point its error passes
+        exit_immediately!(reason: reason_for($!)) if $! && !recoverable?($!) # the first point its error passes
         job.timestamps.stamp!(:executed_at)
         @total_job_count.increment
         @failed_job_count.increment if job.failed?

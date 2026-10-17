@@ -91,7 +91,7 @@ module Busybee
 
       # The fire alarm (the building is burning): raising it flags, exiting nothing,
       # and names the fire; the first fire's reason stands. Claims no runner's stop.
-      def exit_immediately!(reason = :crash)
+      def exit_immediately!(reason: :crash)
         EXIT_IMMEDIATELY_REASON.compare_and_set(nil, reason)
         EXIT_IMMEDIATELY.make_true
       end

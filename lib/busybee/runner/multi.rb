@@ -82,9 +82,9 @@ module Busybee
             record_child_failure(runner, e)
             end_on(e)
           rescue Exception => e # rubocop:disable Lint/RescueException
-            exit_immediately!(reason_for(e))
+            exit_immediately!(reason: reason_for(e))
             record_child_failure(runner, e)
-            kill_children(ending_reason(nil)) # the first fire's reason, maybe an earlier one
+            kill_children(reason: ending_reason(nil)) # the first fire's reason, maybe an earlier one
           end
         end
       end
@@ -93,7 +93,7 @@ module Busybee
       # them if the process must exit immediately: a job type nobody works is a
       # silent outage.
       def end_with(runner)
-        return kill_children(ending_reason(nil)) if exit_immediately?
+        return kill_children(reason: ending_reason(nil)) if exit_immediately?
 
         reason = runner.stop_reason # the reason itself: stopping? also counts the alarm
         stop!(reason: reason) if reason
@@ -103,7 +103,7 @@ module Busybee
       # its reason (:crash/:gateway_error/:unhealthy), unless the process must exit
       # immediately: then the fire decides, as for any other child ending.
       def end_on(error)
-        return kill_children(ending_reason(nil)) if exit_immediately?
+        return kill_children(reason: ending_reason(nil)) if exit_immediately?
 
         stop!(reason: reason_for(error))
       end
@@ -123,7 +123,7 @@ module Busybee
       # mid-statement, leaving the pool unterminated and hanging the
       # wait_for_termination Multi#run! sits in. Killing the children lets each
       # run! return on its own. The reason stays the crash's — nobody forced this.
-      def kill_children(reason)
+      def kill_children(reason:)
         @stop_reason.compare_and_set(nil, reason)
         @runners.each { |runner| runner.kill!(reason: reason) }
         @thread_pool.shutdown

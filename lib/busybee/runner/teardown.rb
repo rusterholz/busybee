@@ -31,7 +31,7 @@ module Busybee
       # closes, or the stream reader's clean-close claim could take the reason;
       # announce unless something already has; let that finish, so T1 precedes T2.
       def begin_teardown(exception)
-        exit_immediately!(reason_for(exception)) if exception && !recoverable?(exception) # its calls would fail
+        exit_immediately!(reason: reason_for(exception)) if exception && !recoverable?(exception) # its calls would fail
         @stop_reason.compare_and_set(nil, exception ? reason_for(exception) : ending_reason(nil))
         announce_stop
         cease_intake # idempotent backstop for an announcement still under way elsewhere
@@ -58,7 +58,7 @@ module Busybee
         Busybee.logger&.error("[busybee] Drain failed during shutdown, continuing teardown: " \
                               "[#{e.class}] #{e.message}")
       rescue Exception => e # rubocop:disable Lint/RescueException
-        exit_immediately!(reason_for(e))
+        exit_immediately!(reason: reason_for(e))
         raise
       end
 
@@ -81,7 +81,7 @@ module Busybee
       rescue *RECOVERABLE_ERRORS => e
         @teardown_error.compare_and_set(nil, e)
       rescue Exception => e # rubocop:disable Lint/RescueException
-        exit_immediately!(reason_for(e))
+        exit_immediately!(reason: reason_for(e))
         raise
       end
     end

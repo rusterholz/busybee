@@ -208,7 +208,7 @@ module Busybee
       # error; a loser is a post-stop error. A won claim announces the stop, and
       # what that announcement raises meets a stop already claimed: post-stop.
       def end_pump(error, reason)
-        exit_immediately!(reason) unless recoverable?(error) # whether or not its claim wins
+        exit_immediately!(reason: reason) unless recoverable?(error) # whether or not its claim wins
         claim_stop(reason, error)
       rescue Exception => e # rubocop:disable Lint/RescueException
         end_pump(e, reason_for(e))
