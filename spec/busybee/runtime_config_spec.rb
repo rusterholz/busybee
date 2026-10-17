@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "fileutils"
+require "tmpdir"
+
 RSpec.describe Busybee::RuntimeConfig do
   let(:worker_class) do
     Class.new(Busybee::Worker) do
@@ -14,7 +17,7 @@ RSpec.describe Busybee::RuntimeConfig do
   around do |example|
     saved = %i[
       @default_worker_mode @default_backpressure_delay @default_buffer_throttle
-      @log_format @worker_name @cluster_address
+      @shutdown_wait_timeout @log_format @worker_name @cluster_address
     ].to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
     example.run
   ensure
@@ -51,12 +54,14 @@ RSpec.describe Busybee::RuntimeConfig do
       config = described_class.new(
         log_format: :json,
         worker_name: "my-worker",
-        cluster_address: "zeebe.example.com:26500"
+        cluster_address: "zeebe.example.com:26500",
+        shutdown_wait_timeout: 7000
       )
       expect(config).to have_attributes(
         log_format: :json,
         worker_name: "my-worker",
-        cluster_address: "zeebe.example.com:26500"
+        cluster_address: "zeebe.example.com:26500",
+        shutdown_wait_timeout: 7000
       )
     end
 
@@ -71,6 +76,7 @@ RSpec.describe Busybee::RuntimeConfig do
         buffer_throttle: nil,
         job_timeout: nil,
         fail_job_backoff: nil,
+        shutdown_wait_timeout: nil,
         log_format: nil,
         worker_name: nil,
         cluster_address: nil
@@ -209,6 +215,27 @@ RSpec.describe Busybee::RuntimeConfig do
         config = described_class.new
         expect(config.resolve_for(worker_class).backpressure_delay).to eq(
           Busybee::Defaults::DEFAULT_BACKPRESSURE_DELAY_MS
+        )
+      end
+    end
+
+    context "with shutdown_wait_timeout precedence (2-level: RC global → gem)" do
+      it "uses the RC value" do
+        Busybee.shutdown_wait_timeout = 9000
+        config = described_class.new(shutdown_wait_timeout: 6000)
+        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(6000)
+      end
+
+      it "falls back to gem config" do
+        Busybee.shutdown_wait_timeout = 9000
+        config = described_class.new
+        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(9000)
+      end
+
+      it "falls back to gem default" do
+        config = described_class.new
+        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(
+          Busybee::Defaults::DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS
         )
       end
     end
@@ -422,9 +449,7 @@ RSpec.describe Busybee::RuntimeConfig do
   end
 
   describe ".parse_yaml" do
-    let(:yaml_dir) { File.join(__dir__, "..", "..", "tmp", "yaml_fixtures") }
-
-    before { FileUtils.mkdir_p(yaml_dir) }
+    let(:yaml_dir) { Dir.mktmpdir("busybee-runtime-config-yaml") }
 
     def write_yaml(filename, content)
       path = File.join(yaml_dir, filename)
@@ -466,6 +491,20 @@ RSpec.describe Busybee::RuntimeConfig do
         job_timeout: 90_000,
         fail_job_backoff: 15_000
       )
+    end
+
+    it "parses a top-level shutdown_wait_timeout" do
+      path = write_yaml("shutdown_wait.yml", "shutdown_wait_timeout: 8000\n")
+      expect(described_class.parse_yaml(path)).to eq(shutdown_wait_timeout: 8000)
+    end
+
+    it "rejects shutdown_wait_timeout as a per-worker override" do
+      path = write_yaml("per_worker_shutdown_wait.yml", <<~YAML)
+        workers:
+          - OrderProcessor:
+              shutdown_wait_timeout: 8000
+      YAML
+      expect { described_class.parse_yaml(path) }.to raise_error(ArgumentError, /shutdown_wait_timeout/)
     end
 
     it "parses workers list into per-worker overrides" do

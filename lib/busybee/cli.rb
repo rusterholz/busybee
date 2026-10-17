@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/module/delegation"
 require "active_support/core_ext/object/blank"
+require "concurrent"
 require "optparse"
 
 require "busybee/client"
+require "busybee/durations"
 require "busybee/error"
 require "busybee/runner"
 require "busybee/runtime_config"
@@ -17,11 +20,12 @@ module Busybee
     # Signals we trap to begin a graceful stop.
     STOP_SIGNALS = %w[INT QUIT TERM].freeze
 
-    def self.main(args)
-      new(args).run
-    end
+    delegate :exit_immediately?, to: :"Busybee::Runner", private: true
+
+    def self.main(args) = new(args).run
 
     def initialize(args)
+      @signalled = Concurrent::AtomicBoolean.new(false) # before any trap can fire
       @worker_class_names = []
       @parsed_options = {}
       parse_options!(args.dup)
@@ -32,10 +36,17 @@ module Busybee
       apply_global_config!
     end
 
+    # Exits 1 once the run has returned if the process must exit immediately, an
+    # error having struck somewhere that raised nothing here.
     def run
       @runner = Runner.for(*@worker_classes, runtime_config: @runtime_config, client: client)
       setup_signal_handlers!
-      @runner.run!
+      begin
+        @runner.run!
+      ensure
+        join_signal_threads
+      end
+      exit(1) if exit_immediately?
     end
 
     private
@@ -44,21 +55,39 @@ module Busybee
       @client ||= Busybee::Client.new
     end
 
+    # The first signal stops; any later one forces. The CLI's own set-once flag
+    # decides, since a runner's stopping? can lag a stop still under way.
     def handle_signal(signal)
-      if @runner.stopping?
-        @runner.kill!
-        exit!(1)
-      else
-        @runner.stop!(reason: :"sig#{signal.downcase}")
+      return @runner.stop!(reason: :"sig#{signal.downcase}") if @signalled.make_true
+
+      force_exit
+    end
+
+    # A kill's own stop can reach a worker not yet stopped and hang or fail in its
+    # on_worker_stop_requested, so it gets a bounded wait, then the exit regardless.
+    def force_exit
+      Thread.new { @runner.kill! }.join(Busybee::Durations.seconds_from(Busybee.shutdown_wait_timeout))
+    ensure
+      exit!(1)
+    end
+
+    # The trap runs on the main thread, on top of whatever it interrupted, a
+    # write holding the logger's lock included; so the handling happens on a
+    # thread of its own, and the trap returns without waiting for it.
+    def setup_signal_handlers!
+      @signal_threads = []
+      STOP_SIGNALS.each do |signal|
+        trap(signal) { @signal_threads << Thread.new { handle_signal(signal) } }
       end
     end
 
-    def setup_signal_handlers!
-      STOP_SIGNALS.each do |signal|
-        trap(signal) do
-          Thread.new { handle_signal(signal) }.join
-        end
-      end
+    # Ruby kills unjoined threads at exit, so a stop announcement still running
+    # on a signal's thread is waited for, up to shutdown_wait_timeout, or not at
+    # all once the process must exit immediately. Either way, joining re-raises
+    # the error a thread already died of.
+    def join_signal_threads
+      wait = exit_immediately? ? 0 : Busybee::Durations.seconds_from(Busybee.shutdown_wait_timeout)
+      @signal_threads&.each { |thread| thread.join(wait) }
     end
 
     def load_environment!
@@ -70,9 +99,7 @@ module Busybee
         return
       end
 
-      # Defensive: busybee.rb's :before_configuration hook should already register
-      # the Railtie as config/environment defines the app.
-      require "busybee/railtie"
+      require "busybee/railtie" # defensive: busybee.rb's :before_configuration hook registers it already
       require "./config/environment"
     rescue StandardError, LoadError => e
       Busybee.logger&.error("Failed to load Rails environment: [#{e.class}] #{e.message}. " \
@@ -127,7 +154,7 @@ module Busybee
                            "List workers in the YAML config file instead."
     end
 
-    def option_parser # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+    def option_parser
       OptionParser.new do |opts|
         opts.banner = "Usage: busybee [options] WorkerClass [WorkerClass ...]"
 
@@ -149,37 +176,41 @@ module Busybee
           @parsed_options[:worker_mode] = mode.to_sym
         end
 
-        opts.on("-l", "--log-format FORMAT", "Log format (text, json)") do |format|
-          @parsed_options[:log_format] = format.to_sym
-        end
-
-        opts.on("-n", "--worker-name NAME", "Worker name for identification") do |name|
-          @parsed_options[:worker_name] = name
-        end
-
-        opts.on("-a", "--cluster-address ADDR", "Cluster address (host:port)") do |addr|
-          @parsed_options[:cluster_address] = addr
-        end
+        process_wide_options(opts)
       end
     end
 
-    # Applies process-wide flags to gem-level config before runners start.
-    # Only sets values that were explicitly provided via CLI flags.
+    def process_wide_options(opts)
+      opts.on("-l", "--log-format FORMAT", "Log format (text, json)") do |format|
+        @parsed_options[:log_format] = format.to_sym
+      end
+
+      opts.on("-n", "--worker-name NAME", "Worker name for identification") do |name|
+        @parsed_options[:worker_name] = name
+      end
+
+      opts.on("-a", "--cluster-address ADDR", "Cluster address (host:port)") do |addr|
+        @parsed_options[:cluster_address] = addr
+      end
+    end
+
+    # Applies process-wide flags, and YAML's top-level shutdown_wait_timeout, to
+    # gem-level config before runners start. Only sets values explicitly provided.
     # Logs when overriding a value already set (e.g., by the Railtie).
     def apply_global_config!
       apply_global_setting!(:log_format)
       apply_global_setting!(:worker_name)
       apply_global_setting!(:cluster_address)
+      apply_global_setting!(:shutdown_wait_timeout, source: "YAML shutdown_wait_timeout")
     end
 
-    def apply_global_setting!(field)
+    def apply_global_setting!(field, source: "--#{field.to_s.tr('_', '-')}")
       cli_value = @runtime_config.public_send(field)
       return unless cli_value
 
       existing = Busybee.instance_variable_get(:"@#{field}")
       if existing
-        flag = "--#{field.to_s.tr('_', '-')}"
-        Busybee.logger&.info("#{flag} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
+        Busybee.logger&.info("#{source} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
       end
       Busybee.public_send(:"#{field}=", cli_value)
     end

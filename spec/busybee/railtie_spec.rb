@@ -14,7 +14,7 @@ def busybee_config_ivars
     @default_message_ttl @default_buffer @default_buffer_throttle
     @grpc_retry_delay @grpc_retry_enabled @grpc_retry_errors
     @grpc_keepalive_interval @grpc_keepalive_timeout
-    @log_format @logger @default_backpressure_delay
+    @log_format @logger @default_backpressure_delay @shutdown_wait_timeout
     @worker_name @backpressure_statuses
   ]
 end
@@ -288,6 +288,31 @@ RSpec.describe "Busybee::Railtie", :rails do
         configure_and_initialize
         expect(Busybee.instance_variable_get(:@default_backpressure_delay)).to be_nil
         expect(Busybee.default_backpressure_delay).to eq(Busybee::Defaults::DEFAULT_BACKPRESSURE_DELAY_MS)
+      end
+    end
+
+    describe "shutdown_wait_timeout" do
+      it "sets shutdown_wait_timeout when configured" do
+        configure_and_initialize(shutdown_wait_timeout: 15_000)
+        expect(Busybee.instance_variable_get(:@shutdown_wait_timeout)).to eq(15_000)
+      end
+
+      it "converts a String, as an environment variable delivers it" do
+        configure_and_initialize(shutdown_wait_timeout: "15000")
+        expect(Busybee.shutdown_wait_timeout).to eq(15_000)
+      end
+
+      it "warns on one under a second" do
+        allow(Busybee::Logging).to receive(:warn)
+        configure_and_initialize(shutdown_wait_timeout: 500)
+
+        expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
+      end
+
+      it "leaves nil when not configured (uses default from Defaults)" do
+        configure_and_initialize
+        expect(Busybee.instance_variable_get(:@shutdown_wait_timeout)).to be_nil
+        expect(Busybee.shutdown_wait_timeout).to eq(Busybee::Defaults::DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS)
       end
     end
 

@@ -111,6 +111,11 @@ RSpec.describe Busybee::Durations do
         expect(Busybee::Logging).not_to have_received(:warn)
       end
 
+      it "warns on a shutdown wait under a second" do
+        described_class.validate!(:shutdown_wait_timeout, 500)
+        expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
+      end
+
       it "stays quiet for a knob with no floor, however small" do
         described_class.validate!(:buffer_throttle, 0.1)
         expect(Busybee::Logging).not_to have_received(:warn)

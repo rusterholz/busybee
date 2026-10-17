@@ -41,11 +41,11 @@ RSpec.describe "a worker meeting an unrecoverable error", :gateway do # rubocop:
       gateway.on(:activate_jobs) { [Busybee::GRPC::ActivateJobsResponse.new(jobs: [wire_job(1), wire_job(2)])] }
     end
 
-    it "still closes the activation of the job it was running" do
+    it "runs no closing hook for the job it was running, the process told to exit immediately" do
       brackets = record_job_brackets
       run_to_completion
 
-      expect(brackets).to eq([[:activated, 1], [:executed, 1]])
+      expect([brackets, Busybee::Runner.exit_immediately?]).to eq([[[:activated, 1]], true])
     end
 
     it "sends the engine nothing about that job, nor about the rest of its batch" do

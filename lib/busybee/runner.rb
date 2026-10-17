@@ -3,9 +3,8 @@
 require "concurrent"
 
 require "busybee/client"
-require "busybee/durations"
-require "busybee/grpc/error"
 require "busybee/hooks"
+require "busybee/runner/stopping"
 require "busybee/runner/teardown"
 require "busybee/runtime_config"
 require "busybee/worker/shutdown"
@@ -23,6 +22,13 @@ module Busybee
     # today and widen separately. The shared name lets one grep find both.
     RECOVERABLE_ERRORS = [StandardError].freeze
 
+    # The fire alarm, set once by an unrecoverable error or a kill: every runner in the
+    # process then skips handbacks, drains and job hooks. Preallocated: raising it allocates nothing.
+    EXIT_IMMEDIATELY = Concurrent::AtomicBoolean.new(false)
+    EXIT_IMMEDIATELY_REASON = Concurrent::AtomicReference.new(nil) # the first fire's, set before the flag
+    private_constant :EXIT_IMMEDIATELY, :EXIT_IMMEDIATELY_REASON
+
+    include Stopping
     include Teardown
 
     def initialize(worker_class = nil, runtime_config: nil, client: nil)
@@ -36,6 +42,8 @@ module Busybee
       @failed_job_count = Concurrent::AtomicFixnum.new(0)
       @backpressure_count = Concurrent::AtomicFixnum.new(0)
       @teardown_error = Concurrent::AtomicReference.new(nil)
+      @announcing = Concurrent::AtomicBoolean.new(false)
+      @stop_announced = Concurrent::Event.new
     end
 
     # Blocks until stopped or until #run_loop raises; the teardown then runs on every
@@ -55,25 +63,31 @@ module Busybee
     end
 
     # Signals graceful shutdown, recording why. Thread-safe: the CLI runs signal
-    # handlers on their own thread. The set-once reason IS the gate: "is-stopping"
-    # and "the reason" are one atomic fact, and only the call setting it announces.
+    # handlers on their own thread. The set-once reason is the gate: only the call
+    # setting it announces.
     def stop!(reason: :signal)
       raise ArgumentError, "stop reason must be a Symbol, got #{reason.class}" unless reason.is_a?(Symbol)
 
       announce_stop if @stop_reason.compare_and_set(nil, reason)
     end
 
-    # True once a stop reason is set.
-    def stopping? = !@stop_reason.get.nil?
-
-    # True if run! is actively executing.
+    # True once a stop has begun, or once the process must exit immediately,
+    # which may come before this runner has a reason; stop_reason waits for one.
+    def stopping? = !@stop_reason.get.nil? || exit_immediately?
+    def stop_reason = @stop_reason.get
     def running? = @running.true?
 
-    # Force shutdown; Multi overrides to also kill the pool. Parameterized because
-    # a hard teardown is not always operator-initiated (see Multi's cascade).
-    def kill!(reason: :kill) = stop!(reason: reason)
+    # Force shutdown: the fire alarm, then a stop. Multi overrides to also kill the
+    # pool. Parameterized: a hard teardown is not always operator-initiated.
+    def kill!(reason: :kill)
+      exit_immediately!(reason: reason)
+      stop!(reason: reason)
+      @stop_announced.set # a teardown waiting on another thread's T1 goes on
+    end
 
     class << self
+      def exit_immediately? = EXIT_IMMEDIATELY.true?
+
       # Resolves worker mode and returns the matching runner. Mode precedence,
       # lowest first: Busybee.default_worker_mode, the worker DSL's worker_mode,
       # then a RuntimeConfig override (global or per-worker).
@@ -101,17 +115,15 @@ module Busybee
                 "Invalid worker mode: #{resolved_config.worker_mode.inspect}. Valid: :polling, :streaming, :hybrid"
         end
       end
+
+      # The seam Busybee::Testing lowers the alarm through between examples.
+      def lower_exit_immediately
+        EXIT_IMMEDIATELY.make_false
+        EXIT_IMMEDIATELY_REASON.set(nil)
+      end
     end
 
     private
-
-    # A won stop's effects: intake ceases *before* T1 fires (close-before-fire).
-    def announce_stop
-      @worker_timestamps.stamp!(:stop_requested_at)
-      cease_intake
-      t1 = :on_worker_stop_requested
-      contain_teardown_escalation(t1) { Hooks.run(t1, worker_status, safe: true) }
-    end
 
     # T0: try to begin the run. The @running flip doubles as the single-entry
     # gate: lose it and start! returns false BEFORE stamping or firing.
@@ -121,27 +133,6 @@ module Busybee
       @worker_timestamps.stamp!(:started_at)
       Hooks.run(:on_worker_started, worker_status, safe: true)
       true
-    end
-
-    # A fetch loop's wrapped gRPC error, matched by grpc_status against
-    # Busybee.backpressure_statuses whatever class the gateway raised: backpressure
-    # backs off so the loop retries, anything else propagates. ms→s converts here.
-    def handle_grpc_error(error)
-      raise error unless Busybee.backpressure_statuses.include?(error.grpc_status)
-
-      @backpressure_count.increment
-      sleep Busybee::Durations.seconds_from(@runtime_config.backpressure_delay)
-    end
-
-    # Discern a stop reason from an exit error, never fabricated. reason ⊥ error:
-    # this names the trigger, the exception rides its own axis. gateway_* groups the
-    # engine-driven endings as a filterable family, like sig*.
-    def reason_for(error)
-      case error
-      when Busybee::Worker::Shutdown then :unhealthy
-      when Busybee::GRPC::Error then :gateway_error
-      else :crash
-      end
     end
 
     # A fresh point-in-time snapshot: the carrier worker hooks receive and job
@@ -175,19 +166,29 @@ module Busybee
     # join the pump and hand back jobs still sitting in the buffer.
     def drain_on_shutdown; end
 
-    # Hand a job back to the engine unworked, then say so. Worker-lifecycle work,
-    # so a failure rides the worker carrier; the job did nothing, reports nothing.
-    # Firing from the ensure means the hook fires however the handback went.
+    # Hand a job back unworked, then say so however the handback went, unless the
+    # process must exit immediately. Worker-lifecycle work, so a failure rides the
+    # worker carrier; the job did nothing, reports nothing. An unrecoverable error
+    # says so, then propagates from wherever the handback runs.
     def handle_shutdown_job(job)
-      error = nil
+      return if exit_immediately?
+
+      error = hand_back(job)
+      with_fresh_worker_status(job, error: error) { Hooks.run(:on_job_not_executed, job, safe: true) }
+    rescue Busybee::Worker::Shutdown => e
+      declare_unhealthy(e) # a stop is already under way: post-stop, and the handbacks carry on
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      exit_immediately!(reason: reason_for(e)) unless recoverable?(e)
+      raise
+    end
+
+    # The wire call; a failure it can recover from is the handback's error to report.
+    def hand_back(job)
       with_fresh_worker_status(job) { return_job_unworked(job) }
-    rescue StandardError => e
-      error = e
+      nil
+    rescue *RECOVERABLE_ERRORS => e
       Busybee.logger&.warn("Failed to hand job #{job.key} back during shutdown: #{e.message}")
-    ensure
-      with_fresh_worker_status(job, error: error) do
-        Hooks.run(:on_job_not_executed, job, safe: true)
-      end
+      e
     end
 
     # Calls Client#fail_job directly: a handback is not a failure, so nothing is
@@ -203,32 +204,17 @@ module Busybee
     # A hook declaring the worker down leaves this job in hand and unworked, so it
     # goes back as any job in hand at a stop does, then the escalation carries on.
     #
-    # @param job [Busybee::Job]
     # @param source [Symbol] :poll or :stream, the receive path that activated it
     # @param buffered [Boolean] true from buffered call sites, false from direct ones
     def activate_job(job, source:, buffered: false)
       job.timestamps.stamp!(:activated_at)
       job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
-      with_fresh_worker_status(job) { Hooks.run(:on_job_activated, job, safe: true) }
+      with_fresh_worker_status(job) { Hooks.run(:on_job_activated, job, safe: true) } unless exit_immediately?
     rescue Busybee::Worker::Shutdown => e
       declare_unhealthy(e)
       handle_shutdown_job(job)
       raise
     end
-
-    # The worker declared itself down: claim the stop; a winner keeps the error to raise.
-    def declare_unhealthy(error) = claim_stop(:unhealthy) { |won| record_shutdown_error(error) if won }
-
-    # Main-thread rescues: the error is still raised if an earlier stop claimed the reason.
-    def declare_unhealthy_and_keep(error) = declare_unhealthy(error) || record_shutdown_error(error)
-
-    # Set the reason if unset; record sees the outcome before any announcement.
-    def claim_stop(reason, &record)
-      synchronize_claim { @stop_reason.compare_and_set(nil, reason).tap(&record) }.tap { |won| announce_stop if won }
-    end
-
-    def synchronize_claim = yield
-    def record_shutdown_error(_error); end
 
     # Stamp a fresh Status onto the job, then seed that SAME object for Calls:
     # reading it back off the job rather than passing it twice is what stops a Call
@@ -244,20 +230,17 @@ module Busybee
     # only the innermost gate decides whether work happens. The ensure runs even
     # under run_chain's Shutdown re-raise, and re-stamps, so the final activation
     # stays observable and its gauges read as of completion.
-    #
-    # @param job [Busybee::Job]
     def execute_job(job)
       with_fresh_worker_status(job) do
         Hooks.run_chain(:around_job_execution, job, safe: true) do
           @worker_class.perform_job(job) # seeds its own job carrier (Call.with_job) for perform
         end
       ensure
+        exit_immediately!(reason: reason_for($!)) if $! && !recoverable?($!) # the first point its error passes
         job.timestamps.stamp!(:executed_at)
         @total_job_count.increment
         @failed_job_count.increment if job.failed?
-        with_fresh_worker_status(job) do
-          Hooks.run(:on_job_executed, job, safe: true)
-        end
+        with_fresh_worker_status(job) { Hooks.run(:on_job_executed, job, safe: true) } unless exit_immediately?
       end
     end
 

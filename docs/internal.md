@@ -154,8 +154,8 @@ The Railtie passes Rails config values through these setters. It pre-coerces boo
 
 Consumers then convert for their own destination:
 
-- `milliseconds_from` — every protobuf duration field. Truncates, because those fields are `int64` milliseconds.
-- `seconds_from` — every `Kernel#sleep` (`Runner#handle_grpc_error`, `ErrorHandling#with_retry`, the streaming pump's throttle) and `Job#update_timeout`'s deadline arithmetic. Returns a Float; it must, since `0.25.seconds` truncated to `0` is the difference between waiting and not.
+- `milliseconds_from`: every protobuf duration field. Truncates, because those fields are `int64` milliseconds.
+- `seconds_from`: every wait (the backpressure back-off in `handle_grpc_error`, the teardown's `shutdown_wait_timeout` waits, `ErrorHandling#with_retry`, the streaming pump's throttle) and `Job#update_timeout`'s deadline arithmetic. Returns a Float; it must, since `0.25.seconds` truncated to `0` is the difference between waiting and not.
 
 A hand-rolled conversion at a sleep site goes wrong for some shape the config layer accepts: milliseconds taken as seconds, or an `ActiveSupport::Duration`, already in seconds, divided again. That bug lives at the *consumption* end, so a spec that exercises only the *input* end, or asserts the value it just passed in, cannot catch it.
 
@@ -222,20 +222,21 @@ Runners hold the resolved config at runtime. The resolved config is a flat Runti
 
 RuntimeConfig fields are divided into two categories:
 
-**Worker-scoped** — participate in the full 4-level precedence chain (per-worker RC → global RC → worker DSL → gem default). Only `worker_mode` has a CLI flag (`-m`); the rest are YAML-only:
-- `worker_mode` — `:polling`, `:streaming`, or `:hybrid`
-- `backpressure_delay` — how long to sleep on a backpressure status (see Durations Module)
-- `max_jobs` — max jobs per poll request
-- `request_timeout` — long-poll timeout in ms
-- `buffer` — whether the streaming pump+buffer is used (`true` by default)
-- `buffer_throttle` — pump thread delay in ms (`false` = no throttle)
-- `job_timeout` — job lock timeout in ms
-- `fail_job_backoff` — fail-job backoff in ms
+**Worker-scoped**: participate in the full 4-level precedence chain (per-worker RC → global RC → worker DSL → gem default). Only `worker_mode` has a CLI flag (`-m`); the rest are YAML-only:
+- `worker_mode`: `:polling`, `:streaming`, or `:hybrid`
+- `backpressure_delay`: how long to back off on a backpressure status, unless a stop comes first (see Durations Module)
+- `max_jobs`: max jobs per poll request
+- `request_timeout`: long-poll timeout in ms
+- `buffer`: whether the streaming pump+buffer is used (`true` by default)
+- `buffer_throttle`: pump thread delay in ms (`false` = no throttle)
+- `job_timeout`: job lock timeout in ms
+- `fail_job_backoff`: fail-job backoff in ms
 
-**Process-wide** — apply globally, no per-worker overrides (global RC → gem default):
-- `log_format` — `:text` or `:json`
-- `worker_name` — identifier for this worker process
-- `cluster_address` — Zeebe gateway address
+**Process-wide**: apply globally, no per-worker overrides (global RC → gem default):
+- `log_format`: `:text` or `:json`
+- `worker_name`: identifier for this worker process
+- `cluster_address`: Zeebe gateway address
+- `shutdown_wait_timeout`: the bound, in ms, on every teardown wait for another thread's share of the shutdown (the T1 wait and the pump join); one value for every runner in the process, `Multi`'s children included. Runners read `Busybee.shutdown_wait_timeout`, never this field: the field only carries a YAML value to the CLI's `apply_global_config!`, whose validating setter converts a String and warns under the floor
 
 ### Precedence Chains
 
@@ -265,7 +266,7 @@ Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit va
 
 `RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `worker_mode`).
 
-**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `buffer`, `buffer_throttle`, `job_timeout`, `fail_job_backoff`) plus `workers`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
+**Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `buffer`, `buffer_throttle`, `job_timeout`, `fail_job_backoff`) plus `workers`, and one process-wide field, `shutdown_wait_timeout`, at the top level only. The other process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
 
 **Workers format:** The `workers` key is a YAML list. Each entry is either a bare string (worker class name, no overrides) or a mapping with the worker name as key and overrides nested beneath it:
 
@@ -297,7 +298,7 @@ Runners are long-lived processes that fetch jobs and dispatch them to Workers. A
 ### Class Hierarchy
 
 ```
-Runner                    # Base class: run!, stop!, stopping?, running?, kill!, factory
+Runner                    # Base class: run!, stop!, stopping?, stop_reason, running?, kill!, factory
 ├── Runner::Polling       # Loop using client.with_each_job
 ├── Runner::Streaming     # Loop using client.open_job_stream (dual-mode: inline or pump+queue)
 │   └── Runner::Hybrid    # Subclass of Streaming, adds poll-drain phase before buffer processing
@@ -322,7 +323,7 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 | `Concurrent::AtomicBoolean` | `@running`: the CAS on it is the single-entry gate (see Run Lifecycle) |
 | `Concurrent::AtomicFixnum` | Job counters (`@total_job_count`, `@failed_job_count`, `@backpressure_count`) and the streaming buffer gauge (`@buffered_job_count`, `@peak_buffer_size`) |
 | `Concurrent::AtomicReference` | `@stop_reason` (set once; the stop gate), `@teardown_error` and `@thread_error` (Multi), first-error-wins |
-| Ruby `Monitor` | `@pump_claim` (Streaming/Hybrid): a stop claim and its record as one step, and the only access to the exit and post-stop error slots, which are plain ivars |
+| Ruby `Monitor` | `@stop_lock` (Streaming/Hybrid): a stop claim and its record as one step, and the only access to the exit and post-stop error slots, which are plain ivars (other runners record on one thread, needing no lock); also orders assigning the opened stream against `cease_intake`'s close |
 | Ruby `Queue` | Job queue between pump thread and main thread (thread-safe) |
 | `Concurrent::FixedThreadPool` | Multi runner — one thread per child runner |
 
@@ -331,23 +332,25 @@ Runner                    # Base class: run!, stop!, stopping?, running?, kill!,
 `Runner#run!` is a template method owning the run lifecycle; subclasses fill `run_loop` (the fetch loop) and optionally `cease_intake` / `drain_on_shutdown`. It fires the four observation-only worker hooks, each with a fresh frozen `Worker::Status` snapshot (identity, timing, counters, buffer gauges, outcome):
 
 - **T0 `on_worker_started`** — in `run!` via the private `start!`, once the run is accepted.
-- **T1 `on_worker_stop_requested`**: in `announce_stop`, on the thread whose claim won the stop reason, through `stop!` or a buffered streaming worker's `claim_stop`.
+- **T1 `on_worker_stop_requested`**: in `announce_stop`, exactly once per run (an `@announcing` flag), on the thread whose claim won the stop reason, through `stop!` or `claim_stop`. Every run passes it: a teardown that finds nothing announced (a crash claimed only there, or a loop returning without a stop) announces on its own thread. `announce_stop` sets `@stop_announced` (a `Concurrent::Event`) when it finishes, and the teardown waits on it before T2, bounded by `shutdown_wait_timeout` and skipped once the process must exit immediately, so T1 precedes T2 even when another thread announced. `kill!` sets it too, releasing a teardown still waiting on a T1 running elsewhere.
 - **T2 `on_worker_stopping`** and **T3 `on_worker_shutdown`** — in `run!`'s `ensure`, around the drain.
 
-**The ensure always completes.** T1, T2 and T3 all fire inside `contain_teardown_escalation`, which rescues the one thing a `safe: true` run lets past — `Worker::Shutdown`, whether raised outright or wrapped around a `shutdown_on` match — records it in `@teardown_error` (first wins) and logs it. Once teardown has begun the worker cannot be made more stopped, so escalation buys nothing while costing the drain, the later moments and the `@running` clear, and it would *replace* the exception the worker was exiting on, losing it with no `cause` link. The recorded error is handed to T3 as `Worker::Status#error` only where the exit exception is not already there. T0 is not wrapped: aborting a start is a real outcome.
+**The ensure completes, short of an error the process can't recover from.** T1, T2 and T3 all fire inside `contain_teardown_hooks`, which rescues and records in `@teardown_error` (first wins) what a `safe: true` run lets past short of that line: `Worker::Shutdown`, whether raised outright or wrapped around a `shutdown_on` match, which it logs, and any other `StandardError` (the swallow's own logging failing, say). Once teardown has begun the worker cannot be made more stopped, so escalation buys nothing while costing the drain and the later moments, and it would *replace* the exception the worker was exiting on, leaving it only down the new error's `cause` chain. The recorded error is handed to T3 as `Worker::Status#error` only where the exit exception is not already there. An error outside `Runner::RECOVERABLE_ERRORS` raises the fire alarm and propagates, out of `run!` on the runner's thread, or out of `stop!` on whichever thread announced, skipping the rest of the teardown. `@running` clears in the teardown's own `ensure` regardless, so a runner whose teardown crashed still reads as stopped. T0 is not wrapped: aborting a start is a real outcome.
 
-The drain is contained the same way, by `drain_within_teardown`: a failing wire call would otherwise skip T3 and the `@running` clear exactly as an escalating hook would. It is also **skipped outright** when the worker is exiting on something outside `Runner::RECOVERABLE_ERRORS`: under `NoMemoryError` the drain's own calls are the ones about to fail again, and those jobs come back on activation timeout anyway. The pump thread feeds that same decision. Whatever ends it, of any class, is classified by `Streaming#end_pump` at the moment it claims the stop:
+The drain is contained the same way, by `drain_within_teardown`: a failing wire call would otherwise skip T3 exactly as an escalating hook would, so a recoverable failure is recorded, logged, and the teardown carries on. It is also **skipped outright** once the process must exit immediately (the fire alarm, below): under `NoMemoryError` the drain's own calls are the ones about to fail again, and those jobs come back on activation timeout anyway. An error outside `Runner::RECOVERABLE_ERRORS` inside the drain raises that alarm and propagates, abandoning the rest of the teardown. A handback raises the alarm for its own such error, then propagates it, wherever the handback runs (see the Shutdown path in [job_execution_flows.md](internal/job_execution_flows.md#lifecycle-edge-cases)). The pump thread feeds the same alarm. Whatever ends it, of any class, is classified by `Streaming#end_pump` at the moment it claims the stop:
 
 - **Its claim wins the stop reason:** the error caused the stop. It is stashed for the main thread to re-raise, so it reaches the teardown as the run's own exit error, under its own reason, and is classified like any other.
-- **A stop was already under way:** the error is a **post-stop error**. A graceful stop in flight wins, so it is never raised, the winning reason stands, and T3 reports it as `status.error`. `drain_on_shutdown` checks it after the join, so a post-stop error outside `RECOVERABLE_ERRORS` still skips the handback.
+- **A stop was already under way:** the error is a **post-stop error**. A graceful stop in flight wins, so it is never raised, the winning reason stands, and T3 reports it as `status.error`. `end_pump` raises the fire alarm for one outside `RECOVERABLE_ERRORS` either way, and `drain_on_shutdown` joins the pump before handing anything back, so such an error lands in time for every handback to decline.
 
-The claim and the record are one step under a lock (`claim_stop`) that the main thread's read of the stash also takes, so an error's outcome never depends on which side of that read it lands. On a buffered worker the main thread's own `declare_unhealthy` claims through the same step, so whoever claims owns both the reason and the stash, and a pump error racing it loses the claim and becomes a post-stop error rather than vanishing.
+The same rule holds on every runner and thread, through one `Stopping#claim_stop(reason, error)`: a won claim records the error in the exit slot, raised at loop exit by `raise_exit_error`; a lost one records it as the post-stop error, unless it is already the exit error (an activation escalation re-raised to its caller's rescue). The claim and the record are one step under `synchronize_claim` (`@stop_lock` on a streaming worker, a plain `yield` where only one thread records), which `raise_exit_error` and `post_stop_error` also take, so an error's outcome never depends on which side of a read it lands. Whoever claims owns both the reason and the slot, and an error racing it loses the claim and becomes a post-stop error rather than vanishing.
 
-The pump can still die by exception, through T1 alone: an error outside `StandardError` from an `on_worker_stop_requested` hook fired from the pump's `rescue` (its own error won the claim) or its `ensure` (the gateway closed the stream cleanly) escapes the thread. Unless the exit already skipped the drain, the join re-raises it and the teardown ends there, as with any such error from a teardown hook. T1 fired by an activation escalation runs inside the pump's `begin`, so the same error is rescued there and becomes a post-stop error.
+The pump never dies by exception, and it is the one thread that contains a T1 hook's non-recoverable error. `contain_pump` wraps both the pump's loop and its `ensure`'s stop, so T1 fired from the `ensure` (the gateway closed the stream cleanly) comes to `end_pump` like any pump error, and T1 fired by the announcement of `end_pump`'s own won claim is rescued there. Either way that error meets a stop already claimed, so it is a post-stop error: the run returns without raising it, and the CLI exits 1 on the alarm it raised.
+
+**The fire alarm.** `Runner::EXIT_IMMEDIATELY` is a process-wide, set-once `Concurrent::AtomicBoolean`, allocated at load so raising it allocates nothing. Beside it, `EXIT_IMMEDIATELY_REASON`, a preallocated `Concurrent::AtomicReference`, names the fire: `exit_immediately!(reason: :crash)` records the reason (the first fire's stands, set before the flag) and raises the flag, a Symbol allocating nothing either. `kill!` passes its own reason (`:kill`); every other raiser passes `reason_for` its error, `:crash` for each non-recoverable one today. Raising the alarm claims no runner's stop, since a claim must go through `claim_stop` to announce T1. Instead, every place a runner claims its own stop on the way out asks `ending_reason`, which is the fire's reason once the alarm is raised, and its `otherwise:` until then: the pump's `ensure` and inline streaming's clean end (`otherwise: :gateway_closed`), and the teardown's no-claim case (none). So in a `Multi` every sibling reports the fire that took the process down: `:kill` where an operator forced it, `:crash` where a worker died of an unrecoverable error. `exit_immediately!` raises it and `exit_immediately?` reads it; `Runner.exit_immediately?` is the public reader, which the CLI consults when joining its signal threads, and again to exit 1 once the run has returned (see [Signal Handling](#signal-handling)). It is raised at the first runner code an error the process can't recover from passes, so no consumer classifies errors: `execute_job`'s ensure, for one escaping a job; the teardown, on an exit exception outside `RECOVERABLE_ERRORS`; `Streaming#end_pump`, on such a pump error, whether or not its claim won; `handle_shutdown_job`, for a handback's, wherever the handback runs; `drain_within_teardown`, for the rest of a drain's; `contain_teardown_hooks`, for a T1, T2 or T3 hook's, each before the error propagates; and `Multi`'s pool rescue, the only place a non-recoverable T0 is caught, since `start!` runs outside `run!`'s `ensure`. `kill!` raises it unconditionally. Once it is raised, every runner in the process skips the drain and every handback (`handle_shutdown_job` neither calls the engine nor fires `on_job_not_executed`), and fires no `on_job_activated` or `on_job_executed`. Because `stopping?` counts it, each runner's loops also leave and its activation branch stops starting new work, without waiting for `Multi`'s cascade to reach it, and a runner not yet started never starts. So the job whose own `perform` raised the error skips `on_job_executed` too; `after_perform`, fired in `Worker`'s own ensure before any runner code, still runs. `Busybee::Testing` lowers the alarm and clears its reason before every example, through the private `Runner.lower_exit_immediately`.
 
 **Single-entry gate.** `start!` flips `@running` with an atomic compare-and-set and reports whether *this* call won it; `run!` does `return unless start!` before its `begin/ensure`. A second `run!` on an already-running runner is a no-op (without it, both callers would block their own `run_loop`). The same CAS placement makes the T0/T2/T3 set fire all-or-none — the `ensure` is reached only once `start!` has won.
 
-**Close-before-fire.** `stop!(reason:)` gates on `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate, so `stopping?` and the reason are one atomic fact (no window where a reader sees `stopping?` true but the reason unset), and T1 fires once across repeated signals / per-job `Shutdown`s. Then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires — so a propagating observer can never skip the close and wedge shutdown. The `ensure`'s `cease_intake` is the backstop for the uncaught-error exit where `stop!` was never called.
+**Close-before-fire.** `stop!(reason:)` gates on `@stop_reason.compare_and_set(nil, reason)`: the set-once reason *is* the gate, and T1 fires once across repeated signals / per-job `Shutdown`s. `stopping?` is true once that reason is set **or** the fire alarm is raised, so every loop and handback branch that asks it also leaves, or declines, once the process must exit immediately, even before this runner has a reason of its own; `stop_reason` reads the reason alone, `nil` until one is claimed. Then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires, so a propagating observer can never skip the close and wedge shutdown. The teardown claims the reason for its exit exception *before* anything of its own closes intake, since closing the stream wakes the pump, whose clean-close claim (`:gateway_closed`) would otherwise race it; its own `cease_intake` call is an idempotent backstop for an announcement still under way on another thread. A stop landing while a streaming worker is still opening its stream finds nothing to close, so `Streaming#run_loop` assigns the opened stream under `@stop_lock`, which `cease_intake` also takes, then checks `stopping?`. A stop sets its reason before its `cease_intake` takes the lock, so either that close sees the stream, or the check sees the stop and the run goes straight to its teardown, whose `cease_intake` closes it. The fire alarm seen there does the same, and the teardown claims the fire's reason if nothing has claimed a stop. A stop just after the assignment closes a stream not yet read, whose first read then raises `StreamAlreadyClosed`; since only busybee's own close produces that, `each_streamed_job` takes it as a clean end, for the pump and inline alike.
 
 **Stop reason (`reason` ⊥ `error`).** The closing `Worker::Status` carries two independent axes: `reason` names *why* the run stopped (a low-cardinality Symbol); `error` carries the exception, if any. They don't collapse into one another — a `:rollover` that errors mid-drain reports `reason: :rollover, error: <exception>`. The reason is set once, through the `@stop_reason` gate; `stop!` defaults it to `:signal` and accepts only a Symbol (`ArgumentError` otherwise). Canonical values and who sets each:
 
@@ -370,17 +373,17 @@ The pump can still die by exception, through T1 alone: an error outside `Standar
 
 From the Runner's perspective, `perform_job` has a simple two-outcome contract (returns or raises `Shutdown`). All other exceptions are handled inside `perform_job`. In the fetch loop:
 
-- **Backpressure** — a wrapped `Busybee::GRPC::Error` whose `grpc_status` is in `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) is handled by the shared `handle_grpc_error`: increment `@backpressure_count`, sleep `backpressure_delay` (converted to seconds at the sleep), retry the fetch. Matched by status *symbol*, so it catches the backpressure outcome however the gateway raised it; any other gRPC error re-raises. Fetch needs *two* translation points rather than one: the dispatch runs through the call seam, but `ActivateJobs` is server-streaming, and grpc hands back a lazy enumerator whose status error surfaces while the responses are read — after the seam has closed. So `with_each_job` rescues `::GRPC::BadStatus` around the enumeration itself. Without that second point the raw status matches neither fetch loop's rescue, and backpressure reads as a crash.
-- **`Worker::Shutdown`** → `declare_unhealthy` claims the stop as `:unhealthy` and returns whether the claim won. A winner keeps the error for the run to re-raise, recorded through `claim_stop` before the stop is announced, since the announcement wakes the main thread (on a buffered streaming worker, under the lock that thread reads by; see Run Lifecycle). The main thread's fetch and buffer-consumer rescues call `declare_unhealthy_and_keep`, which also keeps the error when an earlier stop claimed the reason, so it is raised at loop exit either way and reaches `run!`'s `ensure`, where `error` is recorded as its unwrapped cause (see Stop reason). One raised from `on_job_activated` is declared in `activate_job` first, so the job in hand goes back through `handle_shutdown_job` already reading `reason: :unhealthy`, then re-raised for the caller's rescue. On the pump that rescue is `end_pump`: an escalation whose claim won is already the exit error and is skipped, and one whose claim lost becomes a post-stop error.
+- **Backpressure**: a wrapped `Busybee::GRPC::Error` whose `grpc_status` is in `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) is handled by the shared `handle_grpc_error` (in `Runner::Stopping`): increment `@backpressure_count`, back off for `backpressure_delay` (converted to seconds at `back_off`), retry the fetch. The back-off waits on `@stop_announced`, so a stop ends it early. Matched by status *symbol*, so it catches the backpressure outcome however the gateway raised it. Any other gRPC error claims the stop as `:gateway_error` (`claim_stop`): a won claim announces the stop, T1 firing on the fetching thread, then raises the error; a lost one met a stop under way and becomes a post-stop error. Inline streaming's stream errors take the same claim. Fetch needs *two* translation points rather than one: the dispatch runs through the call seam, but `ActivateJobs` is server-streaming, and grpc hands back a lazy enumerator whose status error surfaces while the responses are read, after the seam has closed. So `with_each_job` rescues `::GRPC::BadStatus` around the enumeration itself. Without that second point the raw status matches neither fetch loop's rescue, and backpressure reads as a crash.
+- **`Worker::Shutdown`** → `declare_unhealthy` claims the stop as `:unhealthy` and returns whether the claim won. A winner keeps the error for the run to re-raise, recorded through `claim_stop` before the stop is announced, since the announcement wakes the main thread (on a buffered streaming worker, under the lock that thread reads by; see Run Lifecycle). A loser met a stop already under way, so it is a post-stop error: never raised, reported at T3, the winning reason standing. A winner is raised at loop exit and reaches `run!`'s `ensure`, where `error` is recorded as its unwrapped cause (see Stop reason). One raised from `on_job_activated` is declared in `activate_job` first, so the job in hand goes back through `handle_shutdown_job` already reading `reason: :unhealthy`, then re-raised for the caller's rescue. On the pump that rescue is `end_pump`: an escalation whose claim won is already the exit error and is skipped, and one whose claim lost becomes a post-stop error.
 - **Other errors** → propagate up (to Multi/CLI). Likely fatal (auth, config).
 
 ### Shutdown Sequence
 
-**Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` — the set-once reason *is* the gate — stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), then fire T1. In-progress `perform_job` completes; `run!`'s `ensure` then drains — remaining queued/yielded jobs are handed back via `handle_shutdown_job`, preserving the retry count — and fires T2/T3.
+**Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` (the set-once reason *is* the gate), then stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), and fire T1. In-progress `perform_job` completes; `run!`'s `ensure` waits for T1 to finish, fires T2, drains (remaining queued/yielded jobs are handed back via `handle_shutdown_job`, preserving the retry count), and fires T3.
 
-**Forced (`kill!`):** Base calls `stop!` with the reason it was given (`:kill` by default; `Multi`'s non-recoverable cascade passes the crash's reason instead). Streaming also kills the pump thread, logs how many activated jobs it is discarding, and flushes the queue (resetting the buffer gauge). Multi kills all child runners and the thread pool.
+**Forced (`kill!`):** Base raises the fire alarm, so no runner in the process hands back or runs job hooks after it, then calls `stop!` with the reason it was given (`:kill` by default; `Multi`'s non-recoverable cascade passes the crash's reason instead). Streaming also kills the pump thread, logs how many activated jobs it is discarding, and flushes the queue (resetting the buffer gauge). Multi kills all child runners and the thread pool.
 
-The log line is the only record a kill leaves: on the real path — `cli.rb`'s second signal, guarded by `if @runner.stopping?` — `stop!`'s reason CAS has already been won by the graceful stop, so T1 does not re-fire, and the `exit!(1)` on the next line skips every `at_exit` and `ensure`, so T2/T3 never fire either. That is also why `:kill` is a stop reason alerts effectively never see. The buffer clear doubles as the drain's early exit: a graceful drain running when the kill lands finds nothing on its next non-blocking pop and breaks, so no separate guard is needed in the loop.
+The log line is the only record a kill leaves: on the real path (`cli.rb`'s second signal, past its `@signalled` flag) `stop!`'s reason CAS has almost always been won already by the first signal's graceful stop, so T1 does not re-fire, and the `exit!(1)` on the next line skips every `at_exit` and `ensure`, so T2/T3 never fire either. That is also why `:kill` is a stop reason alerts effectively never see. The buffer clear doubles as the drain's early exit: a graceful drain running when the kill lands finds nothing on its next non-blocking pop and breaks, so no separate guard is needed in the loop.
 
 ### Buffer Throttle
 
@@ -398,11 +401,11 @@ Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` — works
 
 **Threading model:** A `Concurrent::FixedThreadPool` sized to the number of worker classes. Each thread calls `runner.run!` on its child runner. The main thread calls `thread_pool.wait_for_termination` and blocks until all child threads exit.
 
-**Error handling:** A `Concurrent::AtomicReference` captures the first error from any child thread (first-error-wins via `update { |prev| prev || e }`). When a child thread raises, Multi logs the error, calls `stop!` to cascade shutdown to all siblings, and after the pool terminates, re-raises the captured error.
+**Error handling:** A `Concurrent::AtomicReference` captures the first error from any child thread (first-error-wins via `update { |prev| prev || e }`). When a child thread raises, Multi logs the error and cascades to the siblings, and after the pool terminates, re-raises the captured error. A recoverable error cascades a graceful `stop!` (`cascade_after_failure`), unless the fire alarm is already raised, when it kills them under the fire's reason instead; anything else raises the fire alarm and kills them (`kill_children`, under the fire's reason: this crash's, or an earlier fire's). A child whose `run!` returns normally ends them too (`cascade_after_return`): it kills them, under the fire's reason, if the fire alarm is raised, since its own error never left it; otherwise it stops them gracefully under its own `stop_reason` (a clean stream close, say), so a job type is never left unworked while its siblings keep the process alive. Nothing is re-raised either way.
 
 **Shutdown sequence:**
 - `stop!` — stops all child runners, then `thread_pool.shutdown` (waits for in-progress jobs to finish)
-- `stopping?` — true only when *all* child runners are stopping
+- `stopping?` — true only when *all* child runners are stopping (each counting the fire alarm, so all are once it is raised)
 - `kill!` — kills all child runners, then `thread_pool.kill` (immediate termination)
 
 **ActiveRecord connection pool check:** On initialization, if `ActiveRecord` is defined, Multi compares `connection_pool.size` against the number of worker classes. Logs an error if the pool is undersized (common misconfiguration), or an info message confirming adequate pool size.
@@ -424,31 +427,33 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 
 1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
 2. **`initialize(args)`** — all setup: parse options (`OptionParser`), load Rails environment, extract workers from YAML if `--config`, load worker classes, build `RuntimeConfig`, apply process-wide config.
-3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks).
+3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks), joins the signal threads within `shutdown_wait_timeout`, then exits 1 if the fire alarm is up (see [Signal Handling](#signal-handling)).
 
 ### CLI Flags
 
-The CLI exposes 5 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff) are YAML-only — they're per-worker concerns that don't belong on a command line.
+The CLI exposes 5 flags, besides `--version` and `--help`. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff) are YAML-only: they're per-worker concerns that don't belong on a command line.
 
-- `--config` / `-c` — YAML configuration file path
-- `--worker-mode` / `-m` — `:polling`, `:streaming`, or `:hybrid`
-- `--log-format` / `-l` — `:text` or `:json`
-- `--worker-name` / `-n` — worker process identifier
-- `--cluster-address` / `-a` — Zeebe gateway address
+- `--config` / `-c`: YAML configuration file path
+- `--worker-mode` / `-m`: `:polling`, `:streaming`, or `:hybrid`
+- `--log-format` / `-l`: `:text` or `:json`
+- `--worker-name` / `-n`: worker process identifier
+- `--cluster-address` / `-a`: Zeebe gateway address
 
 **Mutual exclusions:** `--config` is mutually exclusive with `--worker-mode` (set worker_mode in YAML instead) and with positional worker args (list workers in YAML instead). Process-wide flags (`-l`, `-n`, `-a`) are allowed alongside `--config`.
 
 **YAML config flow:** When `--config` is provided, the CLI calls `RuntimeConfig.parse_yaml` to get YAML-sourced kwargs, extracts worker class names from the `workers:` keys, merges CLI process-wide flags into the kwargs, and constructs RuntimeConfig from the result.
 
-**Process-wide application:** `apply_global_config!` applies process-wide flags to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding values already set by the Railtie.
+**Process-wide application:** `apply_global_config!` applies process-wide flags, and the YAML's top-level `shutdown_wait_timeout`, to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding values already set by the Railtie, naming the flag or the YAML key.
 
 ### Signal Handling
 
-Traps `INT`, `QUIT`, `TERM` — all mapped to the same handler. The trap block spawns a thread and joins it (`Thread.new { handle_signal(signal) }.join`) to work around Ruby's signal trap restrictions (no mutex/thread pool operations in trap context).
+Traps `INT`, `QUIT`, `TERM`, all mapped to the same handler. The trap block hands the handling to a thread of its own (Ruby forbids mutex and thread-pool operations in trap context) and returns **without joining it**. Ruby runs the trap on the main thread on top of whatever it interrupted, a write holding the logger's lock included, and the handler's `stop!`, its T1 hooks and their log lines may need that very lock; joining from the trap would deadlock the process. `CLI#run` keeps those threads and joins them after `run!` returns, since Ruby kills unjoined threads at exit and T1 may still be running on one past the teardown's own wait. Each join waits up to `shutdown_wait_timeout`, or not at all under `Runner.exit_immediately?`; a thread still announcing at the bound is left behind, to be killed at exit, while one that died of an error re-raises it. Once `run!` has returned and the joins have raised nothing, `CLI#run` calls `exit(1)` if the alarm is up, at_exit handlers included, so an error contained on another thread (the stream reader's, or one on a thread the join missed) still fails the process. So a T1 hook that never returns holds the exit for at most that bound past the run's end, and a second signal's `exit!(1)` ends it sooner.
 
 **Two-signal pattern:**
 - First signal → `runner.stop!` (graceful shutdown)
-- Second signal (while `stopping?`) → `runner.kill!` + `exit!(1)` (forced shutdown, non-zero exit code, skips at_exit handlers)
+- Any later signal → `runner.kill!` on a thread of its own, waited for no longer than `shutdown_wait_timeout`, then `exit!(1)` whatever it did (forced shutdown, non-zero exit code, skips at_exit handlers). The kill's own `stop!` can claim a `Multi` child the first signal hasn't reached and run that child's T1 hooks; the bound keeps a hung one from holding the exit.
+
+The CLI tells them apart by its own set-once `@signalled` flag, created in `initialize` before any trap can fire, not by `runner.stopping?`: with no join in the trap, a second signal can arrive while the first's stop is still under way, and `Multi#stopping?` (every child stopping) stays false until the last child's T1 has begun.
 
 ### Rails Environment Loading
 
@@ -548,7 +553,7 @@ Per-moment readers are forwarded on Job (`job.activated_at`, `job.executed_at`, 
 
 ### Hook Registration
 
-The hook names encode which of the Job carrier's two lifecycles a hook belongs to: **`perform` in the name means the usercode lifecycle** (`before_perform` / `around_perform` / `after_perform`, tightly scoped to the worker's `perform` method), while **`job` in the name means the job's system lifecycle** (`on_job_activated` / `on_job_executed` / `on_job_not_executed` / `around_job_execution`, the distributed-system view: activation, buffering, validation, the response back to the engine). This mirrors the `perform_*` vs `execution_*` timestamp families. One firing quirk to know: `after_perform` fires at perform-envelope exit whenever perform was attempted (`perform_started_at` is set), however the attempt ended. A job a hook short-circuited, or that failed input validation, never reaches it, so a hook that must fire on every exit path is `on_job_executed`. `on_job_not_executed` is that hook's complement rather than an addition to it: exactly one of the two closes every activated job's bracket, except under `kill!` and an exit on an error outside `Runner::RECOVERABLE_ERRORS`, both of which drop the jobs not yet started (see the Shutdown path in [job_execution_flows.md](internal/job_execution_flows.md#lifecycle-edge-cases)).
+The hook names encode which of the Job carrier's two lifecycles a hook belongs to: **`perform` in the name means the usercode lifecycle** (`before_perform` / `around_perform` / `after_perform`, tightly scoped to the worker's `perform` method), while **`job` in the name means the job's system lifecycle** (`on_job_activated` / `on_job_executed` / `on_job_not_executed` / `around_job_execution`, the distributed-system view: activation, buffering, validation, the response back to the engine). This mirrors the `perform_*` vs `execution_*` timestamp families. One firing quirk to know: `after_perform` fires at perform-envelope exit whenever perform was attempted (`perform_started_at` is set), however the attempt ended. A job a hook short-circuited, or that failed input validation, never reaches it, so a hook that must fire on every exit path is `on_job_executed`. `on_job_not_executed` is that hook's complement rather than an addition to it: exactly one of the two closes every activated job's bracket, except under `kill!` and once an error outside `Runner::RECOVERABLE_ERRORS` has raised the fire alarm, both of which drop the jobs not yet started and the closing hook of any job in flight (see the Shutdown path in [job_execution_flows.md](internal/job_execution_flows.md#lifecycle-edge-cases)).
 
 Hooks are registered via `Busybee.configure`, which delegates to `Busybee::Hooks` (one registration method per `HOOK_TYPES` entry):
 

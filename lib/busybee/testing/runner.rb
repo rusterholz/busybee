@@ -38,8 +38,8 @@ module Busybee
 
       # Run each job through activation and execution, in order, as a runner does
       # with a fetched batch. A stop mid-batch hands the rest back; the teardown
-      # then runs before this returns, and a Shutdown propagates from here as it
-      # would from run!.
+      # then runs before this returns, and a Shutdown that stopped the worker
+      # propagates from here as it would from run!.
       #
       # @param jobs [Array<Busybee::Job>] built on this worker's client, not yet run
       # @return [Array<Busybee::Job>] the jobs
@@ -47,9 +47,8 @@ module Busybee
         refuse_unrunnable!(jobs)
         begin
           @activating = true
-          @shutdown_error = nil
           jobs.each { |job| intake(job) }
-          raise @shutdown_error if @shutdown_error
+          raise_exit_error
         ensure
           @activating = false
           teardown($!) if running? && (stopping? || $!)
@@ -82,8 +81,7 @@ module Busybee
         activate_job(job, source: nil)
         stopping? ? handle_shutdown_job(job) : execute_job(job)
       rescue Busybee::Worker::Shutdown => e
-        @shutdown_error = e
-        stop!(reason: :unhealthy)
+        declare_unhealthy(e)
       end
 
       def refuse_unrunnable!(jobs)
