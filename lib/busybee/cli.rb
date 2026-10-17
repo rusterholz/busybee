@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/module/delegation"
 require "active_support/core_ext/object/blank"
 require "concurrent"
 require "optparse"
@@ -19,9 +20,9 @@ module Busybee
     # Signals we trap to begin a graceful stop.
     STOP_SIGNALS = %w[INT QUIT TERM].freeze
 
-    def self.main(args)
-      new(args).run
-    end
+    delegate :exit_immediately?, to: :"Busybee::Runner", private: true
+
+    def self.main(args) = new(args).run
 
     def initialize(args)
       @signalled = Concurrent::AtomicBoolean.new(false) # before any trap can fire
@@ -45,7 +46,7 @@ module Busybee
       ensure
         join_signal_threads
       end
-      exit(1) if Runner.exit_immediately?
+      exit(1) if exit_immediately?
     end
 
     private
@@ -84,7 +85,7 @@ module Busybee
     # on a signal's thread is waited for, unless the process must exit immediately.
     # Either way, joining re-raises the error a thread already died of.
     def join_signal_threads
-      wait = Runner.exit_immediately? ? 0 : nil
+      wait = exit_immediately? ? 0 : nil
       @signal_threads&.each { |thread| thread.join(wait) }
     end
 
