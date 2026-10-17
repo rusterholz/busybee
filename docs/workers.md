@@ -608,7 +608,6 @@ Usage: busybee [options] WorkerClass [WorkerClass ...]
 | `--log-format FORMAT` | `-l` | String | Log format: `text` or `json` |
 | `--worker-name NAME` | `-n` | String | Worker process identifier (default: hostname) |
 | `--cluster-address ADDR` | `-a` | String | Zeebe gateway address as `host:port` |
-| `--shutdown-wait-timeout MS` | | Integer | How long a stopping worker waits on its other threads, in milliseconds (default: `5000`) |
 | `--version` | `-v` | | Print version and exit |
 | `--help` | `-h` | | Print help and exit |
 
@@ -835,7 +834,7 @@ workers:
 bundle exec busybee --config config/busybee.yml --log-format json --worker-name "prod-worker-1"
 ```
 
-`shutdown_wait_timeout` is process-wide too, but YAML may set it at the top level; its `--shutdown-wait-timeout` flag wins over YAML.
+`shutdown_wait_timeout` is process-wide too, but has no flag: set it at the top level of the YAML, or in [gem configuration](configuration.md#shutdown_wait_timeout).
 
 > For a realistic example, see the [Dropship Co. demo app's busybee config files](../spec/demo/config/busybee/).
 
@@ -857,7 +856,7 @@ The first non-nil value wins. This means `0` and `false` are valid explicit valu
 
 The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
-**Process-wide settings** (like `--log-format`, `--worker-name`, `--cluster-address` and `--shutdown-wait-timeout`) follow a simpler 2-level chain: the CLI flag (or, for `shutdown_wait_timeout`, top-level YAML), then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process.
+**Process-wide settings** (like `--log-format`, `--worker-name` and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. `shutdown_wait_timeout` follows the same chain with top-level YAML in the flag's place: top-level YAML, then gem config, then the default. They don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
 

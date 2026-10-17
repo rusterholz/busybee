@@ -115,7 +115,7 @@ module Busybee
       if @yaml_kwargs
         kwargs = @yaml_kwargs.dup
         # Merge CLI process-wide flags into YAML-sourced kwargs
-        %i[log_format worker_name cluster_address shutdown_wait_timeout].each do |field|
+        %i[log_format worker_name cluster_address].each do |field|
           kwargs[field] = @parsed_options[field] if @parsed_options[field]
         end
         @runtime_config = RuntimeConfig.new(**kwargs)
@@ -192,30 +192,25 @@ module Busybee
       opts.on("-a", "--cluster-address ADDR", "Cluster address (host:port)") do |addr|
         @parsed_options[:cluster_address] = addr
       end
-
-      opts.on("--shutdown-wait-timeout MS", Integer, "Shutdown's wait on other threads, in ms") do |ms|
-        @parsed_options[:shutdown_wait_timeout] = ms
-      end
     end
 
-    # Applies process-wide flags to gem-level config before runners start.
-    # Only sets values that were explicitly provided via CLI flags.
+    # Applies process-wide flags, and YAML's top-level shutdown_wait_timeout, to
+    # gem-level config before runners start. Only sets values explicitly provided.
     # Logs when overriding a value already set (e.g., by the Railtie).
     def apply_global_config!
       apply_global_setting!(:log_format)
       apply_global_setting!(:worker_name)
       apply_global_setting!(:cluster_address)
-      apply_global_setting!(:shutdown_wait_timeout)
+      apply_global_setting!(:shutdown_wait_timeout, source: "YAML shutdown_wait_timeout")
     end
 
-    def apply_global_setting!(field)
+    def apply_global_setting!(field, source: "--#{field.to_s.tr('_', '-')}")
       cli_value = @runtime_config.public_send(field)
       return unless cli_value
 
       existing = Busybee.instance_variable_get(:"@#{field}")
       if existing
-        flag = "--#{field.to_s.tr('_', '-')}"
-        Busybee.logger&.info("#{flag} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
+        Busybee.logger&.info("#{source} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
       end
       Busybee.public_send(:"#{field}=", cli_value)
     end

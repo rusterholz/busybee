@@ -50,7 +50,7 @@ end
 def run_scenario(scenario, gateway)
   Busybee::Testing::HookRegistry.isolated do
     register_hooks(scenario)
-    Busybee::CLI.new(["-a", gateway.address, "--shutdown-wait-timeout", "1000", "SignalledWorker"]).run
+    Busybee::CLI.new(["-a", gateway.address, "SignalledWorker"]).run
     puts "#{scenario} exited" # rubocop:disable RSpec/Output
   end
 end
@@ -71,6 +71,7 @@ end)
 
 Busybee.logger = Logger.new(SignallingDevice.new)
 Busybee.credential_type = :insecure
+Busybee.shutdown_wait_timeout = 1000
 begin
   %w[deadlock slow_stop_requested hung_stop_requested].each { |scenario| run_scenario(scenario, gateway) }
 ensure

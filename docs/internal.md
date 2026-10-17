@@ -236,7 +236,7 @@ RuntimeConfig fields are divided into two categories:
 - `log_format`: `:text` or `:json`
 - `worker_name`: identifier for this worker process
 - `cluster_address`: Zeebe gateway address
-- `shutdown_wait_timeout`: the bound, in ms, on every teardown wait for another thread's share of the shutdown (the T1 wait and the pump join); one value for every runner in the process, `Multi`'s children included. Runners read `Busybee.shutdown_wait_timeout`, never this field: the field only carries a YAML or flag value to the CLI's `apply_global_config!`, whose validating setter converts a String and warns under the floor
+- `shutdown_wait_timeout`: the bound, in ms, on every teardown wait for another thread's share of the shutdown (the T1 wait and the pump join); one value for every runner in the process, `Multi`'s children included. Runners read `Busybee.shutdown_wait_timeout`, never this field: the field only carries a YAML value to the CLI's `apply_global_config!`, whose validating setter converts a String and warns under the floor
 
 ### Precedence Chains
 
@@ -431,20 +431,19 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 
 ### CLI Flags
 
-The CLI exposes 6 flags. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff) are YAML-only: they're per-worker concerns that don't belong on a command line.
+The CLI exposes 5 flags, besides `--version` and `--help`. Worker-scoped tuning knobs (backpressure_delay, max_jobs, request_timeout, buffer, buffer_throttle, job_timeout, fail_job_backoff) are YAML-only: they're per-worker concerns that don't belong on a command line.
 
 - `--config` / `-c`: YAML configuration file path
 - `--worker-mode` / `-m`: `:polling`, `:streaming`, or `:hybrid`
 - `--log-format` / `-l`: `:text` or `:json`
 - `--worker-name` / `-n`: worker process identifier
 - `--cluster-address` / `-a`: Zeebe gateway address
-- `--shutdown-wait-timeout`: `shutdown_wait_timeout` in ms, parsed as an Integer
 
-**Mutual exclusions:** `--config` is mutually exclusive with `--worker-mode` (set worker_mode in YAML instead) and with positional worker args (list workers in YAML instead). Process-wide flags (`-l`, `-n`, `-a`, `--shutdown-wait-timeout`) are allowed alongside `--config`, and win over the YAML's top-level `shutdown_wait_timeout`.
+**Mutual exclusions:** `--config` is mutually exclusive with `--worker-mode` (set worker_mode in YAML instead) and with positional worker args (list workers in YAML instead). Process-wide flags (`-l`, `-n`, `-a`) are allowed alongside `--config`.
 
 **YAML config flow:** When `--config` is provided, the CLI calls `RuntimeConfig.parse_yaml` to get YAML-sourced kwargs, extracts worker class names from the `workers:` keys, merges CLI process-wide flags into the kwargs, and constructs RuntimeConfig from the result.
 
-**Process-wide application:** `apply_global_config!` applies process-wide flags to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding values already set by the Railtie.
+**Process-wide application:** `apply_global_config!` applies process-wide flags, and the YAML's top-level `shutdown_wait_timeout`, to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding values already set by the Railtie, naming the flag or the YAML key.
 
 ### Signal Handling
 

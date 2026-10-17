@@ -87,9 +87,10 @@ RSpec.describe Busybee::CLI do
         expect(cli.runtime_config.cluster_address).to eq("zeebe.example.com:26500")
       end
 
-      it "parses --shutdown-wait-timeout as milliseconds" do
-        cli = described_class.new(["--shutdown-wait-timeout", "8000", "TestCLIWorker"])
-        expect(cli.runtime_config.shutdown_wait_timeout).to eq(8000)
+      it "has no flag for shutdown_wait_timeout" do
+        expect do
+          described_class.new(["--shutdown-wait-timeout", "8000", "TestCLIWorker"])
+        end.to raise_error(OptionParser::InvalidOption, /--shutdown-wait-timeout/)
       end
 
       it "collects remaining positional args as worker class names" do
@@ -198,14 +199,14 @@ RSpec.describe Busybee::CLI do
         expect(resolved).to have_attributes(worker_mode: :polling, max_jobs: 5)
       end
 
-      it "merges CLI process-wide flags into YAML config" do
+      it "merges CLI process-wide flags into YAML config, keeping YAML's shutdown_wait_timeout" do
         path = write_yaml("merge.yml", <<~YAML)
           worker_mode: polling
+          shutdown_wait_timeout: 8000
           workers:
             - TestCLIWorker
         YAML
-        cli = described_class.new(["-c", path, "-l", "json", "-n", "my-worker", "-a", "zeebe:26500",
-                                   "--shutdown-wait-timeout", "8000"])
+        cli = described_class.new(["-c", path, "-l", "json", "-n", "my-worker", "-a", "zeebe:26500"])
         expect(cli.runtime_config).to have_attributes(
           log_format: :json,
           worker_name: "my-worker",
@@ -214,15 +215,14 @@ RSpec.describe Busybee::CLI do
         )
       end
 
-      it "takes shutdown_wait_timeout from the top of the YAML, the flag taking precedence" do
+      it "takes shutdown_wait_timeout from the top of the YAML into gem config" do
         path = write_yaml("shutdown_wait.yml", <<~YAML)
           shutdown_wait_timeout: 8000
           workers:
             - TestCLIWorker
         YAML
-        from_yaml = described_class.new(["-c", path]).runtime_config
-        from_flag = described_class.new(["-c", path, "--shutdown-wait-timeout", "9000"]).runtime_config
-        expect([from_yaml, from_flag].map(&:shutdown_wait_timeout)).to eq([8000, 9000])
+        cli = described_class.new(["-c", path])
+        expect([cli.runtime_config.shutdown_wait_timeout, Busybee.shutdown_wait_timeout]).to eq([8000, 8000])
       end
 
       it "applies process-wide flags to gem config" do
@@ -360,18 +360,6 @@ RSpec.describe Busybee::CLI do
         described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
         expect(Busybee.cluster_address).to eq("zeebe.example.com:26500")
       end
-
-      it "applies shutdown_wait_timeout to gem config" do
-        described_class.new(["--shutdown-wait-timeout", "8000", "TestCLIWorker"])
-        expect(Busybee.shutdown_wait_timeout).to eq(8000)
-      end
-
-      it "warns on a --shutdown-wait-timeout under a second" do
-        allow(Busybee::Logging).to receive(:warn)
-        described_class.new(["--shutdown-wait-timeout", "500", "TestCLIWorker"])
-
-        expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
-      end
     end
 
     context "with shutdown_wait_timeout spelled as a String in YAML" do
@@ -395,6 +383,15 @@ RSpec.describe Busybee::CLI do
         described_class.new(["-c", config_with(500)])
 
         expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
+      end
+
+      it "names YAML as the source when it overrides a configured value" do
+        Busybee.instance_variable_set(:@shutdown_wait_timeout, 3000) # restored by the file's around
+        logger = instance_double(Logger, info: nil, warn: nil, error: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        described_class.new(["-c", config_with(8000)])
+
+        expect(logger).to have_received(:info).with(/\AYAML shutdown_wait_timeout overriding.*3000.*8000/)
       end
 
       it "does not override gem config when flags are not provided" do
