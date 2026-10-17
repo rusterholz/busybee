@@ -77,10 +77,10 @@ module Busybee
         @runners.each do |runner|
           @thread_pool.post do
             runner.run!
-            end_with(runner)
+            cascade_after_return(runner)
           rescue *RECOVERABLE_ERRORS => e
             record_child_failure(runner, e)
-            end_on(e)
+            cascade_after_failure(e)
           rescue Exception => e # rubocop:disable Lint/RescueException
             exit_immediately!(reason: reason_for(e))
             record_child_failure(runner, e)
@@ -92,7 +92,7 @@ module Busybee
       # A child that stopped takes the rest with it, under its reason, or kills
       # them if the process must exit immediately: a job type nobody works is a
       # silent outage.
-      def end_with(runner)
+      def cascade_after_return(runner)
         return kill_children(reason: ending_reason) if exit_immediately?
 
         reason = runner.stop_reason # the reason itself: stopping? also counts the alarm
@@ -102,7 +102,7 @@ module Busybee
       # A child's recoverable error stops the rest gracefully, the container adopting
       # its reason (:crash/:gateway_error/:unhealthy), unless the process must exit
       # immediately: then the fire decides, as for any other child ending.
-      def end_on(error)
+      def cascade_after_failure(error)
         return kill_children(reason: ending_reason) if exit_immediately?
 
         stop!(reason: reason_for(error))

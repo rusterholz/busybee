@@ -28,7 +28,7 @@ module Busybee
       # gauge ignores the :stop control sentinels the queue also carries.
       def initialize(worker_class, runtime_config: nil, client: nil)
         super
-        @pump_claim = Monitor.new # the claim's lock, shared by the pump and the main thread
+        @stop_lock = Monitor.new # the stop claim's slots, assigning @stream, and closing it
         return unless buffer?
 
         @job_buffer = Queue.new
@@ -85,16 +85,16 @@ module Busybee
       # (close-before-fire), and run!'s ensure again as the error-exit backstop.
       # Idempotent: a second close no-ops and extra sentinels are skipped on drain.
       def cease_intake
-        @pump_claim.synchronize { @stream&.close }
+        @stop_lock.synchronize { @stream&.close }
         @job_buffer&.push(:stop) if buffer?
       end
 
       # A stop landing while the stream opened found nothing to close. Under the
       # lock cease_intake takes, either it sees this stream or the stop shows here,
       # and nil sends the run to the teardown, whose cease_intake closes it. A stop
-      # just after this closes a stream not yet read: read_stream's clean end.
+      # just after this closes a stream not yet read: each_streamed_job's clean end.
       def adopt_stream(stream)
-        halted = @pump_claim.synchronize do
+        halted = @stop_lock.synchronize do
           @stream = stream
           stopping?
         end
@@ -103,7 +103,7 @@ module Busybee
 
       # Only our own close makes a stream refuse its first read, so that is a
       # clean end like any other.
-      def read_stream(&)
+      def each_streamed_job(&)
         @stream.each(&)
       rescue Busybee::StreamAlreadyClosed
         nil
@@ -150,7 +150,7 @@ module Busybee
       end
 
       def run_inline
-        read_stream do |job|
+        each_streamed_job do |job|
           activate_job(job, source: :stream)
           if stopping?
             handle_shutdown_job(job)
@@ -186,7 +186,7 @@ module Busybee
       def pump_jobs
         delay = @runtime_config.buffer_throttle
 
-        read_stream do |job|
+        each_streamed_job do |job|
           break if stopping?
 
           activate_job(job, source: :stream, buffered: true)
@@ -215,7 +215,7 @@ module Busybee
       end
 
       # Reentrant, so a claim's own record may take it again.
-      def synchronize_claim(&) = @pump_claim.synchronize(&)
+      def synchronize_claim(&) = @stop_lock.synchronize(&)
 
       # Process jobs from the buffer.
       # blocking: false drains all currently-buffered jobs, returns if/when empty.
