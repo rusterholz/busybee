@@ -84,7 +84,7 @@ module Busybee
           rescue Exception => e # rubocop:disable Lint/RescueException
             exit_immediately!(reason: reason_for(e))
             record_child_failure(runner, e)
-            kill_children(reason: ending_reason(nil)) # the first fire's reason, maybe an earlier one
+            kill_children(reason: ending_reason) # the first fire's reason, maybe an earlier one
           end
         end
       end
@@ -93,7 +93,7 @@ module Busybee
       # them if the process must exit immediately: a job type nobody works is a
       # silent outage.
       def end_with(runner)
-        return kill_children(reason: ending_reason(nil)) if exit_immediately?
+        return kill_children(reason: ending_reason) if exit_immediately?
 
         reason = runner.stop_reason # the reason itself: stopping? also counts the alarm
         stop!(reason: reason) if reason
@@ -103,7 +103,7 @@ module Busybee
       # its reason (:crash/:gateway_error/:unhealthy), unless the process must exit
       # immediately: then the fire decides, as for any other child ending.
       def end_on(error)
-        return kill_children(reason: ending_reason(nil)) if exit_immediately?
+        return kill_children(reason: ending_reason) if exit_immediately?
 
         stop!(reason: reason_for(error))
       end

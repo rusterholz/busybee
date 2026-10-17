@@ -78,7 +78,11 @@ module Busybee
       end
 
       # The exit and post-stop slots are plain ivars, read and written only inside this.
-      def synchronize_claim = yield
+      def synchronize_claim
+        # Subclasses may lock here; the base doesn't, since only its main thread claims.
+        yield
+      end
+
       def record_shutdown_error(error) = (@shutdown_error = error if @shutdown_error.nil?)
       def post_stop_error = synchronize_claim { @post_stop_error }
 
@@ -100,7 +104,7 @@ module Busybee
 
       # The reason a runner claims for its own stop on the way out: the fire's,
       # once the process must exit immediately.
-      def ending_reason(default) = exit_immediately? ? EXIT_IMMEDIATELY_REASON.get : default
+      def ending_reason(otherwise: nil) = exit_immediately? ? EXIT_IMMEDIATELY_REASON.get : otherwise
     end
   end
 end

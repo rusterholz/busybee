@@ -163,7 +163,7 @@ module Busybee
           break
         end
 
-        stop!(reason: ending_reason(:gateway_closed)) # a no-op behind a stop already claimed
+        stop!(reason: ending_reason(otherwise: :gateway_closed)) # a no-op behind a stop already claimed
         raise_exit_error
       rescue Busybee::GRPC::Error => e
         raise if claim_stop(:gateway_error, e)
@@ -176,7 +176,7 @@ module Busybee
       def pump_stream_into_buffer
         contain_pump { pump_jobs }
       ensure
-        contain_pump { stop!(reason: ending_reason(:gateway_closed)) }
+        contain_pump { stop!(reason: ending_reason(otherwise: :gateway_closed)) }
       end
 
       # Pump the stream into the buffer until stopped. Whatever ends it, whatever

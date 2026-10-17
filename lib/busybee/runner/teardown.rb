@@ -32,7 +32,7 @@ module Busybee
       # announce unless something already has; let that finish, so T1 precedes T2.
       def begin_teardown(exception)
         exit_immediately!(reason: reason_for(exception)) if exception && !recoverable?(exception) # its calls would fail
-        @stop_reason.compare_and_set(nil, exception ? reason_for(exception) : ending_reason(nil))
+        @stop_reason.compare_and_set(nil, exception ? reason_for(exception) : ending_reason)
         announce_stop
         cease_intake # idempotent backstop for an announcement still under way elsewhere
         @stop_announced.wait(shutdown_wait_seconds) unless exit_immediately?
