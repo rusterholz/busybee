@@ -72,13 +72,18 @@ RSpec.describe "a stop while the job stream is opening", :gateway do # rubocop:d
 
   # The stop lands once the worker holds its stream, before it reads from it:
   # the stop closes a stream the worker has yet to read.
-  describe "just after the stream is adopted" do
+  describe "just after the worker takes the stream" do
     before do
       allow(gateway.client).to receive(:open_job_stream).and_call_original
       stopping = runner
       runner.singleton_class.prepend(Module.new do
-        define_method(:adopt_stream) { |stream| super(stream).tap { stopping.stop!(reason: :sigterm) } }
-        private :adopt_stream
+        %i[run_inline run_with_buffer].each do |reader|
+          define_method(reader) do
+            stopping.stop!(reason: :sigterm)
+            super()
+          end
+        end
+        private :run_inline, :run_with_buffer
       end)
     end
 

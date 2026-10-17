@@ -66,11 +66,14 @@ module Busybee
       # pump + buffer, or inline). Raises a worker Shutdown to signal an error exit.
       # The worker snapshot attributing the stream-open fetch goes stale over the
       # stream's life; execute-time re-seeding keeps the per-job worker current.
+      # A stop sets its reason before cease_intake takes the lock, so a stop whose
+      # close found no stream shows at the check, and a later one closes it unread.
       def run_loop
         stream = Client::Call.with_worker_status(worker_status) do
           @client.open_job_stream(job_type, job_timeout: @runtime_config.job_timeout)
         end
-        return unless adopt_stream(stream)
+        @stop_lock.synchronize { @stream = stream }
+        return if stopping? # a stop as it opened found no stream: the teardown's cease_intake closes it
 
         if buffer?
           run_with_buffer
@@ -87,18 +90,6 @@ module Busybee
       def cease_intake
         @stop_lock.synchronize { @stream&.close }
         @job_buffer&.push(:stop) if buffer?
-      end
-
-      # A stop landing while the stream opened found nothing to close. Under the
-      # lock cease_intake takes, either it sees this stream or the stop shows here,
-      # and nil sends the run to the teardown, whose cease_intake closes it. A stop
-      # just after this closes a stream not yet read: each_streamed_job's clean end.
-      def adopt_stream(stream)
-        halted = @stop_lock.synchronize do
-          @stream = stream
-          stopping?
-        end
-        stream unless halted
       end
 
       # Only our own close makes a stream refuse its first read, so that is a

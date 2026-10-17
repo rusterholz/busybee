@@ -118,13 +118,16 @@ RSpec.describe "a gateway error after a stop", :gateway do # rubocop:disable RSp
     # Only once the worker holds its stream: a stop before that ends the run
     # before the stream is read at all.
     def stop_once_polling
-      adopted = Concurrent::Event.new
+      holding = Concurrent::Event.new
       runner.singleton_class.prepend(Module.new do
-        define_method(:adopt_stream) { |stream| super(stream).tap { adopted.set } }
-        private :adopt_stream
+        define_method(:run_inline) do
+          holding.set
+          super()
+        end
+        private :run_inline
       end)
       Thread.new do
-        adopted.wait(5)
+        holding.wait(5)
         runner.stop!(reason: :sigterm)
       end
     end
