@@ -663,5 +663,47 @@ RSpec.describe Busybee::CLI do
         expect { cli.run }.to raise_error(SystemExit) { |exit| expect(exit.status).to eq(1) }
       end
     end
+
+    # A real worker stopped by a trapped TERM whose on_worker_stop_requested
+    # hangs on the signal's thread, with nothing wrong in the process.
+    context "when a signal's stop announcement hangs", :gateway do
+      let(:cli) { described_class.new(["--worker-mode", "polling", "TestCLIWorker"]) }
+      let(:traps) { {} }
+      let(:started) { Concurrent::Event.new }
+      let(:release) { Concurrent::Event.new }
+
+      around { |example| isolate_busybee_hooks { example.run } }
+
+      before do
+        gateway.on(:activate_jobs) do
+          sleep 0.05
+          [Busybee::GRPC::ActivateJobsResponse.new(jobs: [])]
+        end
+        allow(cli).to receive(:client).and_return(gateway.client)
+        allow(cli).to receive(:trap) { |signal, &handler| traps[signal] = handler }
+        Busybee.instance_variable_set(:@shutdown_wait_timeout, 200) # restored by the file's around
+        on_start = started
+        held = release
+        Busybee.on_worker_started { |_status| on_start.set }
+        Busybee.on_worker_stop_requested { |_status| held.wait(30) }
+      end
+
+      after { release.set }
+
+      it "returns within shutdown_wait_timeout of the run's end, leaving the announcement behind" do
+        Thread.new do
+          started.wait(5)
+          traps.fetch("TERM").call
+        end
+        began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        running = Thread.new { cli.run }
+
+        aggregate_failures do
+          expect(running.join(5)).to be_truthy # bounded, so the hang costs seconds
+          expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 2
+          expect(release).not_to be_set
+        end
+      end
+    end
   end
 end

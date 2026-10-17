@@ -427,7 +427,7 @@ lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
 
 1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
 2. **`initialize(args)`** — all setup: parse options (`OptionParser`), load Rails environment, extract workers from YAML if `--config`, load worker classes, build `RuntimeConfig`, apply process-wide config.
-3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks), joins the signal threads, then exits 1 if the fire alarm is up (see [Signal Handling](#signal-handling)).
+3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks), joins the signal threads within `shutdown_wait_timeout`, then exits 1 if the fire alarm is up (see [Signal Handling](#signal-handling)).
 
 ### CLI Flags
 
@@ -448,7 +448,7 @@ The CLI exposes 6 flags. Worker-scoped tuning knobs (backpressure_delay, max_job
 
 ### Signal Handling
 
-Traps `INT`, `QUIT`, `TERM`, all mapped to the same handler. The trap block hands the handling to a thread of its own (Ruby forbids mutex and thread-pool operations in trap context) and returns **without joining it**. Ruby runs the trap on the main thread on top of whatever it interrupted, a write holding the logger's lock included, and the handler's `stop!`, its T1 hooks and their log lines may need that very lock; joining from the trap would deadlock the process. `CLI#run` keeps those threads and joins them after `run!` returns, since Ruby kills unjoined threads at exit and T1 may still be running on one past `shutdown_wait_timeout`; under `Runner.exit_immediately?` it joins each with no wait, so a thread still announcing is left behind while one that died of an error re-raises it. Once `run!` has returned and the joins have raised nothing, `CLI#run` calls `exit(1)` if the alarm is up, at_exit handlers included, so an error contained on another thread (the stream reader's, or one on a thread the join missed) still fails the process. A T1 hook that never returns is the adopter's, and a second signal's `exit!(1)` escapes it.
+Traps `INT`, `QUIT`, `TERM`, all mapped to the same handler. The trap block hands the handling to a thread of its own (Ruby forbids mutex and thread-pool operations in trap context) and returns **without joining it**. Ruby runs the trap on the main thread on top of whatever it interrupted, a write holding the logger's lock included, and the handler's `stop!`, its T1 hooks and their log lines may need that very lock; joining from the trap would deadlock the process. `CLI#run` keeps those threads and joins them after `run!` returns, since Ruby kills unjoined threads at exit and T1 may still be running on one past the teardown's own wait. Each join waits up to `shutdown_wait_timeout`, or not at all under `Runner.exit_immediately?`; a thread still announcing at the bound is left behind, to be killed at exit, while one that died of an error re-raises it. Once `run!` has returned and the joins have raised nothing, `CLI#run` calls `exit(1)` if the alarm is up, at_exit handlers included, so an error contained on another thread (the stream reader's, or one on a thread the join missed) still fails the process. So a T1 hook that never returns holds the exit for at most that bound past the run's end, and a second signal's `exit!(1)` ends it sooner.
 
 **Two-signal pattern:**
 - First signal → `runner.stop!` (graceful shutdown)

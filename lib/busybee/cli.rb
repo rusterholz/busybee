@@ -82,10 +82,11 @@ module Busybee
     end
 
     # Ruby kills unjoined threads at exit, so a stop announcement still running
-    # on a signal's thread is waited for, unless the process must exit immediately.
-    # Either way, joining re-raises the error a thread already died of.
+    # on a signal's thread is waited for, up to shutdown_wait_timeout, or not at
+    # all once the process must exit immediately. Either way, joining re-raises
+    # the error a thread already died of.
     def join_signal_threads
-      wait = exit_immediately? ? 0 : nil
+      wait = exit_immediately? ? 0 : Busybee::Durations.seconds_from(Busybee.shutdown_wait_timeout)
       @signal_threads&.each { |thread| thread.join(wait) }
     end
 

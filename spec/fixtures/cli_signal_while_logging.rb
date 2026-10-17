@@ -2,14 +2,14 @@
 
 # Spawned by spec/busybee/cli_signal_spec.rb. Runs the real CLI three times
 # against an in-process gateway, printing "<scenario> exited" after each run
-# that returns. In
-# each, on_worker_started's log line sends the process SIGTERM from inside the
-# logger's write, and holds the write open while the signal is handled;
-# on_worker_stop_requested logs too, so handling the signal needs the lock the
-# interrupted write holds.
+# that returns. In each, on_worker_started's log line sends the process SIGTERM
+# from inside the logger's write, and holds the write open while the signal is
+# handled; on_worker_stop_requested logs too, so handling the signal needs the
+# lock the interrupted write holds.
 #
 # deadlock: nothing more.
-# slow_stop_requested: that hook finishes after shutdown_wait_timeout.
+# slow_stop_requested: that hook outlasts the teardown's wait for it, but not
+# the CLI's own wait after the run.
 # hung_stop_requested: it hangs, and on_worker_stopping fails unrecoverably,
 # which crashes the process. Last, since nothing runs after it.
 require "concurrent"
@@ -41,7 +41,7 @@ def register_hooks(scenario)
     Busybee.logger.info("#{scenario} started")
   end
   Busybee.on_worker_stop_requested do |status|
-    sleep({ "slow_stop_requested" => 0.5, "hung_stop_requested" => 30 }.fetch(scenario, 0))
+    sleep({ "slow_stop_requested" => 1.8, "hung_stop_requested" => 30 }.fetch(scenario, 0))
     Busybee.logger.info("#{scenario} stop requested: #{status.reason}")
   end
   Busybee.on_worker_stopping { |_status| raise NoMemoryError, "out of memory" } if scenario == "hung_stop_requested"
@@ -50,7 +50,7 @@ end
 def run_scenario(scenario, gateway)
   Busybee::Testing::HookRegistry.isolated do
     register_hooks(scenario)
-    Busybee::CLI.new(["-a", gateway.address, "--shutdown-wait-timeout", "100", "SignalledWorker"]).run
+    Busybee::CLI.new(["-a", gateway.address, "--shutdown-wait-timeout", "1000", "SignalledWorker"]).run
     puts "#{scenario} exited" # rubocop:disable RSpec/Output
   end
 end

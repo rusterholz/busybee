@@ -29,7 +29,7 @@ RSpec.describe "the CLI receiving a signal mid-log-write" do # rubocop:disable R
     expect(output).to match(/deadlock stop requested: sigterm.*^deadlock exited$/m)
   end
 
-  it "lets the stop announcement finish before exiting, even past shutdown_wait_timeout" do
+  it "lets a stop announcement still running at the run's end finish before exiting, within shutdown_wait_timeout" do
     expect(output).to match(/slow_stop_requested stop requested: sigterm.*^slow_stop_requested exited$/m)
   end
 
