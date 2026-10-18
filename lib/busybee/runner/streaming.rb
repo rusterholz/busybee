@@ -165,9 +165,9 @@ module Busybee
       # only by the gateway closing the stream cleanly (:gateway_closed) or the
       # loop leaving on the fire alarm.
       def pump_stream_into_buffer
-        contain_pump { pump_jobs }
+        ending_pump_on_error { pump_jobs }
       ensure
-        contain_pump { stop!(reason: ending_reason(otherwise: :gateway_closed)) }
+        ending_pump_on_error { stop!(reason: ending_reason(otherwise: :gateway_closed)) }
       end
 
       # Pump the stream into the buffer until stopped. Whatever ends it, whatever
@@ -188,7 +188,7 @@ module Busybee
 
       # The pump's thread ends on nothing it raises: a stop announced here runs
       # on_worker_stop_requested on it, so even that hook's error comes to end_pump.
-      def contain_pump
+      def ending_pump_on_error
         yield
       rescue Exception => e # rubocop:disable Lint/RescueException
         end_pump(e, reason_for(e))
