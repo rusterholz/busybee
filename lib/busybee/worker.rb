@@ -125,10 +125,11 @@ module Busybee
         Hooks.run(:after_perform, job) if job.timestamps.perform_started_at
       end
 
-      # Captures the error first, so after_perform hooks see it on the job even
-      # when autofail's call fails (fail!'s own capture then no-ops).
+      # Records the error first, so after_perform sees it on the job even when
+      # autofail never runs because the job had already resolved (fail!'s own
+      # capture otherwise no-ops).
       def handle_perform_exception(job, exception)
-        job.send(:resolution).set_error(Shutdown.unwrap(exception))
+        job._record_error(Shutdown.unwrap(exception))
         handle_failure(job, exception, configuration)
         raise if exception.is_a?(Shutdown)
         raise Shutdown.new(worker_class: self) if Shutdown.triggered_by?(exception, self)
@@ -199,7 +200,7 @@ module Busybee
         begin
           job.complete!(new_vars)
         rescue StandardError => e
-          job.send(:resolution).set_error(e)
+          job._record_error(e)
           Busybee.logger&.warn("Failed to complete job #{job.key}: #{e.message}. Job will timeout and retry.")
         end
       end

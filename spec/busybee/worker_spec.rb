@@ -1532,6 +1532,24 @@ RSpec.describe Busybee::Worker do
         expect(received_job.error_message).to eq("validation failed")
         expect(received_job.result).to eq("partial" => true, "attempted_at" => "2026-06-08")
       end
+
+      it "sees an error raised after a manual complete! on the job, which stays complete" do
+        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+        received_error = nil
+        Busybee.after_perform { |j| received_error = j.error }
+        worker = stub_const("CompleteThenRaiseWorker", Class.new(Busybee::Worker) do
+          strict_outputs false
+          define_method(:perform) do
+            complete!({ done: true })
+            raise "after the fact"
+          end
+        end)
+
+        worker.perform_job(job)
+
+        expect(job).to be_complete
+        expect(received_error).to be_a(RuntimeError).and(have_attributes(message: "after the fact"))
+      end
     end
 
     describe "handle_failure logging" do
