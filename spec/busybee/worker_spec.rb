@@ -1603,5 +1603,40 @@ RSpec.describe Busybee::Worker do
         expect(sequence).to eq(%i[before around])
       end
     end
+
+    describe "perform_job's return" do
+      it "is perform's Hash, recorded as a frozen HashWithIndifferentAccess" do
+        returned = performing_worker.perform_job(job)
+
+        expect(returned).to be_a(ActiveSupport::HashWithIndifferentAccess).and(be_frozen)
+        expect(returned[:processed]).to be(true)
+        expect(returned).to be(job.result)
+      end
+
+      it "is the recorded result even when around_perform middleware returns something else" do
+        Busybee.around_perform do |_job, perform|
+          perform.call
+          "middleware forgot to return result"
+        end
+
+        expect(performing_worker.perform_job(job)).to eq("processed" => true)
+      end
+
+      it "is nil when perform returns a non-Hash, which auto-complete sends as empty vars" do
+        worker = stub_const("StringReturningWorker", Class.new(Busybee::Worker) do
+          define_method(:perform) { "done" }
+        end)
+
+        expect(worker.perform_job(job)).to be_nil
+        expect(client).to have_received(:complete_job).with(123456, vars: {})
+      end
+
+      it "is nil when a before_perform hook completes the job, whose result is the hook's" do
+        Busybee.before_perform { |j| j.complete!({ early: true }) }
+
+        expect(performing_worker.perform_job(job)).to be_nil
+        expect(job.result).to eq("early" => true)
+      end
+    end
   end
 end

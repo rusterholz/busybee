@@ -81,6 +81,21 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
       end
     end
 
+    %i[around_perform around_job_execution].each do |type|
+      it "records a Hash the block returns as the job's result for #{type}, before the hooks unwind" do
+        observed = []
+        Busybee.public_send(type) do |job, continue|
+          continue.call
+          observed << job.result
+        end
+
+        fire_busybee_hooks(type, build_test_job(type: "fired")) { { total: 5 } }
+
+        expect(observed.first).to be_a(ActiveSupport::HashWithIndifferentAccess).and(be_frozen)
+        expect(observed.first[:total]).to eq(5)
+      end
+    end
+
     describe "worker moments" do
       before { Busybee.on_worker_shutdown { |status| seen << status } }
 

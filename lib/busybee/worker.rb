@@ -64,8 +64,9 @@ module Busybee
       # means the job was handled; raising Shutdown, that the worker is unhealthy.
       #
       # @param job [Busybee::Job] An activated job from the workflow engine
-      # @return [Hash, nil] the result returned by perform (as a HashWithIndifferentAccess)
-      #   on success, or nil on the rescue path
+      # @return [Hash, nil] job.result as the around_perform chain left it (perform's
+      #   Hash or complete!'s vars, a frozen HashWithIndifferentAccess); nil when the
+      #   chain never ran or anything raised
       # @raise [Busybee::Worker::Shutdown] if a shutdown_on exception is caught
       def perform_job(job)
         Client::Call.with_job(job) do # job window spans the whole chain: hooks, perform, autofail all fold it
@@ -148,7 +149,8 @@ module Busybee
         Hooks.run(:before_perform, job) if job.ready?
         result =
           if job.ready?
-            Hooks.run_chain(:around_perform, job) { timed_perform(instance) if job.ready? }
+            Hooks.run_chain(:around_perform, job) { job._record_result(timed_perform(instance)) if job.ready? }
+            job.result
           end
         log_short_circuit(job)
         handle_success(job, result, configuration)

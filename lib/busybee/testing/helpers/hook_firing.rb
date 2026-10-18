@@ -39,7 +39,7 @@ module Busybee
           HookFiring.refuse_silenced!(type)
           HookFiring.correlating(type, target) do
             if AROUND_TYPES.include?(type)
-              Hooks.run_chain(type, target) { continuation&.call }
+              Hooks.run_chain(type, target) { HookFiring.continue(target, continuation) }
             else
               Hooks.run(type, target)
             end
@@ -64,6 +64,13 @@ module Busybee
             raise ArgumentError, "every #{type} hook is suppressed here by without_busybee_hooks, " \
                                  "so fire_busybee_hooks would run nothing. Fire it outside the suppression, " \
                                  "or set `without_busybee_hooks: []` on this example"
+          end
+
+          # On a job the continuation stands in for perform, so a Hash it returns
+          # is recorded as the job's result, as perform's is.
+          def continue(target, continuation)
+            value = continuation&.call
+            target._record_result(value) if target.is_a?(Busybee::Job)
           end
 
           # The scopes production fires these moments in, so a call a hook makes

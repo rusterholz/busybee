@@ -90,7 +90,7 @@ HOOK: on_job_executed (safe)
 A8. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits — fires regardless of how perform exits, so this same step happens in every variant).
-  - `capture_chain_result(target, raw_result)` (the innermost wrapper around the core block):
+  - `job._record_result(raw_result)` (the core block's wrapper around perform's return):
     - `resolution.set_result(raw_result)` — set-once, accepts only Hash values; coerces to a frozen `HashWithIndifferentAccess`. **Result is now set.** Non-Hash perform return values are silently rejected here and end up as `nil` on the Job (and `{}` in `handle_success`).
 
 A9. Continuing `run_hooked_perform`:
@@ -164,7 +164,7 @@ B10. Continuing `instance.perform`:
 B11. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at`.
-  - `capture_chain_result(target, raw_result)`:
+  - `job._record_result(raw_result)`:
     - `resolution.set_result(raw_result)` — silent no-op (set-once; already set in B9). The raw perform return value is discarded.
 
 B12. Continuing `run_hooked_perform`:
@@ -210,7 +210,7 @@ HOOK: on_job_executed (safe)
 C8. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure regardless of how perform exited).
-  - The error propagates past `capture_chain_result` (the innermost wrapper around the core block); no result is captured.
+  - The error propagates past `job._record_result` (the core block's wrapper around perform's return); no result is captured.
   - The error propagates through the chain: portions of `around_perform` middleware after yield **do not get run** (around_perform uses propagating semantics, not safe — errors short-circuit the rest of the chain).
 
 C9. Continuing `run_hooked_perform`:
@@ -294,7 +294,7 @@ D9. Continuing `instance.perform`:
 D10. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at`.
-  - `capture_chain_result(target, raw_result)`:
+  - `job._record_result(raw_result)`:
     - `resolution.set_result(raw_result)`: set-once on the result axis. `result_set?` is false at this point because D8 touched only the error axis (`@error_set`); the result axis is untouched. If perform happens to return a Hash, that Hash is captured as `job.result` alongside the error data captured in D8. Non-Hash returns silently no-op. **Resolution's orthogonal model allows it: the result axis records "what perform returned" and the error axis records "what perform signaled," and Variant D legitimately lands both (manual fail then a partial-payload hash for telemetry/audit). `after_perform` hooks can read both.**
 
 D11. Continuing `run_hooked_perform`:
@@ -377,7 +377,7 @@ The three origin sites converge on E1's "rescued by `perform_job`'s `rescue Stan
 
   - From `before_perform` (flag set in Common 6): `Hooks.run(:before_perform, ..., safe: false)` re-raises via its explicit Shutdown clause. The around chain never starts; `perform_started_at` and `perform_finished_at` are NOT stamped.
   - From `around_perform` pre-yield (flag set in Common 6): `Chain.build_propagating` has no rescues at the middleware layer — Shutdown propagates straight out. The around chain's core block was never entered, so the core ensure (which re-sets the flag) does NOT fire. `perform_started_at` and `perform_finished_at` are NOT stamped.
-  - From `around_perform` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `capture_chain_result` ran in the core block before the ensure unwound into the offending middleware.
+  - From `around_perform` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `job._record_result` ran in the core block before the ensure unwound into the offending middleware.
 
 **E3. Triggered by `shutdown_on` match — a non-Shutdown `StandardError` matches the worker's `shutdown_on` configuration.**
 
@@ -617,7 +617,7 @@ Distinctive state at C10 (contrast G2):
   - `attempt_auto_fail` retries the fail with the *GRPC error*: `job.fail!(grpc_error, backoff: config.fail_job_backoff)` — its internal `set_error` no-ops again.
   - **Isolated transient** (this `fail_job` succeeds): the engine records the failure (one retry drained) and re-yields after the backoff. The engine's failure message is the GRPC error's (`"[Busybee::GRPC::Error] ..."`), a transport failure external monitoring can alert on, while the Job's error axis carries the user's original `fail!` data. The user's original `retries:`/`backoff:` arguments are silently dropped on autofail recovery (they live nowhere on the Job; autofail substitutes `config.fail_job_backoff` and the standard decrement).
   - **Correlated outage** (this `fail_job` also fails): same tail as G3 — `:ready`, `after_perform` fires, activation timeout, engine re-yields with retries intact.
-  - Result axis: unset. Perform aborted at the `fail!` call site, so — unlike a successful Variant D — there is no D10 partial-payload capture (`capture_chain_result` is bypassed by the propagating error).
+  - Result axis: unset. Perform aborted at the `fail!` call site, so — unlike a successful Variant D — there is no D10 partial-payload capture (`job._record_result` is bypassed by the propagating error).
   - C13 `shutdown_on` interaction: same as G2.
 
 **G5. `throw_bpmn_error` fails during manual `throw_bpmn_error!` (Variant D).**
@@ -666,7 +666,7 @@ TIMESTAMP: executed_at
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits, same as A8/B8/C8/D8 — every variant stamps this).
   - MIDDLEWARE: `around_perform` finish — does NOT run. `Chain.build_propagating` (used for `:around_perform`) has no rescues at the middleware layer; non-`StandardError` propagates through the chain and after-yield code is skipped.
-  - The error reaches `perform_job`'s `rescue StandardError` and **does NOT match**. EARLY ERROR CAPTURE does not run; `handle_failure` does not run; `attempt_auto_fail` does not run; the `Shutdown.triggered_by?` check at C13 is unreachable. The Job's error axis stays unset; the result axis stays unset (perform raised before capture_chain_result ran).
+  - The error reaches `perform_job`'s `rescue StandardError` and **does NOT match**. EARLY ERROR CAPTURE does not run; `handle_failure` does not run; `attempt_auto_fail` does not run; the `Shutdown.triggered_by?` check at C13 is unreachable. The Job's error axis stays unset; the result axis stays unset (perform raised before `job._record_result` ran).
   - `run_perform_envelope`'s ensure block:
     - HOOK: `after_perform` — **fires**. A Ruby `ensure` runs for a non-`StandardError` too, and `perform_started_at` is set. The Job it receives is `:ready` with neither axis set, since the capture at C10 was never reached. **One consequence worth knowing:** a hook raising a `StandardError` here *replaces* the in-flight non-`StandardError`, which `perform_job`'s outer rescue then catches and autofails — so a misbehaving hook converts a poison-pill escape into an ordinary reported failure. Rare, and arguably an improvement, but it is a real change from the swallow this hook used to do.
   - MIDDLEWARE: `around_job_execution` finish (safe) — does NOT run. `Chain.build_safe`'s `rescue StandardError` does NOT match; non-`StandardError` propagates through.
@@ -684,7 +684,7 @@ The three origin sites converge on H1's "reaches `perform_job`'s `rescue Standar
 
   - From `before_perform` (flag set in Common 6): `Hooks.run(:before_perform, ..., safe: false)`'s `rescue StandardError` does NOT match; non-`StandardError` propagates straight out. The around chain never starts; `perform_started_at` and `perform_finished_at` are NOT stamped.
   - From `around_perform` pre-yield (flag set in Common 6): `Chain.build_propagating` has no rescues at the middleware layer — non-`StandardError` propagates straight out. The around chain's core block was never entered, so the core ensure (which re-sets the flag) does NOT fire. `perform_started_at` and `perform_finished_at` are NOT stamped.
-  - From `around_perform` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `capture_chain_result` ran in the core block before the ensure unwound into the offending middleware.
+  - From `around_perform` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `job._record_result` ran in the core block before the ensure unwound into the offending middleware.
 
 Identical site list and rationale as E2; the divergence is at the catch sites further down — Shutdown gets explicitly re-raised at safe layers (Category E), while non-`StandardError` bypasses them implicitly.
 
