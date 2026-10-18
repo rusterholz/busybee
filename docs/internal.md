@@ -571,7 +571,7 @@ The arrays live in a hash behind the private `Hooks.registry` accessor, which `h
 
 ### Prefiltering
 
-The whole filter concern — vocabulary, validation, and matching — lives in `Busybee::Hooks::Filters`. `Hooks.match?` / `.error_match?` / `.matches?` remain its public face. `FILTERS` declares, per noun, each key's **domain** (`:name`, `:class`, `:boolean`, `:error`) and its **vocabulary** where one is closed:
+The whole filter concern — vocabulary, validation, and matching — lives in `Busybee::Hooks::Filters`, whose `matches?` is what `Hooks` calls to select the hooks a target fires. `FILTERS` declares, per noun, each key's **domain** (`:name`, `:class`, `:boolean`, `:error`) and its **vocabulary** where one is closed:
 
 - **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `source:`, `buffered:`, `error:`
 - **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `reason:`, `error:`

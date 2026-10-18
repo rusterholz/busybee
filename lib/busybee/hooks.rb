@@ -26,9 +26,6 @@ module Busybee
       before_call: :call, around_call: :call, after_call: :call
     }.freeze
 
-    # The allowed filter kwargs per noun; their domains and vocabularies are Filters'.
-    FILTER_KEYS = Filters::FILTERS.transform_values { |keys| keys.keys.freeze }.freeze
-
     class << self
       # ====== Hook storage ======
 
@@ -64,12 +61,6 @@ module Busybee
           register(type, callback, **filters)
         end
       end
-
-      # ====== Filter matching: Filters owns it, these are its public face ======
-
-      def match?(filter, value) = Filters.match?(filter, value)
-      def error_match?(filter, error) = Filters.error_match?(filter, error)
-      def matches?(hook, target) = Filters.matches?(hook, target)
 
       # ====== Invocation ======
 
