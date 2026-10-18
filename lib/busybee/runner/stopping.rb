@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/module/delegation"
+
 require "busybee/durations"
 require "busybee/grpc/error"
 require "busybee/hooks"
@@ -87,7 +89,7 @@ module Busybee
         EXIT_IMMEDIATELY.make_true
       end
 
-      def exit_immediately? = Runner.exit_immediately?
+      delegate :exit_immediately?, to: :class, private: true
 
       # The reason a runner claims for its own stop on the way out: the fire's,
       # once the process must exit immediately.
