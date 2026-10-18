@@ -19,8 +19,9 @@ module RunnerCorridor
 
     begin
       runner.kill!
-    rescue Exception # rubocop:disable Lint/RescueException
-      nil # a hook failing on the kill's own stop; the hang is what to report
+    rescue NoMemoryError => e
+      # RSpec never rescues one, so a hook's simulated NoMemoryError would end the whole run
+      raise "the runner did not finish within #{seconds}s, and its kill raised #{e.class}"
     end
     raise "the runner did not finish within #{seconds}s"
   end
