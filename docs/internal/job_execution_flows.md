@@ -91,7 +91,7 @@ A8. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits — fires regardless of how perform exits, so this same step happens in every variant).
   - `job._record_result(raw_result)` (the core block's wrapper around perform's return):
-    - `resolution.set_result(raw_result)` — set-once, accepts only Hash values; coerces to a frozen `HashWithIndifferentAccess`. **Result is now set.** Non-Hash perform return values are silently rejected here and end up as `nil` on the Job (and `{}` in `handle_success`).
+    - `resolution.set_result(raw_result)`: set-once, accepts only Hash values; coerces to a frozen `HashWithIndifferentAccess`. **Result is now set.** A non-Hash perform return is silently rejected here, leaving the result axis open: `handle_success` passes `{}` instead, and A11 records it.
 
 A9. Continuing `run_hooked_perform`:
   - HOOKS: Continuing `around_perform` middleware, portions after yield (unsafe — errors propagate, jump to Variant C, and fail the job).
@@ -102,7 +102,7 @@ A10. `handle_success(job, result, config)`:
   - VALIDATION: undeclared outputs (errors propagate, jump to Variant C, fail the job).
 
 A11. `job.complete!(result)`:
-  - `resolution.set_result(vars)` — silent no-op (set-once; already set in A8).
+  - `resolution.set_result(vars)`: a silent no-op when A8 set the result (set-once). After a non-Hash perform return it records `vars`, so `job.result` is a frozen, empty `HashWithIndifferentAccess`, and that is what `after_perform` sees.
   - GRPC CALL: `client.complete_job(key, vars: resolution.result || {})`. **Workflow engine now sees the job as completed.**
   - `resolve!(:complete)`:
     - TIMESTAMP: `resolved_at`.
