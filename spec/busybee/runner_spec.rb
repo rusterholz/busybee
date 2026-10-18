@@ -52,8 +52,8 @@ RSpec.describe Busybee::Runner do
   end
 
   describe "#run!" do
-    it "raises NotImplementedError" do
-      runner = described_class.new(client: client)
+    it "raises NotImplementedError, the base leaving run_loop to its subclasses" do
+      runner = described_class.new(worker_class, client: client)
       expect { runner.run! }.to raise_error(NotImplementedError)
     end
   end

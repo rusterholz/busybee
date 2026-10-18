@@ -37,6 +37,8 @@ module Busybee
                      total_job_count: 0, failed_job_count: 0, backpressure_count: 0,
                      current_buffer_size: nil, peak_buffer_size: nil,
                      reason: nil, error: nil)
+        raise ArgumentError, "worker_class is required" if worker_class.nil?
+
         @worker_class = worker_class
         @worker_mode = worker_mode
         @timestamps = timestamps.dup.freeze
@@ -67,7 +69,7 @@ module Busybee
       # Class and error class render as names for scalar labels.
       def context_tags
         {
-          worker_class: worker_class&.name,
+          worker_class: worker_class.name,
           job_type: job_type,
           worker_mode: worker_mode,
           worker_name: worker_name,

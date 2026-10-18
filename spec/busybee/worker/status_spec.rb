@@ -31,6 +31,10 @@ RSpec.describe Busybee::Worker::Status do
       expect(build_status.worker_class).to be(worker_class)
     end
 
+    it "refuses to be built without a worker class" do
+      expect { build_status(worker_class: nil) }.to raise_error(ArgumentError, /worker_class is required/)
+    end
+
     it "exposes the worker class's configuration" do
       expect(build_status.configuration).to be(worker_class.configuration)
     end
