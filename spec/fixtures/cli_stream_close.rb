@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Spawned by spec/busybee/cli_exit_status_spec.rb. Runs the real CLI once, on a
+# Spawned by spec/busybee/cli/exit_status_spec.rb. Runs the real CLI once, on a
 # streaming worker whose job stream the in-process gateway closes at once, and
 # exits however the CLI does. With "failing_stop_requested" as its argument,
 # on_worker_stop_requested raises a NoMemoryError on the stream reader.

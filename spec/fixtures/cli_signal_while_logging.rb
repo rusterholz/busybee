@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Spawned by spec/busybee/cli_signal_spec.rb. Runs the real CLI three times
+# Spawned by spec/busybee/cli/signal_spec.rb. Runs the real CLI three times
 # against an in-process gateway, printing "<scenario> exited" after each run
 # that returns. In each, on_worker_started's log line sends the process SIGTERM
 # from inside the logger's write, and holds the write open while the signal is

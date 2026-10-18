@@ -9,7 +9,7 @@ require "rbconfig"
 RSpec.describe "the CLI receiving a signal mid-log-write" do # rubocop:disable RSpec/DescribeClass
   # Returns [output, status], or [output, nil] if it had to be killed.
   def self.run_fixture(seconds: 10)
-    fixture = File.expand_path("../fixtures/cli_signal_while_logging.rb", __dir__)
+    fixture = File.expand_path("../../fixtures/cli_signal_while_logging.rb", __dir__)
     Open3.popen2e({ "BUSYBEE_SKIP_RAILS" => "1" }, RbConfig.ruby, fixture) do |_stdin, output, waiter|
       unless waiter.join(seconds)
         Process.kill("KILL", waiter.pid)
