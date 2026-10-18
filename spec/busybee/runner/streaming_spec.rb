@@ -44,7 +44,7 @@ RSpec.describe Busybee::Runner::Streaming do
     def closes_then_stops
       Concurrent::Array.new.tap do |order|
         allow(stream).to receive(:close) { order << :close }
-        Busybee::Hooks.on_worker_stopping { |_status| order << :stopping }
+        Busybee.on_worker_stopping { |_status| order << :stopping }
       end
     end
 

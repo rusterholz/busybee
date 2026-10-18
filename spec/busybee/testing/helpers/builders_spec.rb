@@ -96,8 +96,8 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
     # can fire at all: the gap this whole surface was built to close.
     it "fires the call hooks, because everything above the wire is real" do
       observed = []
-      Busybee::Hooks.before_call { |call| observed << [:before_call, call.rpc] }
-      Busybee::Hooks.after_call { |call| observed << [:after_call, call.rpc, call.status] }
+      Busybee.before_call { |call| observed << [:before_call, call.rpc] }
+      Busybee.after_call { |call| observed << [:after_call, call.rpc, call.status] }
 
       build_test_client.complete_job(42)
 
@@ -106,7 +106,7 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
 
     it "shows a failed call to after_call as errored" do
       statuses = []
-      Busybee::Hooks.after_call { |call| statuses << call.status }
+      Busybee.after_call { |call| statuses << call.status }
       client = build_test_client
       client.on(:complete_job) { raise GRPC::Internal, "nope" }
 
@@ -232,7 +232,7 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
 
     it "resolves through a real client when given one, so call hooks fire" do
       observed = []
-      Busybee::Hooks.after_call { |call| observed << [call.rpc, call.job&.key] }
+      Busybee.after_call { |call| observed << [call.rpc, call.job&.key] }
       client = build_test_client
       job = build_test_job(key: 4242, client: client)
 
@@ -261,8 +261,8 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
     # after_call would record its setup as though it were the run under test.
     it "builds its fixture without firing the hooks under test" do
       fired = []
-      Busybee::Hooks.on_job_activated { fired << :activated }
-      Busybee::Hooks.after_call { fired << :call }
+      Busybee.on_job_activated { fired << :activated }
+      Busybee.after_call { fired << :call }
 
       build_test_job(status: :complete)
 
@@ -270,7 +270,7 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
     end
 
     it "leaves the registry as it found it" do
-      Busybee::Hooks.after_call { nil }
+      Busybee.after_call { nil }
 
       build_test_job(status: :complete)
 

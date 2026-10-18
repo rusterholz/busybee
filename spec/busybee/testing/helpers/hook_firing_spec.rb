@@ -22,8 +22,8 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
 
   describe "#fire_busybee_hooks" do
     it "runs each registered hook of the moment whose filters accept the carrier, against it" do
-      Busybee::Hooks.after_perform(status: :failed) { |job| seen << [:failed, job] }
-      Busybee::Hooks.after_perform(job_type: "fired") { |job| seen << [:typed, job] }
+      Busybee.after_perform(status: :failed) { |job| seen << [:failed, job] }
+      Busybee.after_perform(job_type: "fired") { |job| seen << [:typed, job] }
       job = failed_job
 
       fire_busybee_hooks(:after_perform, job)
@@ -32,7 +32,7 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
     end
 
     it "leaves a hook whose filters don't accept the carrier unrun, so wiring shows as effect" do
-      Busybee::Hooks.after_perform(job_type: "some_other_type") { |job| seen << job }
+      Busybee.after_perform(job_type: "some_other_type") { |job| seen << job }
 
       fire_busybee_hooks(:after_perform, failed_job)
 
@@ -40,7 +40,7 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
     end
 
     it "fires only the named moment" do
-      Busybee::Hooks.on_job_executed { |job| seen << job }
+      Busybee.on_job_executed { |job| seen << job }
 
       fire_busybee_hooks(:after_perform, failed_job)
 
@@ -54,14 +54,14 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
     end
 
     it "raises what a hook body raises, rather than logging it" do
-      Busybee::Hooks.on_job_executed { |_job| raise ArgumentError, "hook bug" }
+      Busybee.on_job_executed { |_job| raise ArgumentError, "hook bug" }
 
       expect { fire_busybee_hooks(:on_job_executed, failed_job) }.to raise_error(ArgumentError, "hook bug")
     end
 
     describe "around a continuation" do
       before do
-        Busybee::Hooks.around_perform do |_job, perform|
+        Busybee.around_perform do |_job, perform|
           seen << :enter
           perform.call
           seen << :exit
@@ -82,7 +82,7 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
     end
 
     describe "worker moments" do
-      before { Busybee::Hooks.on_worker_shutdown { |status| seen << status } }
+      before { Busybee.on_worker_shutdown { |status| seen << status } }
 
       it "takes a built Worker::Status" do
         status = build_test_worker_status(worker_class: worker_class)
@@ -102,7 +102,7 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
     end
 
     it "takes a Call for a call moment" do
-      Busybee::Hooks.after_call { |call| seen << call }
+      Busybee.after_call { |call| seen << call }
       call = build_test_call(:complete_job)
 
       fire_busybee_hooks(:after_call, call)
@@ -120,7 +120,7 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
     end
 
     describe "under without_busybee_hooks" do
-      before { Busybee::Hooks.after_call { |call| seen << call } }
+      before { Busybee.after_call { |call| seen << call } }
 
       it "raises rather than firing nothing, naming the suppression" do
         without_busybee_hooks(:call) do
@@ -131,7 +131,7 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
 
       it "runs the hooks registered inside the suppression" do
         without_busybee_hooks(:call) do
-          Busybee::Hooks.after_call { |call| seen << [:inside, call] }
+          Busybee.after_call { |call| seen << [:inside, call] }
           fire_busybee_hooks(:after_call, build_test_call(:complete_job))
         end
 
@@ -146,10 +146,10 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
       let(:calls) { [] }
 
       before do
-        Busybee::Hooks.after_call { |call| calls << call }
+        Busybee.after_call { |call| calls << call }
         publish = ->(carrier) { carrier.client.publish_message("probe", correlation_key: "k") }
-        Busybee::Hooks.before_perform(&publish)
-        Busybee::Hooks.on_job_activated(&publish)
+        Busybee.before_perform(&publish)
+        Busybee.on_job_activated(&publish)
       end
 
       it "attributes a call made from a perform hook to the job, as perform does" do

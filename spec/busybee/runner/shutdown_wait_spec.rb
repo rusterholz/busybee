@@ -39,7 +39,7 @@ RSpec.describe "a worker waiting out its shutdown", :gateway do # rubocop:disabl
   describe "for a stream reader still busy when the worker drains" do
     before do
       held = release
-      Busybee::Hooks.on_worker_stop_requested { |_status| held.wait(1.5) }
+      Busybee.on_worker_stop_requested { |_status| held.wait(1.5) }
     end
 
     it "stops waiting after shutdown_wait_timeout" do

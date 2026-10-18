@@ -58,7 +58,7 @@ RSpec.describe Busybee::Testing::Helpers::HookScoping do
     it "empties the registry for :all, while hooks registered inside still run, and are gone afterwards" do
       fired = []
       without_busybee_hooks(:all) do
-        Busybee::Hooks.after_perform { |_job| fired << :inside }
+        Busybee.after_perform { |_job| fired << :inside }
         Busybee::Hooks.run(:after_perform, nil)
       end
 
@@ -75,7 +75,7 @@ RSpec.describe Busybee::Testing::Helpers::HookScoping do
     it "discards registrations made inside the block, even when it raises" do
       expect do
         isolate_busybee_hooks do
-          Busybee::Hooks.after_perform { nil }
+          Busybee.after_perform { nil }
           raise "boom"
         end
       end.to raise_error("boom")

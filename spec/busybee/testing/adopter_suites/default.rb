@@ -6,7 +6,7 @@ require "busybee/testing"
 
 SURFACE = Busybee::Testing::Helpers.public_instance_methods
 
-Busybee::Hooks.after_call { nil }
+Busybee.after_call { nil }
 
 RSpec.describe "the helpers module" do
   it "carries the matchers" do

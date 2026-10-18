@@ -58,7 +58,7 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
 
     before do
       gateway.on(:activate_jobs) { [Busybee::GRPC::ActivateJobsResponse.new(jobs: [wire_job(1), wire_job(2)])] }
-      Busybee::Hooks.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
+      Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
     end
 
     it_behaves_like "a crash out of the run"
@@ -91,7 +91,7 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
 
     before do
       gateway.on(:stream_activated_jobs) { [wire_job(1)] }
-      Busybee::Hooks.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
+      Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
     end
 
     it "finishes the stop, reports the error at on_worker_shutdown and says to exit immediately" do
@@ -156,7 +156,7 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
           gate.pop
         end
       end
-      Busybee::Hooks.on_worker_stopping { |_status| raise NoMemoryError, "failed to allocate memory" }
+      Busybee.on_worker_stopping { |_status| raise NoMemoryError, "failed to allocate memory" }
     end
 
     it_behaves_like "a crash out of the run"
@@ -177,7 +177,7 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
 
     before do
       gateway.on(:activate_jobs) { [Busybee::GRPC::ActivateJobsResponse.new(jobs: [wire_job(1)])] }
-      Busybee::Hooks.on_worker_shutdown { |_status| raise NoMemoryError, "failed to allocate memory" }
+      Busybee.on_worker_shutdown { |_status| raise NoMemoryError, "failed to allocate memory" }
     end
 
     it_behaves_like "a crash out of the run"
@@ -211,7 +211,7 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
         sleep 0.05
         [Busybee::GRPC::ActivateJobsResponse.new(jobs: [])]
       end
-      Busybee::Hooks.on_worker_stopping(worker_class: "AlphaWorker") do |_status|
+      Busybee.on_worker_stopping(worker_class: "AlphaWorker") do |_status|
         raise NoMemoryError, "failed to allocate memory"
       end
     end
@@ -254,14 +254,14 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
       gateway.on(:stream_activated_jobs) { Enumerator.new { |_| gate.pop } }
       latch = started
       alpha_class = worker_classes.first
-      Busybee::Hooks.on_worker_started { |status| latch.count_down if status.worker_class == alpha_class }
+      Busybee.on_worker_started { |status| latch.count_down if status.worker_class == alpha_class }
       runner.runners.last.singleton_class.prepend(Module.new do
         define_method(:process_buffered_jobs) do |**options|
           latch.count_down
           super(**options)
         end
       end)
-      Busybee::Hooks.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
+      Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
     end
 
     it "still ends every worker, raising the error on both threads" do

@@ -35,11 +35,11 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     gateway.on(:stream_activated_jobs) do
       [1, 3, 2].map { |key| FaultInjectionGateway.activated_job(type: "post_stop_pump_error", key: key) }
     end
-    Busybee::Hooks.on_worker_stopping { teardown_begun.set }
+    Busybee.on_worker_stopping { teardown_begun.set }
   end
 
   def raise_post_stop_from_activation(error)
-    Busybee::Hooks.on_job_activated(&post_stop_activation_hook(error))
+    Busybee.on_job_activated(&post_stop_activation_hook(error))
   end
 
   def post_stop_activation_hook(error)
@@ -141,7 +141,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     end
 
     before do
-      Busybee::Hooks.on_job_activated do |job|
+      Busybee.on_job_activated do |job|
         next unless job.key == 2
 
         activating << :activating

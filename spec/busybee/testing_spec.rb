@@ -53,8 +53,8 @@ RSpec.describe Busybee::Testing do
     # Registered outside every example's around, so what an example sees is
     # exactly what the metadata left of them.
     before(:context) do # rubocop:disable RSpec/BeforeAfterAll
-      Busybee::Hooks.after_call { nil }
-      Busybee::Hooks.after_perform { nil }
+      Busybee.after_call { nil }
+      Busybee.after_perform { nil }
     end
 
     after(:context) do # rubocop:disable RSpec/BeforeAfterAll

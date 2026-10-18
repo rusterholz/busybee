@@ -52,7 +52,7 @@ RSpec.describe "a worker in a process told to exit immediately", :gateway do # r
 
   it "doesn't start" do
     started = []
-    Busybee::Hooks.on_worker_started(job_type: "stopping_on_the_alarm") { |_status| started << :started }
+    Busybee.on_worker_started(job_type: "stopping_on_the_alarm") { |_status| started << :started }
     sibling.kill!
 
     expect([run_to_completion(seconds: 3), started]).to eq([nil, []])

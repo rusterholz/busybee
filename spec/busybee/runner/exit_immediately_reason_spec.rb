@@ -44,7 +44,7 @@ RSpec.describe "the reason a process must exit immediately", :gateway do # ruboc
   # then lets its stream end; returns the reason it stopped under.
   def reason_the_quiet_worker_ends_with
     reasons = Concurrent::Array.new
-    Busybee::Hooks.on_worker_shutdown(job_type: "quiet") { |status| reasons << status.reason }
+    Busybee.on_worker_shutdown(job_type: "quiet") { |status| reasons << status.reason }
     alarms = Thread.new do
       wait_until { runner.running? }
       yield

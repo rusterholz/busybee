@@ -31,7 +31,7 @@ RSpec.describe "the announcement of a worker's stop", :gateway do # rubocop:disa
     recorded = moments
     %i[on_worker_stop_requested on_worker_stopping on_worker_shutdown].each do |type|
       moment = type.to_s.delete_prefix("on_worker_").to_sym
-      Busybee::Hooks.public_send(type) { |status| recorded << [moment, status.reason] }
+      Busybee.public_send(type) { |status| recorded << [moment, status.reason] }
     end
   end
 

@@ -15,7 +15,7 @@ RSpec.describe "an escalation from on_job_activated", :gateway do # rubocop:disa
   before do
     gateway.on(:complete_job) { Busybee::GRPC::CompleteJobResponse.new }
     gateway.on(:fail_job) { Busybee::GRPC::FailJobResponse.new }
-    Busybee::Hooks.on_job_not_executed { |job| handed_back << job }
+    Busybee.on_job_not_executed { |job| handed_back << job }
   end
 
   after { stream_gate.close }
@@ -52,7 +52,7 @@ RSpec.describe "an escalation from on_job_activated", :gateway do # rubocop:disa
     # Registered ahead of the escalating hook, which ends that moment's run.
     let!(:brackets) { record_job_brackets }
 
-    before { Busybee::Hooks.on_job_activated { raise Busybee::Worker::Shutdown, "replica lag too high" } }
+    before { Busybee.on_job_activated { raise Busybee::Worker::Shutdown, "replica lag too high" } }
 
     it "sends the job back unworked, retries and backoff intact" do
       run_to_completion
@@ -96,7 +96,7 @@ RSpec.describe "an escalation from on_job_activated", :gateway do # rubocop:disa
       before do
         stub_const("ReplicaLagging", Class.new(StandardError))
         Busybee.shutdown_on_errors = [ReplicaLagging]
-        Busybee::Hooks.on_job_activated { raise ReplicaLagging, "replica lag too high" }
+        Busybee.on_job_activated { raise ReplicaLagging, "replica lag too high" }
       end
 
       after { Busybee.shutdown_on_errors = nil }
@@ -108,7 +108,7 @@ RSpec.describe "an escalation from on_job_activated", :gateway do # rubocop:disa
     end
 
     context "when the hook raises an error the worker cannot recover from" do
-      before { Busybee::Hooks.on_job_activated { raise NoMemoryError, "failed to allocate memory" } }
+      before { Busybee.on_job_activated { raise NoMemoryError, "failed to allocate memory" } }
 
       it "drops the job for the engine to reclaim, telling it nothing" do
         expect(run_to_completion).to be_a(NoMemoryError)
@@ -139,13 +139,13 @@ RSpec.describe "an escalation from on_job_activated", :gateway do # rubocop:disa
     # finishes on the pump, so the escalation has to be on record by then.
     context "when on_worker_stop_requested is slow" do
       before do
-        Busybee::Hooks.on_worker_stop_requested { sleep 0.2 }
-        Busybee::Hooks.on_job_activated { raise Busybee::Worker::Shutdown, "replica lag too high" }
+        Busybee.on_worker_stop_requested { sleep 0.2 }
+        Busybee.on_job_activated { raise Busybee::Worker::Shutdown, "replica lag too high" }
       end
 
       it "ends the worker on the escalation from on_worker_stopping onward" do
         stopping = nil
-        Busybee::Hooks.on_worker_stopping { |status| stopping = status }
+        Busybee.on_worker_stopping { |status| stopping = status }
 
         expect(run_to_completion).to be_a(Busybee::Worker::Shutdown)
         expect([stopping.reason, stopping.error]).to match([:unhealthy, an_instance_of(Busybee::Worker::Shutdown)])
