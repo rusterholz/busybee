@@ -60,6 +60,12 @@ RSpec.describe Busybee::Runner do
       runner = described_class.new(worker_class, client: client)
       expect { runner.run! }.to raise_error(NotImplementedError)
     end
+
+    it "is the only way in: every runner keeps its run_loop private" do
+      [described_class, Busybee::Runner::Polling, Busybee::Runner::Streaming, Busybee::Runner::Hybrid].each do |klass|
+        expect(klass.public_method_defined?(:run_loop)).to be(false), "#{klass} exposes run_loop"
+      end
+    end
   end
 
   describe "#stop!" do
