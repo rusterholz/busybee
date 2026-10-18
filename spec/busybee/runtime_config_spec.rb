@@ -219,27 +219,6 @@ RSpec.describe Busybee::RuntimeConfig do
       end
     end
 
-    context "with shutdown_wait_timeout precedence (2-level: RC global → gem)" do
-      it "uses the RC value" do
-        Busybee.shutdown_wait_timeout = 9000
-        config = described_class.new(shutdown_wait_timeout: 6000)
-        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(6000)
-      end
-
-      it "falls back to gem config" do
-        Busybee.shutdown_wait_timeout = 9000
-        config = described_class.new
-        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(9000)
-      end
-
-      it "falls back to gem default" do
-        config = described_class.new
-        expect(config.resolve_for(worker_class).shutdown_wait_timeout).to eq(
-          Busybee::Defaults::DEFAULT_SHUTDOWN_WAIT_TIMEOUT_MS
-        )
-      end
-    end
-
     context "with max_jobs precedence (4-level: RC per-worker → RC global → DSL → gem)" do
       it "uses per-worker override" do
         config = described_class.new(
@@ -397,37 +376,13 @@ RSpec.describe Busybee::RuntimeConfig do
       end
     end
 
-    context "with process-wide fields (no per-worker overrides)" do
-      it "resolves log_format from global RC" do
-        config = described_class.new(log_format: :json)
-        expect(config.resolve_for(worker_class).log_format).to eq(:json)
-      end
-
-      it "resolves log_format from gem default" do
-        config = described_class.new
-        expect(config.resolve_for(worker_class).log_format).to eq(:text)
-      end
-
-      it "resolves worker_name from global RC" do
-        config = described_class.new(worker_name: "my-worker")
-        expect(config.resolve_for(worker_class).worker_name).to eq("my-worker")
-      end
-
-      it "resolves worker_name from gem default" do
-        Busybee.instance_variable_set(:@worker_name, nil)
-        config = described_class.new
-        # Busybee.worker_name falls back to Socket.gethostname
-        expect(config.resolve_for(worker_class).worker_name).to eq(Busybee.worker_name)
-      end
-
-      it "resolves cluster_address from global RC" do
-        config = described_class.new(cluster_address: "zeebe.example.com:26500")
-        expect(config.resolve_for(worker_class).cluster_address).to eq("zeebe.example.com:26500")
-      end
-
-      it "resolves cluster_address from gem default" do
-        config = described_class.new
-        expect(config.resolve_for(worker_class).cluster_address).to eq(Busybee.cluster_address)
+    context "with process-wide fields" do
+      it "leaves them out of the resolved config: Busybee holds them" do
+        config = described_class.new(log_format: :json, worker_name: "my-worker",
+                                     cluster_address: "zeebe.example.com:26500", shutdown_wait_timeout: 6000)
+        expect(config.resolve_for(worker_class)).to have_attributes(
+          log_format: nil, worker_name: nil, cluster_address: nil, shutdown_wait_timeout: nil
+        )
       end
     end
 

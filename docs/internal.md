@@ -214,9 +214,9 @@ Job execution flows — receive-to-runner-return walkthroughs for typical and ed
 `Busybee::RuntimeConfig` holds operator-specified overrides, typically from CLI flags or YAML config. It has a two-phase lifecycle:
 
 1. **Constructed sparse** — only fields the operator explicitly set. Per-worker overrides keyed by class name.
-2. **Resolved via `resolve_for(worker_class)`** — returns a new RuntimeConfig with all values populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
+2. **Resolved via `resolve_for(worker_class)`** — returns a new RuntimeConfig with every worker-scoped value populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
 
-Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every field set.
+Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every worker-scoped field set and the process-wide ones left `nil`.
 
 ### Fields
 
@@ -232,7 +232,7 @@ RuntimeConfig fields are divided into two categories:
 - `job_timeout`: job lock timeout in ms
 - `fail_job_backoff`: fail-job backoff in ms
 
-**Process-wide**: apply globally, no per-worker overrides (global RC → gem default):
+**Process-wide**: apply globally, no per-worker overrides. The CLI sets the global RC's values on gem config (`apply_global_config!`) and `resolve_for` leaves them out, so everything reads them from `Busybee.*`:
 - `log_format`: `:text` or `:json`
 - `worker_name`: identifier for this worker process
 - `cluster_address`: Zeebe gateway address
@@ -252,13 +252,7 @@ Worker DSL (worker_class.configuration)
 Gem default (Busybee.default_*)     (lowest priority)
 ```
 
-All process-wide fields use the same 2-level chain:
-
-```
-Global RuntimeConfig value          (highest priority)
-         ↓
-Gem default (Busybee.*)             (lowest priority)
-```
+Process-wide fields have no chain of their own: a value the CLI was given is set on `Busybee`, whose readers supply the default otherwise.
 
 Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit values (important for `buffer_throttle: false` meaning "no throttle" and `backpressure_delay: 0` for testing).
 
@@ -282,7 +276,7 @@ workers:
 
 **Validation:** `parse_yaml` validates top-level keys (rejects unrecognized keys and process-wide fields) and per-worker override keys (rejects anything not in the worker-scoped set). Errors include the invalid key name and list valid options.
 
-**String-to-symbol coercion:** The constructor accepts strings for `worker_mode` and `log_format` (necessary since `YAML.safe_load` produces strings). Values are validated against the string allowlist before coercion to prevent symbol injection. Both strings and symbols are accepted (backwards-compatible).
+**String-to-symbol coercion:** The constructor accepts strings for `worker_mode` and `log_format` (necessary since `YAML.safe_load` produces strings). Each value is converted with `to_s.to_sym` and checked against `Busybee::Configure`'s Symbol vocabulary; anything else raises `ArgumentError`. Both strings and symbols are accepted.
 
 ### Integration Points
 
