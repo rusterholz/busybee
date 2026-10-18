@@ -17,7 +17,12 @@ module RunnerCorridor
     end
     return raised if thread.join(seconds)
 
-    runner.kill!
+    begin
+      runner.kill!
+    rescue NoMemoryError => e
+      # RSpec never rescues one, so a hook's simulated NoMemoryError would end the whole run
+      raise "the runner did not finish within #{seconds}s, and its kill raised #{e.class}"
+    end
     raise "the runner did not finish within #{seconds}s"
   end
 
@@ -32,6 +37,16 @@ module RunnerCorridor
   end
 
   def shutdown_status_from(&) = shutdown_statuses_from(&).first
+
+  # shutdown_wait_timeout is process-wide, so an example sets it on Busybee and
+  # puts it back.
+  def with_shutdown_wait_timeout(milliseconds)
+    saved = Busybee.instance_variable_get(:@shutdown_wait_timeout)
+    Busybee.instance_variable_set(:@shutdown_wait_timeout, milliseconds)
+    yield
+  ensure
+    Busybee.instance_variable_set(:@shutdown_wait_timeout, saved)
+  end
 
   # A job's activation and closing hooks, in firing order, keyed by job.
   def record_job_brackets

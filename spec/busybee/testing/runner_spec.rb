@@ -164,6 +164,30 @@ RSpec.describe Busybee::Testing::Runner do
       end
     end
 
+    context "when a job's worker declares itself down after a stop has begun" do
+      let(:worker_class) do
+        stopping = -> { worker }
+        Class.new(Busybee::Worker) do
+          job_type "test-worker"
+
+          define_method(:perform) do
+            stopping.call.stop!(reason: :sigterm)
+            raise Busybee::Worker::Shutdown, "replica lag too high"
+          end
+        end
+      end
+
+      it "finishes the stop it was making, hands the rest back, and reports the Shutdown" do
+        spared = job_on_client
+
+        expect { worker.activate([job_on_client, spared]) }.not_to raise_error
+
+        expect(client.received(:fail_job).map(&:jobKey)).to include(spared.key)
+        expect(fired.last.last).to have_attributes(reason: :sigterm, error: be_a(Busybee::Worker::Shutdown))
+        expect(worker).not_to be_running
+      end
+    end
+
     context "when something escapes the job entirely" do
       let(:worker_class) do
         Class.new(Busybee::Worker) do

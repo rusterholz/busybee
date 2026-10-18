@@ -235,7 +235,7 @@ Busybee.backpressure_statuses = %i[resource_exhausted unavailable]
 
 ### GRPC Keepalive
 
-HTTP/2 keepalive pings on the gRPC channel. Their purpose is the streaming worker's job-activation stream: it has no request deadline, so a transport that dies silently — a suspended host, a connection reset a proxy swallowed — would otherwise leave the worker blocked on the stream forever, healthy to a liveness probe but activating nothing. Keepalive pings detect the dead transport and raise it as a gateway error the runner recovers from. (Unary calls already recover on their own deadlines; keepalive is what protects the deadline-less stream.) Enabled by default.
+HTTP/2 keepalive pings on the gRPC channel. Their purpose is the streaming worker's job-activation stream: it has no request deadline, so a transport that dies silently (a suspended host, a connection reset a proxy swallowed) would otherwise leave the worker blocked on the stream forever, healthy to a liveness probe but activating nothing. Keepalive pings detect the dead transport and raise it as a gateway error the runner recovers from. Busybee's other calls, such as completing or failing a job, carry no deadline either, so keepalive is what ends a wait on a dead transport for them too: within about one interval plus one timeout. Enabled by default.
 
 Both knobs take a [duration](#how-busybee-reads-durations); `nil` restores the default. Setting **both** to `false` disables keepalive; setting only one is an error.
 
@@ -359,6 +359,21 @@ Identifier for this worker instance, used in job activation. Useful for debuggin
 Busybee.worker_name = "worker-#{Process.pid}"
 ```
 
+#### `shutdown_wait_timeout`
+
+How long a stopping worker waits for its other threads to finish their part of the shutdown before carrying on without them: for `on_worker_stop_requested` to finish where another thread is running it (a signal handler, say), and on a streaming or hybrid worker for the thread reading the job stream, before buffered jobs are handed back. It also bounds how long a second termination signal waits for the forced stop before the process exits, and how long the `busybee` command waits, once the run is over, for a stop announcement still running on a signal's thread. One value serves every worker in the process: set it to the longest wait any of them needs. A top-level `shutdown_wait_timeout` in [YAML](workers.md#yaml-configuration) sets it too.
+
+| | |
+|--|--|
+| **Type** | A [duration](#how-busybee-reads-durations) |
+| **Default** | `5_000` (5 seconds) |
+
+```ruby
+Busybee.shutdown_wait_timeout = 10_000
+```
+
+See [Workers: Signal Handling](workers.md#signal-handling) for how a worker shuts down.
+
 ## Rails Integration
 
 In a Rails app, Busybee loads a Railtie, whether busybee or Rails is required first. The Railtie:
@@ -435,6 +450,7 @@ All module-level configuration attributes can be set via `config.x.busybee.*`:
 | `config.x.busybee.default_buffer` | `Busybee.default_buffer` |
 | `config.x.busybee.default_buffer_throttle` | `Busybee.default_buffer_throttle` |
 | `config.x.busybee.default_backpressure_delay` | `Busybee.default_backpressure_delay` |
+| `config.x.busybee.shutdown_wait_timeout` | `Busybee.shutdown_wait_timeout` |
 | `config.x.busybee.backpressure_statuses` | `Busybee.backpressure_statuses` |
 | `config.x.busybee.default_input_required` | `Busybee.default_input_required` |
 | `config.x.busybee.default_output_required` | `Busybee.default_output_required` |
@@ -580,7 +596,7 @@ See [Workers: Buffer Throttle](workers.md#buffer-throttle) for guidance on choos
 
 #### `default_backpressure_delay`
 
-How long to wait after a backpressure error (any status in [`backpressure_statuses`](#backpressure_statuses)) before retrying.
+How long to wait after a backpressure error (any status in [`backpressure_statuses`](#backpressure_statuses)) before retrying. A stop ends the wait early.
 
 | | |
 |--|--|

@@ -6,7 +6,7 @@ require "concurrent"
 # there first, the pump or the main thread, and that claim's reason and error
 # must stay one fact. Each example widens one window by pausing the runner
 # inside one real step, so the race lands the same way every run.
-RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "the stop lock on a streaming worker", :gateway do # rubocop:disable RSpec/DescribeClass
   let(:activating) { Concurrent::Event.new }
   let(:recording) { Concurrent::Event.new }
   let(:runtime_config) { Busybee::RuntimeConfig.new.resolve_for(worker_class) }
@@ -21,7 +21,7 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
 
   def stream_jobs(*keys)
     gateway.on(:stream_activated_jobs) do
-      keys.map { |key| FaultInjectionGateway.activated_job(type: "pump_claim", key: key) }
+      keys.map { |key| FaultInjectionGateway.activated_job(type: "stop_lock", key: key) }
     end
   end
 
@@ -54,7 +54,7 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
     let(:worker_class) do
       second_activating = activating
       Class.new(Busybee::Worker) do
-        job_type "pump_claim"
+        job_type "stop_lock"
         worker_mode :streaming
 
         define_method(:perform) do
@@ -101,7 +101,7 @@ RSpec.describe "the claim on a streaming worker's stop", :gateway do # rubocop:d
       corridor_runner = -> { runner }
       second_activating = activating
       Class.new(Busybee::Worker) do
-        job_type "pump_claim"
+        job_type "stop_lock"
         worker_mode :streaming
 
         define_method(:perform) do

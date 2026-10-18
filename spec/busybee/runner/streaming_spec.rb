@@ -39,6 +39,15 @@ RSpec.describe Busybee::Runner::Streaming do
   end
 
   describe "#run!" do
+    around { |example| isolate_busybee_hooks { example.run } }
+
+    def closes_then_stops
+      Concurrent::Array.new.tap do |order|
+        allow(stream).to receive(:close) { order << :close }
+        Busybee::Hooks.on_worker_stopping { |_status| order << :stopping }
+      end
+    end
+
     it "opens a job stream with resolved options" do
       allow(client).to receive(:open_job_stream) do |type, **opts|
         expect(type).to eq("test_worker")
@@ -143,7 +152,8 @@ RSpec.describe Busybee::Runner::Streaming do
       runner.run!
     end
 
-    it "closes the stream in ensure even on normal exit" do
+    it "closes the stream before the worker starts stopping, on a normal exit" do
+      order = closes_then_stops
       allow(client).to receive(:open_job_stream) do
         allow(stream).to receive(:each)
         stream
@@ -151,17 +161,18 @@ RSpec.describe Busybee::Runner::Streaming do
 
       runner.run!
 
-      expect(stream).to have_received(:close)
+      expect(order.uniq).to eq(%i[close stopping])
     end
 
-    it "closes the stream in ensure on error" do
+    it "closes the stream before the worker starts stopping, on error" do
+      order = closes_then_stops
       allow(client).to receive(:open_job_stream) do
         allow(stream).to receive(:each).and_raise(RuntimeError, "stream broke")
         stream
       end
 
       expect { runner.run! }.to raise_error(RuntimeError, "stream broke")
-      expect(stream).to have_received(:close)
+      expect(order.uniq).to eq(%i[close stopping])
     end
 
     context "when worker raises Busybee::Worker::Shutdown" do

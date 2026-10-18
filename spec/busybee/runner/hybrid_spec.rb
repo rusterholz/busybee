@@ -290,13 +290,13 @@ RSpec.describe Busybee::Runner::Hybrid do
           runner.stop!
           0
         end
-        allow(runner).to receive(:sleep) # rubocop:disable RSpec/SubjectStub
+        allow(runner).to receive(:back_off) # rubocop:disable RSpec/SubjectStub
 
         runner.run!
 
-        # 2_000 ms configured, and sleep takes seconds. See polling_spec for why
+        # 2_000 ms configured, and the back-off takes seconds. See polling_spec for why
         # asserting the configured value instead is what hid the missing conversion.
-        expect(runner).to have_received(:sleep).with(2.0) # rubocop:disable RSpec/SubjectStub
+        expect(runner).to have_received(:back_off).with(2.0) # rubocop:disable RSpec/SubjectStub
         expect(call_count).to eq(2)
       end
     end
@@ -563,7 +563,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       end
     end
 
-    it "still completes the in-flight polled job but hands subsequently-yielded ones back" do
+    it "still completes the in-flight polled job but neither runs nor hands back ones yielded after" do
       inflight = build_test_job(key: 1, retries: 3)
       yielded_after = build_test_job(key: 2, retries: 5)
       allow(client).to receive(:fail_job)
@@ -574,7 +574,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
       allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
         block.call(inflight)       # perform_job calls kill! during this
-        block.call(yielded_after)  # yielded after kill! — handled as shutdown
+        block.call(yielded_after)  # yielded after kill!, left to its activation timeout
         2
       end
 
@@ -583,7 +583,7 @@ RSpec.describe Busybee::Runner::Hybrid do
       aggregate_failures do
         expect(worker_class).to have_received(:perform_job).with(inflight)
         expect(worker_class).not_to have_received(:perform_job).with(yielded_after)
-        expect(client).to have_received(:fail_job).with(2, "Worker shutting down", retries: 5, backoff: anything)
+        expect(client).not_to have_received(:fail_job)
       end
     end
   end

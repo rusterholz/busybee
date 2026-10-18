@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/numeric/time"
-require "concurrent"
 
 RSpec.describe Busybee::Runner::Polling do
   subject(:runner) { described_class.new(worker_class, runtime_config: runtime_config, client: client) }
@@ -203,14 +202,14 @@ RSpec.describe Busybee::Runner::Polling do
           runner.stop!
           0
         end
-        allow(runner).to receive(:sleep) # rubocop:disable RSpec/SubjectStub
+        allow(runner).to receive(:back_off) # rubocop:disable RSpec/SubjectStub
 
         runner.run!
 
-        # The configured default is 2_000 milliseconds and Kernel#sleep takes
+        # The configured default is 2_000 milliseconds and the back-off takes
         # seconds, so 2.0 is the claim. Asserting runtime_config.backpressure_delay
         # here (the value we passed in) is what let the conversion go missing.
-        expect(runner).to have_received(:sleep).with(2.0) # rubocop:disable RSpec/SubjectStub
+        expect(runner).to have_received(:back_off).with(2.0) # rubocop:disable RSpec/SubjectStub
         expect(call_count).to eq(2)
         expect(runner.send(:worker_status).backpressure_count).to eq(1)
       end
@@ -230,11 +229,11 @@ RSpec.describe Busybee::Runner::Polling do
           runner.stop!
           raise Busybee::GRPC::Error.wrap(GRPC::Unavailable.new("down"))
         end
-        allow(runner).to receive(:sleep)
+        allow(runner).to receive(:back_off)
 
         runner.run!
 
-        expect(runner).to have_received(:sleep).with(2.0)
+        expect(runner).to have_received(:back_off).with(2.0)
       ensure
         Busybee.backpressure_statuses = original
       end
@@ -242,14 +241,14 @@ RSpec.describe Busybee::Runner::Polling do
 
     context "when the backoff delay is configured" do
       # Milliseconds and a Duration are two spellings of one delay, so they have
-      # to reach sleep as the same number of seconds. Only the millisecond
+      # to reach the back-off as the same number of seconds. Only the millisecond
       # spelling was ever exercised, which is how a raw sleep survived.
       {
         "integer milliseconds" => [250, 0.25],
         "a whole-second Duration" => [2.seconds, 2.0],
         "a sub-second Duration" => [0.25.seconds, 0.25]
       }.each do |shape, (configured, expected_seconds)|
-        it "sleeps #{expected_seconds}s when configured with #{shape}" do
+        it "backs off #{expected_seconds}s when configured with #{shape}" do
           delayed_worker = Class.new(Busybee::Worker) do
             job_type "test_worker"
             backpressure_delay configured
@@ -262,11 +261,11 @@ RSpec.describe Busybee::Runner::Polling do
             delayed_runner.stop!
             raise Busybee::GRPC::Error.wrap(GRPC::ResourceExhausted.new("rate limited"))
           end
-          allow(delayed_runner).to receive(:sleep)
+          allow(delayed_runner).to receive(:back_off)
 
           delayed_runner.run!
 
-          expect(delayed_runner).to have_received(:sleep).with(expected_seconds)
+          expect(delayed_runner).to have_received(:back_off).with(expected_seconds)
         end
       end
     end

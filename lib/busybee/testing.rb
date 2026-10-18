@@ -23,5 +23,12 @@ if defined?(RSpec)
     config.around(:example, :without_busybee_hooks) do |example|
       Busybee::Testing::Helpers::HookScoping.without(*example.metadata[:without_busybee_hooks]) { example.run }
     end
+
+    # A runner's fire alarm is process-wide, so one example's must not reach the next.
+    # Raised reason first, so lowered flag first.
+    config.prepend_before(:example) do
+      Busybee::Runner.const_get(:EXIT_IMMEDIATELY).make_false
+      Busybee::Runner.const_get(:EXIT_IMMEDIATELY_REASON).set(nil)
+    end
   end
 end

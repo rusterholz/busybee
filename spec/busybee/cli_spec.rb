@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require "concurrent"
+require "fileutils"
+require "tmpdir"
+
 RSpec.describe Busybee::CLI do
   let(:worker_class) do
     Class.new(Busybee::Worker) do
@@ -19,7 +23,7 @@ RSpec.describe Busybee::CLI do
 
   # Save/restore gem-level config that apply_global_config! may modify
   around do |example|
-    saved = %i[@log_format @worker_name @cluster_address].to_h do |ivar|
+    saved = %i[@log_format @worker_name @cluster_address @shutdown_wait_timeout].to_h do |ivar|
       [ivar, Busybee.instance_variable_get(ivar)]
     end
     example.run
@@ -83,6 +87,12 @@ RSpec.describe Busybee::CLI do
         expect(cli.runtime_config.cluster_address).to eq("zeebe.example.com:26500")
       end
 
+      it "has no flag for shutdown_wait_timeout" do
+        expect do
+          described_class.new(["--shutdown-wait-timeout", "8000", "TestCLIWorker"])
+        end.to raise_error(OptionParser::InvalidOption, /--shutdown-wait-timeout/)
+      end
+
       it "collects remaining positional args as worker class names" do
         cli = described_class.new(["TestCLIWorker"])
         expect(cli.worker_class_names).to eq(["TestCLIWorker"])
@@ -102,9 +112,7 @@ RSpec.describe Busybee::CLI do
     end
 
     context "with --config flag" do
-      let(:yaml_dir) { File.join(__dir__, "..", "..", "tmp", "yaml_fixtures") }
-
-      before { FileUtils.mkdir_p(yaml_dir) }
+      let(:yaml_dir) { Dir.mktmpdir("busybee-cli-yaml") }
 
       after { FileUtils.rm_rf(yaml_dir) }
 
@@ -191,9 +199,10 @@ RSpec.describe Busybee::CLI do
         expect(resolved).to have_attributes(worker_mode: :polling, max_jobs: 5)
       end
 
-      it "merges CLI process-wide flags into YAML config" do
+      it "merges CLI process-wide flags into YAML config, keeping YAML's shutdown_wait_timeout" do
         path = write_yaml("merge.yml", <<~YAML)
           worker_mode: polling
+          shutdown_wait_timeout: 8000
           workers:
             - TestCLIWorker
         YAML
@@ -201,8 +210,19 @@ RSpec.describe Busybee::CLI do
         expect(cli.runtime_config).to have_attributes(
           log_format: :json,
           worker_name: "my-worker",
-          cluster_address: "zeebe:26500"
+          cluster_address: "zeebe:26500",
+          shutdown_wait_timeout: 8000
         )
+      end
+
+      it "takes shutdown_wait_timeout from the top of the YAML into gem config" do
+        path = write_yaml("shutdown_wait.yml", <<~YAML)
+          shutdown_wait_timeout: 8000
+          workers:
+            - TestCLIWorker
+        YAML
+        cli = described_class.new(["-c", path])
+        expect([cli.runtime_config.shutdown_wait_timeout, Busybee.shutdown_wait_timeout]).to eq([8000, 8000])
       end
 
       it "applies process-wide flags to gem config" do
@@ -340,6 +360,39 @@ RSpec.describe Busybee::CLI do
         described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
         expect(Busybee.cluster_address).to eq("zeebe.example.com:26500")
       end
+    end
+
+    context "with shutdown_wait_timeout spelled as a String in YAML" do
+      let(:yaml_dir) { Dir.mktmpdir("busybee-cli-yaml") }
+
+      after { FileUtils.rm_rf(yaml_dir) }
+
+      def config_with(value)
+        File.join(yaml_dir, "config.yml").tap do |path|
+          File.write(path, "shutdown_wait_timeout: \"#{value}\"\nworkers:\n  - TestCLIWorker\n")
+        end
+      end
+
+      it "converts it to milliseconds for every worker in the process" do
+        described_class.new(["-c", config_with(8000)])
+        expect(Busybee.shutdown_wait_timeout).to eq(8000)
+      end
+
+      it "warns on one under a second" do
+        allow(Busybee::Logging).to receive(:warn)
+        described_class.new(["-c", config_with(500)])
+
+        expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
+      end
+
+      it "names YAML as the source when it overrides a configured value" do
+        Busybee.instance_variable_set(:@shutdown_wait_timeout, 3000) # restored by the file's around
+        logger = instance_double(Logger, info: nil, warn: nil, error: nil)
+        allow(Busybee).to receive(:logger).and_return(logger)
+        described_class.new(["-c", config_with(8000)])
+
+        expect(logger).to have_received(:info).with(/\AYAML shutdown_wait_timeout overriding.*3000.*8000/)
+      end
 
       it "does not override gem config when flags are not provided" do
         original_format = Busybee.log_format
@@ -403,7 +456,6 @@ RSpec.describe Busybee::CLI do
     end
 
     it "calls kill! and exit! on second signal" do
-      allow(runner).to receive(:stopping?).and_return(false, true)
       allow(cli).to receive(:exit!)
 
       cli.send(:handle_signal, "TERM")
@@ -412,6 +464,82 @@ RSpec.describe Busybee::CLI do
       expect(runner).to have_received(:stop!).once
       expect(runner).to have_received(:kill!).once
       expect(cli).to have_received(:exit!).with(1)
+    end
+
+    # A real multi-worker runner whose on_worker_stop_requested hangs: the first
+    # signal's stop is stuck inside it for the first worker when the second signal
+    # arrives, and the kill's own stop reaches the second worker's.
+    context "when the second signal arrives while the first's stop is still under way" do
+      let(:release) { Concurrent::Event.new }
+      let(:announcing) { Concurrent::Event.new }
+      let(:runner) do
+        workers = %w[FirstSignalledWorker SecondSignalledWorker].map do |name|
+          stub_const(name, Class.new(Busybee::Worker) { job_type name })
+        end
+        Busybee::Runner::Multi.new(workers, client: instance_double(Busybee::Client))
+      end
+
+      around { |example| isolate_busybee_hooks { example.run } }
+
+      before do
+        busy = announcing
+        held = release
+        Busybee.on_worker_stop_requested do |_status|
+          busy.set
+          held.wait(3)
+        end
+        Busybee.instance_variable_set(:@shutdown_wait_timeout, 200) # restored by the file's around
+        allow(cli).to receive(:exit!)
+      end
+
+      after { release.set }
+
+      def elapsed
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        yield
+        Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+      end
+
+      it "forces the shutdown within shutdown_wait_timeout, however long the hooks hang" do
+        first = Thread.new { cli.send(:handle_signal, "TERM") }
+        announcing.wait(2)
+        took = elapsed { cli.send(:handle_signal, "TERM") }
+        release.set
+        first.join(3)
+
+        aggregate_failures do
+          expect(took).to be < 1.5 # well short of the 3s hang
+          expect(cli).to have_received(:exit!).with(1)
+          expect(Busybee::Runner.exit_immediately?).to be(true)
+        end
+      end
+    end
+
+    # A real worker no signal has stopped yet, so the kill's own stop announces,
+    # and its on_worker_stop_requested fails unrecoverably.
+    context "when the kill's stop announcement fails unrecoverably" do
+      let(:runner) do
+        resolved = Busybee::RuntimeConfig.new.resolve_for(TestCLIWorker)
+        Busybee::Runner::Polling.new(TestCLIWorker, runtime_config: resolved, client: instance_double(Busybee::Client))
+      end
+
+      around do |example|
+        reporting = Thread.report_on_exception
+        Thread.report_on_exception = false
+        isolate_busybee_hooks { example.run }
+      ensure
+        Thread.report_on_exception = reporting
+      end
+
+      before do
+        Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
+        allow(cli).to receive(:exit!).and_raise(SystemExit) # exit! never returns
+      end
+
+      it "still exits" do
+        expect { cli.send(:force_exit) }.to raise_error(SystemExit)
+        expect(cli).to have_received(:exit!).with(1)
+      end
     end
   end
 
@@ -478,6 +606,100 @@ RSpec.describe Busybee::CLI do
           runtime_config: having_attributes(worker_mode: :polling),
           client: an_instance_of(Busybee::Client)
         )
+      end
+    end
+
+    # A real worker whose stop announcement fails on the thread asking for the
+    # stop. The worker's run itself ends cleanly; its shutdown hook holds the run
+    # until any signal's thread has died.
+    context "when a stop announcement fails unrecoverably", :gateway do
+      let(:cli) { described_class.new(["--worker-mode", "polling", "TestCLIWorker"]) }
+      let(:traps) { {} }
+      let(:started) { Concurrent::Event.new }
+
+      around do |example|
+        reporting = Thread.report_on_exception
+        Thread.report_on_exception = false
+        isolate_busybee_hooks { example.run }
+      ensure
+        Thread.report_on_exception = reporting
+      end
+
+      before do
+        gateway.on(:activate_jobs) do
+          sleep 0.05
+          [Busybee::GRPC::ActivateJobsResponse.new(jobs: [])]
+        end
+        allow(cli).to receive(:client).and_return(gateway.client)
+        allow(cli).to receive(:trap) { |signal, &handler| traps[signal] = handler }
+        signal_threads = -> { cli.instance_variable_get(:@signal_threads) }
+        on_start = started
+        Busybee.on_worker_started { |_status| on_start.set }
+        Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
+        Busybee.on_worker_shutdown { |_status| sleep 0.005 while signal_threads.call.any?(&:alive?) }
+      end
+
+      it "raises a signal thread's error out of the run" do
+        Thread.new do
+          started.wait(5)
+          traps.fetch("TERM").call
+        end
+
+        expect { cli.run }.to raise_error(NoMemoryError, "failed to allocate memory")
+        expect(Busybee::Runner.exit_immediately?).to be(true)
+      end
+
+      # The stop comes from a thread of the adopter's own, which the CLI never
+      # joins, so no error reaches the CLI.
+      it "exits 1 when the error never reaches the run" do
+        Thread.new do
+          started.wait(5)
+          cli.instance_variable_get(:@runner).stop!(reason: :sigterm)
+        end
+
+        expect { cli.run }.to raise_error(SystemExit) { |exit| expect(exit.status).to eq(1) }
+      end
+    end
+
+    # A real worker stopped by a trapped TERM whose on_worker_stop_requested
+    # hangs on the signal's thread, with nothing wrong in the process.
+    context "when a signal's stop announcement hangs", :gateway do
+      let(:cli) { described_class.new(["--worker-mode", "polling", "TestCLIWorker"]) }
+      let(:traps) { {} }
+      let(:started) { Concurrent::Event.new }
+      let(:release) { Concurrent::Event.new }
+
+      around { |example| isolate_busybee_hooks { example.run } }
+
+      before do
+        gateway.on(:activate_jobs) do
+          sleep 0.05
+          [Busybee::GRPC::ActivateJobsResponse.new(jobs: [])]
+        end
+        allow(cli).to receive(:client).and_return(gateway.client)
+        allow(cli).to receive(:trap) { |signal, &handler| traps[signal] = handler }
+        Busybee.instance_variable_set(:@shutdown_wait_timeout, 200) # restored by the file's around
+        on_start = started
+        held = release
+        Busybee.on_worker_started { |_status| on_start.set }
+        Busybee.on_worker_stop_requested { |_status| held.wait(30) }
+      end
+
+      after { release.set }
+
+      it "returns within shutdown_wait_timeout of the run's end, leaving the announcement behind" do
+        Thread.new do
+          started.wait(5)
+          traps.fetch("TERM").call
+        end
+        began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        running = Thread.new { cli.run }
+
+        aggregate_failures do
+          expect(running.join(5)).to be_truthy # bounded, so the hang costs seconds
+          expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 2
+          expect(release).not_to be_set
+        end
       end
     end
   end

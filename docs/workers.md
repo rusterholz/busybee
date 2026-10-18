@@ -638,7 +638,7 @@ The worker process responds to standard Unix signals:
 | `TERM` | Same as INT | Same as INT |
 | `QUIT` | Same as INT | Same as INT |
 
-During graceful shutdown, any jobs that were received from the workflow engine but not yet started are handed back to the workflow engine unworked, with their retry count preserved, so they'll be picked up by another worker. Two cases leave them to come back when their activation times out instead: the forced second-signal shutdown, and any error outside `StandardError` (such as `NoMemoryError`), including one that arrives while the graceful shutdown is under way. On a streaming or hybrid worker, an error on the thread reading the job stream that arrives once the shutdown is under way doesn't turn it into a crash: the shutdown finishes as the graceful stop it was, and the error reaches `on_worker_shutdown` (see [Stop Reasons](hooks.md#stop-reasons)). Such a post-stop error affects only the worker it struck: in a [multi-worker process](#when-one-worker-fails), that worker leaves its jobs to time out while its siblings still hand theirs back.
+During graceful shutdown, any jobs that were received from the workflow engine but not yet started are handed back to the workflow engine unworked, with their retry count preserved, so they'll be picked up by another worker. A streaming or hybrid worker first waits for the thread reading its job stream to finish, for up to `shutdown_wait_timeout` (5 seconds by default). Each handback is a call to the engine with no deadline of its own, so a gateway that is slow to answer lengthens the shutdown; keep [teardown hooks](hooks.md#keep-hook-bodies-fast) light to leave it room. Two cases leave them to come back when their activation times out instead: the forced second-signal shutdown, and any error outside `StandardError` (such as `NoMemoryError`), including one that arrives while the graceful shutdown is under way. An error that arrives once the shutdown is under way, such as the gateway failing a fetch, a worker declared unhealthy, or a failure on a streaming worker's thread reading the job stream, doesn't turn it into a crash: the shutdown finishes as the graceful stop it was, and the error reaches `on_worker_shutdown` (see [Stop Reasons](hooks.md#stop-reasons)). An error outside `StandardError` still leaves jobs to time out, and not only the struck worker's: in a [multi-worker process](#when-one-worker-fails), every worker leaves its jobs to time out.
 
 ### Worker Modes
 
@@ -736,7 +736,7 @@ However, there is an option that gives you a rate cap higher than this value wit
 
 #### Backpressure
 
-When the Zeebe cluster is under heavy load, it may respond to requests with a `ResourceExhausted` GRPC error. Both the polling and hybrid modes handle this automatically by sleeping for `backpressure_delay` milliseconds (default: 2,000) before retrying.
+When the Zeebe cluster is under heavy load, it may respond to requests with a `ResourceExhausted` GRPC error. Both the polling and hybrid modes handle this automatically by waiting `backpressure_delay` milliseconds (default: 2,000) before retrying. A worker told to stop stops waiting at once.
 
 ```ruby
 backpressure_delay 10_000  # wait 10 seconds on backpressure
@@ -762,9 +762,9 @@ Jobs of the *same* type are always processed sequentially. That is, only one ins
 
 #### When One Worker Fails
 
-**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. Every worker's `on_worker_shutdown` fires with the crash's reason — so a container of five workers produces five shutdown events, one of which carries the error.
+**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. A worker that stops on its own, say because the engine closed its job stream, takes the rest with it too, gracefully and under its own reason, so the process exits and is replaced rather than leaving that job type unworked. Every worker's `on_worker_shutdown` fires with the crash's reason, so a container of five workers produces five shutdown events, one of which carries the error.
 
-How hard the shutdown is depends on what went wrong. An ordinary error leaves the process healthy enough to be polite, so each worker drains: jobs in hand go back to the engine promptly and are picked up by whoever replaces you. Any error outside `StandardError`, such as a `NoMemoryError` or a `NotImplementedError`, skips the drain, so busybee makes no more calls from a process in that state. Those jobs come back to the engine the slower way, when their activation times out.
+How hard the shutdown is depends on what went wrong. An ordinary error leaves the process healthy enough to be polite, so each worker drains: jobs in hand go back to the engine promptly and are picked up by whoever replaces you. Any error outside `StandardError`, such as a `NoMemoryError` or a `NotImplementedError`, skips the drain in every worker, so busybee makes no more calls from a process in that state, and it may skip hooks too, `on_worker_shutdown` included. Those jobs come back to the engine the slower way, when their activation times out. Such an error stops the other workers even when the worker it struck absorbed it on its way down, as a streaming worker's thread reading the job stream does during a shutdown already under way; the process then exits with status 1 without re-raising it.
 
 Worth knowing when planning capacity: with one poison worker class deployed across a hundred containers, that's a hundred containers churning, not one.
 
@@ -823,6 +823,7 @@ workers:
 | `job_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | Job lock timeout (ms) |
 | `fail_job_backoff` | A [duration](configuration.md#how-busybee-reads-durations) | Retry backoff (ms) |
 | `backpressure_delay` | A [duration](configuration.md#how-busybee-reads-durations) | Delay after backpressure error (ms) |
+| `shutdown_wait_timeout` | A [duration](configuration.md#how-busybee-reads-durations) | How long a stopping worker waits on its other threads (ms); for the whole process, so top level only |
 | `buffer` | Boolean | Enable job buffering in streaming mode |
 | `buffer_throttle` | A [duration](configuration.md#how-busybee-reads-durations), or Boolean | Job buffer delay (ms). `false` to disable |
 | `workers` | Array | Worker class names, with optional per-worker overrides |
@@ -832,6 +833,8 @@ workers:
 ```bash
 bundle exec busybee --config config/busybee.yml --log-format json --worker-name "prod-worker-1"
 ```
+
+`shutdown_wait_timeout` is process-wide too, but has no flag: set it at the top level of the YAML, or in [gem configuration](configuration.md#shutdown_wait_timeout).
 
 > For a realistic example, see the [Dropship Co. demo app's busybee config files](../spec/demo/config/busybee/).
 
@@ -853,7 +856,7 @@ The first non-nil value wins. This means `0` and `false` are valid explicit valu
 
 The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
-**Process-wide settings** (like `--log-format`, `--worker-name`, and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. They don't participate in per-worker overrides because they always apply to the entire process.
+**Process-wide settings** (like `--log-format`, `--worker-name` and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. `shutdown_wait_timeout` follows the same chain with top-level YAML in the flag's place: top-level YAML, then gem config, then the default. They don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
 

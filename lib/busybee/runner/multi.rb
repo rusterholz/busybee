@@ -77,14 +77,35 @@ module Busybee
         @runners.each do |runner|
           @thread_pool.post do
             runner.run!
+            cascade_after_return(runner)
           rescue *RECOVERABLE_ERRORS => e
             record_child_failure(runner, e)
-            stop!(reason: reason_for(e)) # container adopts the crash's reason (:crash/:gateway_error/:unhealthy)
+            cascade_after_failure(e)
           rescue Exception => e # rubocop:disable Lint/RescueException
+            exit_immediately!(reason: reason_for(e))
             record_child_failure(runner, e)
-            kill_children(reason_for(e))
+            kill_children(reason: ending_reason) # the first fire's reason, maybe an earlier one
           end
         end
+      end
+
+      # A child that stopped takes the rest with it, under its reason, or kills
+      # them if the process must exit immediately: a job type nobody works is a
+      # silent outage.
+      def cascade_after_return(runner)
+        return kill_children(reason: ending_reason) if exit_immediately?
+
+        reason = runner.stop_reason # the reason itself: stopping? also counts the alarm
+        stop!(reason: reason) if reason
+      end
+
+      # A child's recoverable error stops the rest gracefully, the container adopting
+      # its reason (:crash/:gateway_error/:unhealthy), unless the process must exit
+      # immediately: then the fire decides, as for any other child ending.
+      def cascade_after_failure(error)
+        return kill_children(reason: ending_reason) if exit_immediately?
+
+        stop!(reason: reason_for(error))
       end
 
       # Record before cascading, always: a cascade can end this very thread, and
@@ -102,7 +123,7 @@ module Busybee
       # mid-statement, leaving the pool unterminated and hanging the
       # wait_for_termination Multi#run! sits in. Killing the children lets each
       # run! return on its own. The reason stays the crash's — nobody forced this.
-      def kill_children(reason)
+      def kill_children(reason:)
         @stop_reason.compare_and_set(nil, reason)
         @runners.each { |runner| runner.kill!(reason: reason) }
         @thread_pool.shutdown

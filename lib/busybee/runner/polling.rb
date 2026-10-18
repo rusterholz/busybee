@@ -13,11 +13,9 @@ module Busybee
     class Polling < Runner
       # Fills Runner#run!'s loop: long-poll for jobs and process them until
       # stopped. Gateway backpressure backs off and retries. A per-job Shutdown
-      # is stashed in @shutdown_error and re-raised once the loop exits, so the
-      # drain runs before it propagates. Single-threaded, so the ivar needs no lock.
+      # that caused the stop is re-raised once the loop exits, so the drain runs
+      # before it propagates; one meeting a stop under way is only reported.
       def run_loop
-        @shutdown_error = nil
-
         loop do
           break if stopping?
 
@@ -26,7 +24,7 @@ module Busybee
           handle_grpc_error(e) # back off + retry on backpressure, else re-raise
         end
 
-        raise @shutdown_error if @shutdown_error
+        raise_exit_error
       end
 
       private
@@ -42,13 +40,9 @@ module Busybee
               execute_job(job)
             end
           rescue Busybee::Worker::Shutdown => e
-            declare_unhealthy_and_keep(e)
+            declare_unhealthy(e)
           end
         end
-      end
-
-      def record_shutdown_error(error)
-        @shutdown_error = error
       end
 
       def job_type

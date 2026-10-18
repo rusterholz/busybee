@@ -48,6 +48,7 @@ module Busybee
         config.log_format = busybee_conf.log_format if busybee_conf.log_format.present?
         config.cluster_address = busybee_conf.cluster_address if busybee_conf.cluster_address.present?
         config.worker_name = busybee_conf.worker_name if busybee_conf.worker_name.present?
+        config.shutdown_wait_timeout = busybee_conf.shutdown_wait_timeout if busybee_conf.shutdown_wait_timeout.presence
 
         # Credentials: explicit object, or build from type + params
         Busybee::Railtie.configure_credentials(config, busybee_conf)
@@ -87,7 +88,6 @@ module Busybee
       unless busybee_conf.default_input_required.nil?
         config.default_input_required = !!busybee_conf.default_input_required
       end
-      config.default_max_jobs = busybee_conf.default_max_jobs if busybee_conf.default_max_jobs.presence
       unless busybee_conf.default_output_required.nil?
         config.default_output_required = !!busybee_conf.default_output_required
       end
@@ -98,23 +98,23 @@ module Busybee
       unless busybee_conf.default_buffer_throttle.nil?
         config.default_buffer_throttle = busybee_conf.default_buffer_throttle
       end
-      config.default_worker_mode = busybee_conf.default_worker_mode if busybee_conf.default_worker_mode.presence
-      if busybee_conf.default_backpressure_delay.presence
-        config.default_backpressure_delay = busybee_conf.default_backpressure_delay
+      %i[default_max_jobs default_worker_mode default_backpressure_delay].each do |attr|
+        value = busybee_conf.public_send(attr)
+        config.public_send(:"#{attr}=", value) if value.presence
       end
       config.backpressure_statuses = busybee_conf.backpressure_statuses if busybee_conf.backpressure_statuses.present?
       config.shutdown_on_errors = busybee_conf.shutdown_on_errors if busybee_conf.shutdown_on_errors.presence
     end
 
+    # An explicit credentials object, else credentials built from type + params
+    # (or autodetected from params alone).
     # @api private
     def self.configure_credentials(config, busybee_conf)
-      # Option 1: Explicit credentials object
       if busybee_conf.credentials.is_a?(Busybee::Credentials)
         config.credentials = busybee_conf.credentials
         return
       end
 
-      # Option 2: Build credentials from type + params (or autodetect from params alone)
       credential_type = busybee_conf.credential_type.presence
       credential_params = extract_credential_params(busybee_conf)
 
