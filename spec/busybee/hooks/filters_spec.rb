@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "date"
+
 require "busybee/client/call"
 require "busybee/grpc"
 require "busybee/grpc/error"

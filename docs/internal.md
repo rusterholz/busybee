@@ -137,8 +137,8 @@ lib/busybee/
 
 Gem-level configuration (`Busybee.cluster_address`, `Busybee.default_message_ttl`, etc.) is split across two files:
 
-- **`busybee.rb`** — Readers, defaults, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
-- **`configure.rb`** — `Busybee::Configure` module with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`). It also holds the one definition of each configuration vocabulary (`VALID_CREDENTIAL_TYPES`, `VALID_LOG_FORMATS`, `VALID_WORKER_MODES`, all Symbols), which `RuntimeConfig`, the worker DSL and the hook filters read too.
+- **`busybee.rb`**: readers, defaults, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
+- **`configure.rb`**: the `Busybee::Configure` module, with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`). It also holds the one definition of each configuration vocabulary (`VALID_CREDENTIAL_TYPES`, `VALID_LOG_FORMATS`, `VALID_WORKER_MODES`, all Symbols), which `RuntimeConfig`, the worker DSL and the hook filters read too.
 
 All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), buffer throttle (Numeric/boolean/numeric String), worker mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
 
@@ -216,7 +216,7 @@ Job execution flows — receive-to-runner-return walkthroughs for typical and ed
 `Busybee::RuntimeConfig` holds operator-specified overrides, typically from CLI flags or YAML config. It has a two-phase lifecycle:
 
 1. **Constructed sparse** — only fields the operator explicitly set. Per-worker overrides keyed by class name.
-2. **Resolved via `resolve_for(worker_class)`** — returns a new RuntimeConfig with every worker-scoped value populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
+2. **Resolved via `resolve_for(worker_class)`**: returns a new RuntimeConfig with every worker-scoped value populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
 
 Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every worker-scoped field set and the process-wide ones left `nil`.
 
@@ -567,7 +567,7 @@ The arrays live in a hash behind the private `Hooks.registry` accessor, which `h
 
 ### Prefiltering
 
-The whole filter concern — vocabulary, validation, and matching — lives in `Busybee::Hooks::Filters`, whose `matches?` is what `Hooks` calls to select the hooks a target fires. `FILTERS` declares, per noun, each key's **domain** (`:name`, `:class`, `:boolean`, `:error`) and its **vocabulary** where one is closed:
+The whole filter concern (vocabulary, validation, and matching) lives in `Busybee::Hooks::Filters`, whose `matches?` is what `Hooks` calls to select the hooks a target fires. `FILTERS` declares, per noun, each key's **domain** (`:name`, `:class`, `:boolean`, `:error`) and its **vocabulary** where one is closed:
 
 - **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `source:`, `buffered:`, `error:`
 - **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `reason:`, `error:`

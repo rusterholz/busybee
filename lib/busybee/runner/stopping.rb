@@ -11,7 +11,7 @@ module Busybee
     # is the claim: its setter owns the stop, records its error in the exit slot
     # (a loser's goes to the post-stop slot) and announces it. reason_for,
     # recoverable? and the fire alarm decide the reason; last, the fetch loops'
-    # gRPC policy, which claims the stop or backs off until the announcement.
+    # gRPC policy: claim the stop, or wait out backpressure_delay unless announced.
     module Stopping
       private
 
