@@ -2,6 +2,9 @@
 
 require "grpc"
 
+require "busybee/configure"
+require "busybee/job/activation"
+
 module Busybee
   module Hooks
     # What the prefilter kwargs accept, and what each carrier can actually hold
@@ -23,8 +26,8 @@ module Busybee
       ].freeze
 
       JOB_STATUSES = %i[ready complete failed error].freeze
-      JOB_SOURCES = %i[poll stream].freeze
-      WORKER_MODES = %i[polling streaming hybrid].freeze
+      JOB_SOURCES = Job::Activation::VALID_SOURCES
+      WORKER_MODES = Configure::VALID_WORKER_MODES
       CALL_STATUSES = %i[pending succeeded errored].freeze
 
       # Filter keys per noun, as [domain, vocabulary]. A nil vocabulary is an

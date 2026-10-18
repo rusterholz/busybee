@@ -60,7 +60,7 @@ House/HeaderCommentDensity:
     - 'spec/support/fault_injection_gateway.rb'
     - 'spec/support/integration_helper.rb'
 
-# Offense count: 9
+# Offense count: 8
 # Configuration parameters: Max, MinDenominator.
 House/InternalCommentDensity:
   Exclude:
@@ -69,5 +69,4 @@ House/InternalCommentDensity:
     - 'lib/busybee/credentials/oauth.rb'
     - 'lib/busybee/hooks/chain.rb'
     - 'lib/busybee/worker.rb'
-    - 'lib/busybee/worker/configuration.rb'
     - 'spec/demo/app/workers/delivery/complete_driver_delivery_worker.rb'

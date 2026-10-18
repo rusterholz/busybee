@@ -135,8 +135,8 @@ lib/busybee/
 
 Gem-level configuration (`Busybee.cluster_address`, `Busybee.default_message_ttl`, etc.) is split across two files:
 
-- **`busybee.rb`** — Readers, defaults, constants, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
-- **`configure.rb`** — `Busybee::Configure` module with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`).
+- **`busybee.rb`** — Readers, defaults, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
+- **`configure.rb`** — `Busybee::Configure` module with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`). It also holds the one definition of each configuration vocabulary (`VALID_CREDENTIAL_TYPES`, `VALID_LOG_FORMATS`, `VALID_WORKER_MODES`, all Symbols), which `RuntimeConfig`, the worker DSL and the hook filters read too.
 
 All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), buffer throttle (Numeric/boolean/numeric String), worker mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
 

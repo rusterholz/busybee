@@ -23,17 +23,8 @@ require "busybee/version"
 require "busybee/worker"
 
 # Top-level gem module. Configuration readers and defaults live here;
-# validated setters live in Busybee::Configure.
+# validated setters and their vocabularies live in Busybee::Configure.
 module Busybee
-  # Valid credential type identifiers. Update this as new credential classes are added.
-  VALID_CREDENTIAL_TYPES = %w[insecure tls oauth camunda_cloud].freeze
-
-  # Valid log format identifiers.
-  VALID_LOG_FORMATS = %w[text json].freeze
-
-  # Valid worker mode identifiers.
-  VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
-
   class << self
     include Configure
 

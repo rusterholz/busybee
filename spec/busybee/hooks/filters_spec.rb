@@ -129,15 +129,6 @@ RSpec.describe Busybee::Hooks::Filters do
   end
 
   describe "vocabularies agree with the authorities they mirror" do
-    it "mirrors the job sources Activation validates" do
-      expect(described_class::JOB_SOURCES).to match_array(Busybee::Job::Activation::VALID_SOURCES)
-    end
-
-    it "mirrors the worker modes Configuration validates" do
-      expect(described_class::WORKER_MODES).
-        to match_array(Busybee::Worker::Configuration::VALID_WORKER_MODES)
-    end
-
     it "covers every status a wrapped gRPC error can report" do
       reported = grpc_bad_status_classes.map do |klass|
         Busybee::GRPC::Error.wrap(klass.new("boom")).grpc_status

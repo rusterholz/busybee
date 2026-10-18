@@ -8,6 +8,11 @@ module Busybee
   # Validated setters for gem-level configuration.
   # Included into Busybee's singleton class; readers live in busybee.rb.
   module Configure # rubocop:disable Metrics/ModuleLength
+    # The vocabularies these setters (and RuntimeConfig, and the worker DSL) accept.
+    VALID_CREDENTIAL_TYPES = %i[insecure tls oauth camunda_cloud].freeze # one per credential class
+    VALID_LOG_FORMATS = %i[text json].freeze
+    VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
+
     # --- String configs ---
 
     def cluster_address=(value)
@@ -191,7 +196,7 @@ module Busybee
       end
 
       str_value = value.to_s
-      if VALID_LOG_FORMATS.include?(str_value)
+      if VALID_LOG_FORMATS.include?(str_value.to_sym)
         @log_format = str_value.to_sym
       else
         Logging.warn("Invalid log_format: #{str_value.inspect}. Valid formats: #{VALID_LOG_FORMATS.join(', ')}")
@@ -207,7 +212,7 @@ module Busybee
       end
 
       str_value = value.to_s
-      if VALID_CREDENTIAL_TYPES.include?(str_value)
+      if VALID_CREDENTIAL_TYPES.include?(str_value.to_sym)
         @credential_type = str_value.to_sym
       else
         Logging.warn("Invalid credential_type: #{str_value.inspect}. Valid types: #{VALID_CREDENTIAL_TYPES.join(', ')}")

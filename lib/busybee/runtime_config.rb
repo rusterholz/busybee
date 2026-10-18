@@ -2,6 +2,8 @@
 
 require "yaml"
 
+require "busybee/configure"
+
 module Busybee
   # Operator-specified runtime configuration, typically from CLI flags or YAML.
   #
@@ -18,9 +20,6 @@ module Busybee
   #
   # Runners hold the resolved config at runtime.
   class RuntimeConfig
-    VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
-    VALID_LOG_FORMATS = %i[text json].freeze
-
     # Top-level keys allowed in YAML config: worker-scoped fields, the one
     # process-wide field YAML may set, and workers.
     WORKER_SCOPED_KEYS = %i[worker_mode backpressure_delay max_jobs request_timeout
@@ -109,7 +108,7 @@ module Busybee
                    job_timeout: nil, fail_job_backoff: nil,
                    log_format: nil, worker_name: nil, cluster_address: nil, shutdown_wait_timeout: nil,
                    workers: {})
-      @worker_mode = coerce_symbol!(worker_mode, VALID_WORKER_MODES, "worker mode") if worker_mode
+      @worker_mode = coerce_symbol!(worker_mode, Configure::VALID_WORKER_MODES, "worker mode") if worker_mode
       @backpressure_delay = backpressure_delay
       @max_jobs = max_jobs
       @request_timeout = request_timeout
@@ -118,12 +117,12 @@ module Busybee
       @job_timeout = job_timeout
       @fail_job_backoff = fail_job_backoff
       @shutdown_wait_timeout = shutdown_wait_timeout
-      @log_format = coerce_symbol!(log_format, VALID_LOG_FORMATS, "log format") if log_format
+      @log_format = coerce_symbol!(log_format, Configure::VALID_LOG_FORMATS, "log format") if log_format
       @worker_name = worker_name
       @cluster_address = cluster_address
       @workers = workers.each_with_object({}) do |(name, overrides), validated|
         if overrides[:worker_mode]
-          mode = coerce_symbol!(overrides[:worker_mode], VALID_WORKER_MODES, "worker mode")
+          mode = coerce_symbol!(overrides[:worker_mode], Configure::VALID_WORKER_MODES, "worker mode")
           overrides = overrides.merge(worker_mode: mode)
         end
         validated[name.to_s] = overrides
