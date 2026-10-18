@@ -81,7 +81,7 @@ RSpec.describe "an escalation on the main thread after a stop", :gateway do # ru
     before do
       deliver_by_poll
       stopping = -> { runner }
-      Busybee::Hooks.on_job_activated do |_job|
+      Busybee.on_job_activated do |_job|
         stopping.call.stop!(reason: :signal)
         raise Busybee::Worker::Shutdown, "replica lag too high"
       end

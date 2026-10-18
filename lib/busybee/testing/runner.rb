@@ -19,7 +19,7 @@ module Busybee
     #   worker.activate([build_test_job(client: worker.client)])
     #   worker.stop!
     class Runner < Busybee::Runner
-      attr_reader :client, :worker_class
+      attr_reader :client
 
       def initialize(worker_class, client: nil)
         super(worker_class, runtime_config: RuntimeConfig.new.resolve_for(worker_class),

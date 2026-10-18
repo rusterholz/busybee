@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support" # the one base-AS site: every core_ext cherry-pick below assumes it (AS load contract)
+require "active_support/core_ext/module/delegation"
 require "active_support/core_ext/object/blank"
 require "grpc"
 require "socket"
@@ -22,29 +23,15 @@ require "busybee/version"
 require "busybee/worker"
 
 # Top-level gem module. Configuration readers and defaults live here;
-# validated setters live in Busybee::Configure.
+# validated setters and their vocabularies live in Busybee::Configure.
 module Busybee
-  # Valid credential type identifiers. Update this as new credential classes are added.
-  VALID_CREDENTIAL_TYPES = %w[insecure tls oauth camunda_cloud].freeze
-
-  # Valid log format identifiers.
-  VALID_LOG_FORMATS = %w[text json].freeze
-
-  # Valid worker mode identifiers.
-  VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
-
   class << self
     include Configure
 
     attr_accessor :logger
     attr_reader :credentials
 
-    # Delegate hook registration methods to Busybee::Hooks
-    Hooks::HOOK_TYPES.each do |type|
-      define_method(type) do |**filters, &callback|
-        Hooks.register(type, callback, **filters)
-      end
-    end
+    delegate(*Hooks::HOOK_TYPES, to: :"Busybee::Hooks") # string-eval'd: a bare :Hooks won't resolve here
 
     def configure
       yield self

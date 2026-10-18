@@ -12,7 +12,7 @@ RSpec.describe Busybee::Testing::HookRegistry do
 
   describe ".isolated" do
     it "discards registrations made inside the block" do
-      described_class.isolated { Busybee::Hooks.before_perform { nil } }
+      described_class.isolated { Busybee.before_perform { nil } }
 
       expect(Busybee::Hooks.hooks_for(:before_perform)).to be_empty
     end
@@ -20,7 +20,7 @@ RSpec.describe Busybee::Testing::HookRegistry do
     it "discards them even when the block raises" do
       expect do
         described_class.isolated do
-          Busybee::Hooks.before_perform { nil }
+          Busybee.before_perform { nil }
           raise "boom"
         end
       end.to raise_error("boom")
@@ -29,9 +29,9 @@ RSpec.describe Busybee::Testing::HookRegistry do
     end
 
     it "keeps registrations that predate the block" do
-      Busybee::Hooks.before_perform { nil }
+      Busybee.before_perform { nil }
 
-      described_class.isolated { Busybee::Hooks.after_perform { nil } }
+      described_class.isolated { Busybee.after_perform { nil } }
 
       expect(Busybee::Hooks.hooks_for(:before_perform).size).to eq(1)
       expect(Busybee::Hooks.hooks_for(:after_perform)).to be_empty
@@ -44,8 +44,8 @@ RSpec.describe Busybee::Testing::HookRegistry do
 
   describe ".with_only" do
     before do
-      Busybee::Hooks.before_perform { fired << :before_perform }
-      Busybee::Hooks.after_perform { fired << :after_perform }
+      Busybee.before_perform { fired << :before_perform }
+      Busybee.after_perform { fired << :after_perform }
     end
 
     it "runs the named types and suppresses the rest" do

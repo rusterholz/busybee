@@ -8,8 +8,8 @@ module Busybee
     module Helpers
       # Executes workers without a Zeebe connection, through the real runner
       # lifecycle; see Testing::Runner. The job comes from Builders, included
-      # alongside this module into Helpers, which busybee/testing auto-includes
-      # into every RSpec example.
+      # alongside this module into Helpers, which busybee/testing includes into
+      # every RSpec example tagged :busybee.
       #
       # @example Happy path
       #   job = execute_worker(ProcessOrderWorker, variables: { order_id: order.id })

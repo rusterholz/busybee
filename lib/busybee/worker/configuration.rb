@@ -2,6 +2,7 @@
 
 require "active_support/core_ext/string/inflections"
 
+require "busybee/configure"
 require "busybee/defaults"
 require "busybee/durations"
 require "busybee/error"
@@ -13,7 +14,6 @@ module Busybee
     class Configuration # rubocop:disable Metrics/ClassLength
       VALID_TYPES = %w[string integer decimal boolean datetime duration uuid null].freeze
       VALID_SOURCES = %i[variable header].freeze
-      VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
       VALID_POLLING_KWARGS = %i[max_jobs request_timeout].freeze
       VALID_STREAMING_KWARGS = %i[buffer buffer_throttle].freeze
 
@@ -56,9 +56,10 @@ module Busybee
 
       def worker_mode=(value)
         sym = value.to_sym
-        unless VALID_WORKER_MODES.include?(sym)
+        unless Configure::VALID_WORKER_MODES.include?(sym)
           raise InvalidWorkerDefinition,
-                "Invalid worker mode #{value.inspect}. Valid: #{VALID_WORKER_MODES.map(&:inspect).join(', ')}"
+                "Invalid worker mode #{value.inspect}. " \
+                "Valid: #{Configure::VALID_WORKER_MODES.map(&:inspect).join(', ')}"
         end
 
         @worker_mode = sym
@@ -272,16 +273,15 @@ module Busybee
               "`buffer_throttle:` cannot be set when `buffer: false` — there is no buffer to throttle"
       end
 
+      # Coerces true → 0 (the minimal throttle) and nil → false (none); anything
+      # else reads on the gem-wide duration contract, like every other knob.
       def validate_buffer_throttle!(kwargs)
-        # Coerce: true → 0 ("enable at minimal setting"), nil → false ("no throttling")
         kwargs[:buffer_throttle] = 0 if kwargs[:buffer_throttle] == true
         kwargs[:buffer_throttle] = false if kwargs[:buffer_throttle].nil?
 
         value = kwargs[:buffer_throttle]
         return if value == false
 
-        # Read on the gem-wide duration contract like every other knob, so a
-        # Duration works here too and the accepted shapes don't fork.
         throttle = validate_duration!(:buffer_throttle, value)
         if throttle.negative?
           raise InvalidWorkerDefinition,

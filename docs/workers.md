@@ -270,7 +270,7 @@ def perform
   job.headers                 # custom headers from BPMN definition, same format
 
   # Lifecycle (delegated — see Manual Lifecycle Control)
-  job.complete!(vars = {})    # mark job complete — skips output validation, see below
+  job.complete!(vars = {})    # mark job complete, checking declared outputs as the worker's does
   job.fail!(error, retries: nil, backoff: nil)  # mark job failed
   job.throw_bpmn_error!(code, message = "")     # throw a BPMN error
   job.update_retries(count)   # change remaining retry count
@@ -295,7 +295,7 @@ job.variables.order_id            # method access
 job.variables.address.zip_code    # nested method access
 ```
 
-One asymmetry is worth knowing before you reach past the worker. `fail!` and `throw_bpmn_error!` are plain delegations, but `complete!` is not: the worker's own `complete!` checks your declared outputs first — required ones present, undeclared ones absent — and only then completes the job. `job.complete!` performs neither check and sends whatever you hand it. Prefer the worker's `complete!` unless you specifically want to bypass the contract; see [Strict Output Validation](#strict-output-validation).
+Reaching past the worker doesn't change what `complete!` checks. The worker's `complete!` and `job.complete!` both check your declared outputs (required ones present, undeclared ones absent) whenever a worker is attached to the job: in `perform` and in the perform hooks around it. A job resolved before then, by an `on_job_activated` hook say, or a `Busybee::Job` used on its own, has no worker attached and so no outputs to check against. See [Strict Output Validation](#strict-output-validation).
 
 Most of the time, you won't need to reach for `job` directly — input accessors give you named, validated methods for reading data, and the lifecycle delegations (`complete!`, `fail!`, etc.) read more naturally without the `job.` prefix. But the job object is there when you need metadata, status checks, or raw data access.
 
@@ -445,7 +445,7 @@ end
 
 To opt out everywhere, set [`Busybee.default_strict_outputs = false`](configuration.md#default_strict_outputs). A worker's own `strict_outputs` always wins over the gem-level default.
 
-Validation runs on automatic completion and on the worker's own `complete!`. Reaching past the worker to `job.complete!` bypasses both output checks — see [Direct Job Access](#direct-job-access).
+Validation runs on automatic completion and on `complete!`, whether you call the worker's or the job's; see [Direct Job Access](#direct-job-access) for the one case it can't, a job with no worker attached.
 
 ### Input/Output Types
 

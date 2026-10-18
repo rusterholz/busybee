@@ -15,8 +15,8 @@ RSpec.describe "handing a job back on shutdown", :gateway do # rubocop:disable R
   before do
     gateway.on(:complete_job) { Busybee::GRPC::CompleteJobResponse.new }
     gateway.on(:fail_job) { Busybee::GRPC::FailJobResponse.new }
-    Busybee::Hooks.on_job_activated { |job| runner.stop!(reason: :sigterm) if job.key == 2 }
-    Busybee::Hooks.on_job_not_executed { |job| handed_back << job }
+    Busybee.on_job_activated { |job| runner.stop!(reason: :sigterm) if job.key == 2 }
+    Busybee.on_job_not_executed { |job| handed_back << job }
   end
 
   def corridor_worker(mode, **streaming)

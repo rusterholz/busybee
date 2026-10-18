@@ -68,7 +68,7 @@ RSpec.describe "the stop lock on a streaming worker", :gateway do # rubocop:disa
       paused = recording
       pause_after_recording { paused.set.then { sleep 0.2 } }
       stream_jobs(1, 3, 2)
-      Busybee::Hooks.on_job_activated do |job|
+      Busybee.on_job_activated do |job|
         next unless job.key == 2
 
         activating.set
@@ -116,7 +116,7 @@ RSpec.describe "the stop lock on a streaming worker", :gateway do # rubocop:disa
     before do
       pause_after_claiming(0.3)
       stream_jobs(1, 2)
-      Busybee::Hooks.on_job_activated do |job|
+      Busybee.on_job_activated do |job|
         next unless job.key == 2
 
         activating.set

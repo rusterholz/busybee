@@ -31,7 +31,7 @@ module RunnerCorridor
   # threads, hence the concurrent collection.
   def shutdown_statuses_from
     captured = Concurrent::Array.new
-    Busybee::Hooks.on_worker_shutdown { |status| captured << status }
+    Busybee.on_worker_shutdown { |status| captured << status }
     yield
     captured
   end
@@ -51,9 +51,9 @@ module RunnerCorridor
   # A job's activation and closing hooks, in firing order, keyed by job.
   def record_job_brackets
     Concurrent::Array.new.tap do |brackets|
-      Busybee::Hooks.on_job_activated { |job| brackets << [:activated, job.key] }
-      Busybee::Hooks.on_job_executed { |job| brackets << [:executed, job.key] }
-      Busybee::Hooks.on_job_not_executed { |job| brackets << [:not_executed, job.key] }
+      Busybee.on_job_activated { |job| brackets << [:activated, job.key] }
+      Busybee.on_job_executed { |job| brackets << [:executed, job.key] }
+      Busybee.on_job_not_executed { |job| brackets << [:not_executed, job.key] }
     end
   end
 end

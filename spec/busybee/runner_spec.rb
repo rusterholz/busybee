@@ -37,6 +37,10 @@ RSpec.describe Busybee::Runner do
   let(:runner) { described_class.new(worker_class, client: client) }
 
   describe "#initialize" do
+    it "exposes the worker class it runs" do
+      expect(runner.worker_class).to be(worker_class)
+    end
+
     it "accepts an explicit client" do
       runner = described_class.new(client: client)
       expect(runner.instance_variable_get(:@client)).to be(client)
@@ -52,9 +56,19 @@ RSpec.describe Busybee::Runner do
   end
 
   describe "#run!" do
-    it "raises NotImplementedError" do
-      runner = described_class.new(client: client)
+    it "raises NotImplementedError, the base leaving run_loop to its subclasses" do
+      runner = described_class.new(worker_class, client: client)
       expect { runner.run! }.to raise_error(NotImplementedError)
+    end
+
+    it "keeps the instance exit_immediately? private: Runner.exit_immediately? is the public reader" do
+      expect(described_class.private_method_defined?(:exit_immediately?)).to be(true)
+    end
+
+    it "is the only way in: every runner keeps its run_loop private" do
+      [described_class, Busybee::Runner::Polling, Busybee::Runner::Streaming, Busybee::Runner::Hybrid].each do |klass|
+        expect(klass.public_method_defined?(:run_loop)).to be(false), "#{klass} exposes run_loop"
+      end
     end
   end
 

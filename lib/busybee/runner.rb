@@ -3,6 +3,7 @@
 require "concurrent"
 
 require "busybee/client"
+require "busybee/configure"
 require "busybee/hooks"
 require "busybee/runner/stopping"
 require "busybee/runner/teardown"
@@ -30,6 +31,8 @@ module Busybee
 
     include Stopping
     include Teardown
+
+    attr_reader :worker_class
 
     def initialize(worker_class = nil, runtime_config: nil, client: nil)
       @worker_class = worker_class
@@ -111,8 +114,8 @@ module Busybee
         when :streaming then Streaming
         when :hybrid then Hybrid
         else
-          raise ArgumentError,
-                "Invalid worker mode: #{resolved_config.worker_mode.inspect}. Valid: :polling, :streaming, :hybrid"
+          raise ArgumentError, "Invalid worker mode: #{resolved_config.worker_mode.inspect}. " \
+                               "Valid: #{Configure::VALID_WORKER_MODES.map(&:inspect).join(', ')}"
         end
       end
     end

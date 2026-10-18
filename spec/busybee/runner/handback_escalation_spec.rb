@@ -33,7 +33,7 @@ RSpec.describe "a worker declared down while handing jobs back", :gateway do # r
   # Registered after the brackets' recorder, so that still sees the handback.
   def declare_down_on_first_handback
     declared = Concurrent::AtomicBoolean.new(false)
-    Busybee::Hooks.on_job_not_executed do |_job|
+    Busybee.on_job_not_executed do |_job|
       raise Busybee::Worker::Shutdown, "replica lag too high" if declared.make_true
     end
   end
@@ -131,8 +131,8 @@ RSpec.describe "a worker declared down while handing jobs back", :gateway do # r
 
     before do
       gateway.on(:activate_jobs) { [Busybee::GRPC::ActivateJobsResponse.new(jobs: [wire_job(1)])] }
-      Busybee::Hooks.on_job_activated { |_job| raise Busybee::Worker::Shutdown, "from activation" }
-      Busybee::Hooks.on_job_not_executed { |_job| raise Busybee::Worker::Shutdown, "from the handback" }
+      Busybee.on_job_activated { |_job| raise Busybee::Worker::Shutdown, "from activation" }
+      Busybee.on_job_not_executed { |_job| raise Busybee::Worker::Shutdown, "from the handback" }
     end
 
     it "still ends the run on the activation's Shutdown" do

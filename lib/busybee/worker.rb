@@ -59,12 +59,9 @@ module Busybee
     end
 
     class << self
-      # Entry point called by Runners. Instantiates the worker, validates inputs,
-      # calls perform, and applies lifecycle behaviors (auto-complete, auto-fail, shutdown).
-      #
-      # Contract with Runners:
-      # - Returns normally: job was handled, runner continues.
-      # - Raises Shutdown: worker is unhealthy, runner should shut down.
+      # Entry point called by Runners: instantiates the worker, validates inputs,
+      # calls perform, and applies auto-complete, auto-fail and shutdown. Returning
+      # means the job was handled; raising Shutdown, that the worker is unhealthy.
       #
       # @param job [Busybee::Job] An activated job from the workflow engine
       # @return [Hash, nil] the result returned by perform (as a HashWithIndifferentAccess)
@@ -74,9 +71,7 @@ module Busybee
         Client::Call.with_job(job) do # job window spans the whole chain: hooks, perform, autofail all fold it
           run_perform_envelope(job)
         rescue StandardError => e
-          # handle_perform_exception only ever re-raises a Shutdown, so anything
-          # else reaching here was raised by after_perform.
-          raise if e.is_a?(Shutdown)
+          raise if e.is_a?(Shutdown) # handle_perform_exception's only re-raise; anything else is after_perform's
 
           handle_perform_exception(job, e)
         end
@@ -130,10 +125,9 @@ module Busybee
         Hooks.run(:after_perform, job) if job.timestamps.perform_started_at
       end
 
+      # Captures the error first, so after_perform hooks see it on the job even
+      # when autofail's call fails (fail!'s own capture then no-ops).
       def handle_perform_exception(job, exception)
-        # Capture early so after_perform hooks see the error attached to Job even
-        # when autofail's GRPC fails. fail!'s own set_error during autofail
-        # no-ops harmlessly.
         job.send(:resolution).set_error(Shutdown.unwrap(exception))
         handle_failure(job, exception, configuration)
         raise if exception.is_a?(Shutdown)
@@ -160,12 +154,10 @@ module Busybee
         result
       end
 
-      # A hook resolved the job before perform could run. Reported here rather
-      # than at whichever gate first noticed: the gates are temporal, and
-      # skipping the around_perform chain means perform's own gate is never
-      # evaluated, so no single gate sees every short-circuit. Sits on the
-      # non-raising path, which is what separates a deliberate short-circuit
-      # from an invalid job — that one leaves by way of MissingInput.
+      # A hook resolved the job before perform could run. Reported here, not at
+      # a gate: skipping the around_perform chain skips perform's own gate, so no
+      # gate sees every short-circuit. An invalid job leaves raising MissingInput,
+      # so this non-raising path sees only the deliberate ones.
       def log_short_circuit(job)
         return unless job.resolved? && job.timestamps.perform_started_at.nil?
 
@@ -195,6 +187,9 @@ module Busybee
         Array(input.source).any? { |src| !instance.public_send(:"#{src}s")[input.name.to_s].nil? }
       end
 
+      # Outputs are validated before the rescue, so a contract violation fails the
+      # job as perform's own error would. A failed complete! is recorded on the
+      # job's error axis, so after_perform and on_job_executed see why, then logged.
       def handle_success(job, result, config)
         return unless config.complete_job_on_success && job.ready?
 
@@ -204,10 +199,6 @@ module Busybee
         begin
           job.complete!(new_vars)
         rescue StandardError => e
-          # Capture the failure on Resolution's error axis so after_perform and
-          # on_job_executed hooks see why complete! failed, even though the
-          # error is logged-and-swallowed here. Symmetry with G2's early
-          # capture in handle_perform_exception.
           job.send(:resolution).set_error(e)
           Busybee.logger&.warn("Failed to complete job #{job.key}: #{e.message}. Job will timeout and retry.")
         end

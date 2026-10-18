@@ -2,6 +2,8 @@
 
 require "yaml"
 
+require "busybee/configure"
+
 module Busybee
   # Operator-specified runtime configuration, typically from CLI flags or YAML.
   #
@@ -13,14 +15,11 @@ module Busybee
   # Fields are divided into two groups:
   #   - Worker-scoped: participate in the full 4-level precedence chain including
   #     per-worker overrides. Passed to runner constructors.
-  #   - Process-wide: resolve at global RC → gem default only (no per-worker step).
-  #     Applied to gem-level config before runners start.
+  #   - Process-wide: global only, applied to gem-level config before runners
+  #     start; a resolved config doesn't carry them.
   #
   # Runners hold the resolved config at runtime.
   class RuntimeConfig
-    VALID_WORKER_MODES = %i[polling streaming hybrid].freeze
-    VALID_LOG_FORMATS = %i[text json].freeze
-
     # Top-level keys allowed in YAML config: worker-scoped fields, the one
     # process-wide field YAML may set, and workers.
     WORKER_SCOPED_KEYS = %i[worker_mode backpressure_delay max_jobs request_timeout
@@ -109,7 +108,7 @@ module Busybee
                    job_timeout: nil, fail_job_backoff: nil,
                    log_format: nil, worker_name: nil, cluster_address: nil, shutdown_wait_timeout: nil,
                    workers: {})
-      @worker_mode = coerce_symbol!(worker_mode, VALID_WORKER_MODES, "worker mode") if worker_mode
+      @worker_mode = coerce_symbol!(worker_mode, Configure::VALID_WORKER_MODES, "worker mode") if worker_mode
       @backpressure_delay = backpressure_delay
       @max_jobs = max_jobs
       @request_timeout = request_timeout
@@ -118,12 +117,12 @@ module Busybee
       @job_timeout = job_timeout
       @fail_job_backoff = fail_job_backoff
       @shutdown_wait_timeout = shutdown_wait_timeout
-      @log_format = coerce_symbol!(log_format, VALID_LOG_FORMATS, "log format") if log_format
+      @log_format = coerce_symbol!(log_format, Configure::VALID_LOG_FORMATS, "log format") if log_format
       @worker_name = worker_name
       @cluster_address = cluster_address
       @workers = workers.each_with_object({}) do |(name, overrides), validated|
         if overrides[:worker_mode]
-          mode = coerce_symbol!(overrides[:worker_mode], VALID_WORKER_MODES, "worker mode")
+          mode = coerce_symbol!(overrides[:worker_mode], Configure::VALID_WORKER_MODES, "worker mode")
           overrides = overrides.merge(worker_mode: mode)
         end
         validated[name.to_s] = overrides
@@ -131,17 +130,14 @@ module Busybee
     end
 
     # Resolves configuration for a specific worker class through the full
-    # precedence chain. Returns a new RuntimeConfig with all values populated.
-    #
-    # Worker-scoped fields resolve through 4 levels:
+    # precedence chain. Returns a new RuntimeConfig with every worker-scoped
+    # field populated, each through 4 levels:
     #   1. Per-worker RuntimeConfig override (highest priority)
     #   2. Global RuntimeConfig value
     #   3. Worker DSL (worker_class.configuration)
     #   4. Gem default (lowest priority)
     #
-    # Process-wide fields resolve through 2 levels:
-    #   1. Global RuntimeConfig value
-    #   2. Gem default
+    # Process-wide fields stay out: the CLI applies them to Busybee, which holds them.
     def resolve_for(worker_class) # rubocop:disable Metrics/AbcSize
       wo = @workers[worker_class.name] || {}
       dsl = worker_class.configuration
@@ -155,11 +151,7 @@ module Busybee
         buffer:     first_non_nil(wo[:buffer], @buffer, dsl.streaming_config[:buffer], Busybee.default_buffer),
         buffer_throttle:    first_non_nil(wo[:buffer_throttle], @buffer_throttle, dsl.streaming_config[:buffer_throttle], Busybee.default_buffer_throttle),
         job_timeout:        first_non_nil(wo[:job_timeout], @job_timeout, dsl.job_timeout, Busybee.default_job_timeout),
-        fail_job_backoff:            first_non_nil(wo[:fail_job_backoff], @fail_job_backoff, dsl.fail_job_backoff, Busybee.default_fail_job_backoff),
-        log_format:         first_non_nil(@log_format, Busybee.log_format),
-        worker_name:        first_non_nil(@worker_name, Busybee.worker_name),
-        cluster_address:    first_non_nil(@cluster_address, Busybee.cluster_address),
-        shutdown_wait_timeout: first_non_nil(@shutdown_wait_timeout, Busybee.shutdown_wait_timeout)
+        fail_job_backoff:            first_non_nil(wo[:fail_job_backoff], @fail_job_backoff, dsl.fail_job_backoff, Busybee.default_fail_job_backoff)
       )
       # rubocop:enable Layout/HashAlignment, Layout/LineLength
     end

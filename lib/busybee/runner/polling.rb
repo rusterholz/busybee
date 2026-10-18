@@ -11,6 +11,8 @@ module Busybee
     # Each iteration long-polls the gateway for available jobs, yields them
     # sequentially to the worker's perform_job, and handles shutdown/errors.
     class Polling < Runner
+      private
+
       # Fills Runner#run!'s loop: long-poll for jobs and process them until
       # stopped. Gateway backpressure backs off and retries. A per-job Shutdown
       # that caused the stop is re-raised once the loop exits, so the drain runs
@@ -26,8 +28,6 @@ module Busybee
 
         raise_exit_error
       end
-
-      private
 
       def process_all_available_jobs
         # A fresh snapshot per poll, so a starved worker still reports via its fetch.

@@ -31,6 +31,10 @@ RSpec.describe Busybee::Worker::Status do
       expect(build_status.worker_class).to be(worker_class)
     end
 
+    it "refuses to be built without a worker class" do
+      expect { build_status(worker_class: nil) }.to raise_error(ArgumentError, /worker_class is required/)
+    end
+
     it "exposes the worker class's configuration" do
       expect(build_status.configuration).to be(worker_class.configuration)
     end
@@ -50,6 +54,15 @@ RSpec.describe Busybee::Worker::Status do
     it "reports the process-wide worker name" do
       allow(Busybee).to receive(:worker_name).and_return("orders-pod-7")
       expect(build_status.worker_name).to eq("orders-pod-7")
+    end
+
+    it "snapshots the worker name, so renaming the process later does not change the status" do
+      Busybee.worker_name = "orders-pod-7"
+      status = build_status
+      Busybee.worker_name = "orders-pod-8"
+      expect(status.worker_name).to eq("orders-pod-7")
+    ensure
+      Busybee.worker_name = nil
     end
   end
 

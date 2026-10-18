@@ -20,7 +20,7 @@ RSpec.describe "a worker meeting an unrecoverable error", :gateway do # rubocop:
   def record_worker_moments
     Concurrent::Array.new.tap do |moments|
       %i[on_worker_stopping on_worker_shutdown].each do |type|
-        Busybee::Hooks.public_send(type) { |status| moments << [type, status.reason, status.error&.class] }
+        Busybee.public_send(type) { |status| moments << [type, status.reason, status.error&.class] }
       end
     end
   end
@@ -96,7 +96,7 @@ RSpec.describe "a worker meeting an unrecoverable error", :gateway do # rubocop:
           yielder << wire_job(3)
         end
       end
-      Busybee::Hooks.on_job_activated { |job| raise NoMemoryError, "failed to allocate memory" if job.key == 3 }
+      Busybee.on_job_activated { |job| raise NoMemoryError, "failed to allocate memory" if job.key == 3 }
     end
 
     it "ends the worker on that error, through both closing moments" do

@@ -6,16 +6,16 @@ module Busybee
   class Worker
     # A frozen, point-in-time snapshot of a worker run. Handed to worker hooks
     # as the |worker| carrier and stamped into job context for job-hook
-    # visibility. Deliberately NOT the live Runner: it carries no
-    # run!/stop!/kill! control surface, so a hook cannot steer the runner from
-    # inside an observation. Built fresh at each firing moment; a nil reader
-    # means "not yet known" (e.g. stop_duration_ms before the drain, or
-    # reason/error before the run ends).
+    # visibility. Not the live Runner: it carries no run!/stop!/kill! control
+    # surface, so a hook cannot steer the runner from inside an observation.
+    # Built fresh at each firing moment; a nil reader means "not yet known"
+    # (e.g. stop_duration_ms before the drain, or reason/error before the run ends).
     class Status
       attr_reader :worker_class, :worker_mode, :timestamps,
                   :total_job_count, :failed_job_count, :backpressure_count,
                   :current_buffer_size, :peak_buffer_size,
-                  :reason, :error
+                  :reason, :error,
+                  :worker_name # container identity (Busybee.worker_name), not the per-job worker
 
       # The worker class's declared contract object; the DSL-contract readers
       # below forward through it.
@@ -30,13 +30,12 @@ module Busybee
       delegate :started_at, :stop_requested_at, :stopping_at, :shutdown_at,
                :stop_duration_ms, :stop_latency_ms, :uptime_s, to: :timestamps
 
-      # Container identity (Busybee.worker_name) — not the per-job worker.
-      delegate :worker_name, to: :Busybee
-
       def initialize(worker_class:, worker_mode:, timestamps:, # rubocop:disable Metrics/ParameterLists
                      total_job_count: 0, failed_job_count: 0, backpressure_count: 0,
                      current_buffer_size: nil, peak_buffer_size: nil,
                      reason: nil, error: nil)
+        raise ArgumentError, "worker_class is required" if worker_class.nil?
+
         @worker_class = worker_class
         @worker_mode = worker_mode
         @timestamps = timestamps.dup.freeze
@@ -47,6 +46,7 @@ module Busybee
         @peak_buffer_size = peak_buffer_size
         @reason = reason
         @error = error
+        @worker_name = Busybee.worker_name
         freeze
       end
 
@@ -67,7 +67,7 @@ module Busybee
       # Class and error class render as names for scalar labels.
       def context_tags
         {
-          worker_class: worker_class&.name,
+          worker_class: worker_class.name,
           job_type: job_type,
           worker_mode: worker_mode,
           worker_name: worker_name,

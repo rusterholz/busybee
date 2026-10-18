@@ -24,8 +24,8 @@ module Busybee
       module Builders
         # A Worker::Status as the runner snapshots it. Note what it refuses that a
         # double allowed: job_type is *derived* from worker_class, so the two can't
-        # disagree; error_message comes from a real exception; and worker_name is
-        # no field at all — set the gem config if a spec needs a particular one.
+        # disagree; error_message comes from a real exception; and worker_name is the
+        # gem config's as the status is built: set that first to choose one.
         #
         # @param worker_class [Class<Busybee::Worker>] the worker this run is of
         # @param worker_mode [Symbol] :polling, :streaming or :hybrid

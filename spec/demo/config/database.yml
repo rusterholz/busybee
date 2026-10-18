@@ -28,20 +28,27 @@ development:
     database: db/data/monitoring_development.sqlite3
     migrations_paths: db/monitoring_migrate
 
+# seeds: false, so the spec boot's prepare_all creates a database without seeding
+# it: specs build their own rows, and seeded ones would sit outside every
+# example's transaction.
 test:
   oms:
     <<: *default
     database: db/oms_test.sqlite3
     migrations_paths: db/oms_migrate
+    seeds: false
   logistics:
     <<: *default
     database: db/logistics_test.sqlite3
     migrations_paths: db/logistics_migrate
+    seeds: false
   delivery:
     <<: *default
     database: db/delivery_test.sqlite3
     migrations_paths: db/delivery_migrate
+    seeds: false
   monitoring:
     <<: *default
     database: db/monitoring_test.sqlite3
     migrations_paths: db/monitoring_migrate
+    seeds: false

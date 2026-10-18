@@ -51,6 +51,15 @@ RSpec.describe Busybee::CLI do
         end.to output(/Usage:/).to_stdout.and raise_error(SystemExit)
       end
 
+      it "lists the worker modes and log formats Configure accepts in --help" do
+        stub_const("Busybee::Configure::VALID_WORKER_MODES", %i[polling streaming hybrid batch])
+        stub_const("Busybee::Configure::VALID_LOG_FORMATS", %i[text json logfmt])
+        expect do
+          described_class.new(["--help"])
+        end.to output(/Worker mode \(polling, streaming, hybrid, batch\).*Log format \(text, json, logfmt\)/m).
+          to_stdout.and raise_error(SystemExit)
+      end
+
       it "parses --worker-mode into runtime config" do
         cli = described_class.new(["--worker-mode", "polling", "TestCLIWorker"])
         expect(cli.runtime_config.worker_mode).to eq(:polling)

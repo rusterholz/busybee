@@ -57,7 +57,9 @@ lib/busybee/
 │   ├── hybrid.rb            # Hybrid runner (Streaming subclass, adds poll-drain phase)
 │   ├── multi.rb             # Multi runner (thread pool managing multiple single-worker runners)
 │   ├── polling.rb           # Polling runner (with_each_job loop)
-│   └── streaming.rb         # Streaming runner (open_job_stream, pump thread + queue)
+│   ├── stopping.rb          # Runner::Stopping: a stop's claim, announcement and reason; fetch loops' gRPC policy
+│   ├── streaming.rb         # Streaming runner (open_job_stream, pump thread + queue)
+│   └── teardown.rb          # Runner::Teardown: run!'s ensure (T2, the drain, T3)
 ├── serialization.rb         # JSON serialization/deserialization
 ├── testing.rb               # Testing module entry point
 ├── testing/                 # RSpec integration
@@ -135,8 +137,8 @@ lib/busybee/
 
 Gem-level configuration (`Busybee.cluster_address`, `Busybee.default_message_ttl`, etc.) is split across two files:
 
-- **`busybee.rb`** — Readers, defaults, constants, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
-- **`configure.rb`** — `Busybee::Configure` module with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`).
+- **`busybee.rb`**: readers, defaults, and `configure`. This is the public surface: reading the file shows what config exists and what the defaults are.
+- **`configure.rb`**: the `Busybee::Configure` module, with validated setters and private validation helpers. Included into Busybee's singleton class (`class << self; include Configure`). It also holds the one definition of each configuration vocabulary (`VALID_CREDENTIAL_TYPES`, `VALID_LOG_FORMATS`, `VALID_WORKER_MODES`, all Symbols), which `RuntimeConfig`, the worker DSL and the hook filters read too.
 
 All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), buffer throttle (Numeric/boolean/numeric String), worker mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
 
@@ -213,10 +215,10 @@ Job execution flows — receive-to-runner-return walkthroughs for typical and ed
 
 `Busybee::RuntimeConfig` holds operator-specified overrides, typically from CLI flags or YAML config. It has a two-phase lifecycle:
 
-1. **Constructed sparse** — only fields the operator explicitly set. Per-worker overrides keyed by class name.
-2. **Resolved via `resolve_for(worker_class)`** — returns a new RuntimeConfig with all values populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
+1. **Constructed sparse**: only fields the operator explicitly set. Per-worker overrides keyed by class name.
+2. **Resolved via `resolve_for(worker_class)`**: returns a new RuntimeConfig with every worker-scoped value populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
 
-Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every field set.
+Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every worker-scoped field set and the process-wide ones left `nil`.
 
 ### Fields
 
@@ -232,7 +234,7 @@ RuntimeConfig fields are divided into two categories:
 - `job_timeout`: job lock timeout in ms
 - `fail_job_backoff`: fail-job backoff in ms
 
-**Process-wide**: apply globally, no per-worker overrides (global RC → gem default):
+**Process-wide**: apply globally, no per-worker overrides. The CLI sets the global RC's values on gem config (`apply_global_config!`) and `resolve_for` leaves them out, so everything reads them from `Busybee.*`:
 - `log_format`: `:text` or `:json`
 - `worker_name`: identifier for this worker process
 - `cluster_address`: Zeebe gateway address
@@ -252,13 +254,7 @@ Worker DSL (worker_class.configuration)
 Gem default (Busybee.default_*)     (lowest priority)
 ```
 
-All process-wide fields use the same 2-level chain:
-
-```
-Global RuntimeConfig value          (highest priority)
-         ↓
-Gem default (Busybee.*)             (lowest priority)
-```
+Process-wide fields have no chain of their own: a value the CLI was given is set on `Busybee`, whose readers supply the default otherwise.
 
 Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit values (important for `buffer_throttle: false` meaning "no throttle" and `backpressure_delay: 0` for testing).
 
@@ -282,7 +278,7 @@ workers:
 
 **Validation:** `parse_yaml` validates top-level keys (rejects unrecognized keys and process-wide fields) and per-worker override keys (rejects anything not in the worker-scoped set). Errors include the invalid key name and list valid options.
 
-**String-to-symbol coercion:** The constructor accepts strings for `worker_mode` and `log_format` (necessary since `YAML.safe_load` produces strings). Values are validated against the string allowlist before coercion to prevent symbol injection. Both strings and symbols are accepted (backwards-compatible).
+**String-to-symbol coercion:** The constructor accepts strings for `worker_mode` and `log_format` (necessary since `YAML.safe_load` produces strings). Each value is converted with `to_s.to_sym` and checked against `Busybee::Configure`'s Symbol vocabulary; anything else raises `ArgumentError`. Both strings and symbols are accepted.
 
 ### Integration Points
 
@@ -298,7 +294,7 @@ Runners are long-lived processes that fetch jobs and dispatch them to Workers. A
 ### Class Hierarchy
 
 ```
-Runner                    # Base class: run!, stop!, stopping?, stop_reason, running?, kill!, factory
+Runner                    # Base class: run!, stop!, stopping?, stop_reason, running?, kill!, worker_class, factory
 ├── Runner::Polling       # Loop using client.with_each_job
 ├── Runner::Streaming     # Loop using client.open_job_stream (dual-mode: inline or pump+queue)
 │   └── Runner::Hybrid    # Subclass of Streaming, adds poll-drain phase before buffer processing
@@ -571,7 +567,7 @@ The arrays live in a hash behind the private `Hooks.registry` accessor, which `h
 
 ### Prefiltering
 
-The whole filter concern — vocabulary, validation, and matching — lives in `Busybee::Hooks::Filters`. `Hooks.match?` / `.error_match?` / `.matches?` remain its public face. `FILTERS` declares, per noun, each key's **domain** (`:name`, `:class`, `:boolean`, `:error`) and its **vocabulary** where one is closed:
+The whole filter concern (vocabulary, validation, and matching) lives in `Busybee::Hooks::Filters`, whose `matches?` is what `Hooks` calls to select the hooks a target fires. `FILTERS` declares, per noun, each key's **domain** (`:name`, `:class`, `:boolean`, `:error`) and its **vocabulary** where one is closed:
 
 - **Job hooks:** `job_type:`, `worker_class:`, `status:`, `bpmn_process_id:`, `source:`, `buffered:`, `error:`
 - **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `reason:`, `error:`

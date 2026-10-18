@@ -19,7 +19,7 @@ RSpec.describe Busybee::Hooks do
 
     it "maps every hook type to a filter noun (HOOK_NOUN is explicit, not derived)" do
       expect(described_class::HOOK_NOUN.keys).to match_array(described_class::HOOK_TYPES)
-      expect(described_class::HOOK_NOUN.values.uniq).to match_array(described_class::FILTER_KEYS.keys)
+      expect(described_class::HOOK_NOUN.values.uniq).to match_array(Busybee::Hooks::Filters::FILTERS.keys)
     end
   end
 
@@ -64,116 +64,6 @@ RSpec.describe Busybee::Hooks do
 
     it "requires a block" do
       expect { Busybee.before_perform }.to raise_error(ArgumentError, /block/)
-    end
-  end
-
-  describe ".match?" do
-    it "matches exact symbol" do
-      expect(described_class.match?(:failed, :failed)).to be true
-      expect(described_class.match?(:failed, :complete)).to be false
-    end
-
-    it "matches exact string" do
-      expect(described_class.match?("process_order", "process_order")).to be true
-      expect(described_class.match?("process_order", "other")).to be false
-    end
-
-    it "matches regex" do
-      expect(described_class.match?(/order/, "process_order")).to be true
-      expect(described_class.match?(/order/, "send_email")).to be false
-    end
-
-    it "treats String and Symbol filters as interchangeable, in both directions" do
-      expect(described_class.match?("failed", :failed)).to be true
-      expect(described_class.match?(:charge_card, "charge_card")).to be true
-      expect(described_class.match?("failed", :complete)).to be false
-      expect(described_class.match?(:charge_card, "ship_order")).to be false
-    end
-
-    it "matches a Class by a name given as a Symbol" do
-      klass = Class.new { def self.name = "OrderWorker" }
-      expect(described_class.match?(:OrderWorker, klass)).to be true
-      expect(described_class.match?(:ShipmentWorker, klass)).to be false
-    end
-
-    it "does not cross the String/Symbol seam for values that merely stringify alike" do
-      expect(described_class.match?("5", 5)).to be false
-      expect(described_class.match?(:"1970-01-01", Date.new(1970, 1, 1))).to be false
-    end
-
-    it "matches Class via is_a? (case equality)" do
-      expect(described_class.match?(RuntimeError, RuntimeError.new("boom"))).to be true
-      expect(described_class.match?(RuntimeError, StandardError.new("boom"))).to be false
-    end
-
-    it "matches Class by identity (filter and value are the same Class)" do
-      klass = Class.new { def self.name = "OrderWorker" }
-      other = Class.new { def self.name = "ShipmentWorker" }
-      expect(described_class.match?(klass, klass)).to be true
-      expect(described_class.match?(klass, other)).to be false
-    end
-
-    it "matches Proc/Lambda" do
-      filter = ->(v) { v.start_with?("order") }
-      expect(described_class.match?(filter, "order_123")).to be true
-      expect(described_class.match?(filter, "shipment_456")).to be false
-    end
-
-    it "falls back to Class name when value is a Class" do
-      # Two distinct anonymous classes; DuplicateMethods misreads both as ::Object.name.
-      # rubocop:disable Lint/DuplicateMethods
-      expect(described_class.match?(/Order/, Class.new { def self.name = "OrderWorker" })).to be true
-      expect(described_class.match?(/Order/, Class.new { def self.name = "ShipmentWorker" })).to be false
-      # rubocop:enable Lint/DuplicateMethods
-    end
-
-    it "matches Class by exact name string (useful for load-order issues)" do
-      klass = Class.new { def self.name = "OrderWorker" }
-      expect(described_class.match?("OrderWorker", klass)).to be true
-      expect(described_class.match?("ShipmentWorker", klass)).to be false
-    end
-
-    it "does not use name fallback for non-Class values" do
-      expect(described_class.match?(/boom/, RuntimeError.new("boom"))).to be false
-    end
-
-    it "matches any element when the filter is an array" do
-      expect(described_class.match?(%i[failed error], :error)).to be true
-      expect(described_class.match?(%i[failed error], :complete)).to be false
-    end
-
-    it "applies each element matcher (string, regex, class name) inside an array" do
-      expect(described_class.match?(["create_shipment", /assign/], "assign_driver")).to be true
-      expect(described_class.match?(["create_shipment", /assign/], "load_warehouses")).to be false
-    end
-
-    it "treats an empty array as matching nothing" do
-      expect(described_class.match?([], :anything)).to be false
-    end
-  end
-
-  describe ".matches?" do
-    # Targets are Job-like objects whose attribute names are looked up via
-    # public_send. Struct stand-ins keep the matching tests focused on the
-    # matching logic without Job construction overhead.
-    let(:target_class) { Struct.new(:status, :job_type, keyword_init: true) }
-
-    it "returns true when all filters match" do
-      hook = { filters: { status: :failed, job_type: /order/ } }
-      target = target_class.new(status: :failed, job_type: "process_order")
-      expect(described_class.matches?(hook, target)).to be true
-    end
-
-    it "returns false when any filter does not match" do
-      hook = { filters: { status: :failed, job_type: /order/ } }
-      target = target_class.new(status: :complete, job_type: "process_order")
-      expect(described_class.matches?(hook, target)).to be false
-    end
-
-    it "returns true (vacuous truth) when filters are empty" do
-      hook = { filters: {} }
-      target = target_class.new(status: :ready, job_type: nil)
-      expect(described_class.matches?(hook, target)).to be true
     end
   end
 
@@ -246,86 +136,6 @@ RSpec.describe Busybee::Hooks do
     it "rejects matcher types the error: table does not name" do
       expect { Busybee.before_perform(error: :not_a_matcher, &noop) }.
         to raise_error(ArgumentError, /error:/)
-    end
-  end
-
-  describe ".error_match?" do
-    let(:boom) { RuntimeError.new("boom") }
-
-    it "matches the absence of an error with false" do
-      expect(described_class.error_match?(false, nil)).to be true
-      expect(described_class.error_match?(false, boom)).to be false
-    end
-
-    it "matches the presence of any error with true" do
-      expect(described_class.error_match?(true, boom)).to be true
-      expect(described_class.error_match?(true, nil)).to be false
-    end
-
-    it "matches by exact class" do
-      expect(described_class.error_match?(RuntimeError, boom)).to be true
-      expect(described_class.error_match?(ArgumentError, boom)).to be false
-    end
-
-    it "matches by superclass (hierarchy, like rescue)" do
-      expect(described_class.error_match?(StandardError, boom)).to be true
-    end
-
-    it "matches by mixin module on the error's class" do
-      reportable = Module.new
-      tagged = Class.new(StandardError) { include reportable }.new("tagged")
-      expect(described_class.error_match?(reportable, tagged)).to be true
-      expect(described_class.error_match?(reportable, boom)).to be false
-    end
-
-    it "matches a String against the error's own class name, never its ancestry" do
-      expect(described_class.error_match?("RuntimeError", boom)).to be true
-      expect(described_class.error_match?("StandardError", boom)).to be false
-    end
-
-    it "matches a Regexp against the error's own class name, never its ancestry" do
-      expect(described_class.error_match?(/Runtime/, boom)).to be true
-      expect(described_class.error_match?(/StandardError/, boom)).to be false
-    end
-
-    it "matches with a Proc receiving the error itself" do
-      expect(described_class.error_match?(->(e) { e.message == "boom" }, boom)).to be true
-      expect(described_class.error_match?(->(e) { e.message == "quiet" }, boom)).to be false
-    end
-
-    it "matches any element of an Array, mixing matcher kinds" do
-      expect(described_class.error_match?([ArgumentError, /Runtime/], boom)).to be true
-      expect(described_class.error_match?([ArgumentError, /Type/], boom)).to be false
-    end
-
-    it "matches nothing but false when no error is present (Procs are not even called)" do
-      probe = ->(_) { raise "must not be called on nil" }
-      aggregate_failures do
-        expect(described_class.error_match?(true, nil)).to be false
-        expect(described_class.error_match?(StandardError, nil)).to be false
-        expect(described_class.error_match?("RuntimeError", nil)).to be false
-        expect(described_class.error_match?(/anything/, nil)).to be false
-        expect(described_class.error_match?(probe, nil)).to be false
-        expect(described_class.error_match?([probe, true], nil)).to be false
-      end
-    end
-  end
-
-  describe ".matches? with the error: key" do
-    let(:target_class) { Struct.new(:error, keyword_init: true) }
-
-    it "routes error: through the bespoke matcher, so a Regexp sees the class name" do
-      # Under the generic layers this was the silent-no-match trap: a Regexp
-      # never === an exception instance, and the name fallback needs a Class.
-      hook = { filters: { error: /Runtime/ } }
-      expect(described_class.matches?(hook, target_class.new(error: RuntimeError.new("boom")))).to be true
-      expect(described_class.matches?(hook, target_class.new(error: nil))).to be false
-    end
-
-    it "expresses \"did not error\" with error: false" do
-      hook = { filters: { error: false } }
-      expect(described_class.matches?(hook, target_class.new(error: nil))).to be true
-      expect(described_class.matches?(hook, target_class.new(error: RuntimeError.new("boom")))).to be false
     end
   end
 

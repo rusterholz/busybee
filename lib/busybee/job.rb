@@ -55,9 +55,7 @@ module Busybee
     # job.worker; this is the process/container the job ran in.
     delegate :worker_name, to: :Busybee
 
-    # Non-predicate reader for the `buffered` hook filter key: Hooks.attribute
-    # resolves a filter value via public_send(key), and a kwarg key can't carry
-    # the `?`. buffered? (delegated above) stays the idiomatic predicate.
+    # The `buffered` filter key's reader, since a kwarg can't carry buffered?'s `?`.
     def buffered = buffered? # rubocop:disable Naming/PredicateMethod
 
     # Create a new Job wrapper.
@@ -73,12 +71,9 @@ module Busybee
       @timestamps = Timestamps.new
     end
 
-    # Route a kwargs hash through the Job's typed POROs. Activation-owned
-    # keys (source, buffer_size, worker, worker_class) land in Activation;
-    # Resolution-owned keys (Resolution::OWNED_KEYS) are intentionally NOT
-    # routed here — they have dedicated lifecycle methods (#complete!,
-    # #fail!, #throw_bpmn_error!) and a warning fires if they show up.
-    # Everything else is absorbed by Context as arbitrary scratch.
+    # Route kwargs through the Job's typed POROs: Activation::KEYS land in
+    # Activation; Resolution::OWNED_KEYS are dropped with a warning, being
+    # #complete!/#fail!/#throw_bpmn_error!'s to set; Context absorbs the rest.
     def set_context(**kwargs)
       warn_about_reserved_keys(kwargs)
       kwargs = kwargs.except(*Resolution::OWNED_KEYS)
@@ -214,8 +209,7 @@ module Busybee
     attr_reader :activation, :resolution
 
     # Output validation is the worker's contract, so it applies exactly when a
-    # worker is attached. Done here rather than by calling Worker#complete!, so
-    # that method stays a plain delegate rather than a mutual call.
+    # worker is attached. Checked here, not via Worker#complete!, which calls this.
     def validate_outputs!(vars)
       return unless worker
 
@@ -223,21 +217,14 @@ module Busybee
       worker.class.validate_undeclared_outputs!(vars)
     end
 
-    # A job's own engine calls carry the job whatever the thread — a manual
-    # complete!/fail! from outside the perform window (an async worker's own
-    # thread) would otherwise build an uncorrelated Call.
+    # The job's own engine calls carry it on any thread, an async worker's included.
     def correlated(&) = Client::Call.with_job(self, &)
 
-    # Shared fire-once guard for the resolution ops.
-    # The result axis is set-once, so a complete! arriving after perform's own
-    # return value was captured transmits that value and drops these vars. Only
-    # reachable since hooks were allowed to resolve — a post-yield resolution
-    # used to raise instead — and silently losing variables the caller handed us
-    # is worse than a surprising rule, so name it. Called only when the axis is
-    # already claimed; the equality escape is for the gem's own auto-complete,
-    # which hands back the very object it captured. Note that HWIA#== does not
-    # convert the other side's symbol keys, so this compares identity in
-    # practice and must stay on that path.
+    # The result axis is set-once, so a complete! after perform's return value
+    # was captured sends that value and drops these vars: say so, not silently.
+    # The equality escape is for auto-complete, handing back the very object it
+    # captured; HWIA#== doesn't convert the other side's symbol keys, so this
+    # compares identity in practice.
     def warn_discarded_result(vars)
       return unless vars.is_a?(Hash) && vars.any?
       return if resolution.result == vars
@@ -248,6 +235,7 @@ module Busybee
       )
     end
 
+    # The resolution ops' shared fire-once guard.
     def ensure_resolvable!(verb)
       return if ready?
 
@@ -261,12 +249,8 @@ module Busybee
       explicit || ((@retries_override || payload.retries) - 1)
     end
 
-    # Mark the job resolved: stamp resolved_at, advance the Resolution PORO
-    # to the terminal status (fire-once enforced). Outcome data (result /
-    # error trio) is captured separately by the calling lifecycle method
-    # (#complete!, #fail!, #throw_bpmn_error!) before its GRPC. after_perform
-    # firing happens uniformly post-perform in Worker.perform_job's ensure,
-    # not here.
+    # Stamp resolved_at and advance Resolution to its terminal status (fire-once);
+    # the calling lifecycle method captured the outcome data before its call.
     def resolve!(status)
       @timestamps.stamp!(:resolved_at)
       resolution.resolve_to(status)

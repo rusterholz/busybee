@@ -130,7 +130,7 @@ module Busybee
       end
 
       def runner_worker_name(runner)
-        runner.instance_variable_get(:@worker_class)&.name || "(anonymous worker)"
+        runner.worker_class.name || "(anonymous worker)"
       end
 
       def check_connection_pool_size(worker_classes)

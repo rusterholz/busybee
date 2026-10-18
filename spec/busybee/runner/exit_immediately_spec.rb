@@ -207,7 +207,7 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
           gate.pop
         end
       end
-      Busybee::Hooks.on_job_not_executed { |_job| raise NoMemoryError, "failed to allocate memory" }
+      Busybee.on_job_not_executed { |_job| raise NoMemoryError, "failed to allocate memory" }
     end
 
     after { stream_gate.close }
@@ -247,7 +247,7 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
 
     before do
       poll_for("exit_immediately", 1, 2)
-      Busybee::Hooks.on_job_not_executed { |_job| raise NoMemoryError, "failed to allocate memory" }
+      Busybee.on_job_not_executed { |_job| raise NoMemoryError, "failed to allocate memory" }
     end
 
     it "ends the run on it, raising it out of run!, and says to exit immediately" do
@@ -284,9 +284,9 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
 
     def beta_brackets
       Concurrent::Array.new.tap do |brackets|
-        Busybee::Hooks.on_job_activated(job_type: "beta") { |job| brackets << [:activated, job.key] }
-        Busybee::Hooks.on_job_executed(job_type: "beta") { |job| brackets << [:executed, job.key] }
-        Busybee::Hooks.on_job_not_executed(job_type: "beta") { |job| brackets << [:not_executed, job.key] }
+        Busybee.on_job_activated(job_type: "beta") { |job| brackets << [:activated, job.key] }
+        Busybee.on_job_executed(job_type: "beta") { |job| brackets << [:executed, job.key] }
+        Busybee.on_job_not_executed(job_type: "beta") { |job| brackets << [:not_executed, job.key] }
       end
     end
 
@@ -324,7 +324,7 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
         poll_for("beta", 1, 2)
         activating = alpha_activating
         stop_made = stopped
-        Busybee::Hooks.on_job_activated(job_type: "alpha") do |_job|
+        Busybee.on_job_activated(job_type: "alpha") do |_job|
           activating.set
           stop_made.wait(5)
           raise NoMemoryError, "failed to allocate memory"
@@ -359,8 +359,8 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
       before do
         poll_for("beta", 1, 2)
         activated = beta_activated
-        Busybee::Hooks.on_job_activated(job_type: "beta") { |_job| activated.set }
-        Busybee::Hooks.on_worker_started(worker_class: "AlphaWorker") do |_status|
+        Busybee.on_job_activated(job_type: "beta") { |_job| activated.set }
+        Busybee.on_worker_started(worker_class: "AlphaWorker") do |_status|
           activated.wait(5)
           raise NoMemoryError, "failed to allocate memory"
         end
@@ -400,7 +400,7 @@ RSpec.describe "a process that must exit immediately", :gateway do # rubocop:dis
 
       before do
         poll_for("beta")
-        Busybee::Hooks.on_job_not_executed(job_type: "alpha") { |_job| raise NoMemoryError, "failed to allocate memory" }
+        Busybee.on_job_not_executed(job_type: "alpha") { |_job| raise NoMemoryError, "failed to allocate memory" }
       end
 
       # Job 1 is in perform when the stream sends jobs 2 and 3 and ends; perform

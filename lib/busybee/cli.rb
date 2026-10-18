@@ -6,6 +6,7 @@ require "concurrent"
 require "optparse"
 
 require "busybee/client"
+require "busybee/configure"
 require "busybee/durations"
 require "busybee/error"
 require "busybee/runner"
@@ -172,7 +173,7 @@ module Busybee
           @parsed_options[:config_file] = file
         end
 
-        opts.on("-m", "--worker-mode MODE", "Worker mode (polling, streaming, hybrid)") do |mode|
+        opts.on("-m", "--worker-mode MODE", "Worker mode (#{Configure::VALID_WORKER_MODES.join(', ')})") do |mode|
           @parsed_options[:worker_mode] = mode.to_sym
         end
 
@@ -181,7 +182,7 @@ module Busybee
     end
 
     def process_wide_options(opts)
-      opts.on("-l", "--log-format FORMAT", "Log format (text, json)") do |format|
+      opts.on("-l", "--log-format FORMAT", "Log format (#{Configure::VALID_LOG_FORMATS.join(', ')})") do |format|
         @parsed_options[:log_format] = format.to_sym
       end
 
@@ -208,6 +209,7 @@ module Busybee
       cli_value = @runtime_config.public_send(field)
       return unless cli_value
 
+      # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
       existing = Busybee.instance_variable_get(:"@#{field}")
       if existing
         Busybee.logger&.info("#{source} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
