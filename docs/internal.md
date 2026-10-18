@@ -215,7 +215,7 @@ Job execution flows — receive-to-runner-return walkthroughs for typical and ed
 
 `Busybee::RuntimeConfig` holds operator-specified overrides, typically from CLI flags or YAML config. It has a two-phase lifecycle:
 
-1. **Constructed sparse** — only fields the operator explicitly set. Per-worker overrides keyed by class name.
+1. **Constructed sparse**: only fields the operator explicitly set. Per-worker overrides keyed by class name.
 2. **Resolved via `resolve_for(worker_class)`**: returns a new RuntimeConfig with every worker-scoped value populated through the precedence chain: per-worker RuntimeConfig → global RuntimeConfig → worker DSL → gem defaults.
 
 Runners hold the resolved config at runtime. The resolved config is a flat RuntimeConfig (no per-worker nesting) with every worker-scoped field set and the process-wide ones left `nil`.
