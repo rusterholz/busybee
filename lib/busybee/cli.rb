@@ -208,6 +208,7 @@ module Busybee
       cli_value = @runtime_config.public_send(field)
       return unless cli_value
 
+      # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
       existing = Busybee.instance_variable_get(:"@#{field}")
       if existing
         Busybee.logger&.info("#{source} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
