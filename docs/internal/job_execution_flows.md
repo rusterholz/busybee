@@ -219,7 +219,7 @@ C9. Continuing `run_hooked_perform`:
 C10. Continuing `Worker.perform_job(job)`:
   - The error is rescued by `perform_job`'s `rescue StandardError`.
   - `handle_perform_exception(job, exception)`:
-    - EARLY ERROR CAPTURE: `job._record_error(Shutdown.unwrap(exception))` — records the error on the error axis of Resolution before autofail runs, so `after_perform` sees the error attached to the Job even when autofail's GRPC fails (C12). `Shutdown.unwrap` reduces a `Shutdown` to its `cause`; every other error passes through untouched.
+    - EARLY ERROR CAPTURE: `job._record_error(Shutdown.unwrap(exception))`: records the error on the error axis before `handle_failure` runs, so `after_perform` sees it even when the job had already resolved and autofail never runs (C11's early exit). A failed autofail (C12) is covered by `fail!`'s own pre-GRPC capture. `Shutdown.unwrap` reduces a `Shutdown` to its `cause`; every other error passes through untouched.
     - Calls `handle_failure(job, exception, config)`.
 
 C11. `handle_failure(job, error, config)`:
