@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support" # the one base-AS site: every core_ext cherry-pick below assumes it (AS load contract)
+require "active_support/core_ext/module/delegation"
 require "active_support/core_ext/object/blank"
 require "grpc"
 require "socket"
@@ -39,12 +40,7 @@ module Busybee
     attr_accessor :logger
     attr_reader :credentials
 
-    # Delegate hook registration methods to Busybee::Hooks
-    Hooks::HOOK_TYPES.each do |type|
-      define_method(type) do |**filters, &callback|
-        Hooks.register(type, callback, **filters)
-      end
-    end
+    delegate(*Hooks::HOOK_TYPES, to: :"Busybee::Hooks") # string-eval'd: a bare :Hooks won't resolve here
 
     def configure
       yield self

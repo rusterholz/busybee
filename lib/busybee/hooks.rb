@@ -43,7 +43,7 @@ module Busybee
 
       # ====== Registration ======
 
-      # Register a hook. Called by delegation methods on the Busybee singleton.
+      # Register a hook; each per-type registration method below calls this.
       #
       # @param type [Symbol] one of HOOK_TYPES
       # @param filters [Hash] optional prefilter kwargs
@@ -58,6 +58,7 @@ module Busybee
       end
 
       # One registration method per hook type, each taking filter kwargs and a block.
+      # Busybee delegates them all here; call them through Busybee.
       HOOK_TYPES.each do |type|
         define_method(type) do |**filters, &callback|
           register(type, callback, **filters)
