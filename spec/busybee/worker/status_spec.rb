@@ -55,6 +55,15 @@ RSpec.describe Busybee::Worker::Status do
       allow(Busybee).to receive(:worker_name).and_return("orders-pod-7")
       expect(build_status.worker_name).to eq("orders-pod-7")
     end
+
+    it "snapshots the worker name, so renaming the process later does not change the status" do
+      Busybee.worker_name = "orders-pod-7"
+      status = build_status
+      Busybee.worker_name = "orders-pod-8"
+      expect(status.worker_name).to eq("orders-pod-7")
+    ensure
+      Busybee.worker_name = nil
+    end
   end
 
   describe "outcome" do
