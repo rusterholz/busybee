@@ -115,12 +115,6 @@ module Busybee
                 "Invalid worker mode: #{resolved_config.worker_mode.inspect}. Valid: :polling, :streaming, :hybrid"
         end
       end
-
-      # The seam Busybee::Testing lowers the alarm through between examples.
-      def lower_exit_immediately
-        EXIT_IMMEDIATELY.make_false
-        EXIT_IMMEDIATELY_REASON.set(nil)
-      end
     end
 
     private
