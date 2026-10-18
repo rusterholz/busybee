@@ -298,7 +298,7 @@ Runners are long-lived processes that fetch jobs and dispatch them to Workers. A
 ### Class Hierarchy
 
 ```
-Runner                    # Base class: run!, stop!, stopping?, stop_reason, running?, kill!, factory
+Runner                    # Base class: run!, stop!, stopping?, stop_reason, running?, kill!, worker_class, factory
 ├── Runner::Polling       # Loop using client.with_each_job
 ├── Runner::Streaming     # Loop using client.open_job_stream (dual-mode: inline or pump+queue)
 │   └── Runner::Hybrid    # Subclass of Streaming, adds poll-drain phase before buffer processing

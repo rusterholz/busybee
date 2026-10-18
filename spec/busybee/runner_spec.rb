@@ -37,6 +37,10 @@ RSpec.describe Busybee::Runner do
   let(:runner) { described_class.new(worker_class, client: client) }
 
   describe "#initialize" do
+    it "exposes the worker class it runs" do
+      expect(runner.worker_class).to be(worker_class)
+    end
+
     it "accepts an explicit client" do
       runner = described_class.new(client: client)
       expect(runner.instance_variable_get(:@client)).to be(client)

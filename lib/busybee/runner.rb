@@ -31,6 +31,8 @@ module Busybee
     include Stopping
     include Teardown
 
+    attr_reader :worker_class
+
     def initialize(worker_class = nil, runtime_config: nil, client: nil)
       @worker_class = worker_class
       @runtime_config = runtime_config
