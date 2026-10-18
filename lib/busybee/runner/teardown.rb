@@ -62,8 +62,6 @@ module Busybee
         raise
       end
 
-      def recoverable?(error) = RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
-
       # Process-wide: read where the validating setter put it, never off a runtime config.
       def shutdown_wait_seconds = Busybee::Durations.seconds_from(Busybee.shutdown_wait_timeout)
 

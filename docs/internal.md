@@ -57,7 +57,9 @@ lib/busybee/
 │   ├── hybrid.rb            # Hybrid runner (Streaming subclass, adds poll-drain phase)
 │   ├── multi.rb             # Multi runner (thread pool managing multiple single-worker runners)
 │   ├── polling.rb           # Polling runner (with_each_job loop)
-│   └── streaming.rb         # Streaming runner (open_job_stream, pump thread + queue)
+│   ├── stopping.rb          # Runner::Stopping: a stop's claim, announcement and reason; fetch loops' gRPC policy
+│   ├── streaming.rb         # Streaming runner (open_job_stream, pump thread + queue)
+│   └── teardown.rb          # Runner::Teardown: run!'s ensure (T2, the drain, T3)
 ├── serialization.rb         # JSON serialization/deserialization
 ├── testing.rb               # Testing module entry point
 ├── testing/                 # RSpec integration
