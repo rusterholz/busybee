@@ -65,8 +65,9 @@ module Busybee
       #
       # @param job [Busybee::Job] An activated job from the workflow engine
       # @return [Hash, nil] job.result as the around_perform chain left it (perform's
-      #   Hash or complete!'s vars, a frozen HashWithIndifferentAccess); nil when the
-      #   chain never ran or anything raised
+      #   Hash or complete!'s vars, a frozen HashWithIndifferentAccess). nil when no
+      #   Hash was recorded by then, when the chain never ran, or when an error reached
+      #   perform_job's rescue; a failed auto-complete call is logged, not raised
       # @raise [Busybee::Worker::Shutdown] if a shutdown_on exception is caught
       def perform_job(job)
         Client::Call.with_job(job) do # job window spans the whole chain: hooks, perform, autofail all fold it
