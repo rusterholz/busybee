@@ -314,6 +314,30 @@ RSpec.describe Busybee::Hooks do
       expect(received).to eq([job])
     end
 
+    [false, true].each do |safe|
+      it "hands every hook the core's value from perform.call, whatever the hooks return (safe: #{safe})" do
+        returned = []
+        %i[outer inner].each do |label|
+          Busybee.around_perform do |_job, perform|
+            returned << [label, perform.call]
+            "#{label} hook's own value"
+          end
+        end
+
+        described_class.run_chain(:around_perform, job, safe: safe) { :core_value }
+        expect(returned).to eq([%i[inner core_value], %i[outer core_value]])
+      end
+
+      it "hands the core's value up past a hook that never yielded (safe: #{safe})" do
+        returned = nil
+        Busybee.around_perform { |_job, perform| returned = perform.call }
+        Busybee.around_perform { |_job, _perform| :never_yielded }
+
+        described_class.run_chain(:around_perform, job, safe: safe) { :core_value }
+        expect(returned).to eq(:core_value)
+      end
+    end
+
     it "returns nil and leaves a Job carrier's result alone, whatever the core returns" do
       expect(described_class.run_chain(:around_perform, job) { { order_id: 123 } }).to be_nil
       expect(job.result).to be_nil
