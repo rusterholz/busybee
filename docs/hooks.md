@@ -319,6 +319,7 @@ Which of the two you want follows from the naming rule: a transaction belongs ar
 Rules of the middleware road:
 
 - **The return value is safe.** Your worker's result is harvested from the job itself, not from the chain's return value — middleware can't lose it by returning something else.
+- **`perform.call` returns the job's result**, in every hook of the chain: perform's Hash, or the vars a `complete!` sent, as a frozen `HashWithIndifferentAccess` (nil when there is none). Middleware can log or measure what the work produced without reaching back into the job.
 - **A hook can resolve the job**, and that's how you [short-circuit](#short-circuiting-a-job) one. `complete!`, `fail!`, and `throw_bpmn_error!` are legal from any job hook.
 - **Adjusting the job short of resolving it is also yours.** `update_timeout` and `update_retries` are legal from every hook, so middleware that knows the work ahead is slow can buy it more time before yielding.
 - **`around_job_execution` is observing.** Errors it raises are logged and swallowed. `around_perform` is the propagating one: errors it raises fail the job (see [When Hooks Raise](#when-hooks-raise)).

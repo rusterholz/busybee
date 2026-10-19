@@ -7,6 +7,7 @@
 - **Lifecycle Hooks** – Register callbacks to run at various lifecycle moments for middleware (transactions, retries) and observation (metrics, tracing, error reporting):
   - Worker lifecycle hooks: on process start, stop requested, stopping, and shutdown
   - Job lifecycle hooks: both logical, systemic lifecycle (on activated, on executed, around execution) and local, usercode lifecycle (before, after, and around the `perform` method)
+  - Job middleware sees what the work produced: `perform.call` returns the job's result in every around hook, so a span or a log line can carry it without reaching back into the job
   - Call lifecycle hooks: before, after, and around every GRPC call
   - Call hooks can rewrite the outbound request before it reaches the engine — scrub an exception message that may carry customer data, decline a BPMN retry when it was your infrastructure that failed rather than the job, or send your own correlation id along. Written once in `before_call`, it applies to every call of that kind, so there is no call site left to forget
   - A request is sealed the moment it is sent, so what `after_call` reports is exactly what the engine received. Retries begin from a fresh writable copy of what the previous attempt sent, and a rewrite in `around_call` therefore applies to the retry as well as the first try

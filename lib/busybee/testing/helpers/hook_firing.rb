@@ -67,10 +67,14 @@ module Busybee
           end
 
           # On a job the continuation stands in for perform, so a Hash it returns
-          # is recorded as the job's result, as perform's is.
+          # is recorded as the job's result, as perform's is, and perform.call
+          # returns that result.
           def continue(target, continuation)
             value = continuation&.call
-            target._record_result(value) if target.is_a?(Busybee::Job)
+            return value unless target.is_a?(Busybee::Job)
+
+            target._record_result(value)
+            target.result
           end
 
           # The scopes production fires these moments in, so a call a hook makes

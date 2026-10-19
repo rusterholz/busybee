@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
-require "busybee/worker/shutdown"
-
 module Busybee
   module Hooks
-    # Builds the nested lambda chain used by Hooks.run_chain.
-    # Each hook receives (target, perform); calling perform descends one
-    # step. The core block sits at the chain's center.
-    #
-    # Chain owns only composition — nesting, the called-flag, the forced
-    # continuation. What happens when a link raises is Hooks'
-    # protect_allowing_shutdowns policy, shared with the flat hook runs.
+    # Builds the nested lambda chain used by Hooks.run_chain. Each hook receives
+    # (target, perform); calling perform descends one step and returns the core's
+    # value, whatever the hooks below it return. Chain owns only composition (the
+    # nesting, the called-flag, the forced continuation); what a raise means is
+    # Hooks' policy, shared with the flat hook runs.
     module Chain
       class << self
         # @param hooks [Array<Hash>] matching hooks, each with :callback
@@ -28,56 +24,44 @@ module Busybee
 
         private
 
-        # No rescue here by design: a propagating chain (around_perform) hands
-        # errors raw to perform_job's rescue, which must run autofail before
-        # any Shutdown wrap — don't route these links through
-        # protect_allowing_shutdowns.
-        #
-        # Forced continuation applies here too, on the clean-return path only.
-        # The chain always descends; whether work happens is decided by the
-        # job's ready? gate at the core. There is one way to short-circuit a
-        # job — resolve it — and skipping the yield isn't it. Raising still
-        # aborts, because a raise never reaches the forcing branch.
+        # Propagating links (around_perform) hand errors raw to perform_job's
+        # rescue, which must autofail before any Shutdown wrap, so they bypass
+        # protect_allowing_shutdowns. A raise aborts; a clean return without
+        # yielding is forced on, since resolving the job is the only short-circuit.
         def build_propagating(hooks, target, core)
           hooks.reverse.inject(core) do |next_link, hook|
             lambda do
               called = false
+              value = nil
               wrapped = lambda {
                 called = true
-                next_link.call
+                value = next_link.call
               }
               hook[:callback].call(target, wrapped)
-              next if called
-
-              force_continuation(hook, wrapped)
+              force_continuation(hook, wrapped) unless called
+              value
             end
           end
         end
 
-        # Observing links: an outer hook raising must not prevent inner hooks
-        # and the core from running (nor may a hook cancel the work by not
-        # yielding — forced continuation, with a warning). A link classifies
-        # only its OWN error. One that merely passed through it on the way up
-        # belongs to whoever raised it — safe: describes hook-error policy, and
-        # the work's errors were never the hook engine's to judge.
+        # Observing links: a hook raising or not yielding must not stop the hooks
+        # below it or the core. A link classifies only its own error; one passing
+        # through on the way up belongs to whoever raised it.
         def build_safe(hooks, target, core)
           hooks.reverse.inject(classifying(core, target)) do |next_link, hook|
             safe_link(next_link, hook, target)
           end
         end
 
-        # One observing link. `called` and `error_from_below` are per-invocation
-        # state, so they live inside the returned lambda, not beside it.
+        # One observing link; its state is per invocation, so it lives inside.
         def safe_link(next_link, hook, target)
           lambda do
             called = false
-            error_from_below = nil
-            # Every descent runs through here, so no site below can forget to
-            # mark. Identity, not class: a hook that raises its own error after
-            # a successful perform.call still owns that error.
+            value = error_from_below = nil
+            # Identity, not class: a hook raising its own error after a good descent owns it.
             wrapped = lambda do
               called = true
-              next_link.call
+              value = next_link.call
             rescue StandardError => e
               error_from_below = e
               raise
@@ -91,17 +75,14 @@ module Busybee
 
               Hooks.classify_hook_error(target, safe: true)
             end
-            # A swallowed pre-yield error lands here with the work still
-            # undone — a swallow must not cancel downstream.
-            wrapped.call unless called
+            wrapped.call unless called # a swallowed pre-yield error must not cancel downstream
+            value
           end
         end
 
-        # The classification boundary, seeded beneath every link so that it
-        # exists with no hooks registered at all. Its absence was what let a
-        # shutdown_on error escape unescalated and report :crash rather than
-        # :unhealthy, purely because nobody happened to be listening. Never
-        # swallows: whether an error is fatal is a property of (error, worker).
+        # The classification boundary, beneath every link so it exists with no
+        # hooks registered: whether an error is fatal is a property of (error,
+        # worker), never of who was listening. Never swallows.
         def classifying(core, target)
           lambda do
             core.call
@@ -110,24 +91,17 @@ module Busybee
           end
         end
 
-        # The chain always descends, so a hook that returned without yielding
-        # gets its continuation run anyway. Shared by both builders — the rule
-        # doesn't vary with the error policy.
+        # The chain always descends: run the skipped continuation, and say so.
         def force_continuation(hook, wrapped)
           log_forgotten_yield(hook[:callback])
           wrapped.call
         end
 
-        # Warn when an around-hook returned without yielding (calling perform).
-        # Both chain builders force-run the continuation regardless — the chain
-        # always descends, and a hook that wants to short-circuit resolves the
-        # job instead — but the operator should know a hook is misbehaving.
-        # Includes the hook's source location.
         def log_forgotten_yield(callback)
           location = callback.source_location&.join(":")
           suffix = location ? " (at #{location})" : ""
           Busybee.logger&.warn(
-            "[busybee] Observing around-hook returned without yielding; " \
+            "[busybee] Around-hook returned without yielding; " \
             "forcing continuation#{suffix}"
           )
         end
