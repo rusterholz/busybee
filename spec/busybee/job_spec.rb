@@ -990,6 +990,51 @@ RSpec.describe Busybee::Job do
     end
   end
 
+  describe "#_record_result / #_record_error" do
+    it "records a Hash result as a frozen HashWithIndifferentAccess" do
+      job._record_result({ order_id: 123 })
+
+      expect(job.result).to be_a(ActiveSupport::HashWithIndifferentAccess)
+      expect(job.result).to be_frozen
+      expect(job.result[:order_id]).to eq(123)
+      expect(job.result["order_id"]).to eq(123)
+    end
+
+    it "keeps the first recorded result" do
+      job._record_result({ first: true })
+      job._record_result({ second: true })
+
+      expect(job.result).to eq("first" => true)
+    end
+
+    it "ignores a non-Hash result, leaving the axis open" do
+      job._record_result("not a hash")
+      job._record_result(nil)
+      expect(job.result).to be_nil
+
+      job._record_result({ later: true })
+      expect(job.result).to eq("later" => true)
+    end
+
+    it "records an error, keeping the first" do
+      first = RuntimeError.new("first")
+      job._record_error(first)
+      job._record_error(RuntimeError.new("second"))
+
+      expect(job.error).to be(first)
+      expect(job.error_message).to eq("first")
+    end
+
+    it "records both axes independently, without resolving the job" do
+      job._record_error(RuntimeError.new("boom"))
+      job._record_result({ partial: true })
+
+      expect(job.error_message).to eq("boom")
+      expect(job.result).to eq("partial" => true)
+      expect(job).to be_ready
+    end
+  end
+
   describe "timestamps" do
     describe "#stamp!" do
       it "sets both monotonic and UTC timestamps" do

@@ -90,8 +90,8 @@ HOOK: on_job_executed (safe)
 A8. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits — fires regardless of how perform exits, so this same step happens in every variant).
-  - `capture_chain_result(target, raw_result)` (the innermost wrapper around the core block):
-    - `resolution.set_result(raw_result)` — set-once, accepts only Hash values; coerces to a frozen `HashWithIndifferentAccess`. **Result is now set.** Non-Hash perform return values are silently rejected here and end up as `nil` on the Job (and `{}` in `handle_success`).
+  - `job._record_result(raw_result)` (the core block's wrapper around perform's return):
+    - `resolution.set_result(raw_result)`: set-once, accepts only Hash values; coerces to a frozen `HashWithIndifferentAccess`. **Result is now set.** A non-Hash perform return is silently rejected here, leaving the result axis open: `handle_success` passes `{}` instead, and A11 records it.
 
 A9. Continuing `run_hooked_perform`:
   - HOOKS: Continuing `around_perform` middleware, portions after yield (unsafe — errors propagate, jump to Variant C, and fail the job).
@@ -102,7 +102,7 @@ A10. `handle_success(job, result, config)`:
   - VALIDATION: undeclared outputs (errors propagate, jump to Variant C, fail the job).
 
 A11. `job.complete!(result)`:
-  - `resolution.set_result(vars)` — silent no-op (set-once; already set in A8).
+  - `resolution.set_result(vars)`: a silent no-op when A8 set the result (set-once). After a non-Hash perform return it records `vars`, so `job.result` is a frozen, empty `HashWithIndifferentAccess`, and that is what `after_perform` sees.
   - GRPC CALL: `client.complete_job(key, vars: resolution.result || {})`. **Workflow engine now sees the job as completed.**
   - `resolve!(:complete)`:
     - TIMESTAMP: `resolved_at`.
@@ -164,7 +164,7 @@ B10. Continuing `instance.perform`:
 B11. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at`.
-  - `capture_chain_result(target, raw_result)`:
+  - `job._record_result(raw_result)`:
     - `resolution.set_result(raw_result)` — silent no-op (set-once; already set in B9). The raw perform return value is discarded.
 
 B12. Continuing `run_hooked_perform`:
@@ -210,7 +210,7 @@ HOOK: on_job_executed (safe)
 C8. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure regardless of how perform exited).
-  - The error propagates past `capture_chain_result` (the innermost wrapper around the core block); no result is captured.
+  - The error propagates past `job._record_result` (the core block's wrapper around perform's return); no result is captured.
   - The error propagates through the chain: portions of `around_perform` middleware after yield **do not get run** (around_perform uses propagating semantics, not safe — errors short-circuit the rest of the chain).
 
 C9. Continuing `run_hooked_perform`:
@@ -219,7 +219,7 @@ C9. Continuing `run_hooked_perform`:
 C10. Continuing `Worker.perform_job(job)`:
   - The error is rescued by `perform_job`'s `rescue StandardError`.
   - `handle_perform_exception(job, exception)`:
-    - EARLY ERROR CAPTURE: `resolution.set_error(Shutdown.unwrap(exception))` — records the error on the error axis of Resolution before autofail runs, so `after_perform` sees the error attached to the Job even when autofail's GRPC fails (C12). `Shutdown.unwrap` reduces a `Shutdown` to its `cause`; every other error passes through untouched.
+    - EARLY ERROR CAPTURE: `job._record_error(Shutdown.unwrap(exception))`: records the error on the error axis before `handle_failure` runs, so `after_perform` sees it even when the job had already resolved and autofail never runs (C11's early exit). A failed autofail (C12) is covered by `fail!`'s own pre-GRPC capture. `Shutdown.unwrap` reduces a `Shutdown` to its `cause`; every other error passes through untouched.
     - Calls `handle_failure(job, exception, config)`.
 
 C11. `handle_failure(job, error, config)`:
@@ -294,7 +294,7 @@ D9. Continuing `instance.perform`:
 D10. Continuing the `around_perform` middleware chain core:
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at`.
-  - `capture_chain_result(target, raw_result)`:
+  - `job._record_result(raw_result)`:
     - `resolution.set_result(raw_result)`: set-once on the result axis. `result_set?` is false at this point because D8 touched only the error axis (`@error_set`); the result axis is untouched. If perform happens to return a Hash, that Hash is captured as `job.result` alongside the error data captured in D8. Non-Hash returns silently no-op. **Resolution's orthogonal model allows it: the result axis records "what perform returned" and the error axis records "what perform signaled," and Variant D legitimately lands both (manual fail then a partial-payload hash for telemetry/audit). `after_perform` hooks can read both.**
 
 D11. Continuing `run_hooked_perform`:
@@ -356,7 +356,7 @@ HOOK: on_job_executed (safe)
   - MIDDLEWARE: `around_perform` finish (unsafe — Shutdown propagates through the chain; post-yield does NOT run).
   - The error is rescued by `perform_job`'s `rescue StandardError` (Shutdown < StandardError).
   - `handle_perform_exception(job, shutdown)`:
-    - EARLY ERROR CAPTURE: `resolution.set_error(Shutdown.unwrap(shutdown))` — captures `shutdown.cause` (not the wrapper). See E5.
+    - EARLY ERROR CAPTURE: `job._record_error(Shutdown.unwrap(shutdown))` — captures `shutdown.cause` (not the wrapper). See E5.
     - `handle_failure` → `attempt_auto_fail` → `job.fail!(Shutdown.unwrap(shutdown), backoff: config.fail_job_backoff)` (when `job.ready?`):
       - GRPC CALL: `client.fail_job(key, message, retries: <count - 1>, backoff: backoff)`. **Workflow engine now sees the job as failed with the Shutdown's underlying cause, one retry drained.**
       - TIMESTAMP: `resolved_at`.
@@ -377,7 +377,7 @@ The three origin sites converge on E1's "rescued by `perform_job`'s `rescue Stan
 
   - From `before_perform` (flag set in Common 6): `Hooks.run(:before_perform, ..., safe: false)` re-raises via its explicit Shutdown clause. The around chain never starts; `perform_started_at` and `perform_finished_at` are NOT stamped.
   - From `around_perform` pre-yield (flag set in Common 6): `Chain.build_propagating` has no rescues at the middleware layer — Shutdown propagates straight out. The around chain's core block was never entered, so the core ensure (which re-sets the flag) does NOT fire. `perform_started_at` and `perform_finished_at` are NOT stamped.
-  - From `around_perform` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `capture_chain_result` ran in the core block before the ensure unwound into the offending middleware.
+  - From `around_perform` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `job._record_result` ran in the core block before the ensure unwound into the offending middleware.
 
 **E3. Triggered by `shutdown_on` match — a non-Shutdown `StandardError` matches the worker's `shutdown_on` configuration.**
 
@@ -546,7 +546,7 @@ Follows Variant A unchanged through A10. G1 deviates at A11, inside `handle_succ
     - GRPC CALL: `client.complete_job(key, vars: ...)` raises `Busybee::GRPC::Error`. **Workflow engine never hears about the completion; it still sees the job as activated.**
     - `resolve!(:complete)` does NOT run (`.tap`'s block is never reached). No `resolved_at` timestamp, no status change — the job remains `:ready`.
   - The error unwinds out of `job.complete!` into `handle_success`'s `rescue StandardError`:
-    - ERROR CAPTURE: `resolution.set_error(e)` — records the rescued `Busybee::GRPC::Error` on the error axis before swallowing. Symmetry with G2's early capture in `handle_perform_exception`: both telemetry surfaces (`after_perform`, `on_job_executed`) see *why* the completion failed.
+    - ERROR CAPTURE: `job._record_error(e)` — records the rescued `Busybee::GRPC::Error` on the error axis before swallowing. Symmetry with G2's early capture in `handle_perform_exception`: both telemetry surfaces (`after_perform`, `on_job_executed`) see *why* the completion failed.
     - Logged: `"Failed to complete job #{job.key}: ... Job will timeout and retry."` — and swallowed. `run_hooked_perform` returns normally; `perform_job`'s `rescue StandardError` is never involved.
   - `run_perform_envelope`'s ensure block:
     - HOOK: `after_perform` — **fires**, with the job `:ready` and **both** axes set: the canonical "result set does not imply success, and error set does not imply failure on the engine side" case under Resolution's orthogonal model. This is the shape the predicate was widened for — the engine never heard, and the hook is handed a job it can still resolve.
@@ -592,7 +592,7 @@ Begins as B8–B9 and ends as C10–C15; what's distinctive is the state carried
     - GRPC CALL: `client.complete_job(key, vars: ...)` raises `Busybee::GRPC::Error`. Engine still sees the job as activated; `resolve!(:complete)` never runs; the job remains `:ready`.
   - The GRPC::Error raises out of `complete!` at its perform call site, aborting the remainder of `instance.perform`. From here **the trace continues as Variant C from C8** ("instance.perform raises StandardError" — here, the GRPC::Error): `perform_finished_at` stamps, the flag re-sets, `around_perform` post-yield middleware does NOT run, and the error lands at C10.
   - Distinctive state at C10 (vs. plain Variant C):
-    - EARLY ERROR CAPTURE: `resolution.set_error(grpc_error)` — captures the *GRPC error* (`Shutdown.unwrap` passes non-Shutdown errors through). **Both axes are now set: the result perform intended to deliver, and the error that blocked delivery.** `after_perform` hooks can read both.
+    - EARLY ERROR CAPTURE: `job._record_error(grpc_error)` — captures the *GRPC error* (`Shutdown.unwrap` passes non-Shutdown errors through). **Both axes are now set: the result perform intended to deliver, and the error that blocked delivery.** `after_perform` hooks can read both.
     - `handle_failure`: the job is still `ready?` (the manual complete never resolved), so `attempt_auto_fail` runs — `job.fail!(grpc_error, backoff: config.fail_job_backoff)`:
       - Inside `fail!`: `resolution.set_error(...)` — silent no-op (set-once on the error axis).
       - GRPC CALL: `client.fail_job(key, "[Busybee::GRPC::Error] ...", retries: <count - 1>, backoff: backoff)`.
@@ -613,11 +613,11 @@ Same shape as G2 with fail-side specifics. Begins at D8: `resolution.set_error(e
 
 Distinctive state at C10 (contrast G2):
 
-  - EARLY ERROR CAPTURE: `resolution.set_error(grpc_error)` — **silent no-op.** The error axis already carries the user's intended error data from D8 (set-once). The Job permanently records what the worker meant to signal, not the transport failure that blocked it.
+  - EARLY ERROR CAPTURE: `job._record_error(grpc_error)` — **silent no-op.** The error axis already carries the user's intended error data from D8 (set-once). The Job permanently records what the worker meant to signal, not the transport failure that blocked it.
   - `attempt_auto_fail` retries the fail with the *GRPC error*: `job.fail!(grpc_error, backoff: config.fail_job_backoff)` — its internal `set_error` no-ops again.
   - **Isolated transient** (this `fail_job` succeeds): the engine records the failure (one retry drained) and re-yields after the backoff. The engine's failure message is the GRPC error's (`"[Busybee::GRPC::Error] ..."`), a transport failure external monitoring can alert on, while the Job's error axis carries the user's original `fail!` data. The user's original `retries:`/`backoff:` arguments are silently dropped on autofail recovery (they live nowhere on the Job; autofail substitutes `config.fail_job_backoff` and the standard decrement).
   - **Correlated outage** (this `fail_job` also fails): same tail as G3 — `:ready`, `after_perform` fires, activation timeout, engine re-yields with retries intact.
-  - Result axis: unset. Perform aborted at the `fail!` call site, so — unlike a successful Variant D — there is no D10 partial-payload capture (`capture_chain_result` is bypassed by the propagating error).
+  - Result axis: unset. Perform aborted at the `fail!` call site, so — unlike a successful Variant D — there is no D10 partial-payload capture (`job._record_result` is bypassed by the propagating error).
   - C13 `shutdown_on` interaction: same as G2.
 
 **G5. `throw_bpmn_error` fails during manual `throw_bpmn_error!` (Variant D).**
@@ -666,7 +666,7 @@ TIMESTAMP: executed_at
   - Continuing `timed_perform(instance)`:
     - TIMESTAMP: `perform_finished_at` (stamped in `timed_perform`'s ensure as perform exits, same as A8/B8/C8/D8 — every variant stamps this).
   - MIDDLEWARE: `around_perform` finish — does NOT run. `Chain.build_propagating` (used for `:around_perform`) has no rescues at the middleware layer; non-`StandardError` propagates through the chain and after-yield code is skipped.
-  - The error reaches `perform_job`'s `rescue StandardError` and **does NOT match**. EARLY ERROR CAPTURE does not run; `handle_failure` does not run; `attempt_auto_fail` does not run; the `Shutdown.triggered_by?` check at C13 is unreachable. The Job's error axis stays unset; the result axis stays unset (perform raised before capture_chain_result ran).
+  - The error reaches `perform_job`'s `rescue StandardError` and **does NOT match**. EARLY ERROR CAPTURE does not run; `handle_failure` does not run; `attempt_auto_fail` does not run; the `Shutdown.triggered_by?` check at C13 is unreachable. The Job's error axis stays unset; the result axis stays unset (perform raised before `job._record_result` ran).
   - `run_perform_envelope`'s ensure block:
     - HOOK: `after_perform` — **fires**. A Ruby `ensure` runs for a non-`StandardError` too, and `perform_started_at` is set. The Job it receives is `:ready` with neither axis set, since the capture at C10 was never reached. **One consequence worth knowing:** a hook raising a `StandardError` here *replaces* the in-flight non-`StandardError`, which `perform_job`'s outer rescue then catches and autofails — so a misbehaving hook converts a poison-pill escape into an ordinary reported failure. Rare, and arguably an improvement, but it is a real change from the swallow this hook used to do.
   - MIDDLEWARE: `around_job_execution` finish (safe) — does NOT run. `Chain.build_safe`'s `rescue StandardError` does NOT match; non-`StandardError` propagates through.
@@ -684,7 +684,7 @@ The three origin sites converge on H1's "reaches `perform_job`'s `rescue Standar
 
   - From `before_perform` (flag set in Common 6): `Hooks.run(:before_perform, ..., safe: false)`'s `rescue StandardError` does NOT match; non-`StandardError` propagates straight out. The around chain never starts; `perform_started_at` and `perform_finished_at` are NOT stamped.
   - From `around_perform` pre-yield (flag set in Common 6): `Chain.build_propagating` has no rescues at the middleware layer — non-`StandardError` propagates straight out. The around chain's core block was never entered, so the core ensure (which re-sets the flag) does NOT fire. `perform_started_at` and `perform_finished_at` are NOT stamped.
-  - From `around_perform` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `capture_chain_result` ran in the core block before the ensure unwound into the offending middleware.
+  - From `around_perform` post-yield (flag re-set by the core ensure): `perform_finished_at` IS stamped (perform completed before the offending hook). The result axis may carry whatever `perform` returned — `job._record_result` ran in the core block before the ensure unwound into the offending middleware.
 
 Identical site list and rationale as E2; the divergence is at the catch sites further down — Shutdown gets explicitly re-raised at safe layers (Category E), while non-`StandardError` bypasses them implicitly.
 

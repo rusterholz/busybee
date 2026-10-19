@@ -314,37 +314,8 @@ RSpec.describe Busybee::Hooks do
       expect(received).to eq([job])
     end
 
-    it "captures the core block return value onto job.result (set-once + HWIA + freeze)" do
-      result = described_class.run_chain(:around_perform, job) { { order_id: 123 } }
-      expect(result).to eq("order_id" => 123)
-      expect(job.result).to eq("order_id" => 123)
-    end
-
-    it "returns job.result even when middleware forgets to return it" do
-      Busybee.around_perform do |_job, perform|
-        perform.call
-        "middleware forgot to return result"
-      end
-
-      result = described_class.run_chain(:around_perform, job) { { order_id: 123 } }
-      expect(result).to eq("order_id" => 123)
-    end
-
-    it "freezes the captured result so it can't be mutated post-capture" do
-      described_class.run_chain(:around_perform, job) { { order_id: 123 } }
-      expect(job.result).to be_frozen
-    end
-
-    it "applies with_indifferent_access to the result" do
-      described_class.run_chain(:around_perform, job) { { order_id: 123 } }
-      expect(job.result).to be_a(ActiveSupport::HashWithIndifferentAccess)
-      expect(job.result[:order_id]).to eq(123)
-      expect(job.result["order_id"]).to eq(123)
-    end
-
-    it "leaves job.result nil when core returns non-Hash (Resolution rejects)" do
-      result = described_class.run_chain(:around_perform, job) { nil }
-      expect(result).to be_nil
+    it "returns nil and leaves a Job carrier's result alone, whatever the core returns" do
+      expect(described_class.run_chain(:around_perform, job) { { order_id: 123 } }).to be_nil
       expect(job.result).to be_nil
     end
 

@@ -64,8 +64,10 @@ module Busybee
       # means the job was handled; raising Shutdown, that the worker is unhealthy.
       #
       # @param job [Busybee::Job] An activated job from the workflow engine
-      # @return [Hash, nil] the result returned by perform (as a HashWithIndifferentAccess)
-      #   on success, or nil on the rescue path
+      # @return [Hash, nil] job.result as the around_perform chain left it (perform's
+      #   Hash or complete!'s vars, a frozen HashWithIndifferentAccess). nil when no
+      #   Hash was recorded by then, when the chain never ran, or when an error reached
+      #   perform_job's rescue; a failed auto-complete call is logged, not raised
       # @raise [Busybee::Worker::Shutdown] if a shutdown_on exception is caught
       def perform_job(job)
         Client::Call.with_job(job) do # job window spans the whole chain: hooks, perform, autofail all fold it
@@ -125,10 +127,11 @@ module Busybee
         Hooks.run(:after_perform, job) if job.timestamps.perform_started_at
       end
 
-      # Captures the error first, so after_perform hooks see it on the job even
-      # when autofail's call fails (fail!'s own capture then no-ops).
+      # Records the error first, so after_perform sees it on the job even when
+      # autofail never runs because the job had already resolved (fail!'s own
+      # capture otherwise no-ops).
       def handle_perform_exception(job, exception)
-        job.send(:resolution).set_error(Shutdown.unwrap(exception))
+        job._record_error(Shutdown.unwrap(exception))
         handle_failure(job, exception, configuration)
         raise if exception.is_a?(Shutdown)
         raise Shutdown.new(worker_class: self) if Shutdown.triggered_by?(exception, self)
@@ -147,7 +150,8 @@ module Busybee
         Hooks.run(:before_perform, job) if job.ready?
         result =
           if job.ready?
-            Hooks.run_chain(:around_perform, job) { timed_perform(instance) if job.ready? }
+            Hooks.run_chain(:around_perform, job) { job._record_result(timed_perform(instance)) if job.ready? }
+            job.result
           end
         log_short_circuit(job)
         handle_success(job, result, configuration)
@@ -199,7 +203,7 @@ module Busybee
         begin
           job.complete!(new_vars)
         rescue StandardError => e
-          job.send(:resolution).set_error(e)
+          job._record_error(e)
           Busybee.logger&.warn("Failed to complete job #{job.key}: #{e.message}. Job will timeout and retry.")
         end
       end

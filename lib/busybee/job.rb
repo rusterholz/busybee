@@ -204,6 +204,15 @@ module Busybee
       end
     end
 
+    # ===== Framework-write seam (underscore idiom; no public setters) =====
+
+    # Record perform's return as the result. Set-once, first Hash wins; anything
+    # else is a no-op. Independent of the error axis, and never resolves the job.
+    def _record_result(value) = resolution.set_result(value)
+
+    # Record why the work failed. Set-once on its own axis (see _record_result).
+    def _record_error(error) = resolution.set_error(error)
+
     private
 
     attr_reader :activation, :resolution

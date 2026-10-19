@@ -107,24 +107,16 @@ module Busybee
       end
 
       # Run an around-hook chain wrapping a core block; callbacks receive
-      # (target, perform). Returns the captured result.
-      def run_chain(type, target, safe: false, &block)
-        matching = matching_hooks(type, target)
-        core = -> { capture_chain_result(target, block.call) }
-        Chain.build(matching, target, core, safe: safe).call
-        target.is_a?(Busybee::Job) ? target.result : nil
+      # (target, perform). Returns nothing: a core whose outcome matters records
+      # it on its carrier.
+      #
+      # @return [nil]
+      def run_chain(type, target, safe: false, &core)
+        Chain.build(matching_hooks(type, target), target, core, safe: safe).call
+        nil
       end
 
       private
-
-      # Innermost step of run_chain. Guarded because the manual-complete flow may
-      # already have captured the result from inside perform, and it is set-once.
-      def capture_chain_result(target, raw_result)
-        return unless target.is_a?(Busybee::Job)
-
-        resolution = target.send(:resolution)
-        resolution.set_result(raw_result) unless resolution.result_set?
-      end
 
       def matching_hooks(type, target)
         hooks_for(type).select { |hook| Filters.matches?(hook, target) }
