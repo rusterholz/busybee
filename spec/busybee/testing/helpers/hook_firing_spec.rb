@@ -94,6 +94,16 @@ RSpec.describe Busybee::Testing::Helpers::HookFiring do
         expect(observed.first).to be_a(ActiveSupport::HashWithIndifferentAccess).and(be_frozen)
         expect(observed.first[:total]).to eq(5)
       end
+
+      it "returns the job's result from perform.call for #{type}, as production does" do
+        returned = nil
+        Busybee.public_send(type) { |_job, continue| returned = continue.call }
+
+        fire_busybee_hooks(type, build_test_job(type: "fired")) { { total: 5 } }
+
+        expect(returned).to be_a(ActiveSupport::HashWithIndifferentAccess).and(be_frozen)
+        expect(returned[:total]).to eq(5)
+      end
     end
 
     describe "worker moments" do

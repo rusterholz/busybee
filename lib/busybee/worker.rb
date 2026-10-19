@@ -150,7 +150,7 @@ module Busybee
         Hooks.run(:before_perform, job) if job.ready?
         result =
           if job.ready?
-            Hooks.run_chain(:around_perform, job) { job._record_result(timed_perform(instance)) if job.ready? }
+            Hooks.run_chain(:around_perform, job) { record_perform(instance) }
             job.result
           end
         log_short_circuit(job)
@@ -168,6 +168,13 @@ module Busybee
         Busybee.logger&.info(
           "[busybee] Job #{job.key} was resolved by a hook before perform ran; perform skipped"
         )
+      end
+
+      # The around_perform core: perform.call hands every hook the job's result.
+      def record_perform(instance)
+        job = instance.job
+        job._record_result(timed_perform(instance)) if job.ready?
+        job.result
       end
 
       def timed_perform(instance)
