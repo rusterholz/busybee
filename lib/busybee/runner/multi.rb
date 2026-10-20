@@ -2,6 +2,7 @@
 
 require "concurrent"
 
+require "busybee/logging"
 require "busybee/runner"
 require "busybee/runtime_config"
 
@@ -113,10 +114,9 @@ module Busybee
       # reporting a clean shutdown for a container that crashed.
       def record_child_failure(runner, error)
         @thread_error.update { |prev| prev || error }
-        Busybee.logger&.error(
-          "Error in runner for #{runner_worker_name(runner)}: " \
-          "[#{error.class}] #{error.message}"
-        )
+        name = runner_worker_name(runner)
+        Logging.error("Error in runner for #{name}: [#{error.class}] #{error.message}",
+                      error: error, worker_class: name)
       end
 
       # Not #kill!: its @thread_pool.kill would end this very pool thread
@@ -140,17 +140,13 @@ module Busybee
         worker_count = worker_classes.length
 
         if pool_size < worker_count
-          Busybee.logger&.error(
-            "Process #{Process.pid} is running #{worker_count} workers but the database " \
-            "connection pool size is only #{pool_size}. This may cause connection timeout " \
-            "errors. Adjust the pool size (usually via RAILS_MAX_THREADS) or reduce the " \
-            "number of workers in this process."
-          )
+          Logging.error("Process #{Process.pid} is running #{worker_count} workers but the database " \
+                        "connection pool size is only #{pool_size}. This may cause connection timeout " \
+                        "errors. Adjust the pool size (usually via RAILS_MAX_THREADS) or reduce the " \
+                        "number of workers in this process.")
         else
-          Busybee.logger&.info(
-            "Process #{Process.pid} will run #{worker_count} workers with a database " \
-            "connection pool size of #{pool_size}."
-          )
+          Logging.info("Process #{Process.pid} will run #{worker_count} workers with a database " \
+                       "connection pool size of #{pool_size}.")
         end
       end
     end

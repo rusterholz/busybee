@@ -5,6 +5,7 @@ require "concurrent"
 require "busybee/client"
 require "busybee/configure"
 require "busybee/hooks"
+require "busybee/logging"
 require "busybee/runner/exit_immediately"
 require "busybee/runner/stopping"
 require "busybee/runner/teardown"
@@ -138,6 +139,7 @@ module Busybee
     end
 
     def worker_mode = @runtime_config&.worker_mode
+    def logged_worker_name = @worker_class&.name || "(anonymous worker)"
 
     # The fetch/process loop, filling run!'s body between T0 and the ensure.
     def run_loop = raise(NotImplementedError)
@@ -172,7 +174,8 @@ module Busybee
       with_fresh_worker_status(job) { return_job_unworked(job) }
       nil
     rescue *RECOVERABLE_ERRORS => e
-      Busybee.logger&.warn("Failed to hand job #{job.key} back during shutdown: #{e.message}")
+      Logging.warn("Failed to hand #{job.type} job ##{job.key} back during shutdown: [#{e.class}] #{e.message}",
+                   job, error: e)
       e
     end
 

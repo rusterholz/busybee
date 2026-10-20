@@ -346,15 +346,6 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       end
     end
 
-    let(:logged) { [] }
-
-    before do
-      logger = instance_double(Logger)
-      allow(logger).to receive(:error) { |message| logged << message }
-      allow(logger).to receive(:warn) { |message| logged << message }
-      allow(Busybee).to receive(:logger).and_return(logger)
-    end
-
     it "lets the rest of the teardown run when on_worker_stopping declares unhealth" do
       record_all_lifecycle_hooks
       Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
@@ -426,9 +417,21 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
     it "says in the log that it declined to escalate, and why" do
       Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
-      runner.run!
 
-      expect(logged).to include(a_string_matching(/on_worker_stopping.*already shutting down/))
+      lines = capture_busybee_log { runner.run! }
+
+      expect(lines).to include("ERROR [busybee] Shutdown from on_worker_stopping ignored, LifecycleWorker already " \
+                               "shutting down: [Busybee::Worker::Shutdown] T2 declares unhealth")
+    end
+
+    it "carries the worker and the escalation in JSON" do
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+
+      lines = capture_busybee_log(format: :json) { runner.run! }
+
+      expect(lines).to include(a_hash_including("worker_class" => "LifecycleWorker",
+                                                "error_class" => "Busybee::Worker::Shutdown",
+                                                "error_message" => "T2 declares unhealth"))
     end
 
     it "clears running? when on_worker_shutdown declares unhealth" do
@@ -505,6 +508,16 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
         expect(moments).to eq(%i[started stop_requested stopping shutdown])
         expect(runner.running?).to be(false)
       end
+    end
+
+    it "says in the log that the drain failed, and how" do
+      allow(Busybee).to receive(:logger).and_call_original
+      runner.test_drain = -> { raise "the broker went away mid-drain" }
+
+      lines = capture_busybee_log { runner.run! }
+
+      expect(lines).to eq(["ERROR [busybee] Drain failed during LifecycleWorker's shutdown, continuing the " \
+                           "teardown: [RuntimeError] the broker went away mid-drain"])
     end
 
     it "hands the drain's failure to the shutdown observer" do

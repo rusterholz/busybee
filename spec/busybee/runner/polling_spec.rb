@@ -346,9 +346,6 @@ RSpec.describe Busybee::Runner::Polling do
       end
 
       it "logs a warning when handing a shutdown job back raises an error" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
         bad_job = build_test_job(key: 99, retries: 1)
         allow(client).to receive(:fail_job).and_raise(StandardError, "grpc gone")
 
@@ -358,9 +355,24 @@ RSpec.describe Busybee::Runner::Polling do
           0
         end
 
-        runner.run!
+        lines = capture_busybee_log { runner.run! }
 
-        expect(logger).to have_received(:warn).with(/Failed to hand job 99 back during shutdown.*grpc gone/)
+        expect(lines).to include("WARN [busybee] Failed to hand test job #99 back during shutdown: " \
+                                 "[StandardError] grpc gone")
+      end
+
+      it "carries the job and the error in JSON when a handback fails" do
+        allow(client).to receive(:fail_job).and_raise(StandardError, "grpc gone")
+        allow(client).to receive(:with_each_job) do |_type, **_opts, &block|
+          runner.stop!
+          block.call(build_test_job(key: 99, retries: 1))
+          0
+        end
+
+        lines = capture_busybee_log(format: :json) { runner.run! }
+
+        expect(lines).to include(a_hash_including("job_key" => 99, "error_class" => "StandardError",
+                                                  "error_message" => "grpc gone", "level" => "warn"))
       end
     end
   end

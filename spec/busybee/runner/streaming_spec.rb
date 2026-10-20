@@ -287,9 +287,6 @@ RSpec.describe Busybee::Runner::Streaming do
       end
 
       it "logs a warning when handing a shutdown job back raises an error" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
         bad_job = build_test_job(key: 99, retries: 1)
         allow(client).to receive(:fail_job).and_raise(StandardError, "grpc gone")
 
@@ -301,9 +298,10 @@ RSpec.describe Busybee::Runner::Streaming do
           stream
         end
 
-        runner.run!
+        lines = capture_busybee_log { runner.run! }
 
-        expect(logger).to have_received(:warn).with(/Failed to hand job 99 back during shutdown.*grpc gone/)
+        expect(lines).to include("WARN [busybee] Failed to hand test job #99 back during shutdown: " \
+                                 "[StandardError] grpc gone")
       end
     end
   end
@@ -729,28 +727,16 @@ RSpec.describe Busybee::Runner::Streaming do
       # worker hook fires either, because stop!'s set-once reason has already
       # been won. So this line is the only record that work was dropped.
       it "logs how many activated jobs it discarded" do
-        logged = []
-        logger = instance_double(Logger)
-        allow(logger).to receive(:warn) { |message| logged << message }
-        allow(logger).to receive(:error) { |message| logged << message }
-        allow(Busybee).to receive(:logger).and_return(logger)
         2.times { |i| runner.send(:buffer_job, build_test_job(key: i)) }
 
-        runner.kill!
+        lines = capture_busybee_log { runner.kill! }
 
-        expect(logged).to include(a_string_matching(/discard\w*\s+2\b/i))
+        expect(lines).to eq(["WARN [busybee] kill! discarded 2 activated job(s) still buffered by " \
+                             "(anonymous worker); the engine re-yields them when their activation times out"])
       end
 
       it "says nothing when there was nothing in hand to discard" do
-        logged = []
-        logger = instance_double(Logger)
-        allow(logger).to receive(:warn) { |message| logged << message }
-        allow(logger).to receive(:error) { |message| logged << message }
-        allow(Busybee).to receive(:logger).and_return(logger)
-
-        runner.kill!
-
-        expect(logged).to be_empty
+        expect(capture_busybee_log { runner.kill! }).to be_empty
       end
 
       # The buffer clear is what cuts a graceful drain short: the drain's next

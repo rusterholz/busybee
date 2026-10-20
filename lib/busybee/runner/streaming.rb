@@ -7,6 +7,7 @@ require "busybee/client/call"
 require "busybee/durations"
 require "busybee/error"
 require "busybee/grpc/error"
+require "busybee/logging"
 require "busybee/runner"
 require "busybee/worker/shutdown"
 
@@ -49,17 +50,16 @@ module Busybee
 
       private
 
-      # A kill discards these jobs and runs no job hooks to say so: a stuck
-      # container is a poor place for adopter code. No worker hook fires either on
-      # the real path: stop!'s set-once reason was won by the graceful stop, and
-      # the CLI's exit! follows. So this is the only record work was dropped, and
-      # it must precede the clear that drops it.
+      # A kill discards these jobs and runs no job hooks to say so. No worker hook
+      # fires either on the real path: stop!'s set-once reason was won by the
+      # graceful stop, and the CLI's exit! follows. So this is the only record work
+      # was dropped, and it must precede the clear that drops it.
       def report_discarded_jobs
         discarded = @buffered_job_count.value
         return unless discarded.positive?
 
-        Busybee.logger&.warn("[busybee] kill! discarded #{discarded} activated job(s) still buffered; " \
-                             "the engine re-yields them when their activation times out")
+        Logging.warn("kill! discarded #{discarded} activated job(s) still buffered by #{logged_worker_name}; " \
+                     "the engine re-yields them when their activation times out", worker_status)
       end
 
       # Fills Runner#run!'s loop: open the job stream and process jobs (via the
