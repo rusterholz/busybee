@@ -5,6 +5,7 @@ require "active_support/core_ext/module/delegation"
 require "busybee/client/call"
 require "busybee/error"
 require "busybee/hooks"
+require "busybee/logging"
 require "busybee/worker/configuration"
 require "busybee/worker/dsl"
 require "busybee/worker/shutdown"
@@ -165,9 +166,7 @@ module Busybee
       def log_short_circuit(job)
         return unless job.resolved? && job.timestamps.perform_started_at.nil?
 
-        Busybee.logger&.info(
-          "[busybee] Job #{job.key} was resolved by a hook before perform ran; perform skipped"
-        )
+        Logging.info("#{job.type} job ##{job.key} was resolved by a hook before perform ran; perform skipped", job)
       end
 
       # The around_perform core: perform.call hands every hook the job's result.
@@ -211,7 +210,8 @@ module Busybee
           job.complete!(new_vars)
         rescue StandardError => e
           job._record_error(e)
-          Busybee.logger&.warn("Failed to complete job #{job.key}: #{e.message}. Job will timeout and retry.")
+          Logging.warn("Failed to complete #{job.type} job ##{job.key}: [#{e.class}] #{e.message}; " \
+                       "it will time out and retry", job)
         end
       end
 
@@ -227,16 +227,15 @@ module Busybee
       def log_post_resolution_error(job, error)
         location = error.backtrace&.first
         suffix = location ? " (at #{location})" : ""
-        Busybee.logger&.warn(
-          "Error in #{configuration.job_type} worker for job #{job.key} " \
-          "after job was already #{job.status}: [#{error.class}] #{error.message}#{suffix}"
-        )
+        Logging.warn("Error in #{job.type} job ##{job.key} after it was already #{job.status}: " \
+                     "[#{error.class}] #{error.message}#{suffix}", job, error: error)
       end
 
       def attempt_auto_fail(job, error, config)
         job.fail!(Shutdown.unwrap(error), backoff: config.fail_job_backoff)
       rescue StandardError => e
-        Busybee.logger&.warn("Failed to fail job #{job.key}: #{e.message}. Job will timeout and retry.")
+        Logging.warn("Failed to fail #{job.type} job ##{job.key}: [#{e.class}] #{e.message}; " \
+                     "it will time out and retry", job, error: e)
       end
     end
   end

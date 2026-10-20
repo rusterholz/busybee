@@ -124,11 +124,18 @@ RSpec.describe Busybee::Worker do
         let(:job) { build_test_job(key: 123456, client: unreachable) }
 
         it "logs and swallows the error" do
-          logger = instance_double(Logger, warn: nil)
-          allow(Busybee).to receive(:logger).and_return(logger)
+          lines = capture_busybee_log { expect { performing_worker.perform_job(job) }.not_to raise_error }
 
-          expect { performing_worker.perform_job(job) }.not_to raise_error
-          expect(logger).to have_received(:warn).with(/Failed to complete job.*connection lost/)
+          expect(lines).to contain_exactly(
+            /\AWARN \[busybee\] Failed to complete test job #123456: \[Busybee::GRPC::Error\] .*connection lost.*; it will time out and retry\z/ # rubocop:disable Layout/LineLength
+          )
+        end
+
+        it "carries the job, and the error recorded on it, in JSON" do
+          lines = capture_busybee_log(format: :json) { performing_worker.perform_job(job) }
+
+          expect(lines.first).to include("job_key" => 123_456, "error_class" => "Busybee::GRPC::Error",
+                                         "error_message" => a_string_including("connection lost"))
         end
 
         it "captures the error on the Job as the client raised it" do
@@ -195,16 +202,17 @@ RSpec.describe Busybee::Worker do
       end
 
       it "logs and swallows GRPC errors from fail!" do
-        job = build_test_job(client: build_test_client.on(:fail_job) { raise GRPC::Unavailable, "connection lost" })
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
+        unreachable = build_test_client.on(:fail_job) { raise GRPC::Unavailable, "connection lost" }
+        job = build_test_job(key: 42, client: unreachable)
         worker = stub_const("FailGrpcWorker", Class.new(described_class) do
           define_method(:perform) { raise "boom" }
         end)
 
-        expect { worker.perform_job(job) }.not_to raise_error
-        expect(logger).to have_received(:warn).with(/Failed to fail job.*connection lost/)
+        lines = capture_busybee_log { expect { worker.perform_job(job) }.not_to raise_error }
+
+        expect(lines).to contain_exactly(
+          /\AWARN \[busybee\] Failed to fail test job #42: \[Busybee::GRPC::Error\] .*connection lost.*; it will time out and retry\z/ # rubocop:disable Layout/LineLength
+        )
       end
 
       it "swallows perform errors after auto-fail (runner continues)" do
@@ -1018,22 +1026,16 @@ RSpec.describe Busybee::Worker do
       end
 
       it "reports the skipped perform at :info" do
-        logger = instance_double(Logger, info: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         Busybee.before_perform { |job| job.complete!({ early: true }) }
 
-        performing_worker.perform_job(job)
+        lines = capture_busybee_log { performing_worker.perform_job(job) }
 
-        expect(logger).to have_received(:info).with(/resolved by a hook before perform ran/)
+        expect(lines).to eq(["INFO [busybee] process_order job #123456 was resolved by a hook before perform ran; " \
+                             "perform skipped"])
       end
 
       it "does not report a skipped perform when perform actually ran" do
-        logger = instance_double(Logger, info: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
-        performing_worker.perform_job(job)
-
-        expect(logger).not_to have_received(:info)
+        expect(capture_busybee_log { performing_worker.perform_job(job) }).to be_empty
       end
 
       it "clears flag on rescue entry so autofail works after hook error" do
@@ -1161,8 +1163,6 @@ RSpec.describe Busybee::Worker do
       end
 
       it "warns that a late complete!'s variables were discarded" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         worker = stub_const("DiscardedVarsWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) { { done: true } }
@@ -1172,24 +1172,24 @@ RSpec.describe Busybee::Worker do
           job.complete!({ late: true })
         end
 
-        worker.perform_job(job)
+        lines = capture_busybee_log { worker.perform_job(job) }
 
-        expect(logger).to have_received(:warn).with(/discarded/)
+        expect(lines).to eq(["WARN [busybee] Variables passed to complete! on process_order job #123456 were " \
+                             "discarded: this job's result was already captured from perform's return value, " \
+                             "and that is what the engine received"])
       end
 
       # The sanctioned shape: resolve, then yield anyway. The gate skips the
       # work, so there is nothing to discard and nothing to warn about.
       it "does not warn when a hook's complete! is the one that sets the result" do
-        logger = instance_double(Logger, warn: nil, info: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         Busybee.around_perform do |job, perform|
           job.complete!({ early: true })
           perform.call
         end
 
-        performing_worker.perform_job(job)
+        lines = capture_busybee_log { performing_worker.perform_job(job) }
 
-        expect(logger).not_to have_received(:warn)
+        expect(lines.grep(/\AWARN/)).to be_empty
       end
 
       it "does not overwrite a hook's result when the skipped core returns nil" do
@@ -1436,21 +1436,19 @@ RSpec.describe Busybee::Worker do
       end
 
       it "reports a hook's error against an already-settled job without re-resolving it" do
-        logger = instance_double(Logger, warn: nil, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         Busybee.after_perform { raise "hook boom" }
 
-        expect { performing_worker.perform_job(job) }.not_to raise_error
+        lines = capture_busybee_log { expect { performing_worker.perform_job(job) }.not_to raise_error }
 
         expect(job.status).to eq(:complete)
         expect(client).not_to have_received(:fail_job)
-        expect(logger).to have_received(:warn).with(/already complete: \[RuntimeError\] hook boom/)
+        expect(lines).to contain_exactly(
+          /\AWARN \[busybee\] Error in process_order job #123456 after it was already complete: \[RuntimeError\] hook boom \(at .*worker_spec\.rb:\d+:in .*\)\z/ # rubocop:disable Layout/LineLength
+        )
       end
 
       # An escalation on its way out is not a second error arriving late.
       it "does not re-report a Shutdown that passed the hooks on its way out" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         stub_const("FatalPerformError", Class.new(StandardError))
         Busybee.after_perform { |_j| nil }
         worker = stub_const("EscalatingPerformWorker", Class.new(Busybee::Worker) do
@@ -1458,9 +1456,11 @@ RSpec.describe Busybee::Worker do
           define_method(:perform) { raise FatalPerformError, "db gone" }
         end)
 
-        expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+        lines = capture_busybee_log do
+          expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
+        end
 
-        expect(logger).not_to have_received(:warn).with(/after job was already/)
+        expect(lines.grep(/after it was already/)).to be_empty
       end
 
       it "escalates a shutdown_on error raised by a hook" do

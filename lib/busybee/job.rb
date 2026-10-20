@@ -11,6 +11,7 @@ require "busybee/job/error_formatting"
 require "busybee/job/payload"
 require "busybee/job/resolution"
 require "busybee/job/timestamps"
+require "busybee/logging"
 require "busybee/serialization"
 
 module Busybee
@@ -238,10 +239,8 @@ module Busybee
       return unless vars.is_a?(Hash) && vars.any?
       return if resolution.result == vars
 
-      Busybee.logger&.warn(
-        "[busybee] Variables passed to complete! on job #{key} were discarded: this job's result " \
-        "was already captured from perform's return value, and that is what the engine received"
-      )
+      Logging.warn("Variables passed to complete! on #{type} job ##{key} were discarded: this job's result " \
+                   "was already captured from perform's return value, and that is what the engine received", self)
     end
 
     # The resolution ops' shared fire-once guard.
@@ -267,11 +266,9 @@ module Busybee
 
     def warn_about_reserved_keys(kwargs)
       reserved = kwargs.keys & Resolution::OWNED_KEYS
-      reserved.each do |key|
-        Busybee.logger&.warn(
-          "[busybee] :#{key} passed to Job#set_context will be dropped — " \
-          "use Job#complete!, #fail!, or #throw_bpmn_error! to capture outcome data."
-        )
+      reserved.each do |reserved_key|
+        Logging.warn(":#{reserved_key} passed to Job#set_context on #{type} job ##{key} was dropped; " \
+                     "use Job#complete!, #fail!, or #throw_bpmn_error! to capture outcome data", self)
       end
     end
   end

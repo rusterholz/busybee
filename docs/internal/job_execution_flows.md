@@ -412,7 +412,7 @@ A job hook may call `complete!` / `fail!` / `throw_bpmn_error!`. That is the sup
 **Reporting.** `Worker.log_short_circuit` emits one `:info` line when the job settled without perform being attempted:
 
 ```
-[busybee] Job <key> was resolved by a hook before perform ran; perform skipped
+[busybee] <type> job #<key> was resolved by a hook before perform ran; perform skipped
 ```
 
 It fires from `run_hooked_perform`'s non-raising path, which is what separates a deliberate short-circuit from an invalid job — the latter leaves by way of `MissingInput` and is reported as a failure instead. There is no single gate every short-circuit passes through (skipping the `around_perform` chain means perform's own gate is never evaluated), which is why the line lives at the end of the method rather than at a gate.
@@ -466,9 +466,9 @@ Perform ran and returned, so this is not a short-circuit at all — the work hap
   - The chain's core already captured perform's return value onto the result axis, and that axis is **set-once**. A `complete!(vars)` here therefore transmits *perform's* result, not `vars`. That is the intended precedence — the work's own answer wins over a wrapper's — but the variables are silently dropped, so `Job#warn_discarded_result` logs:
 
     ```
-    [busybee] Variables passed to complete! on job <key> were discarded: this job's
-    result was already captured from perform's return value, and that is what the
-    engine received
+    [busybee] Variables passed to complete! on <type> job #<key> were discarded: this
+    job's result was already captured from perform's return value, and that is what
+    the engine received
     ```
 
     The gem's own auto-complete is exempt: it hands back the very object it captured, so there is nothing to discard.
@@ -547,7 +547,7 @@ Follows Variant A unchanged through A10. G1 deviates at A11, inside `handle_succ
     - `resolve!(:complete)` does NOT run (`.tap`'s block is never reached). No `resolved_at` timestamp, no status change — the job remains `:ready`.
   - The error unwinds out of `job.complete!` into `handle_success`'s `rescue StandardError`:
     - ERROR CAPTURE: `job._record_error(e)` — records the rescued `Busybee::GRPC::Error` on the error axis before swallowing. Symmetry with G2's early capture in `handle_perform_exception`: both telemetry surfaces (`after_perform`, `on_job_executed`) see *why* the completion failed.
-    - Logged: `"Failed to complete job #{job.key}: ... Job will timeout and retry."` — and swallowed. `run_hooked_perform` returns normally; `perform_job`'s `rescue StandardError` is never involved.
+    - Logged: `"Failed to complete #{job.type} job ##{job.key}: [#{e.class}] #{e.message}; it will time out and retry"`, with the job as the line's carrier, and swallowed. `run_hooked_perform` returns normally; `perform_job`'s `rescue StandardError` is never involved.
   - `run_perform_envelope`'s ensure block:
     - HOOK: `after_perform` — **fires**, with the job `:ready` and **both** axes set: the canonical "result set does not imply success, and error set does not imply failure on the engine side" case under Resolution's orthogonal model. This is the shape the predicate was widened for — the engine never heard, and the hook is handed a job it can still resolve.
   - MIDDLEWARE: `around_job_execution` finish (safe) — runs normally; nothing is propagating.

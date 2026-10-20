@@ -2,6 +2,7 @@
 
 require "busybee/hooks/chain"
 require "busybee/hooks/filters"
+require "busybee/logging"
 require "busybee/worker/shutdown"
 
 module Busybee
@@ -95,15 +96,15 @@ module Busybee
           Busybee::Worker::Shutdown.triggered_by?(error, worker_class)
         raise unless safe
 
-        log_swallowed_error(error)
+        log_swallowed_error(error, target)
       end
 
       # Log a swallowed hook error, with the first backtrace frame so the operator
       # can locate the offending hook from a single log line.
-      def log_swallowed_error(error)
+      def log_swallowed_error(error, target)
         location = error.backtrace&.first
         suffix = location ? " (at #{location})" : ""
-        Busybee.logger&.error("[busybee] Error in hooks (ignored): [#{error.class}] #{error.message}#{suffix}")
+        Logging.error("Error in hooks (ignored): [#{error.class}] #{error.message}#{suffix}", target, error: error)
       end
 
       # Run an around-hook chain wrapping a core block; callbacks receive

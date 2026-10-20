@@ -191,13 +191,20 @@ RSpec.describe Busybee::Hooks do
       end
 
       it "logs swallowed errors with class, message, and source location" do
-        logger = instance_double(Logger, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         Busybee.after_perform { raise "boom" }
 
-        described_class.run(:after_perform, job, safe: true)
-        expect(logger).to have_received(:error).
-          with(%r{\[busybee\] Error in hooks \(ignored\): \[RuntimeError\] boom \(at .+/hooks_spec\.rb:\d+})
+        lines = capture_busybee_log { described_class.run(:after_perform, job, safe: true) }
+        expect(lines).to contain_exactly(
+          %r{\AERROR \[busybee\] Error in hooks \(ignored\): \[RuntimeError\] boom \(at .+/hooks_spec\.rb:\d+:in .+\)\z}
+        )
+      end
+
+      it "carries the hook's target and the error in JSON" do
+        Busybee.after_perform { raise "boom" }
+
+        lines = capture_busybee_log(format: :json) { described_class.run(:after_perform, job, safe: true) }
+        expect(lines.first).to include("job_key" => job.key, "error_class" => "RuntimeError", "error_message" => "boom",
+                                       "error_location" => a_string_matching(/hooks_spec\.rb:\d+/))
       end
 
       it "always propagates Busybee::Worker::Shutdown" do
@@ -379,12 +386,19 @@ RSpec.describe Busybee::Hooks do
     end
 
     it "warns when a propagating middleware returns without yielding" do
-      logger = instance_double(Logger, warn: nil)
-      allow(Busybee).to receive(:logger).and_return(logger)
       Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
 
-      described_class.run_chain(:around_perform, job) { "core" }
-      expect(logger).to have_received(:warn).with(/\[busybee\].*without yielding/)
+      lines = capture_busybee_log { described_class.run_chain(:around_perform, job) { "core" } }
+      expect(lines).to contain_exactly(
+        %r{\AWARN \[busybee\] Around-hook returned without yielding; forcing continuation \(at .+/hooks_spec\.rb:\d+\)\z} # rubocop:disable Layout/LineLength
+      )
+    end
+
+    it "carries the chain's target in JSON" do
+      Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
+
+      lines = capture_busybee_log(format: :json) { described_class.run_chain(:around_perform, job) { "core" } }
+      expect(lines.first).to include("job_key" => job.key, "level" => "warn")
     end
 
     it "still lets a propagating middleware abort by raising" do
@@ -435,27 +449,26 @@ RSpec.describe Busybee::Hooks do
       end
 
       it "logs swallowed errors with class, message, and source location" do
-        logger = instance_double(Logger, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         Busybee.around_perform { |_job, _perform| raise "broken" }
 
-        described_class.run_chain(:around_perform, job, safe: true) { "core" }
-        expect(logger).to have_received(:error).
-          with(%r{\[busybee\] Error in hooks \(ignored\): \[RuntimeError\] broken \(at .+/hooks_spec\.rb:\d+})
+        lines = capture_busybee_log { described_class.run_chain(:around_perform, job, safe: true) { "core" } }
+        expect(lines).to contain_exactly(
+          %r{\AERROR \[busybee\] Error in hooks \(ignored\): \[RuntimeError\] broken \(at .+/hooks_spec\.rb:\d+:in .+\)\z} # rubocop:disable Layout/LineLength
+        )
       end
 
       # safe: describes hook-error policy. An error raised by the work the hook
       # descended into is not the hook engine's to judge: it travels on, and it
       # is never reported as a hook's failure.
       it "does not swallow or misattribute an error raised by the core" do
-        logger = instance_double(Logger, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         Busybee.around_perform { |_job, perform| perform.call }
 
-        expect do
-          described_class.run_chain(:around_perform, job, safe: true) { raise "core boom" }
-        end.to raise_error(RuntimeError, "core boom")
-        expect(logger).not_to have_received(:error).with(/Error in hooks/)
+        lines = capture_busybee_log do
+          expect do
+            described_class.run_chain(:around_perform, job, safe: true) { raise "core boom" }
+          end.to raise_error(RuntimeError, "core boom")
+        end
+        expect(lines.grep(/Error in hooks/)).to be_empty
       end
 
       it "always propagates Shutdown" do
@@ -488,13 +501,10 @@ RSpec.describe Busybee::Hooks do
       end
 
       it "warns when an observing middleware returns without yielding" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
 
-        described_class.run_chain(:around_perform, job, safe: true) { "core" }
-        expect(logger).to have_received(:warn).
-          with(/\[busybee\].*without yielding/)
+        lines = capture_busybee_log { described_class.run_chain(:around_perform, job, safe: true) { "core" } }
+        expect(lines).to contain_exactly(/\AWARN \[busybee\] Around-hook returned without yielding; forcing/)
       end
 
       it "does not double-run the core when a forced continuation raises" do

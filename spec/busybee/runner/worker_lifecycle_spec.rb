@@ -299,8 +299,22 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect { runner.run! }.not_to raise_error
     end
 
-    # The swallow logs the hook's error, and the log write fails too.
+    # An adopter's filter raises while the hook is matched, outside the swallow.
     it "contains an ordinary error escaping a teardown hook's swallow, and finishes the shutdown" do
+      captured = nil
+      Busybee.on_worker_stopping(reason: ->(_reason) { raise "broken filter" }) { nil }
+      Busybee.on_worker_shutdown { |worker| captured = worker }
+
+      aggregate_failures do
+        expect { runner.run! }.not_to raise_error
+        expect(captured&.error).to be_a(RuntimeError).and(have_attributes(message: "broken filter"))
+        expect(runner.running?).to be(false)
+        expect(Busybee::Runner.exit_immediately?).to be(false)
+      end
+    end
+
+    # The swallow logs the hook's error, and the log write fails too.
+    it "finishes the shutdown when logging a teardown hook's swallowed error fails" do
       logger = instance_double(Logger, info: nil, warn: nil)
       allow(logger).to receive(:error).and_raise(IOError, "log device closed")
       allow(Busybee).to receive(:logger).and_return(logger)
@@ -308,9 +322,9 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       Busybee.on_worker_stopping { raise "broken hook" }
       Busybee.on_worker_shutdown { |worker| captured = worker }
 
+      expect { runner.run! }.to output(/failed to log \(IOError: log device closed\): Error in hooks/).to_stderr
       aggregate_failures do
-        expect { runner.run! }.not_to raise_error
-        expect(captured&.error).to be_a(IOError)
+        expect(captured.error).to be_nil
         expect(runner.running?).to be(false)
         expect(Busybee::Runner.exit_immediately?).to be(false)
       end

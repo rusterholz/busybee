@@ -126,11 +126,12 @@ module Busybee
         { status: @status }
       end
 
+      # Never the result: it is workflow-instance data, perhaps personal. The error
+      # by class and message, as Client::Call names one.
       def logging_context
         context_tags.merge(
-          result: @result,
-          error: @error,
-          error_message: @error_message,
+          error_class: @error&.class&.name,
+          error_message: error_message,
           error_code: @error_code
         ).compact
       end
