@@ -147,7 +147,7 @@ The Railtie passes Rails config values through these setters. It pre-coerces boo
 
 ## Logging Module
 
-`Busybee::Logging` provides prefixed log output in text or JSON format. A mutex serializes the format + write path so concurrent threads (e.g., multiple Worker runners) cannot interleave within a single log line. The nil-logger guard runs outside the mutex to avoid unnecessary lock acquisition.
+`Busybee::Logging` provides prefixed log output in text or JSON format. Each call reads `Busybee.logger` and `Busybee.log_format` once, so a logger swapped mid-call can't leave it writing to nil, and renders its line before taking the lock. `LOCK`, a `Mutex` created at load, covers only the logger's write, so concurrent lines can't interleave even on a logger with no lock of its own (stdlib `Logger` has one; not every logger does), and nothing that can yield runs under it. It is taken with `try_lock || lock`; where `lock` raises `ThreadError` (in a signal trap, from a logger whose write itself logs, or while a sibling fiber on the same thread holds it) the line is written unlocked rather than lost. The acquisition runs under `Thread.handle_interrupt(Object => :on_blocking)`, so a `Thread#kill` reaches a thread waiting its turn but never lands between taking the lock and the `ensure` that releases it.
 
 ## Durations Module
 

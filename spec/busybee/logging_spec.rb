@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "concurrent"
 require "logger"
 require "stringio"
 
@@ -138,50 +139,152 @@ RSpec.describe Busybee::Logging do
     end
   end
 
-  context "with concurrent logging" do
-    let(:lines) { Queue.new }
-    let(:logger) do
-      Logger.new($stdout).tap do |l|
-        l.formatter = proc do |_severity, _datetime, _progname, msg|
-          lines << msg
-          ""
-        end
-      end
-    end
+  # A logger with no lock of its own (unlike stdlib Logger), writing a line a
+  # character at a time and yielding the thread between characters. on_write
+  # runs before each line, on the writing thread.
+  describe "thread safety" do
+    let(:trickling_logger_class) do
+      Class.new do
+        attr_reader :output
+        attr_accessor :on_write
 
-    let(:thread_count) { 10 }
-    let(:messages_per_thread) { 50 }
+        def initialize = @output = +""
 
-    def log_from_threads
-      threads = thread_count.times.map do |t|
-        Thread.new do
-          messages_per_thread.times do |m|
-            described_class.info("thread-#{t}-message-#{m}", thread: t, seq: m)
+        %i[debug info warn error].each do |level|
+          define_method(level) do |line|
+            on_write&.call(line)
+            "#{line}\n".each_char do |char|
+              @output << char
+              Thread.pass
+            end
           end
         end
       end
+    end
+    let(:logger) { trickling_logger_class.new }
+    let(:release) { Concurrent::Event.new }
+
+    before { Busybee.log_format = :text }
+
+    def wait_until(seconds = 5)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+      sleep 0.001 until yield || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+    end
+
+    # Logs line on a thread of its own, holding that write open (and the lock
+    # with it) until release is set; returns the thread once the write began.
+    def hold_a_write(line)
+      writing = Concurrent::Event.new
+      held = release
+      logger.on_write = lambda do |written|
+        next unless written.include?(line)
+
+        writing.set
+        held.wait(5)
+      end
+      Thread.new { described_class.info(line) }.tap { writing.wait(5) }
+    end
+
+    # Logs line on a thread of its own and returns it once it waits its turn.
+    def queue_a_write(line)
+      thread = Thread.new do
+        Thread.current.report_on_exception = false
+        described_class.info(line)
+      end
+      wait_until { thread.status == "sleep" }
+      thread
+    end
+
+    after { release.set }
+
+    it "keeps concurrent lines whole on a logger with no lock of its own" do
+      threads = Array.new(6) do |t|
+        Thread.new { 30.times { |m| described_class.info("thread #{t} message #{m}", seq: m) } }
+      end
       threads.each(&:join)
 
-      [].tap { |collected| collected << lines.pop until lines.empty? }
+      lines = logger.output.lines
+      aggregate_failures do
+        expect(lines.size).to eq(180)
+        expect(lines).to all match(/\A\[busybee\] thread \d message \d+ \(seq: \d+\)\n\z/)
+      end
     end
 
-    it "does not interleave text log lines across threads" do
-      Busybee.log_format = :text
-      collected = log_from_threads
+    it "writes to the logger it was called with, though the logger is swapped while it waits its turn" do
+      first = hold_a_write("first")
+      second = queue_a_write("second")
+      Busybee.logger = nil
+      release.set
 
-      expect(collected.size).to eq(thread_count * messages_per_thread)
-      expect(collected).to all match(/\A\[busybee\] thread-\d+-message-\d+ \(thread: \d+, seq: \d+\)\z/)
+      expect { [first, second].each { |thread| thread.join(5) } }.not_to raise_error
+      expect(logger.output.lines).to eq(["[busybee] first\n", "[busybee] second\n"])
     end
 
-    it "does not interleave JSON log lines across threads" do
-      Busybee.log_format = :json
-      collected = log_from_threads
+    it "logs from a value that logs while being rendered" do
+      logging = described_class
+      chatty = Object.new
+      chatty.define_singleton_method(:inspect) { logging.info("rendering").then { "chatty" } }
 
-      expect(collected.size).to eq(thread_count * messages_per_thread)
-      expect(collected).to all satisfy("be valid JSON with expected keys") { |line|
-        json = JSON.parse(line)
-        json.key?("message") && json.key?("level") && json.key?("thread") && json.key?("seq")
-      }
+      described_class.info("outer", value: chatty)
+
+      expect(logger.output.lines).to eq(["[busybee] rendering\n", "[busybee] outer (value: chatty)\n"])
+    end
+
+    it "renders a line without holding up another thread's write" do
+      logging = described_class
+      other_written = Concurrent::Event.new
+      slow = Object.new
+      slow.define_singleton_method(:inspect) do
+        Thread.new { logging.info("other").then { other_written.set } }
+        other_written.wait(2) ? "slow" : "timed out"
+      end
+
+      described_class.info("rendered", value: slow)
+
+      expect(logger.output.lines).to eq(["[busybee] other\n", "[busybee] rendered (value: slow)\n"])
+    end
+
+    it "logs from inside the logger's own write" do
+      logging = described_class
+      logger.on_write = ->(line) { logging.warn("inner") if line.include?("outer") }
+
+      described_class.info("outer")
+
+      expect(logger.output.lines).to contain_exactly("[busybee] outer\n", "[busybee] inner\n")
+    end
+
+    def trap_logging(line)
+      raised = nil
+      previous = trap("USR2") do
+        described_class.info(line)
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        raised = e
+      end
+      Process.kill("USR2", Process.pid)
+      wait_until { logger.output.include?(line) || raised }
+      trap("USR2", previous)
+      raised
+    end
+
+    it "logs from a signal trap" do
+      expect([trap_logging("trapped"), logger.output]).to eq([nil, "[busybee] trapped\n"])
+    end
+
+    it "logs from a signal trap while another thread is writing" do
+      holder = hold_a_write("holder")
+      raised = trap_logging("trapped")
+      release.set
+      holder.join(5)
+
+      expect([raised, logger.output.lines]).to eq([nil, ["[busybee] trapped\n", "[busybee] holder\n"]])
+    end
+
+    it "leaves a thread waiting its turn able to be killed" do
+      hold_a_write("stuck")
+      waiting = queue_a_write("waiting")
+      waiting.kill
+
+      expect(waiting.join(1)).to eq(waiting)
     end
   end
 end

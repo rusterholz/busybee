@@ -5,10 +5,21 @@ require "time"
 
 module Busybee
   # Centralized logging with prefixing and optional JSON formatting.
-  # Thread-safe: a mutex serializes format + write so concurrent threads
-  # cannot interleave within a single log line.
+  #
+  # Thread-safe: the logger and format are read once per call, the line is
+  # rendered outside the lock, and the lock covers only the logger's write, so
+  # concurrent lines can't interleave even on a logger with no lock of its own.
+  # Where the lock can't be taken (a trap, a write that itself logs, a sibling
+  # fiber holding it) the line is written unlocked rather than lost.
   module Logging
     PREFIX = "[busybee]"
+    LOCK = Mutex.new
+    # Async interrupts (Thread#kill, #raise) land only where a thread blocks: while
+    # it waits its turn or inside the write, never between taking the lock and the
+    # ensure that releases it.
+    DEFER_INTERRUPTS = { Object => :on_blocking }.freeze
+    ALLOW_INTERRUPTS = { Object => :immediate }.freeze
+    private_constant :LOCK, :DEFER_INTERRUPTS, :ALLOW_INTERRUPTS
 
     class << self
       def debug(message, **context)
@@ -29,19 +40,33 @@ module Busybee
 
       private
 
-      def mutex = @mutex ||= Mutex.new
-
       def log(level, message, **context)
-        return unless Busybee.logger
+        logger = Busybee.logger
+        return unless logger
 
-        mutex.synchronize do
-          formatted = case Busybee.log_format
-                      when :text then format_text(message, **context)
-                      when :json then format_json(level, message, **context)
-                      end
+        formatted = case Busybee.log_format
+                    when :text then format_text(message, **context)
+                    when :json then format_json(level, message, **context)
+                    end
+        write(logger, level, formatted)
+      end
 
-          Busybee.logger.public_send(level, formatted)
+      def write(logger, level, line)
+        Thread.handle_interrupt(DEFER_INTERRUPTS) do
+          locked = acquire
+          begin
+            Thread.handle_interrupt(ALLOW_INTERRUPTS) { logger.public_send(level, line) }
+          ensure
+            LOCK.unlock if locked
+          end
         end
+      end
+
+      # try_lock first: it works in a trap, where lock raises.
+      def acquire
+        LOCK.try_lock || LOCK.lock
+      rescue ThreadError
+        false
       end
 
       def format_text(message, **context)
