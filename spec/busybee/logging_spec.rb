@@ -210,8 +210,105 @@ RSpec.describe Busybee::Logging do
       end
     end
 
-    it "refuses a carrier that has no logging_context" do
-      expect { described_class.info("the message", { job_key: 1 }) }.to raise_error(ArgumentError, /logging_context/)
+    it "refuses a carrier that has no logging_context, saying so on stderr" do
+      expect { described_class.info("the message", { job_key: 1 }) }.
+        to output(/\A\[busybee\] failed to log \(ArgumentError: .*logging_context.*\): the message\n\z/).to_stderr
+      expect(log_output.string).to be_empty
+    end
+  end
+
+  # A log call returns nil and never raises, wherever it sits, a rescue clause
+  # included: what goes wrong inside it is told to stderr, and an error the
+  # process can't recover from raises the fire alarm on its way.
+  describe "safety" do
+    let(:failure) { IOError.new("closed stream") }
+    let(:logger) do
+      raising = failure
+      Class.new { %i[debug info warn error].each { |level| define_method(level) { |_line| raise raising } } }.new
+    end
+
+    it "returns nil" do
+      Busybee.logger = Logger.new(log_output)
+
+      expect(described_class.info("logged")).to be_nil
+    end
+
+    it "returns nil when the logger fails, saying so on stderr" do
+      result = :unset
+      expect { result = described_class.warn("Failed to complete frog_blast job #93928392854") }.
+        to output("[busybee] failed to log (IOError: closed stream): Failed to complete frog_blast job #93928392854\n").
+        to_stderr
+      expect(result).to be_nil
+    end
+
+    it "leaves the fire alarm down for an ordinary failure" do
+      expect { described_class.warn("logged") }.to output(/failed to log/).to_stderr
+      expect(Busybee::Runner.exit_immediately?).to be(false)
+    end
+
+    context "when the failure is one the process can't recover from" do
+      let(:failure) { NoMemoryError.new("failed to allocate memory") }
+
+      it "raises the fire alarm, then says so on stderr" do
+        expect { described_class.error("logged") }.to output(/failed to log \(NoMemoryError/).to_stderr
+        expect(Busybee::Runner.exit_immediately_reason).to eq(:crash)
+      end
+    end
+
+    it "stays silent when stderr fails too" do
+      allow($stderr).to receive(:write).and_raise(IOError, "stderr closed")
+
+      expect(described_class.warn("logged")).to be_nil
+    end
+
+    it "contains a value that fails to render" do
+      Busybee.logger = Logger.new(log_output)
+      unrenderable = Object.new
+      def unrenderable.inspect = raise(NotImplementedError, "no inspect for you")
+
+      expect { described_class.info("logged", value: unrenderable) }.
+        to output(/failed to log \(NotImplementedError: no inspect for you\): logged/).to_stderr
+    end
+  end
+
+  # gRPC hands back status details tagged BINARY, and an error message can carry
+  # any bytes at all; the line is written either way.
+  describe "encodings" do
+    let(:logger) do
+      Logger.new(log_output).tap do |l|
+        l.formatter = proc { |_severity, _datetime, _progname, msg| "#{msg}\n" }
+      end
+    end
+    let(:valid_binary) { "café closed".b }
+    let(:invalid) { "bad \xFF bytes".b }
+
+    context "when in json mode" do
+      before { Busybee.log_format = :json }
+
+      it "reads valid UTF-8 tagged BINARY as UTF-8" do
+        described_class.warn(valid_binary, details: valid_binary)
+
+        expect(JSON.parse(log_output.string)).
+          to include("message" => "[busybee] café closed", "details" => "café closed")
+      end
+
+      it "replaces bytes that aren't UTF-8" do
+        described_class.warn(invalid, details: invalid, error: IOError.new(invalid))
+
+        expect(JSON.parse(log_output.string)).to include("message" => "[busybee] bad � bytes",
+                                                         "details" => "bad � bytes",
+                                                         "error_message" => "bad � bytes")
+      end
+    end
+
+    context "when in text mode" do
+      before { Busybee.log_format = :text }
+
+      it "replaces bytes that aren't UTF-8 in the message" do
+        described_class.warn(invalid)
+
+        expect(log_output.string).to eq("[busybee] bad � bytes\n")
+      end
     end
   end
 

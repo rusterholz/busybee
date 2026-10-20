@@ -18,12 +18,6 @@ module Busybee
   # that subclasses fill via #run_loop and optionally #drain_on_shutdown. Multi
   # overrides #run!: it manages child runners rather than being a worker.
   class Runner
-    # Errors after which tearing down gracefully is still worth attempting; below
-    # it, drop work and leave fast. Client::Call's constant of the same name asks
-    # about record fidelity, this one about teardown viability: they coincide
-    # today and widen separately. The shared name lets one grep find both.
-    RECOVERABLE_ERRORS = [StandardError].freeze
-
     extend ExitImmediately
     include Stopping
     include Teardown

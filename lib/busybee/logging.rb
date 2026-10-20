@@ -3,8 +3,15 @@
 require "json"
 require "time"
 
+require "busybee/runner/exit_immediately"
+
 module Busybee
   # Centralized logging with prefixing and optional JSON formatting.
+  #
+  # Safe by construction: a call returns nil and never raises, so it may sit
+  # anywhere, a rescue clause included. What fails inside it is told to stderr,
+  # after raising the fire alarm for an error the process can't recover from;
+  # bytes that aren't UTF-8 in the message or a top-level String are replaced.
   #
   # Thread-safe: the logger and format are read once per call, the line is
   # rendered outside the lock, and the lock covers only the logger's write, so
@@ -12,6 +19,8 @@ module Busybee
   # Where the lock can't be taken (a trap, a write that itself logs, a sibling
   # fiber holding it) the line is written unlocked rather than lost.
   module Logging
+    extend Runner::ExitImmediately
+
     PREFIX = "[busybee]"
     LOCK = Mutex.new
     # Async interrupts (Thread#kill, #raise) land only where a thread blocks: while
@@ -40,11 +49,24 @@ module Busybee
         logger = Busybee.logger
         return unless logger
 
+        message = utf8(message)
         formatted = case Busybee.log_format
                     when :text then format_text(message, context)
                     when :json then format_json(level, message, carrier, error, context)
                     end
         write(logger, level, formatted)
+        nil
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        failed_to_log(e, message)
+      end
+
+      # The alarm first: raising it allocates nothing, the notice may not survive.
+      def failed_to_log(error, message)
+        exit_immediately!(reason: :crash) unless Runner::RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
+        $stderr.write("#{PREFIX} failed to log (#{error.class}: #{error.message}): #{message}\n")
+        nil
+      rescue Exception # rubocop:disable Lint/RescueException
+        nil
       end
 
       def write(logger, level, line)
@@ -77,7 +99,7 @@ module Busybee
       def format_json(level, message, carrier, error, context)
         fields = carrier ? carrier.logging_context.merge(context) : context.dup
         fields.merge!(error_fields(error)) if error
-        fields.transform_values! { |value| renderable(value) }
+        fields.transform_values! { |value| utf8(renderable(value)) }
         fields.merge(message: "#{PREFIX} #{message}", level: level.to_s, time: Time.now.utc.iso8601(3)).to_json
       end
 
@@ -90,6 +112,15 @@ module Busybee
       end
 
       def renderable(value) = value.is_a?(Exception) ? "[#{value.class}] #{value.message}" : value
+
+      # A BINARY or invalid String is copied as UTF-8 and scrubbed; anything else,
+      # a clean or ASCII-only String included, passes through untouched.
+      def utf8(value)
+        return value unless value.is_a?(String) && !value.ascii_only?
+        return value if value.valid_encoding? && value.encoding != Encoding::BINARY
+
+        value.dup.force_encoding(Encoding::UTF_8).scrub
+      end
     end
   end
 end
