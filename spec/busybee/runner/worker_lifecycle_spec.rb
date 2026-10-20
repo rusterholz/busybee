@@ -314,10 +314,16 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     end
 
     # The swallow logs the hook's error, and the log write fails too.
+    def logger_failing_on_error
+      Class.new do
+        def info(_line) = nil
+        def warn(_line) = nil
+        def error(_line) = raise(IOError, "log device closed")
+      end.new
+    end
+
     it "finishes the shutdown when logging a teardown hook's swallowed error fails" do
-      logger = instance_double(Logger, info: nil, warn: nil)
-      allow(logger).to receive(:error).and_raise(IOError, "log device closed")
-      allow(Busybee).to receive(:logger).and_return(logger)
+      Busybee.logger = logger_failing_on_error
       captured = nil
       Busybee.on_worker_stopping { raise "broken hook" }
       Busybee.on_worker_shutdown { |worker| captured = worker }
@@ -328,6 +334,8 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
         expect(runner.running?).to be(false)
         expect(Busybee::Runner.exit_immediately?).to be(false)
       end
+    ensure
+      Busybee.logger = nil
     end
   end
 
@@ -496,8 +504,6 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       end
     end
 
-    before { allow(Busybee).to receive(:logger).and_return(nil) }
-
     it "finishes the teardown when the drain fails" do
       record_all_lifecycle_hooks
       runner.test_drain = -> { raise "the broker went away mid-drain" }
@@ -511,7 +517,6 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     end
 
     it "says in the log that the drain failed, and how" do
-      allow(Busybee).to receive(:logger).and_call_original
       runner.test_drain = -> { raise "the broker went away mid-drain" }
 
       lines = capture_busybee_log { runner.run! }

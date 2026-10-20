@@ -317,8 +317,10 @@ RSpec.describe Busybee::Logging do
     context "when in json mode" do
       before { Busybee.log_format = :json }
 
+      # json 2.x writes BINARY strings with a deprecation warning on stderr;
+      # json 3 raises on them.
       it "reads valid UTF-8 tagged BINARY as UTF-8" do
-        described_class.warn(valid_binary, details: valid_binary)
+        expect { described_class.warn(valid_binary, details: valid_binary) }.not_to output.to_stderr
 
         expect(JSON.parse(log_output.string)).
           to include("message" => "[busybee] café closed", "details" => "café closed")
