@@ -150,7 +150,7 @@ Busybee.logger = Logger.new($stdout)
 
 #### `log_format`
 
-Controls log message formatting.
+Controls log message formatting. Every line Busybee writes honors it, and every one starts with `[busybee]`.
 
 | | |
 |--|--|
@@ -158,15 +158,17 @@ Controls log message formatting.
 | **Default** | `:text` |
 | **Valid values** | `:text`, `:json` |
 
-**Text format** (default):
+**Text format** (default): the message names what it's about, so each line reads on its own:
 ```
-[busybee] Retrying after GRPC error (attempt: 1, error: "Unavailable")
+[busybee] Failed to complete ship_order job #2251799813685292: [Busybee::GRPC::Error] GRPC call failed (connection lost); it will time out and retry
 ```
 
-**JSON format**:
+**JSON format**: the same message, plus the `logging_context` of the job, worker or call the line concerns (see [Hooks: Metrics and Logs](hooks.md#metrics-and-logs-the-two-projections)), and the error's class and message as fields:
 ```json
-{"message":"[busybee] Retrying after GRPC error","level":"warn","attempt":1,"error":"Unavailable"}
+{"retries":3,"deadline":"2026-10-20T12:40:00.000Z","job_type":"ship_order","bpmn_process_id":"order_fulfillment","element_id":"ship","job_key":2251799813685292,"process_instance_key":2251799813685281,"worker_class":"ShipOrderWorker","status":"ready","error_class":"Busybee::GRPC::Error","error_message":"GRPC call failed (connection lost)","execution_started_at":"2026-10-20T04:32:10.896Z","perform_started_at":"2026-10-20T04:32:10.896Z","perform_finished_at":"2026-10-20T04:32:10.896Z","message":"[busybee] Failed to complete ship_order job #2251799813685292: [Busybee::GRPC::Error] GRPC call failed (connection lost); it will time out and retry","level":"warn","time":"2026-10-20T04:32:10.897Z"}
 ```
+
+Logging never interrupts your workers: if your logger fails to write a line, Busybee carries on and prints `[busybee] failed to log (<error>): <message>` to stderr instead.
 
 ```ruby
 Busybee.log_format = :json
