@@ -127,7 +127,7 @@ RSpec.describe Busybee::Worker do
           lines = capture_busybee_log { expect { performing_worker.perform_job(job) }.not_to raise_error }
 
           expect(lines).to contain_exactly(
-            /\AWARN \[busybee\] Failed to complete test job #123456, which will time out and retry \(Busybee::GRPC::Error: .*connection lost.*\)\z/ # rubocop:disable Layout/LineLength
+            /\AWARN \[busybee\] Failed to complete test job #123456, which will time out and retry \(Busybee::GRPC::Error: [^()]*\(connection lost\)\)\z/ # rubocop:disable Layout/LineLength
           )
         end
 
@@ -211,7 +211,7 @@ RSpec.describe Busybee::Worker do
         lines = capture_busybee_log { expect { worker.perform_job(job) }.not_to raise_error }
 
         expect(lines).to contain_exactly(
-          /\AWARN \[busybee\] Failed to fail test job #42, which will time out and retry \(Busybee::GRPC::Error: .*connection lost.*\)\z/ # rubocop:disable Layout/LineLength
+          /\AWARN \[busybee\] Failed to fail test job #42, which will time out and retry \(Busybee::GRPC::Error: [^()]*\(connection lost\)\)\z/ # rubocop:disable Layout/LineLength
         )
       end
 

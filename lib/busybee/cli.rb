@@ -50,7 +50,7 @@ module Busybee
       end
       return unless exit_immediately?
 
-      Logging.error("Exiting with status 1: the process must exit immediately", reason: exit_immediately_reason)
+      Logging.error("Exiting with status 1: the process must exit immediately (#{exit_immediately_reason})")
       exit(1)
     end
 

@@ -84,8 +84,7 @@ module Busybee
         if recoverable?(error)
           Logging.warn("Error #{stopping}, finishing the stop", worker_status, error: error)
         else
-          Logging.error("Unrecoverable error #{stopping}, exiting immediately",
-                        error: error, worker_class: logged_worker_name, reason: @stop_reason.get)
+          Logging.error("Unrecoverable error #{stopping}, exiting immediately", error: error)
         end
       end
 

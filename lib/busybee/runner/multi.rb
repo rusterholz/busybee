@@ -115,7 +115,7 @@ module Busybee
       def record_child_failure(runner, error)
         @thread_error.update { |prev| prev || error }
         name = runner_worker_name(runner)
-        Logging.error("Error in runner for #{name}", error: error, worker_class: name)
+        Logging.error("Error in runner for #{name}", error: error)
       end
 
       # Not #kill!: its @thread_pool.kill would end this very pool thread

@@ -89,8 +89,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
         lines = capture_busybee_log { run_to_completion }
 
         expect(lines).to eq(["ERROR [busybee] Unrecoverable error after (anonymous worker) began stopping (signal), " \
-                             "exiting immediately (#{unrecoverable}: out of room) " \
-                             '(worker_class: "(anonymous worker)", reason: :signal)'])
+                             "exiting immediately (#{unrecoverable}: out of room)"])
       end
     end
   end

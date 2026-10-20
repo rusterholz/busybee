@@ -29,7 +29,6 @@ RSpec.describe "a stop announcement failing unrecoverably after the stream faile
 
     expect(raised).to be_a(Busybee::GRPC::Error)
     expect(lines).to eq(["ERROR [busybee] Unrecoverable error after FailingStreamWorker began stopping " \
-                         "(gateway_error), exiting immediately (NoMemoryError: failed to allocate memory) " \
-                         '(worker_class: "FailingStreamWorker", reason: :gateway_error)'])
+                         "(gateway_error), exiting immediately (NoMemoryError: failed to allocate memory)"])
   end
 end

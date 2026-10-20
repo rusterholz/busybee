@@ -669,8 +669,7 @@ RSpec.describe Busybee::CLI do
 
         lines = capture_busybee_log { expect { cli.run }.to raise_error(SystemExit) }
 
-        expect(lines.last).to eq("ERROR [busybee] Exiting with status 1: the process must exit immediately " \
-                                 "(reason: :crash)")
+        expect(lines.last).to eq("ERROR [busybee] Exiting with status 1: the process must exit immediately (crash)")
       end
 
       it "still exits 1 when saying why fails" do
