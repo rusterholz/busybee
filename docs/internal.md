@@ -155,7 +155,7 @@ The Railtie passes Rails config values through these setters. It pre-coerces boo
 
 **Rendering.**
 - **Text:** the prefixed message, its error suffix, then the explicit `**context` as `(key: value, ...)`, each value `inspect`ed. The carrier is not rendered.
-- **JSON:** one object, layered so later layers win: the carrier's `logging_context`, then the explicit `**context`, then the `error:` expansion (`error_class`, `error_message`, and `error_location`, its first backtrace frame, for a `StandardError` only, since materializing a backtrace below that line is one more allocation the process may not survive), then `message` (with its error suffix), `level` and `time`, which always win. A `job.context` primitive named `message`, `level` or `time` therefore never appears in busybee's own lines.
+- **JSON:** one object, layered so later layers win: the carrier's `logging_context`, then the explicit `**context`, then the `error:` expansion (`error_class`, `error_message`, and `error_location`, its first backtrace frame, only for an error inside `Runner::RECOVERABLE_ERRORS`, since materializing a non-recoverable error's backtrace is one more allocation the process may not survive), then `message` (with its error suffix), `level` and `time`, which always win. A `job.context` primitive named `message`, `level` or `time` therefore never appears in busybee's own lines.
 - **Exception values**, anywhere in the context, render as `Class: message`, never an object dump.
 - **Lines on an unrecoverable path** (the stream reader's post-stop error, the CLI's alarm exit) pass explicit keys and no carrier: building a status snapshot allocates.
 

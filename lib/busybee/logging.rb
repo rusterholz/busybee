@@ -70,7 +70,7 @@ module Busybee
 
       # The alarm first: raising it allocates nothing, the notice may not survive.
       def failed_to_log(error, message)
-        exit_immediately!(reason: :crash) unless Runner::RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
+        exit_immediately!(reason: :crash) unless recoverable?(error)
         $stderr.write("#{PREFIX} failed to log (#{error.class}: #{error.message}): #{message}\n")
         nil
       rescue Exception # rubocop:disable Lint/RescueException
@@ -117,13 +117,15 @@ module Busybee
         fields.transform_keys { |key| key.is_a?(Symbol) ? key : key.to_s.to_sym }
       end
 
-      # A location only below the recoverable line: there, materializing the
-      # backtrace is one more allocation the process may not survive.
+      # A location only for a recoverable error: materializing a non-recoverable
+      # one's backtrace is one more allocation the process may not survive.
       def error_fields(error)
         fields = { error_class: error.class.name, error_message: error.message }
-        location = error.backtrace&.first if error.is_a?(StandardError)
+        location = error.backtrace&.first if recoverable?(error)
         location ? fields.merge(error_location: location) : fields
       end
+
+      def recoverable?(error) = Runner::RECOVERABLE_ERRORS.any? { |klass| error.is_a?(klass) }
 
       def renderable(value) = value.is_a?(Exception) ? "#{value.class}: #{value.message}" : value
 
