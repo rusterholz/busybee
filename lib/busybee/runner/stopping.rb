@@ -82,18 +82,12 @@ module Busybee
         raise error if error
       end
 
-      # The fire alarm (the building is burning): raising it flags, exiting nothing,
-      # and names the fire; the first fire's reason stands. Claims no runner's stop.
-      def exit_immediately!(reason: :crash)
-        EXIT_IMMEDIATELY_REASON.compare_and_set(nil, reason)
-        EXIT_IMMEDIATELY.make_true
-      end
-
-      delegate :exit_immediately?, to: :class, private: true
+      # The fire alarm (ExitImmediately) is the class's; raising it claims no runner's stop.
+      delegate :exit_immediately?, :exit_immediately!, :exit_immediately_reason, to: :class, private: true
 
       # The reason a runner claims for its own stop on the way out: the fire's,
       # once the process must exit immediately.
-      def ending_reason(otherwise: nil) = exit_immediately? ? EXIT_IMMEDIATELY_REASON.get : otherwise
+      def ending_reason(otherwise: nil) = exit_immediately_reason || otherwise
 
       # The fetch loops' policy for a wrapped gRPC error, matched by grpc_status
       # whatever class the gateway raised: backpressure backs off so the loop

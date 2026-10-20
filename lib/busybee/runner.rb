@@ -5,6 +5,7 @@ require "concurrent"
 require "busybee/client"
 require "busybee/configure"
 require "busybee/hooks"
+require "busybee/runner/exit_immediately"
 require "busybee/runner/stopping"
 require "busybee/runner/teardown"
 require "busybee/runtime_config"
@@ -23,12 +24,7 @@ module Busybee
     # today and widen separately. The shared name lets one grep find both.
     RECOVERABLE_ERRORS = [StandardError].freeze
 
-    # The fire alarm, set once by an unrecoverable error or a kill: every runner in the
-    # process then skips handbacks, drains and job hooks. Preallocated: raising it allocates nothing.
-    EXIT_IMMEDIATELY = Concurrent::AtomicBoolean.new(false)
-    EXIT_IMMEDIATELY_REASON = Concurrent::AtomicReference.new(nil) # the first fire's, set before the flag
-    private_constant :EXIT_IMMEDIATELY, :EXIT_IMMEDIATELY_REASON
-
+    extend ExitImmediately
     include Stopping
     include Teardown
 
@@ -89,8 +85,6 @@ module Busybee
     end
 
     class << self
-      def exit_immediately? = EXIT_IMMEDIATELY.true?
-
       # Resolves worker mode and returns the matching runner. Mode precedence,
       # lowest first: Busybee.default_worker_mode, the worker DSL's worker_mode,
       # then a RuntimeConfig override (global or per-worker).
