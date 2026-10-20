@@ -9,6 +9,7 @@ require "busybee/client"
 require "busybee/configure"
 require "busybee/durations"
 require "busybee/error"
+require "busybee/logging"
 require "busybee/runner"
 require "busybee/runtime_config"
 require "busybee/version"
@@ -103,8 +104,8 @@ module Busybee
       require "busybee/railtie" # defensive: busybee.rb's :before_configuration hook registers it already
       require "./config/environment"
     rescue StandardError, LoadError => e
-      Busybee.logger&.error("Failed to load Rails environment: [#{e.class}] #{e.message}. " \
-                            "Set BUSYBEE_SKIP_RAILS=1 to skip Rails loading.")
+      Logging.error("Failed to load Rails environment: [#{e.class}] #{e.message}. " \
+                    "Set BUSYBEE_SKIP_RAILS=1 to skip Rails loading.", error: e)
     end
 
     def extract_workers_from_yaml!
@@ -211,9 +212,7 @@ module Busybee
 
       # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
       existing = Busybee.instance_variable_get(:"@#{field}")
-      if existing
-        Busybee.logger&.info("#{source} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
-      end
+      Logging.info("#{source} overriding configured value: #{existing.inspect} → #{cli_value.inspect}") if existing
       Busybee.public_send(:"#{field}=", cli_value)
     end
   end
