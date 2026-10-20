@@ -131,6 +131,90 @@ RSpec.describe Busybee::Logging do
     end
   end
 
+  # What a line says about the job, worker or call it concerns, and about an
+  # error: everything in JSON, only what the call site wrote in text.
+  describe "carriers, context and errors" do
+    let(:logger) do
+      Logger.new(log_output).tap do |l|
+        l.formatter = proc { |_severity, _datetime, _progname, msg| "#{msg}\n" }
+      end
+    end
+    let(:carrier) do
+      Struct.new(:logging_context).new(
+        { job_key: 1, status: "carrier's", error_class: "carrier's", message: "carrier's", level: "x", time: "y" }
+      )
+    end
+
+    def raised(error)
+      raise error
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      e
+    end
+
+    def json_line = JSON.parse(log_output.string)
+
+    context "when in json mode" do
+      before { Busybee.log_format = :json }
+
+      it "logs the carrier's logging_context with the message" do
+        job = build_test_job(type: "frog_blast", key: 93_928_392_854)
+        described_class.info("completed frog_blast job #93928392854", job)
+
+        expect(json_line).to include(JSON.parse(job.logging_context.to_json)).
+          and include("message" => "[busybee] completed frog_blast job #93928392854", "level" => "info")
+      end
+
+      it "layers explicit context over the carrier, the error over both, and its own fields over everything" do
+        described_class.warn("the message", carrier, error: IOError.new("closed stream"), status: "explicit")
+
+        expect(json_line).to include("job_key" => 1, "status" => "explicit", "error_class" => "IOError",
+                                     "error_message" => "closed stream", "message" => "[busybee] the message",
+                                     "level" => "warn", "time" => match(/\A\d{4}-/))
+      end
+
+      it "locates an ordinary error at its first backtrace frame" do
+        error = raised(IOError.new("closed stream"))
+        described_class.warn("failed", error: error)
+
+        expect(json_line).to include("error_location" => error.backtrace.first)
+      end
+
+      it "doesn't locate an error the process can't recover from" do
+        described_class.error("failed", error: raised(NoMemoryError.new("failed to allocate memory")))
+
+        expect(json_line).to include("error_class" => "NoMemoryError").
+          and(satisfy { |line| !line.key?("error_location") })
+      end
+
+      it "renders an exception value as its class and message" do
+        exceptional = Struct.new(:logging_context).new({ cause: IOError.new("closed stream") })
+        described_class.warn("failed", exceptional, other: RuntimeError.new("boom"))
+
+        expect(json_line).to include("cause" => "[IOError] closed stream", "other" => "[RuntimeError] boom")
+      end
+    end
+
+    context "when in text mode" do
+      before { Busybee.log_format = :text }
+
+      it "writes the message and explicit context, leaving the carrier and error to JSON" do
+        described_class.warn("the message", carrier, error: IOError.new("closed stream"), status: "explicit")
+
+        expect(log_output.string).to eq("[busybee] the message (status: \"explicit\")\n")
+      end
+
+      it "renders an exception value as its class and message" do
+        described_class.warn("failed", cause: IOError.new("closed stream"))
+
+        expect(log_output.string).to eq("[busybee] failed (cause: \"[IOError] closed stream\")\n")
+      end
+    end
+
+    it "refuses a carrier that has no logging_context" do
+      expect { described_class.info("the message", { job_key: 1 }) }.to raise_error(ArgumentError, /logging_context/)
+    end
+  end
+
   context "when logger is nil" do
     let(:logger) { nil }
 
