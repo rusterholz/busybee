@@ -62,6 +62,26 @@ RSpec.describe "a gateway error after a stop", :gateway do # rubocop:disable RSp
         expect(status.error).to have_attributes(class: Busybee::GRPC::Error, grpc_status: :internal)
       end
     end
+
+    it "says so in the log, once" do
+      stopper = stop_once_polling
+      lines = capture_busybee_log { run_to_completion }
+      stopper.join(5)
+
+      expect(lines).to contain_exactly(
+        /\AWARN \[busybee\] Error after \(anonymous worker\) began stopping \(sigterm\), finishing the stop: \[Busybee::GRPC::Error\] .*the gateway gave up/ # rubocop:disable Layout/LineLength
+      )
+    end
+
+    it "carries the worker's status and the error in JSON" do
+      stopper = stop_once_polling
+      lines = capture_busybee_log(format: :json) { run_to_completion }
+      stopper.join(5)
+
+      expect(lines).to include(a_hash_including("level" => "warn", "reason" => "sigterm",
+                                                "job_type" => "gateway_error_after_stop",
+                                                "error_class" => "Busybee::GRPC::Error"))
+    end
   end
 
   describe "on a polling worker's long poll" do

@@ -84,6 +84,14 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
 
         expect(gateway.received(:fail_job)).to be_empty
       end
+
+      it "says so in the log, once, naming the worker and the stop's reason" do
+        lines = capture_busybee_log { run_to_completion }
+
+        expect(lines).to eq(["ERROR [busybee] Unrecoverable error after (anonymous worker) began stopping (signal), " \
+                             "exiting immediately: [#{unrecoverable}] out of room " \
+                             '(worker_class: "(anonymous worker)", reason: :signal)'])
+      end
     end
   end
 
@@ -93,6 +101,30 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     before { raise_post_stop_from_activation(Busybee::Worker::Shutdown.new("replica lag too high")) }
 
     it_behaves_like "a graceful stop that stands"
+
+    # It reaches the stop claim twice: from the activation that raised it, then
+    # from the pump it ends.
+    it "says so in the log, once" do
+      lines = capture_busybee_log { run_to_completion }
+
+      expect(lines).to eq(["WARN [busybee] Error after (anonymous worker) began stopping (signal), finishing the " \
+                           "stop: [Busybee::Worker::Shutdown] replica lag too high"])
+    end
+
+    # The write checks whether another thread can take the lock meanwhile.
+    it "writes that line without holding the stop's lock" do
+      lock_taken = Concurrent::Array.new
+      reader = -> { runner }
+      logger = Logger.new(File::NULL)
+      logger.define_singleton_method(:warn) do |_line|
+        lock_taken << !Thread.new { reader.call.send(:post_stop_error) }.join(1).nil?
+      end
+      Busybee.logger = logger
+      run_to_completion
+      Busybee.logger = nil
+
+      expect(lock_taken).to eq([true])
+    end
 
     it "hands back both the job whose hook raised it and the buffered one" do
       run_to_completion

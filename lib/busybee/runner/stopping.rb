@@ -5,6 +5,7 @@ require "active_support/core_ext/module/delegation"
 require "busybee/durations"
 require "busybee/grpc/error"
 require "busybee/hooks"
+require "busybee/logging"
 require "busybee/worker/shutdown"
 
 module Busybee
@@ -51,19 +52,42 @@ module Busybee
       # Claim the stop for an error. A won claim caused the stop: its error is the
       # exit error, raised at loop exit, recorded before the announcement wakes
       # anyone. A lost one met a stop under way: a post-stop error, never raised,
-      # reported at T3, unless it is the exit error already (a re-raised claim).
-      def claim_stop(reason, error)
-        won = synchronize_claim do
-          @stop_reason.compare_and_set(nil, reason).tap do |claimed|
-            if claimed
-              record_shutdown_error(error)
-            elsif !@shutdown_error.equal?(error)
-              @post_stop_error ||= error
-            end
+      # reported at T3 and logged, unless it is the exit error already (a re-raised
+      # claim). Both effects run after the lock is released.
+      def claim_stop(reason, error) # rubocop:disable Naming/PredicateMethod
+        outcome = synchronize_claim do
+          if @stop_reason.compare_and_set(nil, reason)
+            record_shutdown_error(error)
+            :won
+          elsif record_post_stop_error(error)
+            :post_stop
           end
         end
-        announce_stop if won
-        won
+        announce_stop if outcome == :won
+        log_post_stop_error(error) if outcome == :post_stop
+        outcome == :won
+      end
+
+      # The first is kept for T3; each new one is logged. An error claimed twice
+      # in a row (an activation's escalation, then the loop it ends) counts once.
+      def record_post_stop_error(error)
+        return false if @shutdown_error.equal?(error) || @last_post_stop_error.equal?(error)
+
+        @post_stop_error ||= error
+        @last_post_stop_error = error
+      end
+
+      # The process may be out of memory, so an unrecoverable error's line takes
+      # no status snapshot.
+      def log_post_stop_error(error)
+        stopping = "after #{logged_worker_name} began stopping (#{@stop_reason.get})"
+        failure = "[#{error.class}] #{error.message}"
+        if recoverable?(error)
+          Logging.warn("Error #{stopping}, finishing the stop: #{failure}", worker_status, error: error)
+        else
+          Logging.error("Unrecoverable error #{stopping}, exiting immediately: #{failure}",
+                        error: error, worker_class: logged_worker_name, reason: @stop_reason.get)
+        end
       end
 
       # The exit and post-stop slots are plain ivars, read and written only inside this.
