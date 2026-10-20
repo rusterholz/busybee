@@ -386,9 +386,9 @@ RSpec.describe Busybee::Logging do
       sleep 0.001 until yield || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
     end
 
-    # Logs line on a thread of its own, holding that write open (and the lock
-    # with it) until release is set; returns the thread once the write began.
-    def hold_a_write(line)
+    # Holds any write of line open (and the lock with it) until release is set;
+    # returns an Event set once such a write begins.
+    def hold_writes_of(line)
       writing = Concurrent::Event.new
       held = release
       logger.on_write = lambda do |written|
@@ -397,6 +397,13 @@ RSpec.describe Busybee::Logging do
         writing.set
         held.wait(5)
       end
+      writing
+    end
+
+    # Logs line on a thread of its own, its write held open; returns the thread
+    # once the write began.
+    def hold_a_write(line)
+      writing = hold_writes_of(line)
       Thread.new { described_class.info(line) }.tap { writing.wait(5) }
     end
 
@@ -515,34 +522,60 @@ RSpec.describe Busybee::Logging do
     describe "an asynchronous interrupt arriving mid-write" do
       let(:interrupt) { Class.new(Exception) } # rubocop:disable Lint/InheritException
 
-      # Logs "held" on a thread of its own and returns it once the write began;
-      # the thread's value is :returned, or what reached it after the call.
+      # Logs "held" on a thread of its own and returns it once the write began.
       def hold_a_reporting_write
         holder = hold_a_write("held")
         holder.report_on_exception = false
         holder
       end
 
-      def outcome(thread)
-        thread.join(5)
-        thread.value
-      rescue Exception => e # rubocop:disable Lint/RescueException
-        e
+      # Logs "held" on a thread of its own that rescues the interrupt and then
+      # stays alive until parked is set, so a lock it still held would block
+      # the next line. Returns the thread once its write began; caught receives
+      # what reached it.
+      def hold_a_surviving_write(caught, parked)
+        writing = hold_writes_of("held")
+        rescued = interrupt
+        holder = Thread.new do
+          described_class.info("held")
+          caught << :returned
+        rescue rescued => e
+          caught << e
+          parked.wait(5)
+        end
+        writing.wait(5)
+        holder
+      end
+
+      # Raises the interrupt into holder mid-write, lets the write finish, and
+      # returns what reached the holder.
+      def interrupt_mid_write(holder, caught)
+        holder.raise(interrupt, "stop now")
+        sleep 0.05
+        release.set
+        caught.pop(timeout: 5)
       end
 
       it "is delivered to the caller once the line is written, as itself" do
-        holder = hold_a_reporting_write
-        expect do
-          holder.raise(interrupt, "stop now")
-          sleep 0.05
-          release.set
-          expect(outcome(holder)).to be_a(interrupt)
-        end.not_to output.to_stderr
+        caught = Queue.new
+        parked = Concurrent::Event.new
+        holder = hold_a_surviving_write(caught, parked)
+        reached = nil
+        expect { reached = interrupt_mid_write(holder, caught) }.not_to output.to_stderr
+        after = Thread.new { described_class.info("after") }
 
-        expect([logger.output, Busybee::Runner.exit_immediately?]).to eq(["[busybee] held\n", false])
+        aggregate_failures do
+          expect(reached).to be_a(interrupt)
+          expect(after.join(1)).to eq(after)
+          expect(logger.output.lines).to eq(["[busybee] held\n", "[busybee] after\n"])
+          expect(Busybee::Runner.exit_immediately?).to be(false)
+        end
+      ensure
+        parked&.set
+        holder&.join(5)
       end
 
-      it "kills the thread only once the line is written, leaving the lock free" do
+      it "kills the thread only once the line is written" do
         holder = hold_a_reporting_write
         holder.kill
         sleep 0.05
