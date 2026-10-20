@@ -770,7 +770,7 @@ Worth knowing when planning capacity: with one poison worker class deployed acro
 
 #### Database Connections
 
-When running multiple workers, ensure your database connection pool is large enough to support one connection for each worker. Busybee logs a warning at startup if the ActiveRecord pool size is smaller than the number of workers.
+When running multiple workers, ensure your database connection pool is large enough to support one connection for each worker. Busybee logs an error at startup if the ActiveRecord pool size is smaller than the number of workers.
 
 ### YAML Configuration
 
