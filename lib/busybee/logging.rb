@@ -24,12 +24,10 @@ module Busybee
 
     PREFIX = "[busybee]"
     LOCK = Mutex.new
-    # Async interrupts (Thread#kill, #raise) land only where a thread blocks: while
-    # it waits its turn or inside the write, never between taking the lock and the
-    # ensure that releases it.
-    DEFER_INTERRUPTS = { Object => :on_blocking }.freeze
-    ALLOW_INTERRUPTS = { Object => :immediate }.freeze
-    private_constant :LOCK, :DEFER_INTERRUPTS, :ALLOW_INTERRUPTS
+    # Thread#kill and #raise aimed at a logging thread wait until the call returns,
+    # so they land in the caller, outside the containment. A real signal isn't held.
+    DEFER_INTERRUPTS = { Object => :never }.freeze
+    private_constant :LOCK, :DEFER_INTERRUPTS
 
     # Each level takes an optional carrier (a Job, Worker::Status or Client::Call:
     # anything answering logging_context), which enriches JSON only, and an error,
@@ -43,6 +41,10 @@ module Busybee
       private
 
       def log(level, message, carrier, error, context)
+        Thread.handle_interrupt(DEFER_INTERRUPTS) { contained_log(level, message, carrier, error, context) }
+      end
+
+      def contained_log(level, message, carrier, error, context)
         validate_arguments(carrier, error)
         logger = Busybee.logger
         return unless logger
@@ -78,14 +80,10 @@ module Busybee
       end
 
       def write(logger, level, line)
-        Thread.handle_interrupt(DEFER_INTERRUPTS) do
-          locked = acquire
-          begin
-            Thread.handle_interrupt(ALLOW_INTERRUPTS) { logger.public_send(level, line) }
-          ensure
-            LOCK.unlock if locked
-          end
-        end
+        locked = acquire
+        logger.public_send(level, line)
+      ensure
+        LOCK.unlock if locked
       end
 
       # try_lock first: it works in a trap, where lock raises.

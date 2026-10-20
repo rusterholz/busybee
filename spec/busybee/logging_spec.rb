@@ -494,12 +494,64 @@ RSpec.describe Busybee::Logging do
       expect([raised, logger.output.lines]).to eq([nil, ["[busybee] trapped\n", "[busybee] holder\n"]])
     end
 
-    it "leaves a thread waiting its turn able to be killed" do
-      hold_a_write("stuck")
+    # A thread waiting its turn is killed only once it has written its line, so
+    # a kill never leaves a line half written or the lock held.
+    it "lets a kill reach a thread waiting its turn once that thread has written" do
+      holder = hold_a_write("stuck")
       waiting = queue_a_write("waiting")
       waiting.kill
+      still_waiting = waiting.join(0.2).nil?
+      release.set
 
-      expect(waiting.join(1)).to eq(waiting)
+      aggregate_failures do
+        expect(still_waiting).to be(true)
+        expect(waiting.join(5)).to eq(waiting)
+        expect(holder.join(5)).to eq(holder)
+        expect(logger.output.lines).to eq(["[busybee] stuck\n", "[busybee] waiting\n"])
+      end
+    end
+
+    # Interrupts aimed at the logging thread, not failures of logging itself.
+    describe "an asynchronous interrupt arriving mid-write" do
+      let(:interrupt) { Class.new(Exception) } # rubocop:disable Lint/InheritException
+
+      # Logs "held" on a thread of its own and returns it once the write began;
+      # the thread's value is :returned, or what reached it after the call.
+      def hold_a_reporting_write
+        holder = hold_a_write("held")
+        holder.report_on_exception = false
+        holder
+      end
+
+      def outcome(thread)
+        thread.join(5)
+        thread.value
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        e
+      end
+
+      it "is delivered to the caller once the line is written, as itself" do
+        holder = hold_a_reporting_write
+        expect do
+          holder.raise(interrupt, "stop now")
+          sleep 0.05
+          release.set
+          expect(outcome(holder)).to be_a(interrupt)
+        end.not_to output.to_stderr
+
+        expect([logger.output, Busybee::Runner.exit_immediately?]).to eq(["[busybee] held\n", false])
+      end
+
+      it "kills the thread only once the line is written, leaving the lock free" do
+        holder = hold_a_reporting_write
+        holder.kill
+        sleep 0.05
+        release.set
+
+        expect(holder.join(5)).to eq(holder)
+        described_class.info("after")
+        expect(logger.output.lines).to eq(["[busybee] held\n", "[busybee] after\n"])
+      end
     end
   end
 end
