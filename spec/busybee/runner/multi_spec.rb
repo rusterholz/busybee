@@ -258,10 +258,9 @@ RSpec.describe Busybee::Runner::Multi do
     end
   end
 
-  # A child dying of something outside RECOVERABLE_ERRORS used to be the
-  # quietest failure in the gem: nothing logged anywhere, no cascade, and
-  # wait_for_termination never returning — so the container could not even die,
-  # and that worker's job type starved until the next deploy.
+  # A child dying of something outside RECOVERABLE_ERRORS must still be logged,
+  # cascade to its siblings and let wait_for_termination return; otherwise the
+  # container can't even die, and that worker's job type starves until the next deploy.
   describe "a child dying of a non-recoverable error" do
     let(:logged) { Concurrent::Array.new }
 

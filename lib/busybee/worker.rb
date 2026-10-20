@@ -37,7 +37,7 @@ module Busybee
     delegate :variables, :headers, :client, :fail!, :throw_bpmn_error!,
              :update_retries, :update_timeout, to: :job
 
-    # Container identity (Busybee.worker_name) — not the per-job worker instance.
+    # Container identity (Busybee.worker_name), not the per-job worker instance.
     # Explicit identity for metrics/registries.
     delegate :worker_name, to: :Busybee
 
@@ -140,7 +140,7 @@ module Busybee
 
       # Per-line-item gating: every step asks whether work is still on the table
       # at the moment it arrives, not once on the way in. A hook that resolves
-      # the job therefore stops everything downstream of it — including the
+      # the job therefore stops everything downstream of it, including the
       # middleware that would otherwise wrap work no longer going to happen.
       # The perform-like moments fire exactly when perform is attempted; an
       # invalid job and a short-circuited one both skip the lot, and the system

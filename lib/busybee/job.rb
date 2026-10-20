@@ -47,12 +47,12 @@ module Busybee
              to: :timestamps
 
     # Per-moment timestamp readers (job.activated_at, job.executed_at, etc.)
-    # forward to the Timestamps PORO, kind arg and all — delegate forwards it,
-    # and the :utc default lives on the PORO. job.timestamps.stamp! remains the
+    # forward to the Timestamps PORO, kind arg and all (delegate forwards it,
+    # and the :utc default lives on the PORO). job.timestamps.stamp! remains the
     # write surface; there is no Job-level stamp! delegate.
     delegate(*Timestamps.timestamp_names, to: :timestamps)
 
-    # Container identity (Busybee.worker_name) — the per-job worker instance is
+    # Container identity (Busybee.worker_name); the per-job worker instance is
     # job.worker; this is the process/container the job ran in.
     delegate :worker_name, to: :Busybee
 
@@ -250,7 +250,7 @@ module Busybee
       raise Busybee::JobAlreadyHandled, "Cannot #{verb} job #{key} because it is already #{status}"
     end
 
-    # Failing spends one retry — Zeebe doesn't auto-decrement on FailJob, the
+    # Failing spends one retry: Zeebe doesn't auto-decrement on FailJob, the
     # worker owns it. A bare fail! decrements the current count; an explicit
     # retries: (incl. 0) sets it outright. Either way #retries mirrors it after.
     def next_retries(explicit)

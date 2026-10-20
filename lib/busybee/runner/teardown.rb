@@ -46,10 +46,10 @@ module Busybee
         contain_teardown_hooks(type) { Hooks.run(type, worker_status(error: error), safe: true) }
       end
 
-      # The ensure's other door: a failing wire call would skip the rest as an
-      # escalating hook used to. Skipped outright once the process must exit
-      # immediately; an unrecoverable error inside it says so and propagates,
-      # abandoning the rest of the teardown.
+      # The ensure's other door: a failing wire call would otherwise skip the
+      # rest. Skipped outright once the process must exit immediately; an
+      # unrecoverable error inside it says so and propagates, abandoning the
+      # rest of the teardown.
       def drain_within_teardown
         return if exit_immediately?
 

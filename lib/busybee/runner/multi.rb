@@ -8,7 +8,7 @@ require "busybee/runtime_config"
 
 module Busybee
   class Runner
-    # Multi runner — manages multiple worker types in a single process.
+    # Multi runner: manages multiple worker types in a single process.
     # Each worker gets its own child runner (Polling/Streaming/Hybrid) running
     # in a dedicated thread via Concurrent::FixedThreadPool.
     #
@@ -46,7 +46,7 @@ module Busybee
       end
 
       # Transparent: Multi manages child runners rather than being a worker, so it
-      # fires no worker hooks of its own — hence winning the set-once reason gate
+      # fires no worker hooks of its own; hence winning the set-once reason gate
       # directly rather than through super, whose stop! fires T1. Each child fires
       # its own lifecycle hooks and takes the same reason, per worker class.
       def stop!(reason: :signal)
@@ -69,11 +69,11 @@ module Busybee
 
       # Two layers, because how hard to tear down depends on what killed the
       # child. A recoverable error leaves the process well enough to drain, so
-      # the container stops gracefully. Below that line — NoMemoryError,
-      # SystemStackError — a graceful stop would spend its time on the very
+      # the container stops gracefully. Below that line (NoMemoryError,
+      # SystemStackError) a graceful stop would spend its time on the very
       # calls about to fail again, so the siblings are killed instead. Without
-      # the second layer the pool thread simply died: nothing logged anywhere,
-      # no cascade, and wait_for_termination never returning.
+      # the second layer the pool thread would die silently: nothing logged, no
+      # cascade, and wait_for_termination never returning.
       def post_runners_to_pool
         @runners.each do |runner|
           @thread_pool.post do
@@ -110,7 +110,7 @@ module Busybee
       end
 
       # Record before cascading, always: a cascade can end this very thread, and
-      # an unrecorded error would leave Multi#run! with nothing to re-raise —
+      # an unrecorded error would leave Multi#run! with nothing to re-raise,
       # reporting a clean shutdown for a container that crashed.
       def record_child_failure(runner, error)
         @thread_error.update { |prev| prev || error }
@@ -121,7 +121,7 @@ module Busybee
       # Not #kill!: its @thread_pool.kill would end this very pool thread
       # mid-statement, leaving the pool unterminated and hanging the
       # wait_for_termination Multi#run! sits in. Killing the children lets each
-      # run! return on its own. The reason stays the crash's — nobody forced this.
+      # run! return on its own. The reason stays the crash's: nobody forced this.
       def kill_children(reason:)
         @stop_reason.compare_and_set(nil, reason)
         @runners.each { |runner| runner.kill!(reason: reason) }

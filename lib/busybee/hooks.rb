@@ -17,7 +17,7 @@ module Busybee
     ].freeze
 
     # Explicit, not derived from the name: the perform triple is named for the
-    # usercode lifecycle, but its carrier — and so its filter noun — is the Job.
+    # usercode lifecycle, but its carrier, and so its filter noun, is the Job.
     HOOK_NOUN = {
       before_perform: :job, around_perform: :job, after_perform: :job,
       on_job_activated: :job, on_job_executed: :job, on_job_not_executed: :job,
@@ -66,8 +66,8 @@ module Busybee
       # ====== Invocation ======
 
       # Run all matching hooks for the given type, each callback receiving the
-      # target. Error semantics — propagate by default, log-and-continue with
-      # safe: true, shutdown signals excepted — live in protect_allowing_shutdowns.
+      # target. Error semantics (propagate by default, log-and-continue with
+      # safe: true, shutdown signals excepted) live in protect_allowing_shutdowns.
       def run(type, target, safe: false)
         matching_hooks(type, target).each do |hook|
           protect_allowing_shutdowns(target, safe: safe) { hook[:callback].call(target) }
@@ -75,8 +75,8 @@ module Busybee
       end
 
       # Catch-and-classify for a firing hook. Propagating chains (around_perform)
-      # bypass this by design — their errors classify later, at perform_job's
-      # rescue, so autofail runs before the Shutdown wrap.
+      # bypass it: their errors classify later, at perform_job's rescue, so
+      # autofail runs before the Shutdown wrap.
       def protect_allowing_shutdowns(target, safe:)
         yield
       rescue StandardError
