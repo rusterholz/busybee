@@ -603,7 +603,7 @@ Begins as B8–B9 and ends as C10–C15; what's distinctive is the state carried
 
 **G3. `fail_job` fails during autofail (Variant C).**
 
-No new trace shape — C12's closing bullet already covers the mechanics; this names the resulting state. Variant C runs unchanged through C12, where `attempt_auto_fail`'s internal rescue catches the `Busybee::GRPC::Error`, logs `"Failed to fail #{job.type} job ##{job.key}, which will time out and retry"` with the error appended, and swallows it. From there **the trace continues as C13** with the *original perform error* — the GRPC failure never escapes `attempt_auto_fail`, so it is invisible to C13's Shutdown/`shutdown_on` checks (the intro's swallow-vs-propagate asymmetry).
+No new trace shape: C12's closing bullet already covers the mechanics; this names the resulting state. Variant C runs unchanged through C12, where `attempt_auto_fail`'s internal rescue catches the `Busybee::GRPC::Error`, logs `"Failed to fail #{job.type} job ##{job.key}, which will time out and retry"` with the error appended, and swallows it. From there **the trace continues as C13** with the *original perform error*: the GRPC failure never escapes `attempt_auto_fail`, so it is invisible to C13's Shutdown/`shutdown_on` checks (the intro's swallow-vs-propagate asymmetry).
 
 Resulting state: error axis set with the original perform error (C10's early capture — not the GRPC error); result axis unset; status `:ready`. `after_perform` silent at C14; `on_job_executed` fires at C15 as the per-attempt signal. The activation times out and the job is re-yielded — autofail's intended `backoff` never applied, and the engine's retry count is untouched.
 

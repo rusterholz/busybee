@@ -33,7 +33,7 @@
   - In JSON, a line carries the `logging_context` of the job, worker or call it concerns, and an error's `error_class` and `error_message`, so you can filter on `job_key` or `worker_class` instead of parsing messages
   - In text, a line reads on its own, ending with the error when there is one: `Failed to complete ship_order job #2251799813685292, which will time out and retry (Busybee::GRPC::Error: GRPC call failed (connection lost))`
   - Every JSON line carries a `time` field (ISO8601 UTC, millisecond precision), so structured logs stay self-ordering even where the host logger's formatter, which normally supplies the timestamp, is bypassed or absent
-  - Logging can't disturb your workers: a logger that fails to write leaves them running, and Busybee reports the failure on stderr instead
+  - Logging doesn't disturb your workers: a logger that fails to write leaves them running, and Busybee reports the failure on stderr instead, unless the failure is one the process can't recover from, such as running out of memory, which shuts the process down like any such failure would
   - Existing lines were reworded to name the job or worker they concern; if you match on Busybee's log text, check your patterns
 
 - **Uniform Duration Inputs** – anywhere Busybee takes a length of time — client call arguments, gem-level configuration, the worker DSL, YAML, keepalive — you can write it the same way: a bare number for milliseconds, an `ActiveSupport::Duration` in whatever unit reads best, or a numeric String (handy for `ENV`-sourced config). Write `30.seconds` and stop counting zeroes

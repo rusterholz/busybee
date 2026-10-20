@@ -91,8 +91,8 @@ Job hooks get the **live Job** because they are a control seam where middleware 
 
 All three carriers expose the same pair of projections, so one observation pattern works everywhere:
 
-- **`context_tags`** — a low-cardinality Hash, safe to use as **metric labels**. Identity and outcome only: job type, worker class, status, error class name. Nothing unbounded.
-- **`logging_context`** — a high-cardinality superset of `context_tags`, meant for **structured log fields**: keys, timestamps, durations, counters, and an error as `error_class` and `error_message`. A job's `logging_context` never carries its `result`, which holds workflow-instance data; log what you need from it deliberately. It is also what busybee's own JSON log lines carry for the job, worker or call they concern.
+- **`context_tags`**: a low-cardinality Hash, safe to use as **metric labels**. Identity and outcome only: job type, worker class, status, error class name. Nothing unbounded.
+- **`logging_context`**: a high-cardinality superset of `context_tags`, meant for **structured log fields**: keys, timestamps, durations, counters, and an error as `error_class` and `error_message`. A job's `logging_context` never carries its `result`, which holds workflow-instance data; log what you need from it deliberately. It is also what busybee's own JSON log lines carry for the job, worker or call they concern.
 
 ```ruby
 config.on_job_executed do |job|
