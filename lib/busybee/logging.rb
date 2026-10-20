@@ -105,10 +105,16 @@ module Busybee
       # then the line's own fields. time rides in the payload: the JSON line is
       # emitted pre-formatted, so the host logger's formatter can't stamp it.
       def format_json(level, message, carrier, error, context)
-        fields = carrier ? carrier.logging_context.merge(context) : context.dup
+        fields = layered_fields(carrier, context)
         fields.merge!(error_fields(error)) if error
         fields.transform_values! { |value| utf8(renderable(value)) }
         fields.merge(message: "#{PREFIX} #{message}", level: level.to_s, time: Time.now.utc.iso8601(3)).to_json
+      end
+
+      # Symbol keys throughout, so a carrier's String "message" can't sit beside the line's own.
+      def layered_fields(carrier, context)
+        fields = carrier ? carrier.logging_context.merge(context) : context
+        fields.transform_keys { |key| key.is_a?(Symbol) ? key : key.to_s.to_sym }
       end
 
       # A location only below the recoverable line: there, materializing the

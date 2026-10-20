@@ -173,6 +173,18 @@ RSpec.describe Busybee::Logging do
                                      "level" => "warn", "time" => match(/\A\d{4}-/))
       end
 
+      it "keeps its own fields once each, though the carrier names them with String keys" do
+        job = build_test_job
+        job.context["message"] = "the adopter's"
+        job.context["time"] = "noon"
+        described_class.info("the message", job)
+
+        aggregate_failures do
+          %w[message level time].each { |key| expect(log_output.string.scan(/"#{key}":/).size).to eq(1), key }
+          expect(json_line).to include("message" => "[busybee] the message", "time" => match(/\A\d{4}-/))
+        end
+      end
+
       it "locates an ordinary error at its first backtrace frame" do
         error = raised(IOError.new("closed stream"))
         described_class.warn("failed", error: error)
