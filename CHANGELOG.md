@@ -31,7 +31,7 @@
 
 - **Structured Logs** – every line Busybee writes follows your `log_format` and starts with `[busybee]`, so one parser handles them all. Lines that used to arrive as plain text even under `:json`, such as a failed completion, a job handed back during shutdown or a worker crashing in a multi-worker process, are JSON now
   - In JSON, a line carries the `logging_context` of the job, worker or call it concerns, and an error's `error_class` and `error_message`, so you can filter on `job_key` or `worker_class` instead of parsing messages
-  - In text, a line reads on its own: `Failed to complete ship_order job #2251799813685292: [Busybee::GRPC::Error] GRPC call failed (connection lost); it will time out and retry`
+  - In text, a line reads on its own, ending with the error when there is one: `Failed to complete ship_order job #2251799813685292, which will time out and retry (Busybee::GRPC::Error: GRPC call failed (connection lost))`
   - Every JSON line carries a `time` field (ISO8601 UTC, millisecond precision), so structured logs stay self-ordering even where the host logger's formatter, which normally supplies the timestamp, is bypassed or absent
   - Logging can't disturb your workers: a logger that fails to write leaves them running, and Busybee reports the failure on stderr instead
   - Existing lines were reworded to name the job or worker they concern; if you match on Busybee's log text, check your patterns

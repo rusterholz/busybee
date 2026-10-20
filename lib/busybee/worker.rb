@@ -210,8 +210,7 @@ module Busybee
           job.complete!(new_vars)
         rescue StandardError => e
           job._record_error(e)
-          Logging.warn("Failed to complete #{job.type} job ##{job.key}: [#{e.class}] #{e.message}; " \
-                       "it will time out and retry", job)
+          Logging.warn("Failed to complete #{job.type} job ##{job.key}, which will time out and retry", job, error: e)
         end
       end
 
@@ -226,16 +225,15 @@ module Busybee
 
       def log_post_resolution_error(job, error)
         location = error.backtrace&.first
-        suffix = location ? " (at #{location})" : ""
-        Logging.warn("Error in #{job.type} job ##{job.key} after it was already #{job.status}: " \
-                     "[#{error.class}] #{error.message}#{suffix}", job, error: error)
+        suffix = location ? ", at #{location}" : ""
+        Logging.warn("Error in #{job.type} job ##{job.key} after it was already #{job.status}#{suffix}",
+                     job, error: error)
       end
 
       def attempt_auto_fail(job, error, config)
         job.fail!(Shutdown.unwrap(error), backoff: config.fail_job_backoff)
       rescue StandardError => e
-        Logging.warn("Failed to fail #{job.type} job ##{job.key}: [#{e.class}] #{e.message}; " \
-                     "it will time out and retry", job, error: e)
+        Logging.warn("Failed to fail #{job.type} job ##{job.key}, which will time out and retry", job, error: e)
       end
     end
   end

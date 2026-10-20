@@ -195,7 +195,7 @@ RSpec.describe Busybee::Hooks do
 
         lines = capture_busybee_log { described_class.run(:after_perform, job, safe: true) }
         expect(lines).to contain_exactly(
-          %r{\AERROR \[busybee\] Error in hooks \(ignored\): \[RuntimeError\] boom \(at .+/hooks_spec\.rb:\d+:in .+\)\z}
+          %r{\AERROR \[busybee\] Error in hooks \(ignored\), at .+/hooks_spec\.rb:\d+:in .+ \(RuntimeError: boom\)\z}
         )
       end
 
@@ -453,7 +453,7 @@ RSpec.describe Busybee::Hooks do
 
         lines = capture_busybee_log { described_class.run_chain(:around_perform, job, safe: true) { "core" } }
         expect(lines).to contain_exactly(
-          %r{\AERROR \[busybee\] Error in hooks \(ignored\): \[RuntimeError\] broken \(at .+/hooks_spec\.rb:\d+:in .+\)\z} # rubocop:disable Layout/LineLength
+          %r{\AERROR \[busybee\] Error in hooks \(ignored\), at .+/hooks_spec\.rb:\d+:in .+ \(RuntimeError: broken\)\z}
         )
       end
 

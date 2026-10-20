@@ -323,8 +323,8 @@ RSpec.describe Busybee::CLI do
 
         lines = capture_busybee_log { expect { described_class.new(["TestCLIWorker"]) }.not_to raise_error }
 
-        expect(lines).to include("ERROR [busybee] Failed to load Rails environment: [StandardError] boot failed. " \
-                                 "Set BUSYBEE_SKIP_RAILS=1 to skip Rails loading.")
+        expect(lines).to include("ERROR [busybee] Failed to load Rails environment; set BUSYBEE_SKIP_RAILS=1 to " \
+                                 "skip Rails loading (StandardError: boot failed)")
       end
     end
 

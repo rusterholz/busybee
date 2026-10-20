@@ -168,7 +168,8 @@ RSpec.describe Busybee::Logging do
         described_class.warn("the message", carrier, error: IOError.new("closed stream"), status: "explicit")
 
         expect(json_line).to include("job_key" => 1, "status" => "explicit", "error_class" => "IOError",
-                                     "error_message" => "closed stream", "message" => "[busybee] the message",
+                                     "error_message" => "closed stream",
+                                     "message" => "[busybee] the message (IOError: closed stream)",
                                      "level" => "warn", "time" => match(/\A\d{4}-/))
       end
 
@@ -190,23 +191,23 @@ RSpec.describe Busybee::Logging do
         exceptional = Struct.new(:logging_context).new({ cause: IOError.new("closed stream") })
         described_class.warn("failed", exceptional, other: RuntimeError.new("boom"))
 
-        expect(json_line).to include("cause" => "[IOError] closed stream", "other" => "[RuntimeError] boom")
+        expect(json_line).to include("cause" => "IOError: closed stream", "other" => "RuntimeError: boom")
       end
     end
 
     context "when in text mode" do
       before { Busybee.log_format = :text }
 
-      it "writes the message and explicit context, leaving the carrier and error to JSON" do
+      it "writes the message, its error, then explicit context, leaving the carrier to JSON" do
         described_class.warn("the message", carrier, error: IOError.new("closed stream"), status: "explicit")
 
-        expect(log_output.string).to eq("[busybee] the message (status: \"explicit\")\n")
+        expect(log_output.string).to eq("[busybee] the message (IOError: closed stream) (status: \"explicit\")\n")
       end
 
       it "renders an exception value as its class and message" do
         described_class.warn("failed", cause: IOError.new("closed stream"))
 
-        expect(log_output.string).to eq("[busybee] failed (cause: \"[IOError] closed stream\")\n")
+        expect(log_output.string).to eq("[busybee] failed (cause: \"IOError: closed stream\")\n")
       end
     end
 
@@ -214,6 +215,25 @@ RSpec.describe Busybee::Logging do
       expect { described_class.info("the message", { job_key: 1 }) }.
         to output(/\A\[busybee\] failed to log \(ArgumentError: .*logging_context.*\): the message\n\z/).to_stderr
       expect(log_output.string).to be_empty
+    end
+
+    it "refuses an error that isn't an Exception, saying so on stderr, without raising the fire alarm" do
+      result = :unset
+      expect { result = described_class.warn("the message", error: "closed stream") }.
+        to output(/\A\[busybee\] failed to log \(ArgumentError: .*Exception.*\): the message\n\z/).to_stderr
+      expect([result, log_output.string, Busybee::Runner.exit_immediately?]).to eq([nil, "", false])
+    end
+
+    it "lets the rescue clause a misused call sits in finish" do
+      finished = false
+      expect do
+        raise IOError, "closed stream"
+      rescue IOError
+        described_class.warn("handled", error: "closed stream")
+        finished = true
+      end.to output(/failed to log \(ArgumentError/).to_stderr
+
+      expect(finished).to be(true)
     end
   end
 
@@ -295,7 +315,7 @@ RSpec.describe Busybee::Logging do
       it "replaces bytes that aren't UTF-8" do
         described_class.warn(invalid, details: invalid, error: IOError.new(invalid))
 
-        expect(JSON.parse(log_output.string)).to include("message" => "[busybee] bad � bytes",
+        expect(JSON.parse(log_output.string)).to include("message" => "[busybee] bad � bytes (IOError: bad � bytes)",
                                                          "details" => "bad � bytes",
                                                          "error_message" => "bad � bytes")
       end

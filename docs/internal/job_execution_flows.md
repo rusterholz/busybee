@@ -547,7 +547,7 @@ Follows Variant A unchanged through A10. G1 deviates at A11, inside `handle_succ
     - `resolve!(:complete)` does NOT run (`.tap`'s block is never reached). No `resolved_at` timestamp, no status change — the job remains `:ready`.
   - The error unwinds out of `job.complete!` into `handle_success`'s `rescue StandardError`:
     - ERROR CAPTURE: `job._record_error(e)` — records the rescued `Busybee::GRPC::Error` on the error axis before swallowing. Symmetry with G2's early capture in `handle_perform_exception`: both telemetry surfaces (`after_perform`, `on_job_executed`) see *why* the completion failed.
-    - Logged: `"Failed to complete #{job.type} job ##{job.key}: [#{e.class}] #{e.message}; it will time out and retry"`, with the job as the line's carrier, and swallowed. `run_hooked_perform` returns normally; `perform_job`'s `rescue StandardError` is never involved.
+    - Logged: `"Failed to complete #{job.type} job ##{job.key}, which will time out and retry"`, with the job as the line's carrier and the error appended, and swallowed. `run_hooked_perform` returns normally; `perform_job`'s `rescue StandardError` is never involved.
   - `run_perform_envelope`'s ensure block:
     - HOOK: `after_perform` — **fires**, with the job `:ready` and **both** axes set: the canonical "result set does not imply success, and error set does not imply failure on the engine side" case under Resolution's orthogonal model. This is the shape the predicate was widened for — the engine never heard, and the hook is handed a job it can still resolve.
   - MIDDLEWARE: `around_job_execution` finish (safe) — runs normally; nothing is propagating.
@@ -603,7 +603,7 @@ Begins as B8–B9 and ends as C10–C15; what's distinctive is the state carried
 
 **G3. `fail_job` fails during autofail (Variant C).**
 
-No new trace shape — C12's closing bullet already covers the mechanics; this names the resulting state. Variant C runs unchanged through C12, where `attempt_auto_fail`'s internal rescue catches the `Busybee::GRPC::Error`, logs `"Failed to fail job #{job.key}: ... Job will timeout and retry."`, and swallows it. From there **the trace continues as C13** with the *original perform error* — the GRPC failure never escapes `attempt_auto_fail`, so it is invisible to C13's Shutdown/`shutdown_on` checks (the intro's swallow-vs-propagate asymmetry).
+No new trace shape — C12's closing bullet already covers the mechanics; this names the resulting state. Variant C runs unchanged through C12, where `attempt_auto_fail`'s internal rescue catches the `Busybee::GRPC::Error`, logs `"Failed to fail #{job.type} job ##{job.key}, which will time out and retry"` with the error appended, and swallows it. From there **the trace continues as C13** with the *original perform error* — the GRPC failure never escapes `attempt_auto_fail`, so it is invisible to C13's Shutdown/`shutdown_on` checks (the intro's swallow-vs-propagate asymmetry).
 
 Resulting state: error axis set with the original perform error (C10's early capture — not the GRPC error); result axis unset; status `:ready`. `after_perform` silent at C14; `on_job_executed` fires at C15 as the per-attempt signal. The activation times out and the job is re-yielded — autofail's intended `backoff` never applied, and the engine's retry count is untouched.
 

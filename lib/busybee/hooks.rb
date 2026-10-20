@@ -103,8 +103,8 @@ module Busybee
       # can locate the offending hook from a single log line.
       def log_swallowed_error(error, target)
         location = error.backtrace&.first
-        suffix = location ? " (at #{location})" : ""
-        Logging.error("Error in hooks (ignored): [#{error.class}] #{error.message}#{suffix}", target, error: error)
+        suffix = location ? ", at #{location}" : ""
+        Logging.error("Error in hooks (ignored)#{suffix}", target, error: error)
       end
 
       # Run an around-hook chain wrapping a core block; callbacks receive

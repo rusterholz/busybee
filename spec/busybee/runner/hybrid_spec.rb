@@ -437,8 +437,8 @@ RSpec.describe Busybee::Runner::Hybrid do
 
         lines = capture_busybee_log { runner.run! }
 
-        expect(lines).to include("WARN [busybee] Failed to hand test job #99 back during shutdown: " \
-                                 "[StandardError] grpc gone")
+        expect(lines).to include("WARN [busybee] Failed to hand test job #99 back during shutdown " \
+                                 "(StandardError: grpc gone)")
       end
     end
 

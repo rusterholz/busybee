@@ -235,7 +235,7 @@ RSpec.describe Busybee::Runner::Multi do
 
         lines = capture_busybee_log { expect { multi.run! }.to raise_error(StandardError) }
 
-        expect(lines).to include("ERROR [busybee] Error in runner for TestMultiWorker2: [StandardError] kaboom " \
+        expect(lines).to include("ERROR [busybee] Error in runner for TestMultiWorker2 (StandardError: kaboom) " \
                                  '(worker_class: "TestMultiWorker2")')
       end
     end

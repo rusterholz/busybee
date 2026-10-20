@@ -81,11 +81,10 @@ module Busybee
       # no status snapshot.
       def log_post_stop_error(error)
         stopping = "after #{logged_worker_name} began stopping (#{@stop_reason.get})"
-        failure = "[#{error.class}] #{error.message}"
         if recoverable?(error)
-          Logging.warn("Error #{stopping}, finishing the stop: #{failure}", worker_status, error: error)
+          Logging.warn("Error #{stopping}, finishing the stop", worker_status, error: error)
         else
-          Logging.error("Unrecoverable error #{stopping}, exiting immediately: #{failure}",
+          Logging.error("Unrecoverable error #{stopping}, exiting immediately",
                         error: error, worker_class: logged_worker_name, reason: @stop_reason.get)
         end
       end

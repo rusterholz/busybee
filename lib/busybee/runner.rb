@@ -174,8 +174,7 @@ module Busybee
       with_fresh_worker_status(job) { return_job_unworked(job) }
       nil
     rescue *RECOVERABLE_ERRORS => e
-      Logging.warn("Failed to hand #{job.type} job ##{job.key} back during shutdown: [#{e.class}] #{e.message}",
-                   job, error: e)
+      Logging.warn("Failed to hand #{job.type} job ##{job.key} back during shutdown", job, error: e)
       e
     end
 

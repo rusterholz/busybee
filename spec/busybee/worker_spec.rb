@@ -127,7 +127,7 @@ RSpec.describe Busybee::Worker do
           lines = capture_busybee_log { expect { performing_worker.perform_job(job) }.not_to raise_error }
 
           expect(lines).to contain_exactly(
-            /\AWARN \[busybee\] Failed to complete test job #123456: \[Busybee::GRPC::Error\] .*connection lost.*; it will time out and retry\z/ # rubocop:disable Layout/LineLength
+            /\AWARN \[busybee\] Failed to complete test job #123456, which will time out and retry \(Busybee::GRPC::Error: .*connection lost.*\)\z/ # rubocop:disable Layout/LineLength
           )
         end
 
@@ -211,7 +211,7 @@ RSpec.describe Busybee::Worker do
         lines = capture_busybee_log { expect { worker.perform_job(job) }.not_to raise_error }
 
         expect(lines).to contain_exactly(
-          /\AWARN \[busybee\] Failed to fail test job #42: \[Busybee::GRPC::Error\] .*connection lost.*; it will time out and retry\z/ # rubocop:disable Layout/LineLength
+          /\AWARN \[busybee\] Failed to fail test job #42, which will time out and retry \(Busybee::GRPC::Error: .*connection lost.*\)\z/ # rubocop:disable Layout/LineLength
         )
       end
 
@@ -1443,7 +1443,7 @@ RSpec.describe Busybee::Worker do
         expect(job.status).to eq(:complete)
         expect(client).not_to have_received(:fail_job)
         expect(lines).to contain_exactly(
-          /\AWARN \[busybee\] Error in process_order job #123456 after it was already complete: \[RuntimeError\] hook boom \(at .*worker_spec\.rb:\d+:in .*\)\z/ # rubocop:disable Layout/LineLength
+          /\AWARN \[busybee\] Error in process_order job #123456 after it was already complete, at .*worker_spec\.rb:\d+:in .* \(RuntimeError: hook boom\)\z/ # rubocop:disable Layout/LineLength
         )
       end
 
@@ -1554,8 +1554,6 @@ RSpec.describe Busybee::Worker do
 
     describe "handle_failure logging" do
       it "logs a warning when perform raises after manual completion" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         worker = stub_const("CompleteAndRaiseWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) do
@@ -1564,17 +1562,16 @@ RSpec.describe Busybee::Worker do
           end
         end)
 
-        worker.perform_job(job)
-        expect(logger).to have_received(:warn).
-          with(%r{already complete: \[RuntimeError\] post-complete error \(at .+/worker_spec\.rb:\d+})
+        lines = capture_busybee_log { worker.perform_job(job) }
+        expect(lines).to contain_exactly(
+          %r{\AWARN \[busybee\] Error in process_order job #123456 after it was already complete, at .+/worker_spec\.rb:\d+:in .+ \(RuntimeError: post-complete error\)\z} # rubocop:disable Layout/LineLength
+        )
       end
 
       # The operator's next move depends on this sentence. A job the engine has
       # already been told about is not coming back, and saying otherwise sends
       # them looking for a redelivery that will never arrive.
       it "never says a job that resolved before the raise will time out and retry" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
         worker = stub_const("ResolvedThenRaisingWorker", Class.new(Busybee::Worker) do
           strict_outputs false
           define_method(:perform) do
@@ -1583,10 +1580,10 @@ RSpec.describe Busybee::Worker do
           end
         end)
 
-        worker.perform_job(job)
+        lines = capture_busybee_log { worker.perform_job(job) }
 
         expect(job.status).to eq(:complete)
-        expect(logger).not_to have_received(:warn).with(/timeout and retry/)
+        expect(lines.grep(/time out and retry/)).to be_empty
       end
     end
 

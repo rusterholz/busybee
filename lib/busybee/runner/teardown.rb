@@ -56,8 +56,8 @@ module Busybee
         drain_on_shutdown
       rescue *RECOVERABLE_ERRORS => e
         @teardown_error.compare_and_set(nil, e)
-        Logging.error("Drain failed during #{logged_worker_name}'s shutdown, continuing the teardown: " \
-                      "[#{e.class}] #{e.message}", worker_status, error: e)
+        Logging.error("Drain failed during #{logged_worker_name}'s shutdown, continuing the teardown",
+                      worker_status, error: e)
       rescue Exception => e # rubocop:disable Lint/RescueException
         exit_immediately!(reason: reason_for(e))
         raise
@@ -75,8 +75,8 @@ module Busybee
         yield
       rescue Busybee::Worker::Shutdown => e
         @teardown_error.compare_and_set(nil, e)
-        Logging.error("Shutdown from #{type} ignored, #{logged_worker_name} already shutting down: " \
-                      "[#{e.class}] #{e.message}", worker_status, error: e)
+        Logging.error("Shutdown from #{type} ignored, #{logged_worker_name} already shutting down",
+                      worker_status, error: e)
       rescue *RECOVERABLE_ERRORS => e
         @teardown_error.compare_and_set(nil, e)
       rescue Exception => e # rubocop:disable Lint/RescueException

@@ -107,8 +107,7 @@ module Busybee
       require "busybee/railtie" # defensive: busybee.rb's :before_configuration hook registers it already
       require "./config/environment"
     rescue StandardError, LoadError => e
-      Logging.error("Failed to load Rails environment: [#{e.class}] #{e.message}. " \
-                    "Set BUSYBEE_SKIP_RAILS=1 to skip Rails loading.", error: e)
+      Logging.error("Failed to load Rails environment; set BUSYBEE_SKIP_RAILS=1 to skip Rails loading", error: e)
     end
 
     def extract_workers_from_yaml!

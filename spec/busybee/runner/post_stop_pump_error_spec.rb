@@ -89,7 +89,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
         lines = capture_busybee_log { run_to_completion }
 
         expect(lines).to eq(["ERROR [busybee] Unrecoverable error after (anonymous worker) began stopping (signal), " \
-                             "exiting immediately: [#{unrecoverable}] out of room " \
+                             "exiting immediately (#{unrecoverable}: out of room) " \
                              '(worker_class: "(anonymous worker)", reason: :signal)'])
       end
     end
@@ -108,7 +108,7 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
       lines = capture_busybee_log { run_to_completion }
 
       expect(lines).to eq(["WARN [busybee] Error after (anonymous worker) began stopping (signal), finishing the " \
-                           "stop: [Busybee::Worker::Shutdown] replica lag too high"])
+                           "stop (Busybee::Worker::Shutdown: replica lag too high)"])
     end
 
     # The write checks whether another thread can take the lock meanwhile.

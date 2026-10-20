@@ -421,7 +421,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       lines = capture_busybee_log { runner.run! }
 
       expect(lines).to include("ERROR [busybee] Shutdown from on_worker_stopping ignored, LifecycleWorker already " \
-                               "shutting down: [Busybee::Worker::Shutdown] T2 declares unhealth")
+                               "shutting down (Busybee::Worker::Shutdown: T2 declares unhealth)")
     end
 
     it "carries the worker and the escalation in JSON" do
@@ -517,7 +517,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       lines = capture_busybee_log { runner.run! }
 
       expect(lines).to eq(["ERROR [busybee] Drain failed during LifecycleWorker's shutdown, continuing the " \
-                           "teardown: [RuntimeError] the broker went away mid-drain"])
+                           "teardown (RuntimeError: the broker went away mid-drain)"])
     end
 
     it "hands the drain's failure to the shutdown observer" do

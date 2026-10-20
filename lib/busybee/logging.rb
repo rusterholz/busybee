@@ -9,9 +9,10 @@ module Busybee
   # Centralized logging with prefixing and optional JSON formatting.
   #
   # Safe by construction: a call returns nil and never raises, so it may sit
-  # anywhere, a rescue clause included. What fails inside it is told to stderr,
-  # after raising the fire alarm for an error the process can't recover from;
-  # bytes that aren't UTF-8 in the message or a top-level String are replaced.
+  # anywhere, a rescue clause included. What fails inside it, a misused argument
+  # included, is told to stderr, after raising the fire alarm for an error the
+  # process can't recover from; bytes that aren't UTF-8 in the message or a
+  # top-level String are replaced.
   #
   # Thread-safe: the logger and format are read once per call, the line is
   # rendered outside the lock, and the lock covers only the logger's write, so
@@ -31,8 +32,8 @@ module Busybee
     private_constant :LOCK, :DEFER_INTERRUPTS, :ALLOW_INTERRUPTS
 
     # Each level takes an optional carrier (a Job, Worker::Status or Client::Call:
-    # anything answering logging_context) and an error. Both enrich JSON only; in
-    # text the call site has already written what matters into the message.
+    # anything answering logging_context), which enriches JSON only, and an error,
+    # appended to the message as "(Class: message)" in both formats.
     class << self
       def debug(message, carrier = nil, error: nil, **context) = log(:debug, message, carrier, error, context)
       def info(message, carrier = nil, error: nil, **context) = log(:info, message, carrier, error, context)
@@ -42,14 +43,12 @@ module Busybee
       private
 
       def log(level, message, carrier, error, context)
-        unless carrier.nil? || carrier.respond_to?(:logging_context)
-          raise ArgumentError, "a log carrier answers logging_context; got #{carrier.class}"
-        end
-
+        validate_arguments(carrier, error)
         logger = Busybee.logger
         return unless logger
 
         message = utf8(message)
+        message = "#{message} (#{utf8(renderable(error))})" if error
         formatted = case Busybee.log_format
                     when :text then format_text(message, context)
                     when :json then format_json(level, message, carrier, error, context)
@@ -58,6 +57,15 @@ module Busybee
         nil
       rescue Exception => e # rubocop:disable Lint/RescueException
         failed_to_log(e, message)
+      end
+
+      def validate_arguments(carrier, error)
+        unless carrier.nil? || carrier.respond_to?(:logging_context)
+          raise ArgumentError, "a log carrier answers logging_context; got #{carrier.class}"
+        end
+        return if error.nil? || error.is_a?(Exception)
+
+        raise ArgumentError, "error: takes an Exception; got #{error.class}"
       end
 
       # The alarm first: raising it allocates nothing, the notice may not survive.
@@ -111,7 +119,7 @@ module Busybee
         location ? fields.merge(error_location: location) : fields
       end
 
-      def renderable(value) = value.is_a?(Exception) ? "[#{value.class}] #{value.message}" : value
+      def renderable(value) = value.is_a?(Exception) ? "#{value.class}: #{value.message}" : value
 
       # A BINARY or invalid String is copied as UTF-8 and scrubbed; anything else,
       # a clean or ASCII-only String included, passes through untouched.
