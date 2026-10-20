@@ -660,6 +660,31 @@ RSpec.describe Busybee::CLI do
 
         expect { cli.run }.to raise_error(SystemExit) { |exit| expect(exit.status).to eq(1) }
       end
+
+      it "says why it exits 1" do
+        Thread.new do
+          started.wait(5)
+          cli.instance_variable_get(:@runner).stop!(reason: :sigterm)
+        end
+
+        lines = capture_busybee_log { expect { cli.run }.to raise_error(SystemExit) }
+
+        expect(lines.last).to eq("ERROR [busybee] Exiting with status 1: the process must exit immediately " \
+                                 "(reason: :crash)")
+      end
+
+      it "still exits 1 when saying why fails" do
+        Busybee.logger = Class.new { def error(_line) = raise(IOError, "closed stream") }.new
+        Thread.new do
+          started.wait(5)
+          cli.instance_variable_get(:@runner).stop!(reason: :sigterm)
+        end
+
+        expect { expect { cli.run }.to raise_error(SystemExit) { |exit| expect(exit.status).to eq(1) } }.
+          to output(/failed to log \(IOError: closed stream\): Exiting with status 1/).to_stderr
+      ensure
+        Busybee.logger = nil
+      end
     end
 
     # A real worker stopped by a trapped TERM whose on_worker_stop_requested

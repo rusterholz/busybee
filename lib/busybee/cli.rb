@@ -22,7 +22,7 @@ module Busybee
     # Signals we trap to begin a graceful stop.
     STOP_SIGNALS = %w[INT QUIT TERM].freeze
 
-    delegate :exit_immediately?, to: :"Busybee::Runner", private: true
+    delegate :exit_immediately?, :exit_immediately_reason, to: :"Busybee::Runner", private: true
 
     def self.main(args) = new(args).run
 
@@ -39,7 +39,7 @@ module Busybee
     end
 
     # Exits 1 once the run has returned if the process must exit immediately, an
-    # error having struck somewhere that raised nothing here.
+    # error having struck somewhere that raised nothing here, so it says so.
     def run
       @runner = Runner.for(*@worker_classes, runtime_config: @runtime_config, client: client)
       setup_signal_handlers!
@@ -48,7 +48,10 @@ module Busybee
       ensure
         join_signal_threads
       end
-      exit(1) if exit_immediately?
+      return unless exit_immediately?
+
+      Logging.error("Exiting with status 1: the process must exit immediately", reason: exit_immediately_reason)
+      exit(1)
     end
 
     private
