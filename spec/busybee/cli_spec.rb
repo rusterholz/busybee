@@ -27,6 +27,9 @@ RSpec.describe Busybee::CLI do
     Busybee.logger = nil # keeps the CLI's own logger off the suite's stdout, except where it's the subject
   end
 
+  # The messages of the JSON Overriding lines in a text capture's "LEVEL line"s.
+  def override_messages(lines) = lines.grep(/Overriding/).map { |line| JSON.parse(line.split(" ", 2).last)["message"] }
+
   # Save/restore gem-level config that apply_global_config! may modify
   around do |example|
     saved = %i[@log_format @worker_name @cluster_address @shutdown_wait_timeout].to_h do |ivar|
@@ -403,11 +406,11 @@ RSpec.describe Busybee::CLI do
         expect(Busybee.log_format).to eq(original_format)
       end
 
-      it "logs when overriding a value already set (e.g., by the Railtie)" do
-        Busybee.log_format = :text
+      it "logs when overriding a value already set, in the format it sets" do
         lines = capture_busybee_log { described_class.new(["-l", "json", "TestCLIWorker"]) }
 
-        expect(lines).to include("INFO [busybee] Overriding configured value with --log-format: :text \u2192 :json")
+        expect(override_messages(lines)).to eq(["[busybee] Overriding configured value with --log-format: " \
+                                                ":text \u2192 :json"])
       end
 
       it "does not log when no prior value was configured" do
@@ -479,7 +482,7 @@ RSpec.describe Busybee::CLI do
           described_class.new(["-l", "json", "TestCLIWorker"])
         end
 
-        expect(lines.grep(/Overriding/)).to eq(["INFO [busybee] Overriding configured value with --log-format: " \
+        expect(override_messages(lines)).to eq(["[busybee] Overriding configured value with --log-format: " \
                                                 ":text → :json"])
       end
     end

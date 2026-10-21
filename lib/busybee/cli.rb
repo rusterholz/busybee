@@ -229,10 +229,10 @@ module Busybee
 
       # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
       existing = Busybee.instance_variable_get(:"@#{field}")
-      if existing && existing != cli_value
-        Logging.info("Overriding configured value with #{source}: #{existing.inspect} → #{cli_value.inspect}")
-      end
-      Busybee.public_send(:"#{field}=", cli_value)
+      Busybee.public_send(:"#{field}=", cli_value) # first, so the line below follows a --log-format it overrides
+      return unless existing && existing != cli_value
+
+      Logging.info("Overriding configured value with #{source}: #{existing.inspect} → #{cli_value.inspect}")
     end
   end
 end

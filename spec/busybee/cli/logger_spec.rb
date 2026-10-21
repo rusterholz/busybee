@@ -6,9 +6,10 @@ require "tmpdir"
 
 # The busybee command's own logger, run as a real process outside Rails.
 RSpec.describe "the busybee command's logger", :busybee_command, :gateway do # rubocop:disable RSpec/DescribeClass
-  def run_outside_rails(*args, hold_until_logged: false)
+  def run_outside_rails(*args, env: {}, hold_until_logged: false)
     Dir.mktmpdir do |dir|
-      run_to_completion(*args, chdir: dir, env: { "BUSYBEE_SKIP_RAILS" => "1" }, hold_until_logged: hold_until_logged)
+      run_to_completion(*args, chdir: dir, env: { "BUSYBEE_SKIP_RAILS" => "1" }.merge(env),
+                               hold_until_logged: hold_until_logged)
     end
   end
 
@@ -28,6 +29,16 @@ RSpec.describe "the busybee command's logger", :busybee_command, :gateway do # r
 
     lines = result.stdout.lines.map { |line| JSON.parse(line) }
     expect(lines.map { |line| line.values_at("level", "message") }).to eq(worker_messages.map { |line| ["info", line] })
+  end
+
+  it "logs its override of a format configured before it in the --log-format given" do
+    result = run_outside_rails("-l", "json", env: { "BUSYBEE_SPEC_LOG_FORMAT" => "text" })
+
+    lines = result.stdout.lines.map { |line| JSON.parse(line) }
+    expect(lines.first).to include(
+      "level" => "info", "message" => "[busybee] Overriding configured value with --log-format: :text → :json"
+    )
+    expect(lines.drop(1).map { |line| line["message"] }).to eq(worker_messages)
   end
 
   it "carries on without a word about Rails when the bundle has no rails" do
