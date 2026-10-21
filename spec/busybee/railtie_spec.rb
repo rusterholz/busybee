@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require "logger"
 require "pathname"
+require "stringio"
 require "tempfile"
 
 require "busybee/credentials/insecure"
