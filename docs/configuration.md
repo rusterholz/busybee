@@ -137,12 +137,14 @@ Busybee.credentials = Busybee::Credentials::TLS.new(
 
 #### `logger`
 
-The logger instance for Busybee messages. When `nil`, logging is disabled.
+The logger instance for Busybee messages. Set it to `nil` to turn logging off: a logger you set yourself, `nil` included, is never replaced by a default.
 
 | | |
 |--|--|
 | **Type** | Logger-compatible object |
-| **Default** | `nil` (Rails: `Rails.logger`) |
+| **Default** | `nil`; in a Rails app, `Rails.logger`; under the `busybee` command outside Rails, stdout at `info` |
+
+The `busybee` command logs to stdout from its first line, at `info`, until your app supplies a logger: in a Rails app, `Rails.logger` takes over as Rails boots, and what Busybee logs before then reaches stdout.
 
 ```ruby
 Busybee.logger = Logger.new($stdout)
@@ -382,7 +384,7 @@ See [Workers: Signal Handling](workers.md#signal-handling) for how a worker shut
 
 In a Rails app, Busybee loads a Railtie, whether busybee or Rails is required first. The Railtie:
 
-1. Sets `Busybee.logger` to `Rails.logger`, unless a logger is already configured
+1. Sets `Busybee.logger` to `Rails.logger`, unless you configured a logger before boot (`nil` included, which keeps logging off) or set `config.x.busybee.logger` (see "Logger behavior", below)
 2. Applies each `config.x.busybee.*` setting you make, and leaves every other setting as it was
 
 ### Basic Rails Setup
@@ -507,7 +509,7 @@ When both `credential_type` and credential parameters are provided, Busybee buil
 
 **Logger behavior:**
 
-- If not set, defaults to `Rails.logger`, unless a logger was configured before Rails booted
+- If not set, defaults to `Rails.logger`, unless a logger was configured before Rails booted, `nil` included
 - Set to a custom logger to override
 - Set to `true` to use `Rails.logger` in any case
 - Set to `false` to disable logging entirely

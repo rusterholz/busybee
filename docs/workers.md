@@ -591,7 +591,7 @@ bundle exec busybee ProcessOrderWorker ShipOrderWorker NotifyCustomerWorker
 bundle exec busybee --config config/busybee.yml
 ```
 
-The CLI loads your Rails environment automatically (if present), instantiates the named worker classes, and starts processing jobs. Press Ctrl-C for a graceful shutdown, or Ctrl-C again to force-quit.
+The CLI loads your Rails environment automatically (if present), instantiates the named worker classes, and starts processing jobs. It logs to stdout from its first line, until your Rails app's logger takes over (see [Configuration: `logger`](configuration.md#logger)). Press Ctrl-C for a graceful shutdown, or Ctrl-C again to force-quit.
 
 If you've used [Racecar](https://github.com/zendesk/racecar) to run Kafka consumers, this pattern should be familiar: one executable, one or more handler classes, and a long-running process that connects to the messaging infrastructure and dispatches work.
 
@@ -620,7 +620,19 @@ Usage: busybee [options] WorkerClass [WorkerClass ...]
 
 The CLI automatically loads your Rails environment by requiring `./config/environment`. This means your workers have access to your models, application config, and everything else in your Rails app. Most gem configuration settings (credentials, logging, etc.) can be set through Rails app configuration values. See [Configuration: Rails Integration](configuration.md#rails-integration).
 
-If you don't have Rails installed, loading the environment will be skipped automatically and transparently. If you _do_ have Rails installed but for some reason you want to skip loading the Rails environment, you can set an env var:
+If your bundle doesn't include Rails, the CLI skips loading it, silently. If it does, but the directory you run the CLI in has no `config/environment.rb`, the CLI says so and carries on without Rails:
+
+```
+I, [2026-10-21T12:00:00.000000 #4242]  INFO -- : [busybee] Continuing without Rails, no config/environment.rb in /srv/app
+```
+
+If your app fails to boot, the CLI stops: it logs why, Ruby prints the error with its backtrace on stderr, and the process exits with status 1.
+
+```
+E, [2026-10-21T12:00:00.000000 #4242] ERROR -- : [busybee] Failed to load Rails environment in /srv/app; set BUSYBEE_SKIP_RAILS=1 if this is not a Rails app (KeyError: key not found: "DATABASE_URL")
+```
+
+If this is not a Rails app, though your bundle includes Rails, set an env var to skip loading it:
 
 ```bash
 BUSYBEE_SKIP_RAILS=1 bundle exec busybee MyWorker
