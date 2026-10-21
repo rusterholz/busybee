@@ -62,7 +62,14 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
   it "writes its first line in the --log-format given" do
     result = run_in_app(nil, "-l", "json")
 
-    expect(JSON.parse(result.stdout.lines.first[/\{.*\}/])).to include("level" => "info", "message" => continuing_line)
+    expect(JSON.parse(result.stdout.lines.first)).to include("level" => "info", "message" => continuing_line)
+  end
+
+  it "follows a log_format the app sets as it boots" do
+    result = run_in_app(rails_app(before_app: "Busybee.log_format = :json\nBusybee.default_message_ttl = 30"))
+
+    expect(result.status&.exitstatus).to eq(0), describe_exit(result)
+    expect(JSON.parse(result.stdout.lines.first)).to include("level" => "warn")
   end
 
   it "exits 1 when config/environment.rb raises, logging why on stdout and the backtrace on stderr" do

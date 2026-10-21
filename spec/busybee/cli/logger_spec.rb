@@ -18,14 +18,15 @@ RSpec.describe "the busybee command's logger", :busybee_command, :gateway do # r
     expect(result.status&.exitstatus).to eq(0), describe_exit(result)
     expect(result.stdout_while_running).to match(/INFO -- : \[busybee\] Completed logging_stream job ##{job.key}\n/)
     expect(messages(result.stdout)).to eq(worker_messages)
+    expect(result.stdout.lines).to all(match(/\AI, \[\S+ #\d+\]  INFO -- : \[busybee\] /))
     expect(result.stdout.lines.size).to eq(worker_messages.size)
     expect(result.stderr).to eq("")
   end
 
-  it "logs in the --log-format given" do
+  it "logs one bare JSON object a line under --log-format json" do
     result = run_outside_rails("-l", "json")
 
-    lines = result.stdout.lines.map { |line| JSON.parse(line[/\{.*\}/]) }
+    lines = result.stdout.lines.map { |line| JSON.parse(line) }
     expect(lines.map { |line| line.values_at("level", "message") }).to eq(worker_messages.map { |line| ["info", line] })
   end
 

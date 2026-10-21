@@ -144,7 +144,7 @@ The logger instance for Busybee messages. Set it to `nil` to turn logging off: a
 | **Type** | Logger-compatible object |
 | **Default** | `nil`; in a Rails app, `Rails.logger`; under the `busybee` command outside Rails, stdout at `info` |
 
-The `busybee` command logs to stdout from its first line, at `info`, until your app supplies a logger: in a Rails app, `Rails.logger` takes over as Rails boots, and what Busybee logs before then reaches stdout.
+The `busybee` command logs to stdout from its first line, at `info`, until your app supplies a logger: in a Rails app, `Rails.logger` takes over as Rails boots, and what Busybee logs before then reaches stdout. Under `log_format :json`, each of its lines is one bare JSON object; under `:text`, Ruby's standard logger line.
 
 ```ruby
 Busybee.logger = Logger.new($stdout)

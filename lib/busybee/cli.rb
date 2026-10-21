@@ -6,6 +6,7 @@ require "concurrent"
 require "logger"
 require "optparse"
 
+require "busybee/cli/log_formatter"
 require "busybee/client"
 require "busybee/configure"
 require "busybee/durations"
@@ -101,7 +102,7 @@ module Busybee
     # every line until exit.
     def install_logger!
       $stdout.sync = true
-      Busybee.default_logger = Logger.new($stdout, level: :info)
+      Busybee.default_logger = Logger.new($stdout, level: :info, formatter: LogFormatter.new)
       format = @parsed_options[:log_format]
       apply_global_setting!(:log_format, format) if Configure::VALID_LOG_FORMATS.include?(format)
     end

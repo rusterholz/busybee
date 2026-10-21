@@ -11,6 +11,8 @@ exe/
 └── busybee                  # CLI executable (thin shim)
 lib/busybee/
 ├── cli.rb                   # CLI entry point: arg parsing, env loading, signal handling, runner wiring
+├── cli/
+│   └── log_formatter.rb     # The CLI's own logger's formatter: stdlib line, or bare JSON
 ├── configure.rb             # Validated setters for gem-level config (included into Busybee singleton)
 ├── client.rb                # Client class - main user-facing API
 ├── client/                  # Client operation modules + the call seam
@@ -441,8 +443,9 @@ Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` — works
 ### Structure
 
 ```
-exe/busybee          # Thin shim: require "busybee" + CLI.main(ARGV)
-lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
+exe/busybee                      # Thin shim: require "busybee" + CLI.main(ARGV)
+lib/busybee/cli.rb               # CLI class: initialize (setup) + run (execution)
+lib/busybee/cli/log_formatter.rb # CLI::LogFormatter, its default logger's formatter
 ```
 
 ### Lifecycle
@@ -467,7 +470,7 @@ The CLI exposes 5 flags, besides `--version` and `--help`. Worker-scoped tuning 
 
 **Process-wide application:** `apply_global_config!` applies process-wide flags, and the YAML's top-level `shutdown_wait_timeout`, to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding a different value already set by the Railtie, naming the flag or the YAML key. A valid `--log-format` is also applied before Rails loads, so the lines written during the boot follow it.
 
-**Default logger:** before loading Rails, the CLI sets `$stdout.sync` and installs `Logger.new($stdout)` at `info` through `Busybee.default_logger=`, so it stands only where no logger was configured, and the Railtie's `Rails.logger` default replaces it (see [Gem-Level Configuration](#gem-level-configuration)). Outside Rails it stays the process's logger.
+**Default logger:** before loading Rails, the CLI sets `$stdout.sync` and installs `Logger.new($stdout)` at `info` through `Busybee.default_logger=`. Its `CLI::LogFormatter` reads `Busybee.log_format` per line: stdlib's line under `:text`, the bare JSON object under `:json`, so a format set after it was installed (by `--log-format`, or by the app as it boots) still applies. It stands only where no logger was configured, and the Railtie's `Rails.logger` default replaces it (see [Gem-Level Configuration](#gem-level-configuration)). Outside Rails it stays the process's logger.
 
 ### Signal Handling
 

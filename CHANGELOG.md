@@ -118,7 +118,7 @@
   ```
 
   - A bundle without Rails still skips it silently. A bundle with Rails, run where there's no `config/environment.rb`, logs `Continuing without Rails, no config/environment.rb in <dir>` and carries on. Set `BUSYBEE_SKIP_RAILS=1` to skip Rails altogether
-  - `busybee` now logs to stdout from its first line, at `info`, until your app's logger takes over, so what Busybee says while your app boots is no longer lost. Outside Rails, with no logger of your own, its lines go there for the whole run; a logger you set yourself, `nil` included, stays in charge, and `--log-format` applies from the first line
+  - `busybee` now logs to stdout from its first line, at `info`, until your app's logger takes over, so what Busybee says while your app boots is no longer lost. Outside Rails, with no logger of your own, its lines go there for the whole run; a logger you set yourself, `nil` included, stays in charge. `--log-format` applies from the first line, and under `json` each line is one bare JSON object, ready for your log pipeline
 
 - **Empty Environment Variables Count as Unset** – `CLUSTER_ADDRESS=` pointed every client at an empty address, `BUSYBEE_WORKER_NAME=` named the worker `""`, an empty `BUSYBEE_CREDENTIAL_TYPE` logged an invalid-type warning, an empty credential variable such as `CAMUNDA_CLIENT_ID` stopped autodetection with `CannotDetectCredentials`, and `BUSYBEE_SKIP_RAILS=` skipped loading Rails. Each now behaves as though the variable were never set
 
