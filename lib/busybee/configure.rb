@@ -187,6 +187,20 @@ module Busybee
       @shutdown_on_errors = coerced
     end
 
+    # --- Logger ---
+
+    # Any assignment configures the logger, nil included, and no default replaces it.
+    def logger=(value)
+      @logger_configured = true
+      @logger = value
+    end
+
+    # The logger used until one is configured, such as Rails.logger in a Rails app.
+    # @api private
+    def default_logger=(value)
+      @logger = value unless @logger_configured
+    end
+
     # --- Log format ---
 
     def log_format=(value)

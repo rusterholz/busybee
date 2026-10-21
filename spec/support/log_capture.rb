@@ -7,16 +7,24 @@ require "stringio"
 # busybee's log lines, read back through a real Logger. Text lines come back as
 # "LEVEL message" strings, JSON lines parsed.
 module LogCapture
+  # The raw slots, since a logger restored through its setter counts as configured.
+  LOGGER_STATE = %i[@logger @logger_configured @log_format].freeze
+
   def capture_busybee_log(format: :text, level: Logger::DEBUG)
     output = StringIO.new
-    saved = [Busybee.logger, Busybee.instance_variable_get(:@log_format)]
-    Busybee.logger = capturing_logger(output, format).tap { |logger| logger.level = level }
-    Busybee.log_format = format
-    yield
+    preserving_busybee_logger do
+      Busybee.logger = capturing_logger(output, format).tap { |logger| logger.level = level }
+      Busybee.log_format = format
+      yield
+    end
     read_captured(output, format)
+  end
+
+  def preserving_busybee_logger
+    saved = LOGGER_STATE.to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
+    yield
   ensure
-    Busybee.logger, = saved
-    Busybee.instance_variable_set(:@log_format, saved.last)
+    saved.each { |ivar, value| Busybee.instance_variable_set(ivar, value) }
   end
 
   private
@@ -35,4 +43,8 @@ module LogCapture
   end
 end
 
-RSpec.configure { |config| config.include LogCapture }
+RSpec.configure do |config|
+  config.include LogCapture
+  # A logger an example installs, the CLI's included, never outlives it.
+  config.around { |example| preserving_busybee_logger(&example) }
+end
