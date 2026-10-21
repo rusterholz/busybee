@@ -197,7 +197,7 @@ module Busybee
 
     # The logger used until one is configured: the busybee command's, then Rails.logger.
     # @api private
-    def default_logger=(value)
+    def _default_logger=(value)
       @logger = value unless @logger_configured
     end
 

@@ -111,7 +111,7 @@ RSpec.describe "Busybee::Railtie", :rails do
       end
 
       it "replaces a default logger with Rails.logger" do
-        configure_and_initialize(preset: { default_logger: Logger.new(StringIO.new) })
+        configure_and_initialize(preset: { _default_logger: Logger.new(StringIO.new) })
         expect(Busybee.logger).to eq(rails_logger)
       end
     end

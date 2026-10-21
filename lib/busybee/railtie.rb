@@ -39,7 +39,7 @@ module Busybee
         case busybee_conf&.logger
         when false then config.logger = nil
         when true then config.logger = Rails.logger
-        when nil then config.default_logger = Rails.logger
+        when nil then config._default_logger = Rails.logger
         else config.logger = busybee_conf.logger
         end
 
