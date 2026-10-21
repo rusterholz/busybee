@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "concurrent"
 require "open3"
 require "rbconfig"
 
@@ -9,6 +10,8 @@ module BusybeeCommand
   EXE = File.expand_path("../../exe/busybee", __dir__)
   WORKER = File.expand_path("../fixtures/cli_logging_worker.rb", __dir__)
   INSECURE = { "BUSYBEE_CREDENTIAL_TYPE" => "insecure" }.freeze
+  # The repository's own bundle, which never has rails, whatever row is running.
+  WITHOUT_RAILS = { "BUNDLE_GEMFILE" => File.expand_path("../../Gemfile", __dir__) }.freeze
   Result = Struct.new(:stdout, :stderr, :status, :stdout_while_running)
 
   # Returns its stdout, stderr and status (nil if it had to be killed). Given a
@@ -73,4 +76,52 @@ module BusybeeCommand
   end
 end
 
-RSpec.configure { |config| config.include BusybeeCommand, :busybee_command }
+# A gateway that streams the worker one job, then holds the stream open until
+# the job completes, so the run ends with the stream's close. Held until the
+# completion is on stdout instead, the run shows what it logged while running.
+RSpec.shared_context "with a busybee command on a one-job stream" do
+  include BusybeeCommand
+
+  let(:stream_gate) { Queue.new }
+  let(:job) { FaultInjectionGateway.activated_job(type: "logging_stream") }
+
+  before do
+    gateway.on(:stream_activated_jobs) do
+      Enumerator.new do |yielder|
+        yielder << job
+        stream_gate.pop
+      end
+    end
+    gateway.on(:complete_job) do
+      stream_gate << :close if close_on_complete.true?
+      Busybee::GRPC::CompleteJobResponse.new
+    end
+  end
+
+  let(:close_on_complete) { Concurrent::AtomicBoolean.new(true) }
+
+  def run_to_completion(*args, chdir:, env: {}, hold_until_logged: false)
+    close_on_complete.value = !hold_until_logged
+    run_busybee("-a", gateway.address, *args, "LoggingStreamWorker", chdir: chdir, env: env, seconds: 15) do |stdout|
+      hold_until_logged && stdout.include?("Completed").tap { |completed| stream_gate << :close if completed }
+    end
+  end
+
+  # The [busybee] part of each line that has one.
+  def messages(stdout) = stdout.lines.filter_map { |line| line[/\[busybee\] .*/] }
+
+  def worker_messages
+    ["[busybee] Started LoggingStreamWorker (streaming, job type logging_stream)",
+     "[busybee] Completed logging_stream job ##{job.key}",
+     "[busybee] Stopping LoggingStreamWorker (gateway_closed)",
+     "[busybee] Stopped LoggingStreamWorker (gateway_closed)"]
+  end
+
+  def describe_exit(result)
+    "#{result.status ? "exited #{result.status.exitstatus}" : 'hung'}:\n#{result.stdout}#{result.stderr}"
+  end
+end
+
+RSpec.configure do |config|
+  config.include_context "with a busybee command on a one-job stream", :busybee_command
+end

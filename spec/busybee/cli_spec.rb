@@ -282,17 +282,6 @@ RSpec.describe Busybee::CLI do
         expect(loaded_paths).to eq(["rails", "busybee/railtie", "./config/environment"])
       end
 
-      it "skips Rails loading when rails gem is not available" do
-        loaded_paths = []
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
-          loaded_paths << path
-          raise LoadError
-        end
-
-        described_class.new(["TestCLIWorker"])
-        expect(loaded_paths).to eq(["rails"])
-      end
-
       it "skips Rails loading when BUSYBEE_SKIP_RAILS is set" do
         allow_any_instance_of(described_class).to receive(:require) do |_instance, _path| # rubocop:disable RSpec/AnyInstance
           raise "should not be called"
@@ -322,15 +311,16 @@ RSpec.describe Busybee::CLI do
         expect(loaded_paths).to eq(["rails", "busybee/railtie", "./config/environment"])
       end
 
-      it "logs error but does not crash when config/environment fails to load" do
+      it "logs a failure to load config/environment, then raises it" do
+        boot_failure = StandardError.new("boot failed")
         allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
-          raise StandardError, "boot failed" if path == "./config/environment"
+          raise boot_failure if path == "./config/environment"
         end
 
-        lines = capture_busybee_log { expect { described_class.new(["TestCLIWorker"]) }.not_to raise_error }
+        lines = capture_busybee_log { expect { described_class.new(["TestCLIWorker"]) }.to raise_error(boot_failure) }
 
-        expect(lines).to include("ERROR [busybee] Failed to load Rails environment; set BUSYBEE_SKIP_RAILS=1 to " \
-                                 "skip Rails loading (StandardError: boot failed)")
+        expect(lines).to eq(["ERROR [busybee] Failed to load Rails environment in #{Dir.pwd}; " \
+                             "set BUSYBEE_SKIP_RAILS=1 if this is not a Rails app (StandardError: boot failed)"])
       end
     end
 
