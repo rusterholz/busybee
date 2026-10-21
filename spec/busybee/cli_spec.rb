@@ -2,6 +2,9 @@
 
 require "concurrent"
 require "fileutils"
+require "json"
+require "logger"
+require "stringio"
 require "tmpdir"
 
 RSpec.describe Busybee::CLI do
@@ -19,7 +22,10 @@ RSpec.describe Busybee::CLI do
     end
   end
 
-  before { stub_const("TestCLIWorker", worker_class) }
+  before do
+    stub_const("TestCLIWorker", worker_class)
+    Busybee.logger = nil # keeps the CLI's own logger off the suite's stdout, except where it's the subject
+  end
 
   # Save/restore gem-level config that apply_global_config! may modify
   around do |example|
@@ -419,6 +425,72 @@ RSpec.describe Busybee::CLI do
         lines = capture_busybee_log { described_class.new(["-n", "my-worker", "TestCLIWorker"]) }
 
         expect(lines.grep(/Overriding/)).to be_empty
+      end
+    end
+
+    context "with the CLI's own logger" do
+      before { Busybee.instance_variable_set(:@logger_configured, nil) }
+
+      it "logs to stdout at info when no logger is configured" do
+        Busybee.instance_variable_set(:@logger, nil)
+        ENV["BUSYBEE_SKIP_RAILS"] = "1" # so a Rails row's bundle logs nothing about Rails
+
+        expect do
+          described_class.new(["TestCLIWorker"])
+          Busybee::Logging.debug("not at info")
+          Busybee::Logging.info("at info")
+        end.to output(/\AI, \[[^\]]+\]  INFO -- : \[busybee\] at info\n\z/).to_stdout
+      ensure
+        ENV.delete("BUSYBEE_SKIP_RAILS")
+      end
+
+      it "keeps a logger configured before it" do
+        configured = Logger.new(StringIO.new)
+        Busybee.logger = configured
+        described_class.new(["TestCLIWorker"])
+
+        expect(Busybee.logger).to be(configured)
+      end
+
+      it "keeps logging off when nil was configured before it" do
+        Busybee.logger = nil
+        expect { described_class.new(["TestCLIWorker"]) }.not_to output.to_stdout
+
+        expect(Busybee.logger).to be_nil
+      end
+
+      it "writes in the --log-format given, from the first line it logs while loading Rails" do
+        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+          Busybee::Logging.info("booting") if path == "./config/environment"
+        end
+        lines = capture_busybee_log do
+          Busybee.instance_variable_set(:@log_format, nil)
+          described_class.new(["-l", "json", "TestCLIWorker"])
+        end
+
+        expect(JSON.parse(lines.first.delete_prefix("INFO "))).to include("message" => "[busybee] booting")
+      end
+
+      it "does not log an override of the --log-format it applied itself before loading Rails" do
+        lines = capture_busybee_log do
+          Busybee.instance_variable_set(:@log_format, nil)
+          described_class.new(["-l", "json", "TestCLIWorker"])
+        end
+
+        expect(lines.grep(/Overriding/)).to be_empty
+      end
+
+      it "logs an override of a format configured while Rails loaded" do
+        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+          Busybee.log_format = :text if path == "./config/environment"
+        end
+        lines = capture_busybee_log do
+          Busybee.instance_variable_set(:@log_format, nil)
+          described_class.new(["-l", "json", "TestCLIWorker"])
+        end
+
+        expect(lines.grep(/Overriding/)).to eq(["INFO [busybee] Overriding configured value with --log-format: " \
+                                                ":text → :json"])
       end
     end
   end
