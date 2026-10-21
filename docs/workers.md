@@ -626,7 +626,7 @@ If your bundle doesn't include Rails, the CLI skips loading it, silently. If it 
 I, [2026-10-21T12:00:00.000000 #4242]  INFO -- : [busybee] Continuing without Rails, no config/environment.rb in /srv/app
 ```
 
-If your app fails to boot, the CLI stops: it logs why, Ruby prints the error with its backtrace on stderr, and the process exits with status 1.
+If your app fails to boot, the CLI stops: it logs why (through your app's logger once Rails has set it up), Ruby prints the error with its backtrace on stderr, and the process exits with status 1.
 
 ```
 E, [2026-10-21T12:00:00.000000 #4242] ERROR -- : [busybee] Failed to load Rails environment in /srv/app; set BUSYBEE_SKIP_RAILS=1 if this is not a Rails app (KeyError: key not found: "DATABASE_URL")
