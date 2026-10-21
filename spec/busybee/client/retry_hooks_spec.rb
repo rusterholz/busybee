@@ -48,6 +48,20 @@ RSpec.describe "a retried call seen by its call hooks", :gateway do # rubocop:di
       expect(events).to eq([[:before, 0], [:around, 1], [:around, 2], [:after, 2, :succeeded, :ok]])
     end
 
+    it "logs the retry, naming the call and the error that prompted it" do
+      lines = capture_busybee_log { client.complete_job(5) }
+
+      expect(lines).to contain_exactly(
+        /\AWARN \[busybee\] Retrying complete_job in 0\.0s \(Busybee::GRPC::Error: .*broker blinked.*\)\z/
+      )
+    end
+
+    it "carries the call in JSON" do
+      lines = capture_busybee_log(format: :json) { client.complete_job(5) }
+
+      expect(lines.first).to include("rpc" => "complete_job", "attempts" => 1, "error_class" => "Busybee::GRPC::Error")
+    end
+
     it "shows the second attempt the first one's status while the call is still pending" do
       seen = []
       Busybee.around_call do |call, continue|

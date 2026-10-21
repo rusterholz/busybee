@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "busybee/logging"
+
 module Busybee
   module Hooks
     # Builds the nested lambda chain used by Hooks.run_chain. Each hook receives
@@ -38,7 +40,7 @@ module Busybee
                 value = next_link.call
               }
               hook[:callback].call(target, wrapped)
-              force_continuation(hook, wrapped) unless called
+              force_continuation(hook, wrapped, target) unless called
               value
             end
           end
@@ -69,7 +71,7 @@ module Busybee
 
             begin
               hook[:callback].call(target, wrapped)
-              force_continuation(hook, wrapped) unless called
+              force_continuation(hook, wrapped, target) unless called
             rescue StandardError => e
               raise if e.equal?(error_from_below)
 
@@ -92,18 +94,15 @@ module Busybee
         end
 
         # The chain always descends: run the skipped continuation, and say so.
-        def force_continuation(hook, wrapped)
-          log_forgotten_yield(hook[:callback])
+        def force_continuation(hook, wrapped, target)
+          log_forgotten_yield(hook[:callback], target)
           wrapped.call
         end
 
-        def log_forgotten_yield(callback)
+        def log_forgotten_yield(callback, target)
           location = callback.source_location&.join(":")
           suffix = location ? " (at #{location})" : ""
-          Busybee.logger&.warn(
-            "[busybee] Around-hook returned without yielding; " \
-            "forcing continuation#{suffix}"
-          )
+          Logging.warn("Forcing continuation past an around-hook that returned without yielding#{suffix}", target)
         end
       end
     end

@@ -5,6 +5,8 @@ require "concurrent"
 require "busybee/client"
 require "busybee/configure"
 require "busybee/hooks"
+require "busybee/logging"
+require "busybee/runner/exit_immediately"
 require "busybee/runner/stopping"
 require "busybee/runner/teardown"
 require "busybee/runtime_config"
@@ -17,18 +19,7 @@ module Busybee
   # that subclasses fill via #run_loop and optionally #drain_on_shutdown. Multi
   # overrides #run!: it manages child runners rather than being a worker.
   class Runner
-    # Errors after which tearing down gracefully is still worth attempting; below
-    # it, drop work and leave fast. Client::Call's constant of the same name asks
-    # about record fidelity, this one about teardown viability: they coincide
-    # today and widen separately. The shared name lets one grep find both.
-    RECOVERABLE_ERRORS = [StandardError].freeze
-
-    # The fire alarm, set once by an unrecoverable error or a kill: every runner in the
-    # process then skips handbacks, drains and job hooks. Preallocated: raising it allocates nothing.
-    EXIT_IMMEDIATELY = Concurrent::AtomicBoolean.new(false)
-    EXIT_IMMEDIATELY_REASON = Concurrent::AtomicReference.new(nil) # the first fire's, set before the flag
-    private_constant :EXIT_IMMEDIATELY, :EXIT_IMMEDIATELY_REASON
-
+    extend ExitImmediately
     include Stopping
     include Teardown
 
@@ -89,8 +80,6 @@ module Busybee
     end
 
     class << self
-      def exit_immediately? = EXIT_IMMEDIATELY.true?
-
       # Resolves worker mode and returns the matching runner. Mode precedence,
       # lowest first: Busybee.default_worker_mode, the worker DSL's worker_mode,
       # then a RuntimeConfig override (global or per-worker).
@@ -129,6 +118,8 @@ module Busybee
 
       @worker_timestamps.stamp!(:started_at)
       Hooks.run(:on_worker_started, worker_status, safe: true)
+      Logging.info("Started #{logged_worker_name} (#{[worker_mode, "job type #{logged_job_type}"].compact.join(', ')})",
+                   lifecycle_carrier)
       true
     end
 
@@ -150,6 +141,12 @@ module Busybee
     end
 
     def worker_mode = @runtime_config&.worker_mode
+    def logged_worker_name = @worker_class&.name || "(anonymous worker)"
+    def logged_job_type = @worker_class&.configuration&.job_type
+
+    # A status snapshot for a lifecycle line, unless there is no worker to describe
+    # or the process may be out of memory.
+    def lifecycle_carrier = (worker_status unless @worker_class.nil? || exit_immediately?)
 
     # The fetch/process loop, filling run!'s body between T0 and the ensure.
     def run_loop = raise(NotImplementedError)
@@ -182,9 +179,11 @@ module Busybee
     # The wire call; a failure it can recover from is the handback's error to report.
     def hand_back(job)
       with_fresh_worker_status(job) { return_job_unworked(job) }
+      Logging.info("Handed back #{job.type} job ##{job.key}, #{logged_worker_name} shutting down " \
+                   "(#{@stop_reason.get})", job)
       nil
     rescue *RECOVERABLE_ERRORS => e
-      Busybee.logger&.warn("Failed to hand job #{job.key} back during shutdown: #{e.message}")
+      Logging.warn("Failed to hand #{job.type} job ##{job.key} back during shutdown", job, error: e)
       e
     end
 
@@ -206,6 +205,7 @@ module Busybee
     def activate_job(job, source:, buffered: false)
       job.timestamps.stamp!(:activated_at)
       job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
+      Logging.debug("Activated #{job.type} job ##{job.key}", job)
       with_fresh_worker_status(job) { Hooks.run(:on_job_activated, job, safe: true) } unless exit_immediately?
     rescue Busybee::Worker::Shutdown => e
       declare_unhealthy(e)

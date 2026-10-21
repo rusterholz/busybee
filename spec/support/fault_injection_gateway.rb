@@ -94,8 +94,11 @@ class FaultInjectionGateway
     handler.call(request)
   end
 
+  # Short of a ready thread, grpc answers RESOURCE_EXHAUSTED itself, so the pool
+  # has room for every concurrent call a spec makes, plus each thread's moment
+  # between finishing a call and taking the next.
   def start
-    @server = ::GRPC::RpcServer.new(pool_size: 2)
+    @server = ::GRPC::RpcServer.new(pool_size: 8)
     port = bind_port!
     @address = @bind.sub(/:\d+\z/, ":#{port}")
     @server.handle(Service.new(self))

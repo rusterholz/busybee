@@ -103,20 +103,18 @@ RSpec.describe Busybee::Runner::Multi do
       context "when ActiveRecord is defined" do
         let(:mock_pool) { OpenStruct.new(size: pool_size) } # rubocop:disable Style/OpenStructUse
         let(:mock_base) { OpenStruct.new(connection_pool: mock_pool) } # rubocop:disable Style/OpenStructUse
-        let(:logger) { instance_double(Logger, error: nil, info: nil) }
 
-        before do
-          allow(Busybee).to receive(:logger).and_return(logger)
-          stub_const("ActiveRecord::Base", mock_base)
-        end
+        before { stub_const("ActiveRecord::Base", mock_base) }
 
         context "when pool size is smaller than worker count" do
           let(:pool_size) { 1 }
 
           it "logs an error" do
-            described_class.new(worker_classes, client: client)
+            lines = capture_busybee_log { described_class.new(worker_classes, client: client) }
 
-            expect(logger).to have_received(:error).with(/pool size is only 1/)
+            expect(lines).to contain_exactly(
+              /\AERROR \[busybee\] Process \d+ is running 2 workers but the database connection pool size is only 1\./
+            )
           end
         end
 
@@ -124,9 +122,10 @@ RSpec.describe Busybee::Runner::Multi do
           let(:pool_size) { 5 }
 
           it "logs an info message" do
-            described_class.new(worker_classes, client: client)
+            lines = capture_busybee_log { described_class.new(worker_classes, client: client) }
 
-            expect(logger).to have_received(:info).with(/2 workers with a database connection pool size of 5/)
+            expect(lines).to eq(["INFO [busybee] Running 2 workers in process #{Process.pid} with a database " \
+                                 "connection pool of 5"])
           end
         end
       end
@@ -230,16 +229,14 @@ RSpec.describe Busybee::Runner::Multi do
       end
 
       it "logs the error with worker name" do
-        logger = instance_double(Logger, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
         multi = described_class.new(worker_classes, client: client)
         allow(multi.runners[0]).to receive(:run!).and_return(true)
         allow(multi.runners[1]).to receive(:run!).and_raise(StandardError, "kaboom")
 
-        expect { multi.run! }.to raise_error(StandardError)
+        lines = capture_busybee_log { expect { multi.run! }.to raise_error(StandardError) }
 
-        expect(logger).to have_received(:error).with(/TestMultiWorker2.*kaboom/)
+        expect(lines).to include("ERROR [busybee] Stopping all workers after TestMultiWorker2 failed " \
+                                 "(StandardError: kaboom)")
       end
     end
 
@@ -261,10 +258,9 @@ RSpec.describe Busybee::Runner::Multi do
     end
   end
 
-  # A child dying of something outside RECOVERABLE_ERRORS used to be the
-  # quietest failure in the gem: nothing logged anywhere, no cascade, and
-  # wait_for_termination never returning — so the container could not even die,
-  # and that worker's job type starved until the next deploy.
+  # A child dying of something outside RECOVERABLE_ERRORS must still be logged,
+  # cascade to its siblings and let wait_for_termination return; otherwise the
+  # container can't even die, and that worker's job type starves until the next deploy.
   describe "a child dying of a non-recoverable error" do
     let(:logged) { Concurrent::Array.new }
 

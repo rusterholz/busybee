@@ -172,13 +172,13 @@ Busybee.configure do |config|
 end
 ```
 
-When retry is enabled, Busybee makes up to 2 attempts before raising. A warning is logged on retry:
+When retry is enabled, Busybee makes up to 2 attempts before raising. A warning naming the call and its error is logged on retry:
 
 ```
-[busybee] GRPC call failed, retrying in 500ms (error_class: GRPC::Unavailable)
+[busybee] Retrying complete_job in 0.5s (Busybee::GRPC::Error: GRPC call failed (connection refused))
 ```
 
-If both attempts fail, the error message indicates this: `"GRPC call failed after retry"`.
+If both attempts fail, the second attempt's `Busybee::GRPC::Error` is raised.
 
 ## Working with Jobs
 

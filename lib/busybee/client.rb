@@ -84,7 +84,7 @@ module Busybee
     def run_hooked(rpc, request, **kwargs)
       Call.without_reentry(rpc) do
         Call.with_hooks(rpc, request) do |call|
-          with_retry { call.attempt { stub.public_send(rpc, call.request, **kwargs) } }
+          with_retry(call) { call.attempt { stub.public_send(rpc, call.request, **kwargs) } }
         end
       end
     end

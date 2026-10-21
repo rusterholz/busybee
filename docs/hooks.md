@@ -91,8 +91,8 @@ Job hooks get the **live Job** because they are a control seam where middleware 
 
 All three carriers expose the same pair of projections, so one observation pattern works everywhere:
 
-- **`context_tags`** — a low-cardinality Hash, safe to use as **metric labels**. Identity and outcome only: job type, worker class, status, error class name. Nothing unbounded.
-- **`logging_context`** — a high-cardinality superset of `context_tags`, meant for **structured log fields**: keys, timestamps, durations, counters, error messages.
+- **`context_tags`**: a low-cardinality Hash, safe to use as **metric labels**. Identity and outcome only: job type, worker class, status, error class name. Nothing unbounded.
+- **`logging_context`**: a high-cardinality superset of `context_tags`, meant for **structured log fields**: keys, timestamps, durations, counters, and an error as `error_class` and `error_message`. A job's `logging_context` never carries its `result`, which holds workflow-instance data; log what you need from it deliberately. It is also what busybee's own JSON log lines carry for the job, worker or call they concern.
 
 ```ruby
 config.on_job_executed do |job|
@@ -344,7 +344,7 @@ Once a hook resolves the job:
 - **`perform` does not run**, and neither does input validation, automatic completion, or automatic failure. Nothing runs against a job the engine already considers finished.
 - **The perform-family hooks stand down too.** `before_perform`, `around_perform` and `after_perform` fire exactly when `perform` is attempted — so a hook that short-circuits from `on_job_activated` means none of the three fire at all, and one that short-circuits from `before_perform` means the `around_perform` chain is never entered. This is the naming rule doing its job: *perform* in the name means the hook belongs to your code's lifecycle.
 - **The system-lifecycle hooks still fire**, every time. `on_job_activated`, `around_job_execution` and `on_job_executed` bracket every job that reached your process, short-circuited or not. That is where you observe this.
-- **busybee logs it** at `info`: `Job <key> was resolved by a hook before perform ran; perform skipped`.
+- **busybee logs it** at `info`: `Skipping perform for <type> job #<key>, already resolved by a hook`.
 
 Two things to know before you reach for this:
 
@@ -491,7 +491,7 @@ Two prefix families make coarse filters easy: `reason: /\Asig/` matches every si
 
 **`reason` and `error` are independent axes.** The reason classifies the ending; the error, when present, is the exception involved. An `:unhealthy` stop carries the error that triggered it, and a `:sigterm` stop usually carries none. Don't infer one from the other — read both.
 
-**A graceful stop already under way finishes as one.** Once a stop has begun, while a deploy's SIGTERM is being handled, say, a worker declared unhealthy by `perform` or a hook (a `Busybee::Worker::Shutdown`, or an error matching `shutdown_on`) doesn't turn it into a crash, on any kind of worker. Neither does the gateway failing the worker's fetch or its job stream, nor a hook raising an error outside `StandardError` on a streaming or hybrid worker's thread reading the job stream, which runs `on_job_activated` and can run `on_worker_stop_requested`. (Any other `StandardError` from a hook is logged and swallowed, as usual.) The worker still finishes the stop it was making. The reason stays the one that started it, the error reaches `on_worker_shutdown` as `status.error`, and the worker exits without raising it, though the `busybee` command still exits with status 1 when that error is outside `StandardError`. That is one way a `:sigterm` stop can carry an error. An error outside `StandardError` from `perform`, or from a hook on any other thread, is still raised: it has already cut that stop short.
+**A graceful stop already under way finishes as one.** Once a stop has begun, while a deploy's SIGTERM is being handled, say, a worker declared unhealthy by `perform` or a hook (a `Busybee::Worker::Shutdown`, or an error matching `shutdown_on`) doesn't turn it into a crash, on any kind of worker. Neither does the gateway failing the worker's fetch or its job stream, nor a hook raising an error outside `StandardError` on a streaming or hybrid worker's thread reading the job stream, which runs `on_job_activated` and can run `on_worker_stop_requested`. (Any other `StandardError` from a hook is logged and swallowed, as usual.) The worker still finishes the stop it was making. The reason stays the one that started it, the error is logged and reaches `on_worker_shutdown` as `status.error`, and the worker exits without raising it, though the `busybee` command still exits with status 1 when that error is outside `StandardError`. That is one way a `:sigterm` stop can carry an error. An error outside `StandardError` from `perform`, or from a hook on any other thread, is still raised: it has already cut that stop short.
 
 ```ruby
 # Page only on stops that weren't asked for

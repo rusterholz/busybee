@@ -5,6 +5,7 @@ require "active_support/core_ext/module/delegation"
 require "busybee/client/call"
 require "busybee/error"
 require "busybee/hooks"
+require "busybee/logging"
 require "busybee/worker/configuration"
 require "busybee/worker/dsl"
 require "busybee/worker/shutdown"
@@ -36,7 +37,7 @@ module Busybee
     delegate :variables, :headers, :client, :fail!, :throw_bpmn_error!,
              :update_retries, :update_timeout, to: :job
 
-    # Container identity (Busybee.worker_name) — not the per-job worker instance.
+    # Container identity (Busybee.worker_name), not the per-job worker instance.
     # Explicit identity for metrics/registries.
     delegate :worker_name, to: :Busybee
 
@@ -139,7 +140,7 @@ module Busybee
 
       # Per-line-item gating: every step asks whether work is still on the table
       # at the moment it arrives, not once on the way in. A hook that resolves
-      # the job therefore stops everything downstream of it — including the
+      # the job therefore stops everything downstream of it, including the
       # middleware that would otherwise wrap work no longer going to happen.
       # The perform-like moments fire exactly when perform is attempted; an
       # invalid job and a short-circuited one both skip the lot, and the system
@@ -165,9 +166,7 @@ module Busybee
       def log_short_circuit(job)
         return unless job.resolved? && job.timestamps.perform_started_at.nil?
 
-        Busybee.logger&.info(
-          "[busybee] Job #{job.key} was resolved by a hook before perform ran; perform skipped"
-        )
+        Logging.info("Skipping perform for #{job.type} job ##{job.key}, already resolved by a hook", job)
       end
 
       # The around_perform core: perform.call hands every hook the job's result.
@@ -211,7 +210,7 @@ module Busybee
           job.complete!(new_vars)
         rescue StandardError => e
           job._record_error(e)
-          Busybee.logger&.warn("Failed to complete job #{job.key}: #{e.message}. Job will timeout and retry.")
+          Logging.warn("Failed to complete #{job.type} job ##{job.key}, will time out and retry", job, error: e)
         end
       end
 
@@ -226,17 +225,15 @@ module Busybee
 
       def log_post_resolution_error(job, error)
         location = error.backtrace&.first
-        suffix = location ? " (at #{location})" : ""
-        Busybee.logger&.warn(
-          "Error in #{configuration.job_type} worker for job #{job.key} " \
-          "after job was already #{job.status}: [#{error.class}] #{error.message}#{suffix}"
-        )
+        suffix = location ? ", at #{location}" : ""
+        Logging.warn("Ignoring error from #{job.type} job ##{job.key}, already #{job.status}#{suffix}",
+                     job, error: error)
       end
 
       def attempt_auto_fail(job, error, config)
         job.fail!(Shutdown.unwrap(error), backoff: config.fail_job_backoff)
       rescue StandardError => e
-        Busybee.logger&.warn("Failed to fail job #{job.key}: #{e.message}. Job will timeout and retry.")
+        Logging.warn("Failed to fail #{job.type} job ##{job.key}, will time out and retry", job, error: e)
       end
     end
   end

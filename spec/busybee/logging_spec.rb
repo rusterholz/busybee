@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "concurrent"
 require "logger"
 require "stringio"
 
@@ -130,6 +131,221 @@ RSpec.describe Busybee::Logging do
     end
   end
 
+  # What a line says about the job, worker or call it concerns, and about an
+  # error: everything in JSON, only what the call site wrote in text.
+  describe "carriers, context and errors" do
+    let(:logger) do
+      Logger.new(log_output).tap do |l|
+        l.formatter = proc { |_severity, _datetime, _progname, msg| "#{msg}\n" }
+      end
+    end
+    let(:carrier) do
+      Struct.new(:logging_context).new(
+        { job_key: 1, status: "carrier's", error_class: "carrier's", message: "carrier's", level: "x", time: "y" }
+      )
+    end
+
+    def raised(error)
+      raise error
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      e
+    end
+
+    def json_line = JSON.parse(log_output.string)
+
+    context "when in json mode" do
+      before { Busybee.log_format = :json }
+
+      it "logs the carrier's logging_context with the message" do
+        job = build_test_job(type: "frog_blast", key: 93_928_392_854)
+        described_class.info("completed frog_blast job #93928392854", job)
+
+        expect(json_line).to include(JSON.parse(job.logging_context.to_json)).
+          and include("message" => "[busybee] completed frog_blast job #93928392854", "level" => "info")
+      end
+
+      it "layers explicit context over the carrier, the error over both, and its own fields over everything" do
+        described_class.warn("the message", carrier, error: IOError.new("closed stream"), status: "explicit")
+
+        expect(json_line).to include("job_key" => 1, "status" => "explicit", "error_class" => "IOError",
+                                     "error_message" => "closed stream",
+                                     "message" => "[busybee] the message (IOError: closed stream)",
+                                     "level" => "warn", "time" => match(/\A\d{4}-/))
+      end
+
+      it "keeps its own fields once each, though the carrier names them with String keys" do
+        job = build_test_job
+        job.context["message"] = "the adopter's"
+        job.context["time"] = "noon"
+        described_class.info("the message", job)
+
+        aggregate_failures do
+          %w[message level time].each { |key| expect(log_output.string.scan(/"#{key}":/).size).to eq(1), key }
+          expect(json_line).to include("message" => "[busybee] the message", "time" => match(/\A\d{4}-/))
+        end
+      end
+
+      it "locates an ordinary error at its first backtrace frame" do
+        error = raised(IOError.new("closed stream"))
+        described_class.warn("failed", error: error)
+
+        expect(json_line).to include("error_location" => error.backtrace.first)
+      end
+
+      it "doesn't locate an error the process can't recover from" do
+        described_class.error("failed", error: raised(NoMemoryError.new("failed to allocate memory")))
+
+        expect(json_line).to include("error_class" => "NoMemoryError").
+          and(satisfy { |line| !line.key?("error_location") })
+      end
+
+      it "renders an exception value as its class and message" do
+        exceptional = Struct.new(:logging_context).new({ cause: IOError.new("closed stream") })
+        described_class.warn("failed", exceptional, other: RuntimeError.new("boom"))
+
+        expect(json_line).to include("cause" => "IOError: closed stream", "other" => "RuntimeError: boom")
+      end
+    end
+
+    context "when in text mode" do
+      before { Busybee.log_format = :text }
+
+      it "writes the message, its error, then explicit context, leaving the carrier to JSON" do
+        described_class.warn("the message", carrier, error: IOError.new("closed stream"), status: "explicit")
+
+        expect(log_output.string).to eq("[busybee] the message (IOError: closed stream) (status: \"explicit\")\n")
+      end
+
+      it "renders an exception value as its class and message" do
+        described_class.warn("failed", cause: IOError.new("closed stream"))
+
+        expect(log_output.string).to eq("[busybee] failed (cause: \"IOError: closed stream\")\n")
+      end
+    end
+
+    it "refuses a carrier that has no logging_context, saying so on stderr" do
+      expect { described_class.info("the message", { job_key: 1 }) }.
+        to output(/\A\[busybee\] Failed to log \(ArgumentError: .*logging_context.*\): the message\n\z/).to_stderr
+      expect(log_output.string).to be_empty
+    end
+
+    it "refuses an error that isn't an Exception, saying so on stderr, without raising the fire alarm" do
+      result = :unset
+      expect { result = described_class.warn("the message", error: "closed stream") }.
+        to output(/\A\[busybee\] Failed to log \(ArgumentError: .*Exception.*\): the message\n\z/).to_stderr
+      expect([result, log_output.string, Busybee::Runner.exit_immediately?]).to eq([nil, "", false])
+    end
+
+    it "lets the rescue clause a misused call sits in finish" do
+      finished = false
+      expect do
+        raise IOError, "closed stream"
+      rescue IOError
+        described_class.warn("handled", error: "closed stream")
+        finished = true
+      end.to output(/Failed to log \(ArgumentError/).to_stderr
+
+      expect(finished).to be(true)
+    end
+  end
+
+  # A log call returns nil and never raises, wherever it sits, a rescue clause
+  # included: what goes wrong inside it is told to stderr, and an error the
+  # process can't recover from raises the fire alarm on its way.
+  describe "safety" do
+    let(:failure) { IOError.new("closed stream") }
+    let(:logger) do
+      raising = failure
+      Class.new { %i[debug info warn error].each { |level| define_method(level) { |_line| raise raising } } }.new
+    end
+
+    it "returns nil" do
+      Busybee.logger = Logger.new(log_output)
+
+      expect(described_class.info("logged")).to be_nil
+    end
+
+    it "returns nil when the logger fails, saying so on stderr" do
+      result = :unset
+      expect { result = described_class.warn("Failed to complete frog_blast job #93928392854") }.
+        to output("[busybee] Failed to log (IOError: closed stream): Failed to complete frog_blast job #93928392854\n").
+        to_stderr
+      expect(result).to be_nil
+    end
+
+    it "leaves the fire alarm down for an ordinary failure" do
+      expect { described_class.warn("logged") }.to output(/Failed to log/).to_stderr
+      expect(Busybee::Runner.exit_immediately?).to be(false)
+    end
+
+    context "when the failure is one the process can't recover from" do
+      let(:failure) { NoMemoryError.new("failed to allocate memory") }
+
+      it "raises the fire alarm, then says so on stderr" do
+        expect { described_class.error("logged") }.to output(/Failed to log \(NoMemoryError/).to_stderr
+        expect(Busybee::Runner.exit_immediately_reason).to eq(:crash)
+      end
+    end
+
+    it "stays silent when stderr fails too" do
+      allow($stderr).to receive(:write).and_raise(IOError, "stderr closed")
+
+      expect(described_class.warn("logged")).to be_nil
+    end
+
+    it "contains a value that fails to render" do
+      Busybee.logger = Logger.new(log_output)
+      unrenderable = Object.new
+      def unrenderable.inspect = raise(NotImplementedError, "no inspect for you")
+
+      expect { described_class.info("logged", value: unrenderable) }.
+        to output(/Failed to log \(NotImplementedError: no inspect for you\): logged/).to_stderr
+    end
+  end
+
+  # gRPC hands back status details tagged BINARY, and an error message can carry
+  # any bytes at all; the line is written either way.
+  describe "encodings" do
+    let(:logger) do
+      Logger.new(log_output).tap do |l|
+        l.formatter = proc { |_severity, _datetime, _progname, msg| "#{msg}\n" }
+      end
+    end
+    let(:valid_binary) { "café closed".b }
+    let(:invalid) { "bad \xFF bytes".b }
+
+    context "when in json mode" do
+      before { Busybee.log_format = :json }
+
+      # json 2.x writes BINARY strings with a deprecation warning on stderr;
+      # json 3 raises on them.
+      it "reads valid UTF-8 tagged BINARY as UTF-8" do
+        expect { described_class.warn(valid_binary, details: valid_binary) }.not_to output.to_stderr
+
+        expect(JSON.parse(log_output.string)).
+          to include("message" => "[busybee] café closed", "details" => "café closed")
+      end
+
+      it "replaces bytes that aren't UTF-8" do
+        described_class.warn(invalid, details: invalid, error: IOError.new(invalid))
+
+        expect(JSON.parse(log_output.string)).to include("message" => "[busybee] bad � bytes (IOError: bad � bytes)",
+                                                         "details" => "bad � bytes",
+                                                         "error_message" => "bad � bytes")
+      end
+    end
+
+    context "when in text mode" do
+      before { Busybee.log_format = :text }
+
+      it "replaces bytes that aren't UTF-8 in the message" do
+        described_class.warn(invalid)
+
+        expect(log_output.string).to eq("[busybee] bad � bytes\n")
+      end
+    end
+  end
+
   context "when logger is nil" do
     let(:logger) { nil }
 
@@ -138,50 +354,237 @@ RSpec.describe Busybee::Logging do
     end
   end
 
-  context "with concurrent logging" do
-    let(:lines) { Queue.new }
-    let(:logger) do
-      Logger.new($stdout).tap do |l|
-        l.formatter = proc do |_severity, _datetime, _progname, msg|
-          lines << msg
-          ""
-        end
-      end
-    end
+  # A logger with no lock of its own (unlike stdlib Logger), writing a line a
+  # character at a time and yielding the thread between characters. on_write
+  # runs before each line, on the writing thread.
+  describe "thread safety" do
+    let(:trickling_logger_class) do
+      Class.new do
+        attr_reader :output
+        attr_accessor :on_write
 
-    let(:thread_count) { 10 }
-    let(:messages_per_thread) { 50 }
+        def initialize = @output = +""
 
-    def log_from_threads
-      threads = thread_count.times.map do |t|
-        Thread.new do
-          messages_per_thread.times do |m|
-            described_class.info("thread-#{t}-message-#{m}", thread: t, seq: m)
+        %i[debug info warn error].each do |level|
+          define_method(level) do |line|
+            on_write&.call(line)
+            "#{line}\n".each_char do |char|
+              @output << char
+              Thread.pass
+            end
           end
         end
       end
+    end
+    let(:logger) { trickling_logger_class.new }
+    let(:release) { Concurrent::Event.new }
+
+    before { Busybee.log_format = :text }
+
+    def wait_until(seconds = 5)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+      sleep 0.001 until yield || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+    end
+
+    # Holds any write of line open (and the lock with it) until release is set;
+    # returns an Event set once such a write begins.
+    def hold_writes_of(line)
+      writing = Concurrent::Event.new
+      held = release
+      logger.on_write = lambda do |written|
+        next unless written.include?(line)
+
+        writing.set
+        held.wait(5)
+      end
+      writing
+    end
+
+    # Logs line on a thread of its own, its write held open; returns the thread
+    # once the write began.
+    def hold_a_write(line)
+      writing = hold_writes_of(line)
+      Thread.new { described_class.info(line) }.tap { writing.wait(5) }
+    end
+
+    # Logs line on a thread of its own and returns it once it waits its turn.
+    def queue_a_write(line)
+      thread = Thread.new do
+        Thread.current.report_on_exception = false
+        described_class.info(line)
+      end
+      wait_until { thread.status == "sleep" }
+      thread
+    end
+
+    after { release.set }
+
+    it "keeps concurrent lines whole on a logger with no lock of its own" do
+      threads = Array.new(6) do |t|
+        Thread.new { 30.times { |m| described_class.info("thread #{t} message #{m}", seq: m) } }
+      end
       threads.each(&:join)
 
-      [].tap { |collected| collected << lines.pop until lines.empty? }
+      lines = logger.output.lines
+      aggregate_failures do
+        expect(lines.size).to eq(180)
+        expect(lines).to all match(/\A\[busybee\] thread \d message \d+ \(seq: \d+\)\n\z/)
+      end
     end
 
-    it "does not interleave text log lines across threads" do
-      Busybee.log_format = :text
-      collected = log_from_threads
+    it "writes to the logger it was called with, though the logger is swapped while it waits its turn" do
+      first = hold_a_write("first")
+      second = queue_a_write("second")
+      Busybee.logger = nil
+      release.set
 
-      expect(collected.size).to eq(thread_count * messages_per_thread)
-      expect(collected).to all match(/\A\[busybee\] thread-\d+-message-\d+ \(thread: \d+, seq: \d+\)\z/)
+      expect { [first, second].each { |thread| thread.join(5) } }.not_to raise_error
+      expect(logger.output.lines).to eq(["[busybee] first\n", "[busybee] second\n"])
     end
 
-    it "does not interleave JSON log lines across threads" do
-      Busybee.log_format = :json
-      collected = log_from_threads
+    it "logs from a value that logs while being rendered" do
+      logging = described_class
+      chatty = Object.new
+      chatty.define_singleton_method(:inspect) { logging.info("rendering").then { "chatty" } }
 
-      expect(collected.size).to eq(thread_count * messages_per_thread)
-      expect(collected).to all satisfy("be valid JSON with expected keys") { |line|
-        json = JSON.parse(line)
-        json.key?("message") && json.key?("level") && json.key?("thread") && json.key?("seq")
-      }
+      described_class.info("outer", value: chatty)
+
+      expect(logger.output.lines).to eq(["[busybee] rendering\n", "[busybee] outer (value: chatty)\n"])
+    end
+
+    it "renders a line without holding up another thread's write" do
+      logging = described_class
+      other_written = Concurrent::Event.new
+      slow = Object.new
+      slow.define_singleton_method(:inspect) do
+        Thread.new { logging.info("other").then { other_written.set } }
+        other_written.wait(2) ? "slow" : "timed out"
+      end
+
+      described_class.info("rendered", value: slow)
+
+      expect(logger.output.lines).to eq(["[busybee] other\n", "[busybee] rendered (value: slow)\n"])
+    end
+
+    it "logs from inside the logger's own write" do
+      logging = described_class
+      logger.on_write = ->(line) { logging.warn("inner") if line.include?("outer") }
+
+      described_class.info("outer")
+
+      expect(logger.output.lines).to contain_exactly("[busybee] outer\n", "[busybee] inner\n")
+    end
+
+    def trap_logging(line)
+      raised = nil
+      previous = trap("USR2") do
+        described_class.info(line)
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        raised = e
+      end
+      Process.kill("USR2", Process.pid)
+      wait_until { logger.output.include?(line) || raised }
+      trap("USR2", previous)
+      raised
+    end
+
+    it "logs from a signal trap" do
+      expect([trap_logging("trapped"), logger.output]).to eq([nil, "[busybee] trapped\n"])
+    end
+
+    it "logs from a signal trap while another thread is writing" do
+      holder = hold_a_write("holder")
+      raised = trap_logging("trapped")
+      release.set
+      holder.join(5)
+
+      expect([raised, logger.output.lines]).to eq([nil, ["[busybee] trapped\n", "[busybee] holder\n"]])
+    end
+
+    # A thread waiting its turn is killed only once it has written its line, so
+    # a kill never leaves a line half written or the lock held.
+    it "lets a kill reach a thread waiting its turn once that thread has written" do
+      holder = hold_a_write("stuck")
+      waiting = queue_a_write("waiting")
+      waiting.kill
+      still_waiting = waiting.join(0.2).nil?
+      release.set
+
+      aggregate_failures do
+        expect(still_waiting).to be(true)
+        expect(waiting.join(5)).to eq(waiting)
+        expect(holder.join(5)).to eq(holder)
+        expect(logger.output.lines).to eq(["[busybee] stuck\n", "[busybee] waiting\n"])
+      end
+    end
+
+    # Interrupts aimed at the logging thread, not failures of logging itself.
+    describe "an asynchronous interrupt arriving mid-write" do
+      let(:interrupt) { Class.new(Exception) } # rubocop:disable Lint/InheritException
+
+      # Logs "held" on a thread of its own and returns it once the write began.
+      def hold_a_reporting_write
+        holder = hold_a_write("held")
+        holder.report_on_exception = false
+        holder
+      end
+
+      # Logs "held" on a thread of its own that rescues the interrupt and then
+      # stays alive until parked is set, so a lock it still held would block
+      # the next line. Returns the thread once its write began; caught receives
+      # what reached it.
+      def hold_a_surviving_write(caught, parked)
+        writing = hold_writes_of("held")
+        rescued = interrupt
+        holder = Thread.new do
+          described_class.info("held")
+          caught << :returned
+        rescue rescued => e
+          caught << e
+          parked.wait(5)
+        end
+        writing.wait(5)
+        holder
+      end
+
+      # Raises the interrupt into holder mid-write, lets the write finish, and
+      # returns what reached the holder.
+      def interrupt_mid_write(holder, caught)
+        holder.raise(interrupt, "stop now")
+        sleep 0.05
+        release.set
+        caught.pop(timeout: 5)
+      end
+
+      it "is delivered to the caller once the line is written, as itself" do
+        caught = Queue.new
+        parked = Concurrent::Event.new
+        holder = hold_a_surviving_write(caught, parked)
+        reached = nil
+        expect { reached = interrupt_mid_write(holder, caught) }.not_to output.to_stderr
+        after = Thread.new { described_class.info("after") }
+
+        aggregate_failures do
+          expect(reached).to be_a(interrupt)
+          expect(after.join(1)).to eq(after)
+          expect(logger.output.lines).to eq(["[busybee] held\n", "[busybee] after\n"])
+          expect(Busybee::Runner.exit_immediately?).to be(false)
+        end
+      ensure
+        parked&.set
+        holder&.join(5)
+      end
+
+      it "kills the thread only once the line is written" do
+        holder = hold_a_reporting_write
+        holder.kill
+        sleep 0.05
+        release.set
+
+        expect(holder.join(5)).to eq(holder)
+        described_class.info("after")
+        expect(logger.output.lines).to eq(["[busybee] held\n", "[busybee] after\n"])
+      end
     end
   end
 end

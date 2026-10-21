@@ -12,11 +12,12 @@ module Busybee
     # the wrapped cause.
     module ErrorHandling
       # Execute a block, retrying when it raises a retryable Busybee::GRPC::Error.
+      # @param call [Busybee::Client::Call, nil] the call being retried, which a retry's log line names
       # @yield Block that makes a (translated) GRPC call
       # @return Result of the block
       # @raise [Busybee::GRPC::Error] the block's error, re-raised as-is once
       #   retries are exhausted or when the error is not retryable
-      def with_retry
+      def with_retry(call = nil)
         attempts = 0
         max_attempts = Busybee.grpc_retry_enabled ? 2 : 1
 
@@ -27,8 +28,7 @@ module Busybee
           raise unless attempts < max_attempts && retryable?(e)
 
           delay = Busybee::Durations.seconds_from(Busybee.grpc_retry_delay)
-          Busybee::Logging.warn("GRPC call failed, retrying in #{delay}s",
-                                error_class: e.cause&.class&.name)
+          Busybee::Logging.warn("Retrying #{call&.rpc || 'a gRPC call'} in #{delay}s", call, error: e)
           sleep(delay)
           retry
         end

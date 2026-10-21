@@ -2,6 +2,7 @@
 
 require "busybee/durations"
 require "busybee/hooks"
+require "busybee/logging"
 require "busybee/worker/shutdown"
 
 module Busybee
@@ -23,6 +24,7 @@ module Busybee
         drain_within_teardown
         error ||= Busybee::Worker::Shutdown.unwrap(post_stop_error) || @teardown_error.get
         fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
+        Logging.info("Stopped #{logged_worker_name} (#{@stop_reason.get})", lifecycle_carrier)
       ensure
         @running.make_false
       end
@@ -45,18 +47,18 @@ module Busybee
         contain_teardown_hooks(type) { Hooks.run(type, worker_status(error: error), safe: true) }
       end
 
-      # The ensure's other door: a failing wire call would skip the rest as an
-      # escalating hook used to. Skipped outright once the process must exit
-      # immediately; an unrecoverable error inside it says so and propagates,
-      # abandoning the rest of the teardown.
+      # The ensure's other door: a failing wire call would otherwise skip the
+      # rest. Skipped outright once the process must exit immediately; an
+      # unrecoverable error inside it says so and propagates, abandoning the
+      # rest of the teardown.
       def drain_within_teardown
         return if exit_immediately?
 
         drain_on_shutdown
       rescue *RECOVERABLE_ERRORS => e
         @teardown_error.compare_and_set(nil, e)
-        Busybee.logger&.error("[busybee] Drain failed during shutdown, continuing teardown: " \
-                              "[#{e.class}] #{e.message}")
+        Logging.error("Failed to drain #{logged_worker_name} during shutdown, continuing teardown",
+                      worker_status, error: e)
       rescue Exception => e # rubocop:disable Lint/RescueException
         exit_immediately!(reason: reason_for(e))
         raise
@@ -74,8 +76,8 @@ module Busybee
         yield
       rescue Busybee::Worker::Shutdown => e
         @teardown_error.compare_and_set(nil, e)
-        Busybee.logger&.error("[busybee] Shutdown from #{type} ignored, already shutting down: " \
-                              "[#{e.class}] #{e.message}")
+        Logging.error("Ignoring shutdown from #{type}, #{logged_worker_name} already shutting down",
+                      worker_status, error: e)
       rescue *RECOVERABLE_ERRORS => e
         @teardown_error.compare_and_set(nil, e)
       rescue Exception => e # rubocop:disable Lint/RescueException

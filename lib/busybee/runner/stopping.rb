@@ -5,6 +5,7 @@ require "active_support/core_ext/module/delegation"
 require "busybee/durations"
 require "busybee/grpc/error"
 require "busybee/hooks"
+require "busybee/logging"
 require "busybee/worker/shutdown"
 
 module Busybee
@@ -25,6 +26,7 @@ module Busybee
 
         begin
           @worker_timestamps.stamp!(:stop_requested_at)
+          Logging.info("Stopping #{logged_worker_name} (#{@stop_reason.get})", lifecycle_carrier)
           cease_intake
           t1 = :on_worker_stop_requested
           contain_teardown_hooks(t1) { Hooks.run(t1, worker_status, safe: true) }
@@ -51,19 +53,42 @@ module Busybee
       # Claim the stop for an error. A won claim caused the stop: its error is the
       # exit error, raised at loop exit, recorded before the announcement wakes
       # anyone. A lost one met a stop under way: a post-stop error, never raised,
-      # reported at T3, unless it is the exit error already (a re-raised claim).
-      def claim_stop(reason, error)
-        won = synchronize_claim do
-          @stop_reason.compare_and_set(nil, reason).tap do |claimed|
-            if claimed
-              record_shutdown_error(error)
-            elsif !@shutdown_error.equal?(error)
-              @post_stop_error ||= error
-            end
+      # reported at T3 and logged, unless it is the exit error already (a re-raised
+      # claim). Both effects run after the lock is released.
+      def claim_stop(reason, error) # rubocop:disable Naming/PredicateMethod
+        outcome = synchronize_claim do
+          if @stop_reason.compare_and_set(nil, reason)
+            record_shutdown_error(error)
+            :won
+          elsif record_post_stop_error(error)
+            :post_stop
           end
         end
-        announce_stop if won
-        won
+        announce_stop if outcome == :won
+        log_post_stop_error(error) if outcome == :post_stop
+        outcome == :won
+      end
+
+      # The first is kept for T3; each new one is logged. An error claimed twice
+      # in a row (an activation's escalation, then the loop it ends) counts once.
+      def record_post_stop_error(error)
+        return false if @shutdown_error.equal?(error) || @last_post_stop_error.equal?(error)
+
+        @post_stop_error ||= error
+        @last_post_stop_error = error
+      end
+
+      # The process may be out of memory, so an unrecoverable error's line takes
+      # no status snapshot.
+      def log_post_stop_error(error)
+        reason = @stop_reason.get
+        if recoverable?(error)
+          Logging.warn("Finishing #{logged_worker_name}'s stop (#{reason}) despite an error",
+                       worker_status, error: error)
+        else
+          Logging.error("Exiting process immediately: unrecoverable error while #{logged_worker_name} " \
+                        "was stopping (#{reason})", error: error)
+        end
       end
 
       # The exit and post-stop slots are plain ivars, read and written only inside this.
@@ -82,18 +107,12 @@ module Busybee
         raise error if error
       end
 
-      # The fire alarm (the building is burning): raising it flags, exiting nothing,
-      # and names the fire; the first fire's reason stands. Claims no runner's stop.
-      def exit_immediately!(reason: :crash)
-        EXIT_IMMEDIATELY_REASON.compare_and_set(nil, reason)
-        EXIT_IMMEDIATELY.make_true
-      end
-
-      delegate :exit_immediately?, to: :class, private: true
+      # The fire alarm (ExitImmediately) is the class's; raising it claims no runner's stop.
+      delegate :exit_immediately?, :exit_immediately!, :exit_immediately_reason, to: :class, private: true
 
       # The reason a runner claims for its own stop on the way out: the fire's,
       # once the process must exit immediately.
-      def ending_reason(otherwise: nil) = exit_immediately? ? EXIT_IMMEDIATELY_REASON.get : otherwise
+      def ending_reason(otherwise: nil) = exit_immediately_reason || otherwise
 
       # The fetch loops' policy for a wrapped gRPC error, matched by grpc_status
       # whatever class the gateway raised: backpressure backs off so the loop

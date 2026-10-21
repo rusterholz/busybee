@@ -1174,13 +1174,9 @@ RSpec.describe Busybee::Job do
     end
 
     context "with Resolution-owned keys (the reservation list)" do
-      let(:logger) { instance_double(Logger, warn: nil) }
-
-      before { allow(Busybee).to receive(:logger).and_return(logger) }
-
       Busybee::Job::Resolution::OWNED_KEYS.each do |key|
         it "drops :#{key} from Context and Resolution (it has a dedicated lifecycle method)" do
-          job.set_context(key => :sentinel, foo: 1)
+          capture_busybee_log { job.set_context(key => :sentinel, foo: 1) }
 
           aggregate_failures do
             expect(job.context[key]).to be_nil
@@ -1193,21 +1189,26 @@ RSpec.describe Busybee::Job do
           end
         end
 
-        it "logs a warning naming :#{key} and pointing at the lifecycle methods" do
-          job.set_context(key => :sentinel)
+        it "logs a warning naming :#{key}, the job, and the lifecycle methods" do
+          lines = capture_busybee_log { job.set_context(key => :sentinel) }
 
-          expect(logger).to have_received(:warn).with(/:#{key}/)
-          expect(logger).to have_received(:warn).with(/complete!.*fail!.*throw_bpmn_error!/)
+          expect(lines).to eq(["WARN [busybee] Dropping :#{key} passed to Job#set_context on find_available_driver " \
+                               "job #123456; use complete!, fail! or throw_bpmn_error! for outcome data"])
         end
       end
 
       it "warns once per reserved key passed in a single call" do
-        job.set_context(status: :complete, result: { x: 1 }, error_code: "X", foo: 1)
+        lines = capture_busybee_log { job.set_context(status: :complete, result: { x: 1 }, error_code: "X", foo: 1) }
 
-        expect(logger).to have_received(:warn).with(/:status/).once
-        expect(logger).to have_received(:warn).with(/:result/).once
-        expect(logger).to have_received(:warn).with(/:error_code/).once
+        expect(lines.map { |line| line[/:\w+ passed/] }).
+          to eq([":status passed", ":result passed", ":error_code passed"])
         expect(job.context[:foo]).to eq(1)
+      end
+
+      it "carries the job in JSON" do
+        lines = capture_busybee_log(format: :json) { job.set_context(status: :complete) }
+
+        expect(lines.first).to include("job_key" => 123_456, "job_type" => "find_available_driver", "level" => "warn")
       end
     end
   end
@@ -1237,6 +1238,47 @@ RSpec.describe Busybee::Job do
     end
   end
 
+  # Each resolution says so once the engine has taken it, through a real client.
+  describe "resolution log lines" do
+    let(:resolvable) { build_test_job(type: "ship_order", key: 7, retries: 3) }
+
+    it "logs a completion" do
+      expect(capture_busybee_log { resolvable.complete! }).to eq(["INFO [busybee] Completed ship_order job #7"])
+    end
+
+    it "logs a failure with its retries left and the exception" do
+      lines = capture_busybee_log { resolvable.fail!(IOError.new("closed stream")) }
+
+      expect(lines).to eq(["INFO [busybee] Failed ship_order job #7, 2 retries left (IOError: closed stream)"])
+    end
+
+    it "logs a failure with its retries left and the message" do
+      lines = capture_busybee_log { resolvable.fail!("out of stock", retries: 0) }
+
+      expect(lines).to eq(["INFO [busybee] Failed ship_order job #7, 0 retries left: out of stock"])
+    end
+
+    it "logs a BPMN error with its code and message" do
+      lines = capture_busybee_log { resolvable.throw_bpmn_error!(:out_of_stock, "none left") }
+
+      expect(lines).to eq(["INFO [busybee] Threw BPMN error OUT_OF_STOCK on ship_order job #7: none left"])
+    end
+
+    it "logs a BPMN error with no message by its code alone" do
+      lines = capture_busybee_log { resolvable.throw_bpmn_error!(:out_of_stock) }
+
+      expect(lines).to eq(["INFO [busybee] Threw BPMN error OUT_OF_STOCK on ship_order job #7"])
+    end
+
+    it "logs nothing when the engine refuses the resolution" do
+      refused = build_test_job(key: 8, client: build_test_client.on(:complete_job) { raise GRPC::Unavailable, "gone" })
+
+      lines = capture_busybee_log { expect { refused.complete! }.to raise_error(Busybee::GRPC::Error) }
+
+      expect(lines).to be_empty
+    end
+  end
+
   describe "#logging_context" do
     it "is a strict superset of context_tags" do
       job.set_context(source: :stream, buffered: true)
@@ -1253,6 +1295,20 @@ RSpec.describe Busybee::Job do
       expect(logging[:job_key]).to eq(job.key) # high-card, logging-only
       expect(logging[:correlation_id]).to eq("abc-123") # primitive scratch
       expect(logging).not_to have_key(:span) # complex object dropped
+    end
+
+    # perform's result is workflow-instance data, so it never reaches a log.
+    it "leaves out perform's result" do
+      job._record_result(customer_email: "someone@example.com")
+
+      expect(job.logging_context).not_to have_key(:result)
+    end
+
+    it "names the job's error by class and message, never the exception itself" do
+      job._record_error(IOError.new("closed stream"))
+
+      expect(job.logging_context).to include(error_class: "IOError", error_message: "closed stream").
+        and(satisfy { |logging| !logging.key?(:error) })
     end
 
     it "reflects the update_timeout override in deadline" do

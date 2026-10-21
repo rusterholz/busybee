@@ -150,7 +150,7 @@ Busybee.logger = Logger.new($stdout)
 
 #### `log_format`
 
-Controls log message formatting.
+Controls log message formatting. Every line Busybee writes honors it, and every one starts with `[busybee]`.
 
 | | |
 |--|--|
@@ -158,15 +158,19 @@ Controls log message formatting.
 | **Default** | `:text` |
 | **Valid values** | `:text`, `:json` |
 
-**Text format** (default):
+**Text format** (default): the message names what it's about, and ends with the error when there is one, so each line reads on its own:
 ```
-[busybee] Retrying after GRPC error (attempt: 1, error: "Unavailable")
+[busybee] Failed to complete ship_order job #2251799813685292, will time out and retry (Busybee::GRPC::Error: GRPC call failed (connection lost))
 ```
 
-**JSON format**:
+**JSON format**: the same message, plus the `logging_context` of the job, worker or call the line concerns (see [Hooks: Metrics and Logs](hooks.md#metrics-and-logs-the-two-projections)), and the error as fields of its own:
 ```json
-{"message":"[busybee] Retrying after GRPC error","level":"warn","attempt":1,"error":"Unavailable"}
+{"retries":3,"deadline":"2026-10-20T12:40:00.000Z","job_type":"ship_order","bpmn_process_id":"order_fulfillment","element_id":"ship","job_key":2251799813685292,"process_instance_key":2251799813685281,"worker_class":"ShipOrderWorker","status":"ready","error_class":"Busybee::GRPC::Error","error_message":"GRPC call failed (connection lost)","execution_started_at":"2026-10-20T04:37:58.836Z","perform_started_at":"2026-10-20T04:37:58.836Z","perform_finished_at":"2026-10-20T04:37:58.836Z","error_location":".../busybee/grpc/error.rb:27:in `wrap'","message":"[busybee] Failed to complete ship_order job #2251799813685292, will time out and retry (Busybee::GRPC::Error: GRPC call failed (connection lost))","level":"warn","time":"2026-10-20T04:37:58.836Z"}
 ```
+
+Besides warnings and errors, Busybee logs ordinary conditions at `info` (each worker's start and stop, and each job's completion, failure, BPMN error and handback) and each job's activation at `debug`. Set your logger's level to `warn` to quiet them.
+
+Logging doesn't interrupt your workers: if your logger fails to write a line, Busybee carries on and prints `[busybee] Failed to log (<error>): <message>` to stderr instead, unless the failure is one the process can't recover from, such as running out of memory, which shuts the process down like any such failure would.
 
 ```ruby
 Busybee.log_format = :json
@@ -284,7 +288,7 @@ Every setting that takes a length of time — here, in the [worker DSL](workers.
 
 ```
 [busybee] default_message_ttl: 30ms seems unusually small for this setting. Durations here are
-milliseconds — if you meant 30 seconds, use 30000 or 30.seconds
+milliseconds; if you meant 30 seconds, use 30000 or 30.seconds
 ```
 
 The value is still applied — the warning advises, it doesn't override you — and it only appears for settings where a sub-second value is almost certainly a slip. Deliberately tiny values are left alone: `0` means "no delay", `-1` is Zeebe's "answer immediately" for [`request_timeout`](workers.md#polling), and [`buffer_throttle`](workers.md#buffer-throttle), which takes sub-millisecond values, never warns.

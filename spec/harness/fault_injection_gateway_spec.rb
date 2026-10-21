@@ -31,6 +31,29 @@ RSpec.describe FaultInjectionGateway do
     end
   end
 
+  # A server short of threads answers RESOURCE_EXHAUSTED itself, which a runner
+  # takes for the broker's backpressure. Specs run a few workers against one
+  # gateway, polling back to back, so the server keeps threads to spare.
+  describe "concurrent calls", :gateway do
+    it "serves six held open at once, rejecting none of them itself" do
+      arrived = Queue.new
+      release = Concurrent::Event.new
+      gateway.on(:publish_message) do
+        arrived << :arrived
+        release.wait(5)
+        Busybee::GRPC::PublishMessageResponse.new(key: 1)
+      end
+
+      callers = Array.new(6) do
+        Thread.new { gateway.client.publish_message("held", correlation_key: "A1") rescue $! } # rubocop:disable Style/RescueModifier
+      end
+      6.times { arrived.pop(timeout: 5) }
+      release.set
+
+      expect(callers.map(&:value)).to all(eq(1))
+    end
+  end
+
   describe "recording requests", :gateway do
     it "records what actually reached the wire, in order" do
       gateway.on(:publish_message) { Busybee::GRPC::PublishMessageResponse.new(key: 1) }

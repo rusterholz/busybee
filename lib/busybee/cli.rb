@@ -9,6 +9,7 @@ require "busybee/client"
 require "busybee/configure"
 require "busybee/durations"
 require "busybee/error"
+require "busybee/logging"
 require "busybee/runner"
 require "busybee/runtime_config"
 require "busybee/version"
@@ -21,7 +22,7 @@ module Busybee
     # Signals we trap to begin a graceful stop.
     STOP_SIGNALS = %w[INT QUIT TERM].freeze
 
-    delegate :exit_immediately?, to: :"Busybee::Runner", private: true
+    delegate :exit_immediately?, :exit_immediately_reason, to: :"Busybee::Runner", private: true
 
     def self.main(args) = new(args).run
 
@@ -38,7 +39,7 @@ module Busybee
     end
 
     # Exits 1 once the run has returned if the process must exit immediately, an
-    # error having struck somewhere that raised nothing here.
+    # error having struck somewhere that raised nothing here, so it says so.
     def run
       @runner = Runner.for(*@worker_classes, runtime_config: @runtime_config, client: client)
       setup_signal_handlers!
@@ -47,7 +48,10 @@ module Busybee
       ensure
         join_signal_threads
       end
-      exit(1) if exit_immediately?
+      return unless exit_immediately?
+
+      Logging.error("Exiting process immediately due to #{exit_immediately_reason}")
+      exit(1)
     end
 
     private
@@ -103,8 +107,7 @@ module Busybee
       require "busybee/railtie" # defensive: busybee.rb's :before_configuration hook registers it already
       require "./config/environment"
     rescue StandardError, LoadError => e
-      Busybee.logger&.error("Failed to load Rails environment: [#{e.class}] #{e.message}. " \
-                            "Set BUSYBEE_SKIP_RAILS=1 to skip Rails loading.")
+      Logging.error("Failed to load Rails environment; set BUSYBEE_SKIP_RAILS=1 to skip Rails loading", error: e)
     end
 
     def extract_workers_from_yaml!
@@ -211,9 +214,7 @@ module Busybee
 
       # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
       existing = Busybee.instance_variable_get(:"@#{field}")
-      if existing
-        Busybee.logger&.info("#{source} overriding configured value: #{existing.inspect} → #{cli_value.inspect}")
-      end
+      Logging.info("Overriding configured value with #{source}: #{existing.inspect} → #{cli_value.inspect}") if existing
       Busybee.public_send(:"#{field}=", cli_value)
     end
   end

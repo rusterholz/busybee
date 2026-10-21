@@ -2,12 +2,13 @@
 
 require "concurrent"
 
+require "busybee/logging"
 require "busybee/runner"
 require "busybee/runtime_config"
 
 module Busybee
   class Runner
-    # Multi runner — manages multiple worker types in a single process.
+    # Multi runner: manages multiple worker types in a single process.
     # Each worker gets its own child runner (Polling/Streaming/Hybrid) running
     # in a dedicated thread via Concurrent::FixedThreadPool.
     #
@@ -45,7 +46,7 @@ module Busybee
       end
 
       # Transparent: Multi manages child runners rather than being a worker, so it
-      # fires no worker hooks of its own — hence winning the set-once reason gate
+      # fires no worker hooks of its own; hence winning the set-once reason gate
       # directly rather than through super, whose stop! fires T1. Each child fires
       # its own lifecycle hooks and takes the same reason, per worker class.
       def stop!(reason: :signal)
@@ -68,11 +69,11 @@ module Busybee
 
       # Two layers, because how hard to tear down depends on what killed the
       # child. A recoverable error leaves the process well enough to drain, so
-      # the container stops gracefully. Below that line — NoMemoryError,
-      # SystemStackError — a graceful stop would spend its time on the very
+      # the container stops gracefully. Below that line (NoMemoryError,
+      # SystemStackError) a graceful stop would spend its time on the very
       # calls about to fail again, so the siblings are killed instead. Without
-      # the second layer the pool thread simply died: nothing logged anywhere,
-      # no cascade, and wait_for_termination never returning.
+      # the second layer the pool thread would die silently: nothing logged, no
+      # cascade, and wait_for_termination never returning.
       def post_runners_to_pool
         @runners.each do |runner|
           @thread_pool.post do
@@ -109,20 +110,18 @@ module Busybee
       end
 
       # Record before cascading, always: a cascade can end this very thread, and
-      # an unrecorded error would leave Multi#run! with nothing to re-raise —
+      # an unrecorded error would leave Multi#run! with nothing to re-raise,
       # reporting a clean shutdown for a container that crashed.
       def record_child_failure(runner, error)
         @thread_error.update { |prev| prev || error }
-        Busybee.logger&.error(
-          "Error in runner for #{runner_worker_name(runner)}: " \
-          "[#{error.class}] #{error.message}"
-        )
+        name = runner_worker_name(runner)
+        Logging.error("Stopping all workers after #{name} failed", error: error)
       end
 
       # Not #kill!: its @thread_pool.kill would end this very pool thread
       # mid-statement, leaving the pool unterminated and hanging the
       # wait_for_termination Multi#run! sits in. Killing the children lets each
-      # run! return on its own. The reason stays the crash's — nobody forced this.
+      # run! return on its own. The reason stays the crash's: nobody forced this.
       def kill_children(reason:)
         @stop_reason.compare_and_set(nil, reason)
         @runners.each { |runner| runner.kill!(reason: reason) }
@@ -140,17 +139,13 @@ module Busybee
         worker_count = worker_classes.length
 
         if pool_size < worker_count
-          Busybee.logger&.error(
-            "Process #{Process.pid} is running #{worker_count} workers but the database " \
-            "connection pool size is only #{pool_size}. This may cause connection timeout " \
-            "errors. Adjust the pool size (usually via RAILS_MAX_THREADS) or reduce the " \
-            "number of workers in this process."
-          )
+          Logging.error("Process #{Process.pid} is running #{worker_count} workers but the database " \
+                        "connection pool size is only #{pool_size}. This may cause connection timeout " \
+                        "errors. Adjust the pool size (usually via RAILS_MAX_THREADS) or reduce the " \
+                        "number of workers in this process.")
         else
-          Busybee.logger&.info(
-            "Process #{Process.pid} will run #{worker_count} workers with a database " \
-            "connection pool size of #{pool_size}."
-          )
+          Logging.info("Running #{worker_count} workers in process #{Process.pid} with a database " \
+                       "connection pool of #{pool_size}")
         end
       end
     end

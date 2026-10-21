@@ -423,9 +423,6 @@ RSpec.describe Busybee::Runner::Hybrid do
       end
 
       it "logs a warning when handing a shutdown job back raises an error" do
-        logger = instance_double(Logger, warn: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-
         bad_job = build_test_job(key: 99, retries: 1)
         allow(client).to receive(:fail_job).and_raise(StandardError, "grpc gone")
 
@@ -438,9 +435,10 @@ RSpec.describe Busybee::Runner::Hybrid do
           0
         end
 
-        runner.run!
+        lines = capture_busybee_log { runner.run! }
 
-        expect(logger).to have_received(:warn).with(/Failed to hand job 99 back during shutdown.*grpc gone/)
+        expect(lines).to include("WARN [busybee] Failed to hand test job #99 back during shutdown " \
+                                 "(StandardError: grpc gone)")
       end
     end
 

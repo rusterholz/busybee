@@ -321,11 +321,10 @@ RSpec.describe Busybee::CLI do
           raise StandardError, "boot failed" if path == "./config/environment"
         end
 
-        logger = instance_double(Logger, error: nil, info: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
+        lines = capture_busybee_log { expect { described_class.new(["TestCLIWorker"]) }.not_to raise_error }
 
-        expect { described_class.new(["TestCLIWorker"]) }.not_to raise_error
-        expect(logger).to have_received(:error).with(/\[StandardError\] boot failed.*BUSYBEE_SKIP_RAILS/)
+        expect(lines).to include("ERROR [busybee] Failed to load Rails environment; set BUSYBEE_SKIP_RAILS=1 to " \
+                                 "skip Rails loading (StandardError: boot failed)")
       end
     end
 
@@ -396,11 +395,10 @@ RSpec.describe Busybee::CLI do
 
       it "names YAML as the source when it overrides a configured value" do
         Busybee.instance_variable_set(:@shutdown_wait_timeout, 3000) # restored by the file's around
-        logger = instance_double(Logger, info: nil, warn: nil, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
-        described_class.new(["-c", config_with(8000)])
+        lines = capture_busybee_log { described_class.new(["-c", config_with(8000)]) }
 
-        expect(logger).to have_received(:info).with(/\AYAML shutdown_wait_timeout overriding.*3000.*8000/)
+        expect(lines).to include("INFO [busybee] Overriding configured value with YAML shutdown_wait_timeout: " \
+                                 "3000 \u2192 \"8000\"")
       end
 
       it "does not override gem config when flags are not provided" do
@@ -411,22 +409,16 @@ RSpec.describe Busybee::CLI do
 
       it "logs when overriding a value already set (e.g., by the Railtie)" do
         Busybee.log_format = :text
-        logger = instance_double(Logger, info: nil, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
+        lines = capture_busybee_log { described_class.new(["-l", "json", "TestCLIWorker"]) }
 
-        described_class.new(["-l", "json", "TestCLIWorker"])
-
-        expect(logger).to have_received(:info).with(/--log-format overriding.*:text.*:json/)
+        expect(lines).to include("INFO [busybee] Overriding configured value with --log-format: :text \u2192 :json")
       end
 
       it "does not log when no prior value was configured" do
         Busybee.instance_variable_set(:@worker_name, nil)
-        logger = instance_double(Logger, info: nil, error: nil)
-        allow(Busybee).to receive(:logger).and_return(logger)
+        lines = capture_busybee_log { described_class.new(["-n", "my-worker", "TestCLIWorker"]) }
 
-        described_class.new(["-n", "my-worker", "TestCLIWorker"])
-
-        expect(logger).not_to have_received(:info)
+        expect(lines.grep(/Overriding/)).to be_empty
       end
     end
   end
@@ -667,6 +659,30 @@ RSpec.describe Busybee::CLI do
         end
 
         expect { cli.run }.to raise_error(SystemExit) { |exit| expect(exit.status).to eq(1) }
+      end
+
+      it "says why it exits 1" do
+        Thread.new do
+          started.wait(5)
+          cli.instance_variable_get(:@runner).stop!(reason: :sigterm)
+        end
+
+        lines = capture_busybee_log { expect { cli.run }.to raise_error(SystemExit) }
+
+        expect(lines.last).to eq("ERROR [busybee] Exiting process immediately due to crash")
+      end
+
+      it "still exits 1 when saying why fails" do
+        Busybee.logger = Class.new { def error(_line) = raise(IOError, "closed stream") }.new
+        Thread.new do
+          started.wait(5)
+          cli.instance_variable_get(:@runner).stop!(reason: :sigterm)
+        end
+
+        expect { expect { cli.run }.to raise_error(SystemExit) { |exit| expect(exit.status).to eq(1) } }.
+          to output(/Failed to log \(IOError: closed stream\): Exiting process immediately/).to_stderr
+      ensure
+        Busybee.logger = nil
       end
     end
 

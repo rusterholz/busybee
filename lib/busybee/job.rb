@@ -11,6 +11,7 @@ require "busybee/job/error_formatting"
 require "busybee/job/payload"
 require "busybee/job/resolution"
 require "busybee/job/timestamps"
+require "busybee/logging"
 require "busybee/serialization"
 
 module Busybee
@@ -46,12 +47,12 @@ module Busybee
              to: :timestamps
 
     # Per-moment timestamp readers (job.activated_at, job.executed_at, etc.)
-    # forward to the Timestamps PORO, kind arg and all — delegate forwards it,
-    # and the :utc default lives on the PORO. job.timestamps.stamp! remains the
+    # forward to the Timestamps PORO, kind arg and all (delegate forwards it,
+    # and the :utc default lives on the PORO). job.timestamps.stamp! remains the
     # write surface; there is no Job-level stamp! delegate.
     delegate(*Timestamps.timestamp_names, to: :timestamps)
 
-    # Container identity (Busybee.worker_name) — the per-job worker instance is
+    # Container identity (Busybee.worker_name); the per-job worker instance is
     # job.worker; this is the process/container the job ran in.
     delegate :worker_name, to: :Busybee
 
@@ -135,6 +136,7 @@ module Busybee
       resolution.set_result(vars)
       correlated { @client.complete_job(key, vars: resolution.result || {}) }.tap do
         resolve!(:complete)
+        log_resolution("Completed")
       end
     end
 
@@ -160,6 +162,7 @@ module Busybee
       correlated { @client.fail_job(key, message, retries: new_retries, backoff: backoff) }.tap do
         @retries_override = new_retries
         resolve!(:failed)
+        log_failure(message_or_exception, new_retries)
       end
     end
 
@@ -178,6 +181,7 @@ module Busybee
 
       correlated { @client.throw_bpmn_error(key, code, message: message) }.tap do
         resolve!(:error)
+        log_resolution("Threw BPMN error #{code} on", (message unless message.empty?))
       end
     end
 
@@ -229,6 +233,19 @@ module Busybee
     # The job's own engine calls carry it on any thread, an async worker's included.
     def correlated(&) = Client::Call.with_job(self, &)
 
+    # "<verb> <type> job #<key>", then the detail, if any, after a colon.
+    def log_resolution(verb, detail = nil, tail: "")
+      Logging.info("#{verb} #{type} job ##{key}#{tail}#{": #{detail}" if detail}", self)
+    end
+
+    # error: takes only an Exception, so a plain message rides in the text.
+    def log_failure(message_or_exception, retries)
+      tail = ", #{retries} retries left"
+      return log_resolution("Failed", message_or_exception, tail: tail) unless message_or_exception.is_a?(Exception)
+
+      Logging.info("Failed #{type} job ##{key}#{tail}", self, error: message_or_exception)
+    end
+
     # The result axis is set-once, so a complete! after perform's return value
     # was captured sends that value and drops these vars: say so, not silently.
     # The equality escape is for auto-complete, handing back the very object it
@@ -238,10 +255,8 @@ module Busybee
       return unless vars.is_a?(Hash) && vars.any?
       return if resolution.result == vars
 
-      Busybee.logger&.warn(
-        "[busybee] Variables passed to complete! on job #{key} were discarded: this job's result " \
-        "was already captured from perform's return value, and that is what the engine received"
-      )
+      Logging.warn("Discarding variables passed to complete! on #{type} job ##{key}, " \
+                   "result already captured from perform's return value", self)
     end
 
     # The resolution ops' shared fire-once guard.
@@ -251,7 +266,7 @@ module Busybee
       raise Busybee::JobAlreadyHandled, "Cannot #{verb} job #{key} because it is already #{status}"
     end
 
-    # Failing spends one retry — Zeebe doesn't auto-decrement on FailJob, the
+    # Failing spends one retry: Zeebe doesn't auto-decrement on FailJob, the
     # worker owns it. A bare fail! decrements the current count; an explicit
     # retries: (incl. 0) sets it outright. Either way #retries mirrors it after.
     def next_retries(explicit)
@@ -267,11 +282,9 @@ module Busybee
 
     def warn_about_reserved_keys(kwargs)
       reserved = kwargs.keys & Resolution::OWNED_KEYS
-      reserved.each do |key|
-        Busybee.logger&.warn(
-          "[busybee] :#{key} passed to Job#set_context will be dropped — " \
-          "use Job#complete!, #fail!, or #throw_bpmn_error! to capture outcome data."
-        )
+      reserved.each do |reserved_key|
+        Logging.warn("Dropping :#{reserved_key} passed to Job#set_context on #{type} job ##{key}; " \
+                     "use complete!, fail! or throw_bpmn_error! for outcome data", self)
       end
     end
   end
