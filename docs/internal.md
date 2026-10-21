@@ -451,7 +451,7 @@ lib/busybee/cli/log_formatter.rb # CLI::LogFormatter, its default logger's forma
 ### Lifecycle
 
 1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
-2. **`initialize(args)`** — all setup: parse options (`OptionParser`), install the default logger and apply `--log-format`, load Rails environment, extract workers from YAML if `--config`, load worker classes, build `RuntimeConfig`, apply process-wide config.
+2. **`initialize(args)`** -- all setup: parse options (`OptionParser`), install the default logger and apply `--log-format`, load Rails environment, extract workers from YAML if `--config`, load worker classes, build `RuntimeConfig`, apply process-wide config.
 3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks), joins the signal threads within `shutdown_wait_timeout`, then exits 1 if the fire alarm is up (see [Signal Handling](#signal-handling)).
 
 ### CLI Flags
