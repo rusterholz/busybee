@@ -344,7 +344,7 @@ Once a hook resolves the job:
 - **`perform` does not run**, and neither does input validation, automatic completion, or automatic failure. Nothing runs against a job the engine already considers finished.
 - **The perform-family hooks stand down too.** `before_perform`, `around_perform` and `after_perform` fire exactly when `perform` is attempted — so a hook that short-circuits from `on_job_activated` means none of the three fire at all, and one that short-circuits from `before_perform` means the `around_perform` chain is never entered. This is the naming rule doing its job: *perform* in the name means the hook belongs to your code's lifecycle.
 - **The system-lifecycle hooks still fire**, every time. `on_job_activated`, `around_job_execution` and `on_job_executed` bracket every job that reached your process, short-circuited or not. That is where you observe this.
-- **busybee logs it** at `info`: `Job <key> was resolved by a hook before perform ran; perform skipped`.
+- **busybee logs it** at `info`: `Skipping perform for <type> job #<key>, already resolved by a hook`.
 
 Two things to know before you reach for this:
 

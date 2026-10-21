@@ -225,14 +225,14 @@ RSpec.describe Busybee::Logging do
 
     it "refuses a carrier that has no logging_context, saying so on stderr" do
       expect { described_class.info("the message", { job_key: 1 }) }.
-        to output(/\A\[busybee\] failed to log \(ArgumentError: .*logging_context.*\): the message\n\z/).to_stderr
+        to output(/\A\[busybee\] Failed to log \(ArgumentError: .*logging_context.*\): the message\n\z/).to_stderr
       expect(log_output.string).to be_empty
     end
 
     it "refuses an error that isn't an Exception, saying so on stderr, without raising the fire alarm" do
       result = :unset
       expect { result = described_class.warn("the message", error: "closed stream") }.
-        to output(/\A\[busybee\] failed to log \(ArgumentError: .*Exception.*\): the message\n\z/).to_stderr
+        to output(/\A\[busybee\] Failed to log \(ArgumentError: .*Exception.*\): the message\n\z/).to_stderr
       expect([result, log_output.string, Busybee::Runner.exit_immediately?]).to eq([nil, "", false])
     end
 
@@ -243,7 +243,7 @@ RSpec.describe Busybee::Logging do
       rescue IOError
         described_class.warn("handled", error: "closed stream")
         finished = true
-      end.to output(/failed to log \(ArgumentError/).to_stderr
+      end.to output(/Failed to log \(ArgumentError/).to_stderr
 
       expect(finished).to be(true)
     end
@@ -268,13 +268,13 @@ RSpec.describe Busybee::Logging do
     it "returns nil when the logger fails, saying so on stderr" do
       result = :unset
       expect { result = described_class.warn("Failed to complete frog_blast job #93928392854") }.
-        to output("[busybee] failed to log (IOError: closed stream): Failed to complete frog_blast job #93928392854\n").
+        to output("[busybee] Failed to log (IOError: closed stream): Failed to complete frog_blast job #93928392854\n").
         to_stderr
       expect(result).to be_nil
     end
 
     it "leaves the fire alarm down for an ordinary failure" do
-      expect { described_class.warn("logged") }.to output(/failed to log/).to_stderr
+      expect { described_class.warn("logged") }.to output(/Failed to log/).to_stderr
       expect(Busybee::Runner.exit_immediately?).to be(false)
     end
 
@@ -282,7 +282,7 @@ RSpec.describe Busybee::Logging do
       let(:failure) { NoMemoryError.new("failed to allocate memory") }
 
       it "raises the fire alarm, then says so on stderr" do
-        expect { described_class.error("logged") }.to output(/failed to log \(NoMemoryError/).to_stderr
+        expect { described_class.error("logged") }.to output(/Failed to log \(NoMemoryError/).to_stderr
         expect(Busybee::Runner.exit_immediately_reason).to eq(:crash)
       end
     end
@@ -299,7 +299,7 @@ RSpec.describe Busybee::Logging do
       def unrenderable.inspect = raise(NotImplementedError, "no inspect for you")
 
       expect { described_class.info("logged", value: unrenderable) }.
-        to output(/failed to log \(NotImplementedError: no inspect for you\): logged/).to_stderr
+        to output(/Failed to log \(NotImplementedError: no inspect for you\): logged/).to_stderr
     end
   end
 

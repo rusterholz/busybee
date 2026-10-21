@@ -115,7 +115,7 @@ module Busybee
       def record_child_failure(runner, error)
         @thread_error.update { |prev| prev || error }
         name = runner_worker_name(runner)
-        Logging.error("Error in runner for #{name}", error: error)
+        Logging.error("Stopping all workers after #{name} failed", error: error)
       end
 
       # Not #kill!: its @thread_pool.kill would end this very pool thread
@@ -144,8 +144,8 @@ module Busybee
                         "errors. Adjust the pool size (usually via RAILS_MAX_THREADS) or reduce the " \
                         "number of workers in this process.")
         else
-          Logging.info("Process #{Process.pid} will run #{worker_count} workers with a database " \
-                       "connection pool size of #{pool_size}.")
+          Logging.info("Running #{worker_count} workers in process #{Process.pid} with a database " \
+                       "connection pool of #{pool_size}")
         end
       end
     end

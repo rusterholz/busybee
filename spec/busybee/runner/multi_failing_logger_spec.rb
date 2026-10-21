@@ -50,7 +50,7 @@ RSpec.describe "a multi-worker process whose logger fails", :gateway do # ruboco
 
   it "still stops the sibling when logging the worker's failure fails" do
     raised = nil
-    expect { raised = run_to_completion(seconds: 3) }.to output(/failed to log/).to_stderr
+    expect { raised = run_to_completion(seconds: 3) }.to output(/Failed to log/).to_stderr
 
     expect(raised).to be_a(Busybee::GRPC::Error)
   end

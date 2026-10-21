@@ -127,7 +127,7 @@ RSpec.describe Busybee::Worker do
           lines = capture_busybee_log { expect { performing_worker.perform_job(job) }.not_to raise_error }
 
           expect(lines).to contain_exactly(
-            /\AWARN \[busybee\] Failed to complete test job #123456, which will time out and retry \(Busybee::GRPC::Error: [^()]*\(connection lost\)\)\z/ # rubocop:disable Layout/LineLength
+            /\AWARN \[busybee\] Failed to complete test job #123456, will time out and retry \(Busybee::GRPC::Error: [^()]*\(connection lost\)\)\z/ # rubocop:disable Layout/LineLength
           )
         end
 
@@ -211,7 +211,7 @@ RSpec.describe Busybee::Worker do
         lines = capture_busybee_log { expect { worker.perform_job(job) }.not_to raise_error }
 
         expect(lines).to contain_exactly(
-          /\AWARN \[busybee\] Failed to fail test job #42, which will time out and retry \(Busybee::GRPC::Error: [^()]*\(connection lost\)\)\z/ # rubocop:disable Layout/LineLength
+          /\AWARN \[busybee\] Failed to fail test job #42, will time out and retry \(Busybee::GRPC::Error: [^()]*\(connection lost\)\)\z/ # rubocop:disable Layout/LineLength
         )
       end
 
@@ -1030,8 +1030,8 @@ RSpec.describe Busybee::Worker do
 
         lines = capture_busybee_log { performing_worker.perform_job(job) }
 
-        expect(lines).to eq(["INFO [busybee] process_order job #123456 was resolved by a hook before perform ran; " \
-                             "perform skipped"])
+        expect(lines).to eq(["INFO [busybee] Skipping perform for process_order job #123456, " \
+                             "already resolved by a hook"])
       end
 
       it "does not report a skipped perform when perform actually ran" do
@@ -1174,9 +1174,8 @@ RSpec.describe Busybee::Worker do
 
         lines = capture_busybee_log { worker.perform_job(job) }
 
-        expect(lines).to eq(["WARN [busybee] Variables passed to complete! on process_order job #123456 were " \
-                             "discarded: this job's result was already captured from perform's return value, " \
-                             "and that is what the engine received"])
+        expect(lines).to eq(["WARN [busybee] Discarding variables passed to complete! on process_order job #123456, " \
+                             "result already captured from perform's return value"])
       end
 
       # The sanctioned shape: resolve, then yield anyway. The gate skips the
@@ -1443,7 +1442,7 @@ RSpec.describe Busybee::Worker do
         expect(job.status).to eq(:complete)
         expect(client).not_to have_received(:fail_job)
         expect(lines).to contain_exactly(
-          /\AWARN \[busybee\] Error in process_order job #123456 after it was already complete, at .*worker_spec\.rb:\d+:in .* \(RuntimeError: hook boom\)\z/ # rubocop:disable Layout/LineLength
+          /\AWARN \[busybee\] Ignoring error from process_order job #123456, already complete, at .*worker_spec\.rb:\d+:in .* \(RuntimeError: hook boom\)\z/ # rubocop:disable Layout/LineLength
         )
       end
 
@@ -1460,7 +1459,7 @@ RSpec.describe Busybee::Worker do
           expect { worker.perform_job(job) }.to raise_error(Busybee::Worker::Shutdown)
         end
 
-        expect(lines.grep(/after it was already/)).to be_empty
+        expect(lines.grep(/Ignoring error from/)).to be_empty
       end
 
       it "escalates a shutdown_on error raised by a hook" do
@@ -1564,7 +1563,7 @@ RSpec.describe Busybee::Worker do
 
         lines = capture_busybee_log { worker.perform_job(job) }
         expect(lines).to contain_exactly(
-          %r{\AWARN \[busybee\] Error in process_order job #123456 after it was already complete, at .+/worker_spec\.rb:\d+:in .+ \(RuntimeError: post-complete error\)\z} # rubocop:disable Layout/LineLength
+          %r{\AWARN \[busybee\] Ignoring error from process_order job #123456, already complete, at .+/worker_spec\.rb:\d+:in .+ \(RuntimeError: post-complete error\)\z} # rubocop:disable Layout/LineLength
         )
       end
 

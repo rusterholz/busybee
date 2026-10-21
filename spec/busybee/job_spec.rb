@@ -1192,9 +1192,8 @@ RSpec.describe Busybee::Job do
         it "logs a warning naming :#{key}, the job, and the lifecycle methods" do
           lines = capture_busybee_log { job.set_context(key => :sentinel) }
 
-          expect(lines).to eq(["WARN [busybee] :#{key} passed to Job#set_context on find_available_driver " \
-                               "job #123456 was dropped; use Job#complete!, #fail!, or #throw_bpmn_error! " \
-                               "to capture outcome data"])
+          expect(lines).to eq(["WARN [busybee] Dropping :#{key} passed to Job#set_context on find_available_driver " \
+                               "job #123456; use complete!, fail! or throw_bpmn_error! for outcome data"])
         end
       end
 

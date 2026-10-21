@@ -328,7 +328,8 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       Busybee.on_worker_stopping { raise "broken hook" }
       Busybee.on_worker_shutdown { |worker| captured = worker }
 
-      expect { runner.run! }.to output(/failed to log \(IOError: log device closed\): Error in hooks/).to_stderr
+      expect { runner.run! }.
+        to output(/Failed to log \(IOError: log device closed\): Ignoring error raised by a hook/).to_stderr
       aggregate_failures do
         expect(captured.error).to be_nil
         expect(runner.running?).to be(false)
@@ -428,7 +429,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
       lines = capture_busybee_log { runner.run! }
 
-      expect(lines).to include("ERROR [busybee] Shutdown from on_worker_stopping ignored, LifecycleWorker already " \
+      expect(lines).to include("ERROR [busybee] Ignoring shutdown from on_worker_stopping, LifecycleWorker already " \
                                "shutting down (Busybee::Worker::Shutdown: T2 declares unhealth)")
     end
 
@@ -521,7 +522,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
       lines = capture_busybee_log { runner.run! }
 
-      expect(lines).to eq(["ERROR [busybee] Drain failed during LifecycleWorker's shutdown, continuing the " \
+      expect(lines).to eq(["ERROR [busybee] Failed to drain LifecycleWorker during shutdown, continuing " \
                            "teardown (RuntimeError: the broker went away mid-drain)"])
     end
 

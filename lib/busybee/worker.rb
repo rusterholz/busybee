@@ -166,7 +166,7 @@ module Busybee
       def log_short_circuit(job)
         return unless job.resolved? && job.timestamps.perform_started_at.nil?
 
-        Logging.info("#{job.type} job ##{job.key} was resolved by a hook before perform ran; perform skipped", job)
+        Logging.info("Skipping perform for #{job.type} job ##{job.key}, already resolved by a hook", job)
       end
 
       # The around_perform core: perform.call hands every hook the job's result.
@@ -210,7 +210,7 @@ module Busybee
           job.complete!(new_vars)
         rescue StandardError => e
           job._record_error(e)
-          Logging.warn("Failed to complete #{job.type} job ##{job.key}, which will time out and retry", job, error: e)
+          Logging.warn("Failed to complete #{job.type} job ##{job.key}, will time out and retry", job, error: e)
         end
       end
 
@@ -226,14 +226,14 @@ module Busybee
       def log_post_resolution_error(job, error)
         location = error.backtrace&.first
         suffix = location ? ", at #{location}" : ""
-        Logging.warn("Error in #{job.type} job ##{job.key} after it was already #{job.status}#{suffix}",
+        Logging.warn("Ignoring error from #{job.type} job ##{job.key}, already #{job.status}#{suffix}",
                      job, error: error)
       end
 
       def attempt_auto_fail(job, error, config)
         job.fail!(Shutdown.unwrap(error), backoff: config.fail_job_backoff)
       rescue StandardError => e
-        Logging.warn("Failed to fail #{job.type} job ##{job.key}, which will time out and retry", job, error: e)
+        Logging.warn("Failed to fail #{job.type} job ##{job.key}, will time out and retry", job, error: e)
       end
     end
   end

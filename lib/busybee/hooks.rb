@@ -104,7 +104,7 @@ module Busybee
       def log_swallowed_error(error, target)
         location = error.backtrace&.first
         suffix = location ? ", at #{location}" : ""
-        Logging.error("Error in hooks (ignored)#{suffix}", target, error: error)
+        Logging.error("Ignoring error raised by a hook#{suffix}", target, error: error)
       end
 
       # Run an around-hook chain wrapping a core block; callbacks receive

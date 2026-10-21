@@ -102,7 +102,7 @@ module Busybee
         def log_forgotten_yield(callback, target)
           location = callback.source_location&.join(":")
           suffix = location ? " (at #{location})" : ""
-          Logging.warn("Around-hook returned without yielding; forcing continuation#{suffix}", target)
+          Logging.warn("Forcing continuation past an around-hook that returned without yielding#{suffix}", target)
         end
       end
     end

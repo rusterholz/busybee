@@ -1,14 +1,8 @@
 # frozen_string_literal: true
 
 # The hook-count invariance contract, pinned once per lifecycle: what a
-# lifecycle does with an error — suppress it, raise it, escalate it, blame it on
-# somebody — must not depend on whether anyone happened to register a hook.
-#
-# It used to. A safe chain assembled from zero hooks was the bare core with no
-# policy wrapper at all, which made "is something listening?" a load-bearing
-# input to error handling: an error a worker had declared fatal escalated to a
-# graceful shutdown only when a hook was registered, and an error from the work
-# was swallowed and blamed on the hooks only when one was.
+# lifecycle does with an error (suppress it, raise it, escalate it, blame it on
+# somebody) must not depend on whether anyone happened to register a hook.
 #
 # Host groups provide three methods:
 #   exercise(&work)             — run one turn of this lifecycle, with `work` as
@@ -28,7 +22,7 @@ RSpec.shared_examples "a hook-count-invariant error policy" do
       rescue StandardError => e
         [:raised, e.class]
       end
-    [escaped, lines.grep(/Error in hooks/).any?]
+    [escaped, lines.grep(/Ignoring error raised by a hook/).any?]
   end
 
   it "handles an error from the work identically with and without a hook registered" do
@@ -54,7 +48,7 @@ RSpec.shared_examples "a hook-count-invariant error policy" do
 end
 
 # Records every level, so an unexpected call surfaces instead of vanishing into
-# a permissive double — the trap that once hid a warning firing on every job.
+# a permissive double.
 class InvarianceLogger
   def initialize(lines) = @lines = lines
 

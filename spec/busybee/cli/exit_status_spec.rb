@@ -36,8 +36,8 @@ RSpec.describe "the CLI's exit status" do # rubocop:disable RSpec/DescribeClass
     logged = output.lines.grep(/\[busybee\]/)
 
     expect(logged).to match([
-                              /ERROR -- : \[busybee\] Unrecoverable error after ClosingStreamWorker began stopping \(gateway_closed\), exiting immediately \(NoMemoryError: out of memory\)\n\z/, # rubocop:disable Layout/LineLength
-                              /ERROR -- : \[busybee\] Exiting with status 1: the process must exit immediately \(crash\)\n\z/ # rubocop:disable Layout/LineLength
+                              /ERROR -- : \[busybee\] Exiting process immediately: unrecoverable error while ClosingStreamWorker was stopping \(gateway_closed\) \(NoMemoryError: out of memory\)\n\z/, # rubocop:disable Layout/LineLength
+                              /ERROR -- : \[busybee\] Exiting process immediately due to crash\n\z/
                             ])
   end
 

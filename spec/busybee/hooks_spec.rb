@@ -195,7 +195,7 @@ RSpec.describe Busybee::Hooks do
 
         lines = capture_busybee_log { described_class.run(:after_perform, job, safe: true) }
         expect(lines).to contain_exactly(
-          %r{\AERROR \[busybee\] Error in hooks \(ignored\), at .+/hooks_spec\.rb:\d+:in .+ \(RuntimeError: boom\)\z}
+          %r{\AERROR \[busybee\] Ignoring error raised by a hook, at .+/hooks_spec\.rb:\d+:in .+ \(RuntimeError: boom\)\z} # rubocop:disable Layout/LineLength
         )
       end
 
@@ -390,7 +390,7 @@ RSpec.describe Busybee::Hooks do
 
       lines = capture_busybee_log { described_class.run_chain(:around_perform, job) { "core" } }
       expect(lines).to contain_exactly(
-        %r{\AWARN \[busybee\] Around-hook returned without yielding; forcing continuation \(at .+/hooks_spec\.rb:\d+\)\z} # rubocop:disable Layout/LineLength
+        %r{\AWARN \[busybee\] Forcing continuation past an around-hook that returned without yielding \(at .+/hooks_spec\.rb:\d+\)\z} # rubocop:disable Layout/LineLength
       )
     end
 
@@ -453,7 +453,7 @@ RSpec.describe Busybee::Hooks do
 
         lines = capture_busybee_log { described_class.run_chain(:around_perform, job, safe: true) { "core" } }
         expect(lines).to contain_exactly(
-          %r{\AERROR \[busybee\] Error in hooks \(ignored\), at .+/hooks_spec\.rb:\d+:in .+ \(RuntimeError: broken\)\z}
+          %r{\AERROR \[busybee\] Ignoring error raised by a hook, at .+/hooks_spec\.rb:\d+:in .+ \(RuntimeError: broken\)\z} # rubocop:disable Layout/LineLength
         )
       end
 
@@ -468,7 +468,7 @@ RSpec.describe Busybee::Hooks do
             described_class.run_chain(:around_perform, job, safe: true) { raise "core boom" }
           end.to raise_error(RuntimeError, "core boom")
         end
-        expect(lines.grep(/Error in hooks/)).to be_empty
+        expect(lines.grep(/Ignoring error raised by a hook/)).to be_empty
       end
 
       it "always propagates Shutdown" do
@@ -504,7 +504,7 @@ RSpec.describe Busybee::Hooks do
         Busybee.around_perform { |_job, _perform| } # rubocop:disable Lint/EmptyBlock
 
         lines = capture_busybee_log { described_class.run_chain(:around_perform, job, safe: true) { "core" } }
-        expect(lines).to contain_exactly(/\AWARN \[busybee\] Around-hook returned without yielding; forcing/)
+        expect(lines).to contain_exactly(/\AWARN \[busybee\] Forcing continuation past an around-hook that returned/)
       end
 
       it "does not double-run the core when a forced continuation raises" do

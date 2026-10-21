@@ -80,11 +80,13 @@ module Busybee
       # The process may be out of memory, so an unrecoverable error's line takes
       # no status snapshot.
       def log_post_stop_error(error)
-        stopping = "after #{logged_worker_name} began stopping (#{@stop_reason.get})"
+        reason = @stop_reason.get
         if recoverable?(error)
-          Logging.warn("Error #{stopping}, finishing the stop", worker_status, error: error)
+          Logging.warn("Finishing #{logged_worker_name}'s stop (#{reason}) despite an error",
+                       worker_status, error: error)
         else
-          Logging.error("Unrecoverable error #{stopping}, exiting immediately", error: error)
+          Logging.error("Exiting process immediately: unrecoverable error while #{logged_worker_name} " \
+                        "was stopping (#{reason})", error: error)
         end
       end
 

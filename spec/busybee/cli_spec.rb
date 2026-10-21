@@ -397,7 +397,7 @@ RSpec.describe Busybee::CLI do
         Busybee.instance_variable_set(:@shutdown_wait_timeout, 3000) # restored by the file's around
         lines = capture_busybee_log { described_class.new(["-c", config_with(8000)]) }
 
-        expect(lines).to include("INFO [busybee] YAML shutdown_wait_timeout overriding configured value: " \
+        expect(lines).to include("INFO [busybee] Overriding configured value with YAML shutdown_wait_timeout: " \
                                  "3000 \u2192 \"8000\"")
       end
 
@@ -411,14 +411,14 @@ RSpec.describe Busybee::CLI do
         Busybee.log_format = :text
         lines = capture_busybee_log { described_class.new(["-l", "json", "TestCLIWorker"]) }
 
-        expect(lines).to include("INFO [busybee] --log-format overriding configured value: :text \u2192 :json")
+        expect(lines).to include("INFO [busybee] Overriding configured value with --log-format: :text \u2192 :json")
       end
 
       it "does not log when no prior value was configured" do
         Busybee.instance_variable_set(:@worker_name, nil)
         lines = capture_busybee_log { described_class.new(["-n", "my-worker", "TestCLIWorker"]) }
 
-        expect(lines.grep(/overriding/)).to be_empty
+        expect(lines.grep(/Overriding/)).to be_empty
       end
     end
   end
@@ -669,7 +669,7 @@ RSpec.describe Busybee::CLI do
 
         lines = capture_busybee_log { expect { cli.run }.to raise_error(SystemExit) }
 
-        expect(lines.last).to eq("ERROR [busybee] Exiting with status 1: the process must exit immediately (crash)")
+        expect(lines.last).to eq("ERROR [busybee] Exiting process immediately due to crash")
       end
 
       it "still exits 1 when saying why fails" do
@@ -680,7 +680,7 @@ RSpec.describe Busybee::CLI do
         end
 
         expect { expect { cli.run }.to raise_error(SystemExit) { |exit| expect(exit.status).to eq(1) } }.
-          to output(/failed to log \(IOError: closed stream\): Exiting with status 1/).to_stderr
+          to output(/Failed to log \(IOError: closed stream\): Exiting process immediately/).to_stderr
       ensure
         Busybee.logger = nil
       end

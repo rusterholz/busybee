@@ -50,7 +50,7 @@ module Busybee
       end
       return unless exit_immediately?
 
-      Logging.error("Exiting with status 1: the process must exit immediately (#{exit_immediately_reason})")
+      Logging.error("Exiting process immediately due to #{exit_immediately_reason}")
       exit(1)
     end
 
@@ -214,7 +214,7 @@ module Busybee
 
       # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
       existing = Busybee.instance_variable_get(:"@#{field}")
-      Logging.info("#{source} overriding configured value: #{existing.inspect} → #{cli_value.inspect}") if existing
+      Logging.info("Overriding configured value with #{source}: #{existing.inspect} → #{cli_value.inspect}") if existing
       Busybee.public_send(:"#{field}=", cli_value)
     end
   end

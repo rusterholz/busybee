@@ -731,8 +731,7 @@ RSpec.describe Busybee::Runner::Streaming do
 
         lines = capture_busybee_log { runner.kill! }
 
-        expect(lines).to eq(["WARN [busybee] kill! discarded 2 activated job(s) still buffered by " \
-                             "(anonymous worker); the engine re-yields them when their activation times out"])
+        expect(lines).to eq(["WARN [busybee] Discarding 2 buffered job(s) on kill! of (anonymous worker)"])
       end
 
       it "says nothing when there was nothing in hand to discard" do

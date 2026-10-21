@@ -58,8 +58,7 @@ module Busybee
         discarded = @buffered_job_count.value
         return unless discarded.positive?
 
-        Logging.warn("kill! discarded #{discarded} activated job(s) still buffered by #{logged_worker_name}; " \
-                     "the engine re-yields them when their activation times out", worker_status)
+        Logging.warn("Discarding #{discarded} buffered job(s) on kill! of #{logged_worker_name}", worker_status)
       end
 
       # Fills Runner#run!'s loop: open the job stream and process jobs (via the

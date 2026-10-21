@@ -124,8 +124,8 @@ RSpec.describe Busybee::Runner::Multi do
           it "logs an info message" do
             lines = capture_busybee_log { described_class.new(worker_classes, client: client) }
 
-            expect(lines).to eq(["INFO [busybee] Process #{Process.pid} will run 2 workers with a database " \
-                                 "connection pool size of 5."])
+            expect(lines).to eq(["INFO [busybee] Running 2 workers in process #{Process.pid} with a database " \
+                                 "connection pool of 5"])
           end
         end
       end
@@ -235,7 +235,8 @@ RSpec.describe Busybee::Runner::Multi do
 
         lines = capture_busybee_log { expect { multi.run! }.to raise_error(StandardError) }
 
-        expect(lines).to include("ERROR [busybee] Error in runner for TestMultiWorker2 (StandardError: kaboom)")
+        expect(lines).to include("ERROR [busybee] Stopping all workers after TestMultiWorker2 failed " \
+                                 "(StandardError: kaboom)")
       end
     end
 

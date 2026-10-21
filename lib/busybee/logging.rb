@@ -73,7 +73,7 @@ module Busybee
       # The alarm first: raising it allocates nothing, the notice may not survive.
       def failed_to_log(error, message)
         exit_immediately!(reason: :crash) unless recoverable?(error)
-        $stderr.write("#{PREFIX} failed to log (#{error.class}: #{error.message}): #{message}\n")
+        $stderr.write("#{PREFIX} Failed to log (#{error.class}: #{error.message}): #{message}\n")
         nil
       rescue Exception # rubocop:disable Lint/RescueException
         nil
