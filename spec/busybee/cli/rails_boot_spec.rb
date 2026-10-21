@@ -83,6 +83,13 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
     expect(result.stderr).not_to include("WorkerNotFound")
   end
 
+  it "lets config/environment.rb exit as it chooses, untouched" do
+    result = run_in_app("exit 3\n")
+
+    expect(result.status&.exitstatus).to eq(3), describe_exit(result)
+    expect(messages(result.stdout)).to eq([])
+  end
+
   it "exits 1 when a gem config/environment.rb requires is missing" do
     result = run_in_app(rails_app(before_app: "require 'busybee_spec_missing_gem'"))
 
