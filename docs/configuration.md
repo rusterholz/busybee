@@ -168,6 +168,8 @@ Controls log message formatting. Every line Busybee writes honors it, and every 
 {"retries":3,"deadline":"2026-10-20T12:40:00.000Z","job_type":"ship_order","bpmn_process_id":"order_fulfillment","element_id":"ship","job_key":2251799813685292,"process_instance_key":2251799813685281,"worker_class":"ShipOrderWorker","status":"ready","error_class":"Busybee::GRPC::Error","error_message":"GRPC call failed (connection lost)","execution_started_at":"2026-10-20T04:37:58.836Z","perform_started_at":"2026-10-20T04:37:58.836Z","perform_finished_at":"2026-10-20T04:37:58.836Z","error_location":".../busybee/grpc/error.rb:27:in `wrap'","message":"[busybee] Failed to complete ship_order job #2251799813685292, will time out and retry (Busybee::GRPC::Error: GRPC call failed (connection lost))","level":"warn","time":"2026-10-20T04:37:58.836Z"}
 ```
 
+Besides warnings and errors, Busybee logs ordinary conditions at `info` (each worker's start and stop, and each job's completion, failure, BPMN error and handback) and each job's activation at `debug`. Set your logger's level to `warn` to quiet them.
+
 Logging doesn't interrupt your workers: if your logger fails to write a line, Busybee carries on and prints `[busybee] Failed to log (<error>): <message>` to stderr instead, unless the failure is one the process can't recover from, such as running out of memory, which shuts the process down like any such failure would.
 
 ```ruby

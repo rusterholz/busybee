@@ -1030,12 +1030,15 @@ RSpec.describe Busybee::Worker do
 
         lines = capture_busybee_log { performing_worker.perform_job(job) }
 
-        expect(lines).to eq(["INFO [busybee] Skipping perform for process_order job #123456, " \
+        expect(lines).to eq(["INFO [busybee] Completed process_order job #123456",
+                             "INFO [busybee] Skipping perform for process_order job #123456, " \
                              "already resolved by a hook"])
       end
 
       it "does not report a skipped perform when perform actually ran" do
-        expect(capture_busybee_log { performing_worker.perform_job(job) }).to be_empty
+        lines = capture_busybee_log { performing_worker.perform_job(job) }
+
+        expect(lines).to eq(["INFO [busybee] Completed process_order job #123456"])
       end
 
       it "clears flag on rescue entry so autofail works after hook error" do
@@ -1175,7 +1178,8 @@ RSpec.describe Busybee::Worker do
         lines = capture_busybee_log { worker.perform_job(job) }
 
         expect(lines).to eq(["WARN [busybee] Discarding variables passed to complete! on process_order job #123456, " \
-                             "result already captured from perform's return value"])
+                             "result already captured from perform's return value",
+                             "INFO [busybee] Completed process_order job #123456"])
       end
 
       # The sanctioned shape: resolve, then yield anyway. The gate skips the
@@ -1441,7 +1445,7 @@ RSpec.describe Busybee::Worker do
 
         expect(job.status).to eq(:complete)
         expect(client).not_to have_received(:fail_job)
-        expect(lines).to contain_exactly(
+        expect(lines.grep(/\AWARN/)).to contain_exactly(
           /\AWARN \[busybee\] Ignoring error from process_order job #123456, already complete, at .*worker_spec\.rb:\d+:in .* \(RuntimeError: hook boom\)\z/ # rubocop:disable Layout/LineLength
         )
       end
@@ -1562,7 +1566,7 @@ RSpec.describe Busybee::Worker do
         end)
 
         lines = capture_busybee_log { worker.perform_job(job) }
-        expect(lines).to contain_exactly(
+        expect(lines.grep(/\AWARN/)).to contain_exactly(
           %r{\AWARN \[busybee\] Ignoring error from process_order job #123456, already complete, at .+/worker_spec\.rb:\d+:in .+ \(RuntimeError: post-complete error\)\z} # rubocop:disable Layout/LineLength
         )
       end

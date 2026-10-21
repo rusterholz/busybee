@@ -136,6 +136,7 @@ module Busybee
       resolution.set_result(vars)
       correlated { @client.complete_job(key, vars: resolution.result || {}) }.tap do
         resolve!(:complete)
+        log_resolution("Completed")
       end
     end
 
@@ -161,6 +162,7 @@ module Busybee
       correlated { @client.fail_job(key, message, retries: new_retries, backoff: backoff) }.tap do
         @retries_override = new_retries
         resolve!(:failed)
+        log_failure(message_or_exception, new_retries)
       end
     end
 
@@ -179,6 +181,7 @@ module Busybee
 
       correlated { @client.throw_bpmn_error(key, code, message: message) }.tap do
         resolve!(:error)
+        log_resolution("Threw BPMN error #{code} on", (message unless message.empty?))
       end
     end
 
@@ -229,6 +232,19 @@ module Busybee
 
     # The job's own engine calls carry it on any thread, an async worker's included.
     def correlated(&) = Client::Call.with_job(self, &)
+
+    # "<verb> <type> job #<key>", then the detail, if any, after a colon.
+    def log_resolution(verb, detail = nil, tail: "")
+      Logging.info("#{verb} #{type} job ##{key}#{tail}#{": #{detail}" if detail}", self)
+    end
+
+    # error: takes only an Exception, so a plain message rides in the text.
+    def log_failure(message_or_exception, retries)
+      tail = ", #{retries} retries left"
+      return log_resolution("Failed", message_or_exception, tail: tail) unless message_or_exception.is_a?(Exception)
+
+      Logging.info("Failed #{type} job ##{key}#{tail}", self, error: message_or_exception)
+    end
 
     # The result axis is set-once, so a complete! after perform's return value
     # was captured sends that value and drops these vars: say so, not silently.

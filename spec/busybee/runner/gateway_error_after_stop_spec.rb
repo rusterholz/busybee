@@ -68,7 +68,7 @@ RSpec.describe "a gateway error after a stop", :gateway do # rubocop:disable RSp
       lines = capture_busybee_log { run_to_completion }
       stopper.join(5)
 
-      expect(lines).to contain_exactly(
+      expect(lines.grep(/\A(WARN|ERROR)/)).to contain_exactly(
         /\AWARN \[busybee\] Finishing \(anonymous worker\)'s stop \(sigterm\) despite an error \(Busybee::GRPC::Error: [^()]*\(the gateway gave up\)\)\z/ # rubocop:disable Layout/LineLength
       )
     end

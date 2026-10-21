@@ -118,6 +118,8 @@ module Busybee
 
       @worker_timestamps.stamp!(:started_at)
       Hooks.run(:on_worker_started, worker_status, safe: true)
+      Logging.info("Started #{logged_worker_name} (#{[worker_mode, "job type #{logged_job_type}"].compact.join(', ')})",
+                   lifecycle_carrier)
       true
     end
 
@@ -140,6 +142,11 @@ module Busybee
 
     def worker_mode = @runtime_config&.worker_mode
     def logged_worker_name = @worker_class&.name || "(anonymous worker)"
+    def logged_job_type = @worker_class&.configuration&.job_type
+
+    # A status snapshot for a lifecycle line, unless there is no worker to describe
+    # or the process may be out of memory.
+    def lifecycle_carrier = (worker_status unless @worker_class.nil? || exit_immediately?)
 
     # The fetch/process loop, filling run!'s body between T0 and the ensure.
     def run_loop = raise(NotImplementedError)
@@ -172,6 +179,8 @@ module Busybee
     # The wire call; a failure it can recover from is the handback's error to report.
     def hand_back(job)
       with_fresh_worker_status(job) { return_job_unworked(job) }
+      Logging.info("Handed back #{job.type} job ##{job.key}, #{logged_worker_name} shutting down " \
+                   "(#{@stop_reason.get})", job)
       nil
     rescue *RECOVERABLE_ERRORS => e
       Logging.warn("Failed to hand #{job.type} job ##{job.key} back during shutdown", job, error: e)
@@ -196,6 +205,7 @@ module Busybee
     def activate_job(job, source:, buffered: false)
       job.timestamps.stamp!(:activated_at)
       job.set_context(source: source, buffered: buffered, worker_class: @worker_class)
+      Logging.debug("Activated #{job.type} job ##{job.key}", job)
       with_fresh_worker_status(job) { Hooks.run(:on_job_activated, job, safe: true) } unless exit_immediately?
     rescue Busybee::Worker::Shutdown => e
       declare_unhealthy(e)

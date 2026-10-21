@@ -88,8 +88,9 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
       it "says so in the log, once, naming the worker and the stop's reason" do
         lines = capture_busybee_log { run_to_completion }
 
-        expect(lines).to eq(["ERROR [busybee] Exiting process immediately: unrecoverable error while " \
-                             "(anonymous worker) was stopping (signal) (#{unrecoverable}: out of room)"])
+        expect(lines.grep(/\A(WARN|ERROR)/)).
+          to eq(["ERROR [busybee] Exiting process immediately: unrecoverable error while " \
+                 "(anonymous worker) was stopping (signal) (#{unrecoverable}: out of room)"])
       end
     end
   end
@@ -106,8 +107,9 @@ RSpec.describe "an error ending the streaming pump after the stop", :gateway do 
     it "says so in the log, once" do
       lines = capture_busybee_log { run_to_completion }
 
-      expect(lines).to eq(["WARN [busybee] Finishing (anonymous worker)'s stop (signal) despite an error " \
-                           "(Busybee::Worker::Shutdown: replica lag too high)"])
+      expect(lines.grep(/\A(WARN|ERROR)/)).
+        to eq(["WARN [busybee] Finishing (anonymous worker)'s stop (signal) despite an error " \
+               "(Busybee::Worker::Shutdown: replica lag too high)"])
     end
 
     # The write checks whether another thread can take the lock meanwhile.

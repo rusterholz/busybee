@@ -28,7 +28,8 @@ RSpec.describe "a stop announcement failing unrecoverably after the stream faile
     lines = capture_busybee_log { raised = run_to_completion }
 
     expect(raised).to be_a(Busybee::GRPC::Error)
-    expect(lines).to eq(["ERROR [busybee] Exiting process immediately: unrecoverable error while " \
-                         "FailingStreamWorker was stopping (gateway_error) (NoMemoryError: failed to allocate memory)"])
+    expect(lines.grep(/\A(WARN|ERROR)/)).
+      to eq(["ERROR [busybee] Exiting process immediately: unrecoverable error while " \
+             "FailingStreamWorker was stopping (gateway_error) (NoMemoryError: failed to allocate memory)"])
   end
 end

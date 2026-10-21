@@ -522,8 +522,9 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
       lines = capture_busybee_log { runner.run! }
 
-      expect(lines).to eq(["ERROR [busybee] Failed to drain LifecycleWorker during shutdown, continuing " \
-                           "teardown (RuntimeError: the broker went away mid-drain)"])
+      expect(lines.grep(/\AERROR/)).
+        to eq(["ERROR [busybee] Failed to drain LifecycleWorker during shutdown, continuing " \
+               "teardown (RuntimeError: the broker went away mid-drain)"])
     end
 
     it "hands the drain's failure to the shutdown observer" do

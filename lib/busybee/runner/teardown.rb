@@ -24,6 +24,7 @@ module Busybee
         drain_within_teardown
         error ||= Busybee::Worker::Shutdown.unwrap(post_stop_error) || @teardown_error.get
         fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
+        Logging.info("Stopped #{logged_worker_name} (#{@stop_reason.get})", lifecycle_carrier)
       ensure
         @running.make_false
       end

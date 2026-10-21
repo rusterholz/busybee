@@ -7,10 +7,10 @@ require "stringio"
 # busybee's log lines, read back through a real Logger. Text lines come back as
 # "LEVEL message" strings, JSON lines parsed.
 module LogCapture
-  def capture_busybee_log(format: :text)
+  def capture_busybee_log(format: :text, level: Logger::DEBUG)
     output = StringIO.new
     saved = [Busybee.logger, Busybee.instance_variable_get(:@log_format)]
-    Busybee.logger = capturing_logger(output, format)
+    Busybee.logger = capturing_logger(output, format).tap { |logger| logger.level = level }
     Busybee.log_format = format
     yield
     read_captured(output, format)

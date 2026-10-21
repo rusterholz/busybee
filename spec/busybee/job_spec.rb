@@ -1238,6 +1238,47 @@ RSpec.describe Busybee::Job do
     end
   end
 
+  # Each resolution says so once the engine has taken it, through a real client.
+  describe "resolution log lines" do
+    let(:resolvable) { build_test_job(type: "ship_order", key: 7, retries: 3) }
+
+    it "logs a completion" do
+      expect(capture_busybee_log { resolvable.complete! }).to eq(["INFO [busybee] Completed ship_order job #7"])
+    end
+
+    it "logs a failure with its retries left and the exception" do
+      lines = capture_busybee_log { resolvable.fail!(IOError.new("closed stream")) }
+
+      expect(lines).to eq(["INFO [busybee] Failed ship_order job #7, 2 retries left (IOError: closed stream)"])
+    end
+
+    it "logs a failure with its retries left and the message" do
+      lines = capture_busybee_log { resolvable.fail!("out of stock", retries: 0) }
+
+      expect(lines).to eq(["INFO [busybee] Failed ship_order job #7, 0 retries left: out of stock"])
+    end
+
+    it "logs a BPMN error with its code and message" do
+      lines = capture_busybee_log { resolvable.throw_bpmn_error!(:out_of_stock, "none left") }
+
+      expect(lines).to eq(["INFO [busybee] Threw BPMN error OUT_OF_STOCK on ship_order job #7: none left"])
+    end
+
+    it "logs a BPMN error with no message by its code alone" do
+      lines = capture_busybee_log { resolvable.throw_bpmn_error!(:out_of_stock) }
+
+      expect(lines).to eq(["INFO [busybee] Threw BPMN error OUT_OF_STOCK on ship_order job #7"])
+    end
+
+    it "logs nothing when the engine refuses the resolution" do
+      refused = build_test_job(key: 8, client: build_test_client.on(:complete_job) { raise GRPC::Unavailable, "gone" })
+
+      lines = capture_busybee_log { expect { refused.complete! }.to raise_error(Busybee::GRPC::Error) }
+
+      expect(lines).to be_empty
+    end
+  end
+
   describe "#logging_context" do
     it "is a strict superset of context_tags" do
       job.set_context(source: :stream, buffered: true)

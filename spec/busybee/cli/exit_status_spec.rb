@@ -33,7 +33,7 @@ RSpec.describe "the CLI's exit status" do # rubocop:disable RSpec/DescribeClass
 
   it "logs the stream reader's error, then why it exits 1" do
     output, = run_fixture("failing_stop_requested")
-    logged = output.lines.grep(/\[busybee\]/)
+    logged = output.lines.grep(/ERROR -- : \[busybee\]/)
 
     expect(logged).to match([
                               /ERROR -- : \[busybee\] Exiting process immediately: unrecoverable error while ClosingStreamWorker was stopping \(gateway_closed\) \(NoMemoryError: out of memory\)\n\z/, # rubocop:disable Layout/LineLength
@@ -41,9 +41,13 @@ RSpec.describe "the CLI's exit status" do # rubocop:disable RSpec/DescribeClass
                             ])
   end
 
-  it "logs nothing of its own after a clean stop" do
+  it "logs only the worker's start and stop after a clean stop" do
     output, = run_fixture
 
-    expect(output.lines.grep(/\[busybee\]/)).to be_empty
+    logged = output.lines.grep(/\[busybee\]/).map { |line| line[/\[busybee\] .*/] }
+
+    expect(logged).to eq(["[busybee] Started ClosingStreamWorker (streaming, job type closing_stream)",
+                          "[busybee] Stopping ClosingStreamWorker (gateway_closed)",
+                          "[busybee] Stopped ClosingStreamWorker (gateway_closed)"])
   end
 end

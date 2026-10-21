@@ -731,11 +731,12 @@ RSpec.describe Busybee::Runner::Streaming do
 
         lines = capture_busybee_log { runner.kill! }
 
-        expect(lines).to eq(["WARN [busybee] Discarding 2 buffered job(s) on kill! of (anonymous worker)"])
+        expect(lines.grep(/\AWARN/)).
+          to eq(["WARN [busybee] Discarding 2 buffered job(s) on kill! of (anonymous worker)"])
       end
 
       it "says nothing when there was nothing in hand to discard" do
-        expect(capture_busybee_log { runner.kill! }).to be_empty
+        expect(capture_busybee_log { runner.kill! }.grep(/Discarding/)).to be_empty
       end
 
       # The buffer clear is what cuts a graceful drain short: the drain's next

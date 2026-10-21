@@ -26,6 +26,7 @@ module Busybee
 
         begin
           @worker_timestamps.stamp!(:stop_requested_at)
+          Logging.info("Stopping #{logged_worker_name} (#{@stop_reason.get})", lifecycle_carrier)
           cease_intake
           t1 = :on_worker_stop_requested
           contain_teardown_hooks(t1) { Hooks.run(t1, worker_status, safe: true) }
