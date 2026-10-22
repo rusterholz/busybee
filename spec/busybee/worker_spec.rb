@@ -1537,7 +1537,7 @@ RSpec.describe Busybee::Worker do
       end
 
       it "sees an error raised after a manual complete! on the job, which stays complete" do
-        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, warn: nil))
+        allow(Busybee).to receive(:logger).and_return(instance_double(Logger, info: nil, warn: nil))
         received_error = nil
         Busybee.after_perform { |j| received_error = j.error }
         worker = stub_const("CompleteThenRaiseWorker", Class.new(Busybee::Worker) do
@@ -1548,7 +1548,7 @@ RSpec.describe Busybee::Worker do
           end
         end)
 
-        worker.perform_job(job)
+        expect { worker.perform_job(job) }.not_to output.to_stderr
 
         expect(job).to be_complete
         expect(received_error).to be_a(RuntimeError).and(have_attributes(message: "after the fact"))
