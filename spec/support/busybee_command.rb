@@ -77,8 +77,10 @@ module BusybeeCommand
 end
 
 # A gateway that streams the worker one job, then holds the stream open until
-# the job completes, so the run ends with the stream's close. Held until the
-# completion is on stdout instead, the run shows what it logged while running.
+# the job's completion is on stdout, so the run ends with the stream's close,
+# after the completion. A run that logs nothing (logged: false) closes it when
+# the completion reaches the gateway instead, where the stop can overtake the
+# completion's response.
 RSpec.shared_context "with a busybee command on a one-job stream" do
   include BusybeeCommand
 
@@ -100,10 +102,10 @@ RSpec.shared_context "with a busybee command on a one-job stream" do
 
   let(:close_on_complete) { Concurrent::AtomicBoolean.new(true) }
 
-  def run_to_completion(*args, chdir:, env: {}, hold_until_logged: false)
-    close_on_complete.value = !hold_until_logged
+  def run_to_completion(*args, chdir:, env: {}, logged: true)
+    close_on_complete.value = !logged
     run_busybee("-a", gateway.address, *args, "LoggingStreamWorker", chdir: chdir, env: env, seconds: 15) do |stdout|
-      hold_until_logged && stdout.include?("Completed").tap { |completed| stream_gate << :close if completed }
+      logged && stdout.include?("Completed").tap { |completed| stream_gate << :close if completed }
     end
   end
 

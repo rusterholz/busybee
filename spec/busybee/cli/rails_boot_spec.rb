@@ -28,12 +28,12 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
     RUBY
   end
 
-  def run_in_app(environment, *args)
+  def run_in_app(environment, *args, logged: true)
     if environment
       FileUtils.mkdir_p(File.join(app_dir, "config"))
       File.write(File.join(app_dir, "config/environment.rb"), environment)
     end
-    run_to_completion(*args, chdir: app_dir)
+    run_to_completion(*args, chdir: app_dir, logged: logged)
   end
 
   def failure_line(error)
@@ -121,7 +121,7 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
   end
 
   it "stays silent when the app set its logger to nil before Rails booted" do
-    result = run_in_app(rails_app(before_app: "Busybee.logger = nil"))
+    result = run_in_app(rails_app(before_app: "Busybee.logger = nil"), logged: false)
 
     expect(result.status&.exitstatus).to eq(0), describe_exit(result)
     expect(messages(result.stdout)).to eq([])

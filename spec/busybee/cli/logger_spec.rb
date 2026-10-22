@@ -6,15 +6,12 @@ require "tmpdir"
 
 # The busybee command's own logger, run as a real process outside Rails.
 RSpec.describe "the busybee command's logger", :busybee_command, :gateway do # rubocop:disable RSpec/DescribeClass
-  def run_outside_rails(*args, env: {}, hold_until_logged: false)
-    Dir.mktmpdir do |dir|
-      run_to_completion(*args, chdir: dir, env: { "BUSYBEE_SKIP_RAILS" => "1" }.merge(env),
-                               hold_until_logged: hold_until_logged)
-    end
+  def run_outside_rails(*args, env: {})
+    Dir.mktmpdir { |dir| run_to_completion(*args, chdir: dir, env: { "BUSYBEE_SKIP_RAILS" => "1" }.merge(env)) }
   end
 
   it "logs each line to stdout at info as it happens" do
-    result = run_outside_rails(hold_until_logged: true)
+    result = run_outside_rails
 
     expect(result.status&.exitstatus).to eq(0), describe_exit(result)
     expect(result.stdout_while_running).to match(/INFO -- : \[busybee\] Completed logging_stream job ##{job.key}\n/)
