@@ -33,7 +33,7 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
       FileUtils.mkdir_p(File.join(app_dir, "config"))
       File.write(File.join(app_dir, "config/environment.rb"), environment)
     end
-    run_to_completion(*args, chdir: app_dir, logged: logged)
+    run_command_to_completion(*args, chdir: app_dir, logged: logged)
   end
 
   def failure_line(error)

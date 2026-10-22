@@ -102,7 +102,7 @@ RSpec.shared_context "with a busybee command on a one-job stream" do
 
   let(:close_on_complete) { Concurrent::AtomicBoolean.new(true) }
 
-  def run_to_completion(*args, chdir:, env: {}, logged: true)
+  def run_command_to_completion(*args, chdir:, env: {}, logged: true)
     close_on_complete.value = !logged
     run_busybee("-a", gateway.address, *args, "LoggingStreamWorker", chdir: chdir, env: env, seconds: 15) do |stdout|
       logged && stdout.include?("Completed").tap { |completed| stream_gate << :close if completed }

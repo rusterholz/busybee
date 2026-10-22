@@ -12,7 +12,7 @@ RSpec.describe "the busybee command with a broken rails", :busybee_command, :gat
 
   it "exits 1, logging why on stdout and the backtrace on stderr" do
     File.write(File.join(dir, "rails.rb"), "require 'busybee_spec_missing_rails_dependency'\n")
-    result = run_to_completion(chdir: dir, env: BusybeeCommand::WITHOUT_RAILS.merge("RUBYLIB" => dir))
+    result = run_command_to_completion(chdir: dir, env: BusybeeCommand::WITHOUT_RAILS.merge("RUBYLIB" => dir))
 
     expect(result.status&.exitstatus).to eq(1), describe_exit(result)
     expect(messages(result.stdout)).to eq(
