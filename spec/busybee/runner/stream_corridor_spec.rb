@@ -41,6 +41,33 @@ RSpec.describe "a job stream failing under a streaming runner", :gateway do # ru
     end
   end
 
+  # The client keeps the stopped gateway's address, so the stream opens onto a
+  # closed loopback port: the failure arrives at the open, not at a read.
+  context "when the gateway can't be reached as the stream opens" do
+    before do
+      gateway.client
+      gateway.stop
+    end
+
+    { streaming: Busybee::Runner::Streaming, hybrid: Busybee::Runner::Hybrid }.each do |mode, runner_class|
+      context "with a #{mode} runner" do
+        let(:runner) { runner_class.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
+
+        it "ends the worker on that status, wrapped, as a gateway event" do
+          raised = nil
+          status = shutdown_status_from { raised = run_to_completion }
+
+          aggregate_failures do
+            expect(raised).to be_a(Busybee::GRPC::Error)
+            expect(raised.grpc_status).to eq(:unavailable)
+            expect(status.reason).to eq(:gateway_error)
+            expect(status.error).to be(raised)
+          end
+        end
+      end
+    end
+  end
+
   context "when the stream simply ends" do
     before { gateway.on(:stream_activated_jobs) { [] } }
 

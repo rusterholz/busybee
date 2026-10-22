@@ -578,6 +578,15 @@ RSpec.describe Busybee::Client::JobOperations do
       allow(operation).to receive(:execute).and_return(enumerator)
     end
 
+    it "raises a Busybee::GRPC::Error, status intact, when the gateway can't be reached", :gateway do
+      unreachable = gateway.client
+      gateway.stop
+
+      expect { unreachable.open_job_stream("job") }.to raise_error(Busybee::GRPC::Error, /failed to open/) do |error|
+        expect(error.grpc_status).to eq(:unavailable)
+      end
+    end
+
     it "returns a Busybee::JobStream instance" do
       allow(stub).to receive(:stream_activated_jobs).and_return(operation)
 
