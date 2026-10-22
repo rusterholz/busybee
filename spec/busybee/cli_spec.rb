@@ -367,6 +367,14 @@ RSpec.describe Busybee::CLI do
         described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
         expect(Busybee.cluster_address).to eq("zeebe.example.com:26500")
       end
+
+      it "connects to the --cluster-address given over CLUSTER_ADDRESS" do
+        stub_credential_env_vars
+        allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return("env:26500")
+
+        cli = described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
+        expect(cli.send(:client).cluster_address).to eq("zeebe.example.com:26500")
+      end
     end
 
     context "with shutdown_wait_timeout spelled as a String in YAML" do

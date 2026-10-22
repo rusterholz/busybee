@@ -124,6 +124,8 @@
 
 - **Empty Environment Variables Count as Unset** – `CLUSTER_ADDRESS=` pointed every client at an empty address, `BUSYBEE_WORKER_NAME=` named the worker `""`, an empty `BUSYBEE_CREDENTIAL_TYPE` logged an invalid-type warning, an empty credential variable such as `CAMUNDA_CLIENT_ID` stopped autodetection with `CannotDetectCredentials`, and `BUSYBEE_SKIP_RAILS=` skipped loading Rails. Each now behaves as though the variable were never set
 
+- **A Configured Cluster Address Wins Over `CLUSTER_ADDRESS`** – when a client built without arguments read your credentials from the environment, it took `CLUSTER_ADDRESS` along with them and connected there, even where `Busybee.cluster_address` or `busybee --cluster-address` pointed somewhere else. An app with `CLUSTER_ADDRESS` set and a different configured address now connects to the configured one, as the docs describe. With only one of the two set, nothing changes: `CLUSTER_ADDRESS` still applies when no address is configured, and `localhost:26500` when neither is
+
 ### Breaking Changes:
 
 - **Testing helpers go only where you ask for them** – `require "busybee/testing"` used to put every helper and matcher into every example in your suite, so a name like `execute_worker`, `build_test_job`, `complete_job` or `grpc_client` could silently shadow a helper of your own, or be shadowed by it, depending on include order. Now they reach only the specs that opt in: tag a group or example `:busybee`, or tag a whole directory from your spec helper with `define_derived_metadata`. To keep them everywhere, as before, add one line: `RSpec.configure { |config| config.include Busybee::Testing::Helpers }`
