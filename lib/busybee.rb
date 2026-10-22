@@ -28,8 +28,7 @@ module Busybee
   class << self
     include Configure
 
-    attr_accessor :logger
-    attr_reader :credentials
+    attr_reader :credentials, :logger
 
     delegate(*Hooks::HOOK_TYPES, to: :"Busybee::Hooks") # string-eval'd: a bare :Hooks won't resolve here
 

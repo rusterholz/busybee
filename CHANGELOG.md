@@ -109,6 +109,16 @@
   - Earlier versions of these docs set `config.x.busybee` in `config/initializers/busybee.rb`. That never took effect: the Railtie reads it before your initializers run. Set it in `config/application.rb` or `config/environments/*.rb`, or call `Busybee.configure` from the initializer instead
 
 - **Rails Config No Longer Overwrites Settings It Doesn't Mention** – whenever `config.x.busybee` set anything at all, the Railtie reset `cluster_address` and `worker_name` to their defaults unless it set them too, wiping a value you had configured on Busybee directly before Rails booted, and it always replaced a logger configured that way with `Rails.logger`. It now applies only the settings you give it, and a blank value (an empty environment variable, say) doesn't count as given
+  - A logger you set before Rails boots stays, `nil` included, so `Busybee.logger = nil` in `config/application.rb` now keeps Busybee quiet instead of handing it `Rails.logger`
+
+- **A Rails App That Fails to Boot Stops the `busybee` Command** – when your app raised while loading, `busybee` logged the error where it usually went unseen, carried on without your app, and then failed with a `WorkerNotFound` for a worker that was never the problem. It now logs why and exits with status 1, with the error's backtrace on stderr, so your orchestrator sees a failed boot and you see the line that failed. A syntax error or a missing gem in your app stops it the same way:
+
+  ```
+  [busybee] Failed to load Rails environment in /srv/app; set BUSYBEE_SKIP_RAILS=1 if this is not a Rails app (KeyError: key not found: "DATABASE_URL")
+  ```
+
+  - A bundle without Rails still skips it silently. A bundle with Rails, run where there's no `config/environment.rb`, logs `Continuing without Rails, no config/environment.rb in <dir>` and carries on. Set `BUSYBEE_SKIP_RAILS=1` to skip Rails altogether
+  - `busybee` now logs to stdout from its first line, at `info`, until your app's logger takes over, so what Busybee says while your app boots is no longer lost. Outside Rails, with no logger of your own, its lines go there for the whole run; a logger you set yourself, `nil` included, stays in charge. `--log-format` applies from the first line, and under `json` each line is one bare JSON object, ready for your log pipeline
 
 - **Empty Environment Variables Count as Unset** – `CLUSTER_ADDRESS=` pointed every client at an empty address, `BUSYBEE_WORKER_NAME=` named the worker `""`, an empty `BUSYBEE_CREDENTIAL_TYPE` logged an invalid-type warning, an empty credential variable such as `CAMUNDA_CLIENT_ID` stopped autodetection with `CannotDetectCredentials`, and `BUSYBEE_SKIP_RAILS=` skipped loading Rails. Each now behaves as though the variable were never set
 

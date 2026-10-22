@@ -204,6 +204,44 @@ RSpec.describe Busybee do
       described_class.logger = nil
       expect(described_class.logger).to be_nil
     end
+
+    context "with a default logger" do
+      let(:default_logger) { Logger.new(StringIO.new) }
+
+      before { described_class.instance_variable_set(:@logger_configured, nil) }
+
+      it "uses the default while no logger is configured" do
+        described_class.instance_variable_set(:@logger, nil)
+        described_class._default_logger = default_logger
+        expect(described_class.logger).to be(default_logger)
+      end
+
+      it "lets a later default replace an earlier one" do
+        described_class._default_logger = Logger.new(StringIO.new)
+        described_class._default_logger = default_logger
+        expect(described_class.logger).to be(default_logger)
+      end
+
+      it "keeps a configured logger over the default" do
+        configured = Logger.new(StringIO.new)
+        described_class.logger = configured
+        described_class._default_logger = default_logger
+        expect(described_class.logger).to be(configured)
+      end
+
+      it "keeps a configured nil over the default" do
+        described_class.logger = nil
+        described_class._default_logger = default_logger
+        expect(described_class.logger).to be_nil
+      end
+
+      it "gives way to a logger configured after it" do
+        configured = Logger.new(StringIO.new)
+        described_class._default_logger = default_logger
+        described_class.logger = configured
+        expect(described_class.logger).to be(configured)
+      end
+    end
   end
 
   describe ".grpc_retry_enabled" do

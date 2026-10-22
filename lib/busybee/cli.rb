@@ -3,8 +3,10 @@
 require "active_support/core_ext/module/delegation"
 require "active_support/core_ext/object/blank"
 require "concurrent"
+require "logger"
 require "optparse"
 
+require "busybee/cli/log_formatter"
 require "busybee/client"
 require "busybee/configure"
 require "busybee/durations"
@@ -21,6 +23,7 @@ module Busybee
 
     # Signals we trap to begin a graceful stop.
     STOP_SIGNALS = %w[INT QUIT TERM].freeze
+    RAILS_ENVIRONMENT = "./config/environment"
 
     delegate :exit_immediately?, :exit_immediately_reason, to: :"Busybee::Runner", private: true
 
@@ -31,6 +34,7 @@ module Busybee
       @worker_class_names = []
       @parsed_options = {}
       parse_options!(args.dup)
+      install_logger!
       load_environment!
       extract_workers_from_yaml! if @parsed_options[:config_file]
       load_workers!
@@ -56,9 +60,7 @@ module Busybee
 
     private
 
-    def client
-      @client ||= Busybee::Client.new
-    end
+    def client = @client ||= Busybee::Client.new
 
     # The first signal stops; any later one forces. The CLI's own set-once flag
     # decides, since a runner's stopping? can lag a stop still under way.
@@ -95,37 +97,50 @@ module Busybee
       @signal_threads&.each { |thread| thread.join(wait) }
     end
 
-    def load_environment!
-      return if ENV["BUSYBEE_SKIP_RAILS"].present?
+    # The process's logger until one is configured, Rails' included, in the
+    # --log-format given from its first line. stdout is synced, or a pipe holds
+    # every line until exit.
+    def install_logger!
+      $stdout.sync = true
+      Busybee._default_logger = Logger.new($stdout, level: :info, formatter: LogFormatter.new)
+      format = @parsed_options[:log_format]
+      apply_global_setting!(:log_format, format) if Configure::VALID_LOG_FORMATS.include?(format)
+    end
 
-      begin
-        require "rails"
-      rescue LoadError
-        return
-      end
+    # Rails loads unless BUSYBEE_SKIP_RAILS is set or the bundle has no rails,
+    # and the CLI carries on where there's no config/environment.rb to load. Any
+    # other failure is logged, then raised, for Ruby's own report and exit 1.
+    def load_environment!
+      return if ENV["BUSYBEE_SKIP_RAILS"].present? || !rails_present?
 
       require "busybee/railtie" # defensive: busybee.rb's :before_configuration hook registers it already
-      require "./config/environment"
-    rescue StandardError, LoadError => e
-      Logging.error("Failed to load Rails environment; set BUSYBEE_SKIP_RAILS=1 to skip Rails loading", error: e)
+      require RAILS_ENVIRONMENT
+    rescue StandardError, ScriptError => e
+      return Logging.info("Continuing without Rails, no config/environment.rb in #{Dir.pwd}") if missing?(e)
+
+      Logging.error("Failed to load Rails environment in #{Dir.pwd}; set BUSYBEE_SKIP_RAILS=1 if this is not a " \
+                    "Rails app", error: e)
+      raise
     end
+
+    def rails_present?
+      require "rails"
+      true
+    rescue LoadError => e
+      missing?(e, "rails") ? false : raise
+    end
+
+    def missing?(error, feature = RAILS_ENVIRONMENT) = error.is_a?(LoadError) && error.path == feature
 
     def extract_workers_from_yaml!
       @yaml_kwargs = RuntimeConfig.parse_yaml(@parsed_options[:config_file])
       @worker_class_names = (@yaml_kwargs[:workers] || {}).keys
     end
 
+    # The process-wide flags given win over the YAML's kwargs.
     def build_config!
-      if @yaml_kwargs
-        kwargs = @yaml_kwargs.dup
-        # Merge CLI process-wide flags into YAML-sourced kwargs
-        %i[log_format worker_name cluster_address].each do |field|
-          kwargs[field] = @parsed_options[field] if @parsed_options[field]
-        end
-        @runtime_config = RuntimeConfig.new(**kwargs)
-      else
-        @runtime_config = RuntimeConfig.new(**@parsed_options)
-      end
+      flags = @parsed_options.slice(*RuntimeConfig::PROCESS_WIDE_KEYS).compact
+      @runtime_config = RuntimeConfig.new(**(@yaml_kwargs ? @yaml_kwargs.merge(flags) : @parsed_options))
     end
 
     def load_workers!
@@ -208,14 +223,16 @@ module Busybee
       apply_global_setting!(:shutdown_wait_timeout, source: "YAML shutdown_wait_timeout")
     end
 
-    def apply_global_setting!(field, source: "--#{field.to_s.tr('_', '-')}")
-      cli_value = @runtime_config.public_send(field)
+    def apply_global_setting!(field, cli_value = @runtime_config.public_send(field),
+                              source: "--#{field.to_s.tr('_', '-')}")
       return unless cli_value
 
       # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
       existing = Busybee.instance_variable_get(:"@#{field}")
-      Logging.info("Overriding configured value with #{source}: #{existing.inspect} → #{cli_value.inspect}") if existing
-      Busybee.public_send(:"#{field}=", cli_value)
+      Busybee.public_send(:"#{field}=", cli_value) # first, so the line below follows a --log-format it overrides
+      return unless existing && existing != cli_value
+
+      Logging.info("Overriding configured value with #{source}: #{existing.inspect} → #{cli_value.inspect}")
     end
   end
 end

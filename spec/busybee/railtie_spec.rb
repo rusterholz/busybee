@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require "logger"
 require "pathname"
+require "stringio"
 require "tempfile"
 
 require "busybee/credentials/insecure"
@@ -14,7 +16,7 @@ def busybee_config_ivars
     @default_message_ttl @default_buffer @default_buffer_throttle
     @grpc_retry_delay @grpc_retry_enabled @grpc_retry_errors
     @grpc_keepalive_interval @grpc_keepalive_timeout
-    @log_format @logger @default_backpressure_delay @shutdown_wait_timeout
+    @log_format @logger @logger_configured @default_backpressure_delay @shutdown_wait_timeout
     @worker_name @backpressure_statuses
   ]
 end
@@ -103,6 +105,16 @@ RSpec.describe "Busybee::Railtie", :rails do
         custom_logger = Logger.new(StringIO.new)
         configure_and_initialize(preset: { logger: custom_logger })
         expect(Busybee.logger).to eq(custom_logger)
+      end
+
+      it "keeps logging off when nil was configured before boot" do
+        configure_and_initialize(preset: { logger: nil })
+        expect(Busybee.logger).to be_nil
+      end
+
+      it "replaces a default logger with Rails.logger" do
+        configure_and_initialize(preset: { _default_logger: Logger.new(StringIO.new) })
+        expect(Busybee.logger).to eq(rails_logger)
       end
     end
 

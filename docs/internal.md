@@ -11,6 +11,8 @@ exe/
 └── busybee                  # CLI executable (thin shim)
 lib/busybee/
 ├── cli.rb                   # CLI entry point: arg parsing, env loading, signal handling, runner wiring
+├── cli/
+│   └── log_formatter.rb     # The CLI's own logger's formatter: stdlib line, or bare JSON
 ├── configure.rb             # Validated setters for gem-level config (included into Busybee singleton)
 ├── client.rb                # Client class - main user-facing API
 ├── client/                  # Client operation modules + the call seam
@@ -143,11 +145,13 @@ Gem-level configuration (`Busybee.cluster_address`, `Busybee.default_message_ttl
 
 All setters validate their inputs and raise `ArgumentError` with messages naming the config attribute and expected types. Validation patterns: duration (Integer, Duration, numeric String), boolean, string (String/Symbol), buffer throttle (Numeric/boolean/numeric String), worker mode (valid Symbol/String), error class list (Array of Exception subclasses). Numeric-looking Strings from ENV/YAML are coerced; non-integer Numeric durations are coerced to Integer with a logged warning. `nil` always resets to default.
 
-The Railtie passes Rails config values through these setters. It pre-coerces booleans with `!!` (standard Rails practice) but otherwise relies on the setters for validation. Every assignment is guarded on the key being meaningfully present (`present?`, or non-`nil` where `false` is a value: booleans, keepalive, buffer throttle), because a setter treats `nil` as "reset to default" and an unguarded line would wipe a value configured before boot. The logger default fills an empty slot only.
+The Railtie passes Rails config values through these setters. It pre-coerces booleans with `!!` (standard Rails practice) but otherwise relies on the setters for validation. Every assignment is guarded on the key being meaningfully present (`present?`, or non-`nil` where `false` is a value: booleans, keepalive, buffer throttle), because a setter treats `nil` as "reset to default" and an unguarded line would wipe a value configured before boot.
+
+The logger is the exception to "`nil` resets": `Busybee.logger=` records that a logger was configured, `nil` included, and `nil` then means no logging. A default goes in through `_default_logger=` (internal), which sets the logger only while none is configured: the CLI's stdout logger first, then the Railtie's `Rails.logger`, which replaces the CLI's. So a logger the app assigns before boot, `nil` included, stays.
 
 ## Logging Module
 
-`Busybee::Logging` is the only path from busybee to `Busybee.logger`: no other code in `lib/` calls the logger, and no call site writes the `[busybee]` prefix, which `Logging` adds.
+`Busybee::Logging` is the only path from busybee to `Busybee.logger`: no other code in `lib/` calls the logger, and no call site writes the `[busybee]` prefix, which `Logging` adds. With no logger, a line goes nowhere; the CLI and the Railtie each supply a default (see [Gem-Level Configuration](#gem-level-configuration)).
 
 **The call.** `Logging.debug/info/warn/error(message, carrier = nil, error: nil, **context)`. A carrier is anything answering `logging_context`: in practice a `Job`, a `Worker::Status` or a `Client::Call`. `error:` takes an `Exception`. Anything else in either raises an `ArgumentError` inside the call, which is contained and reported like any other failure (below).
 
@@ -439,14 +443,15 @@ Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` — works
 ### Structure
 
 ```
-exe/busybee          # Thin shim: require "busybee" + CLI.main(ARGV)
-lib/busybee/cli.rb   # CLI class: initialize (setup) + run (execution)
+exe/busybee                      # Thin shim: require "busybee" + CLI.main(ARGV)
+lib/busybee/cli.rb               # CLI class: initialize (setup) + run (execution)
+lib/busybee/cli/log_formatter.rb # CLI::LogFormatter, its default logger's formatter
 ```
 
 ### Lifecycle
 
 1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
-2. **`initialize(args)`** — all setup: parse options (`OptionParser`), load Rails environment, extract workers from YAML if `--config`, load worker classes, build `RuntimeConfig`, apply process-wide config.
+2. **`initialize(args)`** -- all setup: parse options (`OptionParser`), install the default logger and apply `--log-format`, load Rails environment, extract workers from YAML if `--config`, load worker classes, build `RuntimeConfig`, apply process-wide config.
 3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks), joins the signal threads within `shutdown_wait_timeout`, then exits 1 if the fire alarm is up (see [Signal Handling](#signal-handling)).
 
 ### CLI Flags
@@ -463,7 +468,9 @@ The CLI exposes 5 flags, besides `--version` and `--help`. Worker-scoped tuning 
 
 **YAML config flow:** When `--config` is provided, the CLI calls `RuntimeConfig.parse_yaml` to get YAML-sourced kwargs, extracts worker class names from the `workers:` keys, merges CLI process-wide flags into the kwargs, and constructs RuntimeConfig from the result.
 
-**Process-wide application:** `apply_global_config!` applies process-wide flags, and the YAML's top-level `shutdown_wait_timeout`, to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding values already set by the Railtie, naming the flag or the YAML key.
+**Process-wide application:** `apply_global_config!` applies process-wide flags, and the YAML's top-level `shutdown_wait_timeout`, to gem config (e.g., `Busybee.log_format = :json`). Detects and logs when overriding a different value already set by the Railtie, naming the flag or the YAML key. A valid `--log-format` is also applied before Rails loads, so the lines written during the boot follow it.
+
+**Default logger:** before loading Rails, the CLI sets `$stdout.sync` and installs `Logger.new($stdout)` at `info` through `Busybee._default_logger=`. Its `CLI::LogFormatter` reads `Busybee.log_format` per line: stdlib's line under `:text`, the bare JSON object under `:json`, so a format set after it was installed (by `--log-format`, or by the app as it boots) still applies. It stands only where no logger was configured, and the Railtie's `Rails.logger` default replaces it (see [Gem-Level Configuration](#gem-level-configuration)). Outside Rails it stays the process's logger.
 
 ### Signal Handling
 
@@ -477,7 +484,13 @@ The CLI tells them apart by its own set-once `@signalled` flag, created in `init
 
 ### Rails Environment Loading
 
-Attempts `require "rails"` — if `LoadError`, Rails is not available and loading is skipped silently. If Rails is present, requires `busybee/railtie` as a backstop (the `:before_configuration` hook should already have registered it), then loads `./config/environment` to boot the app. If environment loading fails, logs an error with the exception class and message, and suggests `BUSYBEE_SKIP_RAILS=1` as an escape hatch. The env var check happens before any `require` calls (chicken-and-egg: gem config isn't available yet since it's set by the Railtie).
+`load_environment!` tells three cases apart, by the `path` a `LoadError` names where one is involved, never by its message:
+
+1. **`BUSYBEE_SKIP_RAILS` set, or no rails in the bundle** (`require "rails"` raises a `LoadError` whose `path` is `"rails"`): skips Rails silently. The env var is checked before any `require`, since gem config, which the Railtie sets, doesn't exist yet.
+2. **Rails loads, but there's no `./config/environment`** (a `LoadError` whose `path` is `"./config/environment"`): logs `Continuing without Rails, no config/environment.rb in <dir>` at `info` and carries on.
+3. **Anything else**, from `require "rails"` or the app's boot (a `StandardError`, or a `ScriptError` such as a `SyntaxError` or a `LoadError` naming another path): logs `Failed to load Rails environment in <dir>; set BUSYBEE_SKIP_RAILS=1 if this is not a Rails app` at `error`, with the error, then re-raises it. Ruby reports it with its backtrace on stderr, and the process exits 1. The line goes wherever `Busybee.logger` points by then: once the Railtie has run, `Rails.logger`, or nowhere under `config.x.busybee.logger = false`. Ruby's report reaches stderr regardless.
+
+`SignalException`, `SystemExit` and `NoMemoryError` aren't rescued. Before loading the app, it requires `busybee/railtie` as a backstop (the `:before_configuration` hook should already have registered it).
 
 ### Error Classes
 

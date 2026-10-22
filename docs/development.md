@@ -124,6 +124,12 @@ The signal file pattern allows the test process to detect when the subprocess ha
 RUN_INTEGRATION_TESTS=1 bundle exec rspec spec/integration/cli/cli_spec.rb
 ```
 
+### CLI Process Specs
+
+The specs in `spec/busybee/cli/` run the CLI as a real process with no Zeebe: the `:gateway` gateway above stands in for the broker. Tag a group `:busybee_command` (with `:gateway`) and `run_busybee` / `run_command_to_completion` (`spec/support/busybee_command.rb`) run `exe/busybee` in a directory you choose, with `spec/fixtures/cli_logging_worker.rb` required ahead of it, and hand back its stdout, stderr and exit status. `run_command_to_completion` streams the worker one job and closes the stream once the job's `Completed` line is on stdout, so the worker's stop always follows it; a run that logs nothing passes `logged: false`, and the stream closes when the completion reaches the gateway.
+
+`spec/busybee/cli/logger_spec.rb` covers the CLI's own logger outside Rails; its rails-free case runs the command under the repository's own `Gemfile`, which has no rails, so it means the same in every appraisal row. `spec/busybee/cli/broken_rails_spec.rb` runs under that `Gemfile` too, with a stand-in `rails.rb` on `RUBYLIB` that fails to load. `spec/busybee/cli/rails_boot_spec.rb` is tagged `:rails` and boots a bare app written into a temp directory, so it runs only under a Rails appraisal.
+
 ### Multi-Tenancy Testing
 
 Busybee supports testing in both single-tenant and multi-tenant modes. Integration tests are automatically filtered based on the `MULTITENANCY_ENABLED` environment variable:
