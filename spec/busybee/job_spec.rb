@@ -1258,6 +1258,12 @@ RSpec.describe Busybee::Job do
       expect(lines).to eq(["INFO [busybee] Failed ship_order job #7, 0 retries left: out of stock"])
     end
 
+    it "logs a failure with its last retry left in the singular" do
+      lines = capture_busybee_log { resolvable.fail!("out of stock", retries: 1) }
+
+      expect(lines).to eq(["INFO [busybee] Failed ship_order job #7, 1 retry left: out of stock"])
+    end
+
     it "logs a BPMN error with its code and message" do
       lines = capture_busybee_log { resolvable.throw_bpmn_error!(:out_of_stock, "none left") }
 
