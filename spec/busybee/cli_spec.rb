@@ -39,6 +39,7 @@ RSpec.describe Busybee::CLI do
     saved = %i[@log_format @worker_name @cluster_address @shutdown_wait_timeout @cli_sources].to_h do |ivar|
       [ivar, Busybee.instance_variable_get(ivar)]
     end
+    saved.each_key { |ivar| Busybee.instance_variable_set(ivar, nil) } # a flag fills only an unset slot
     example.run
   ensure
     saved.each { |ivar, val| Busybee.instance_variable_set(ivar, val) }

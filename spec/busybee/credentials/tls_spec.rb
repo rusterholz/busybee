@@ -69,13 +69,13 @@ RSpec.describe Busybee::Credentials::TLS do
     end
 
     it "falls back to Busybee.cluster_address when not provided" do
-      original = Busybee.cluster_address
+      original = Busybee.instance_variable_get(:@cluster_address) # the reader falls back to ENV
       Busybee.cluster_address = "default.zeebe.io:443"
 
       creds = described_class.new
       expect(creds.cluster_address).to eq("default.zeebe.io:443")
     ensure
-      Busybee.cluster_address = original
+      Busybee.instance_variable_set(:@cluster_address, original)
     end
   end
 
