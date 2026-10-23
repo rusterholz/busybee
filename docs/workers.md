@@ -868,9 +868,10 @@ The first non-nil value wins. This means `0` and `false` are valid explicit valu
 
 The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
-**Process-wide settings** (like `--log-format`, `--worker-name` and `--cluster-address`) follow a simpler chain: your Rails app's configuration, then the CLI flag, then any environment variable and the default. The CLI applies its flags before your app loads, so a value from `config.x.busybee` or from `Busybee.configure` in an initializer replaces the flag's, and busybee logs a line when `config.x.busybee` does:
+**Process-wide settings** (like `--log-format`, `--worker-name` and `--cluster-address`) follow a simpler chain: your app's configuration, then the CLI flag, then any environment variable and the default. A value your app set before the CLI ran stands over the flag. In a Rails app, which the CLI loads after applying its flags, a value from `config.x.busybee` or from `Busybee.configure` in an initializer replaces the flag's. busybee logs a line when a flag gives way to a value set before it, or to `config.x.busybee`:
 
 ```
+[busybee] Overriding --cluster-address "zeebe-a:26500" with Busybee.cluster_address "zeebe-b:26500"
 [busybee] Overriding --cluster-address "zeebe-a:26500" with config.x.busybee.cluster_address "zeebe-b:26500"
 ```
 

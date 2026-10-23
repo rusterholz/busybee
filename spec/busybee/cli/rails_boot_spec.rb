@@ -2,7 +2,6 @@
 
 require "fileutils"
 require "json"
-require "socket"
 require "tmpdir"
 
 # The busybee command loading a Rails app, run as a real process in a directory
@@ -119,14 +118,6 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
     expect(result.status&.exitstatus).to eq(1), describe_exit(result)
     expect(messages(result.stdout)).to eq([])
     expect(result.stderr).to include("late initializer failed (RuntimeError)")
-  end
-
-  # An address nothing listens on: bound, then let go.
-  def closed_address
-    server = TCPServer.new("127.0.0.1", 0)
-    "127.0.0.1:#{server.addr[1]}"
-  ensure
-    server&.close
   end
 
   it "addresses the credentials config.x.busybee builds with --cluster-address, over CLUSTER_ADDRESS" do

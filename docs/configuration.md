@@ -520,7 +520,7 @@ When resolving configuration values, Busybee follows this precedence (highest to
 
 1. **Explicit parameter** - Values passed directly to methods (e.g., `Client.new(cluster_address: "...")`)
 2. **Module or Rails configuration, whichever is written last** - Values set via `Busybee.configure` or direct assignment, and values from `config.x.busybee.*` (when Rails is present). The Railtie applies the keys you set while Rails boots, before `config/initializers/*` run, so `Busybee.configure` in an initializer overrides Rails configuration. A value set before boot (in `spec_helper.rb`, say) holds unless `config.x.busybee` sets the same key
-3. **`busybee` command flags** - `--cluster-address`, `--worker-name` and `--log-format`, and the top-level `shutdown_wait_timeout` in its YAML. The command applies them before your Rails app loads, so module or Rails configuration for the same setting replaces them, and busybee logs when `config.x.busybee` does
+3. **`busybee` command flags** - `--cluster-address`, `--worker-name` and `--log-format`, and the top-level `shutdown_wait_timeout` in its YAML. A flag counts only where your app sets nothing: a value your app configured before the command ran stands, and in a Rails app, which the command loads after applying its flags, Rails configuration or an initializer replaces the flag's. busybee logs when a flag gives way to a value set before it or in `config.x.busybee`
 4. **Environment variables** - Fallback for supported options
 5. **Defaults** - Built-in default values
 

@@ -392,12 +392,20 @@ RSpec.describe Busybee::CLI do
         expect(Busybee.worker_name).to eq("app-worker")
       end
 
-      it "never logs an override of its own, even of a value configured ahead of it" do
-        Busybee.worker_name = "configured-worker"
-        lines = capture_busybee_log { described_class.new(["-l", "json", "-n", "flag-worker", "TestCLIWorker"]) }
+      it "keeps a value the app configured ahead of it, saying so" do
+        Busybee.worker_name = "app-worker"
+        lines = capture_busybee_log { described_class.new(["-n", "flag-worker", "TestCLIWorker"]) }
+
+        expect(Busybee.worker_name).to eq("app-worker")
+        expect(lines.grep(/Overriding/)).to eq(['INFO [busybee] Overriding --worker-name "flag-worker" with ' \
+                                                'Busybee.worker_name "app-worker"'])
+      end
+
+      it "gives way silently to the same value configured ahead of it" do
+        Busybee.worker_name = "same-worker"
+        lines = capture_busybee_log { described_class.new(["-n", "same-worker", "TestCLIWorker"]) }
 
         expect(lines.grep(/Overriding/)).to be_empty
-        expect(Busybee.worker_name).to eq("flag-worker")
       end
     end
 
@@ -434,6 +442,15 @@ RSpec.describe Busybee::CLI do
 
         expect(seen).to eq(8000)
         expect(Busybee.shutdown_wait_timeout).to eq(3000)
+      end
+
+      it "keeps a value the app configured ahead of it, naming YAML as what gave way" do
+        Busybee.shutdown_wait_timeout = 3000
+        lines = capture_busybee_log { described_class.new(["-c", config_with(8000)]) }
+
+        expect(Busybee.shutdown_wait_timeout).to eq(3000)
+        expect(lines.grep(/Overriding/)).to eq(["INFO [busybee] Overriding YAML shutdown_wait_timeout 8000 with " \
+                                                "Busybee.shutdown_wait_timeout 3000"])
       end
 
       it "does not override gem config when flags are not provided" do

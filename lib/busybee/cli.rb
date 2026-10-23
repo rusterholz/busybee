@@ -212,8 +212,9 @@ module Busybee
 
     # Applies process-wide flags, and YAML's top-level shutdown_wait_timeout, to
     # gem-level config before the app loads, as Sidekiq does, so the app's own
-    # configuration has the last word; --log-format first, so it governs every
-    # line from the first. Only sets values explicitly provided.
+    # configuration has the last word: a value it set ahead of the command stands,
+    # and Rails config or an initializer replaces the flag's after. --log-format
+    # first, so it governs every line from the first.
     def apply_global_config!
       apply_global_setting!(:log_format)
       apply_global_setting!(:worker_name)
@@ -221,9 +222,15 @@ module Busybee
       apply_global_setting!(:shutdown_wait_timeout, source: "YAML shutdown_wait_timeout")
     end
 
+    # Logged after the app's value is back, so a --log-format giving way logs in the one kept.
     def apply_global_setting!(field, source: "--#{field.to_s.tr('_', '-')}")
       value = @runtime_config.public_send(field)
-      Busybee._apply_from_cli(field, value, source) if value
+      return unless value
+
+      configured, flagged = Busybee._apply_from_cli(field, value, source)
+      return if configured.nil? || configured == flagged
+
+      Logging.info("Overriding #{source} #{flagged.inspect} with Busybee.#{field} #{configured.inspect}")
     end
   end
 end

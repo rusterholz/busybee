@@ -203,11 +203,17 @@ module Busybee
 
     # --- Values from the busybee command ---
 
-    # Applies a value from the busybee command's flags or YAML, remembering its source.
+    # Applies a value from the busybee command's flags or YAML to a field nothing has set,
+    # remembering its source; a value already there stands. The setter still runs, so
+    # the flag is validated either way. Returns [value already there, flag's value as set].
     # @api private
     def _apply_from_cli(field, value, source)
+      slot = :"@#{field}"
+      configured = instance_variable_get(slot)
       public_send(:"#{field}=", value)
-      (@cli_sources ||= {})[field] = [source, instance_variable_get(:"@#{field}")]
+      flagged = instance_variable_get(slot)
+      configured.nil? ? (@cli_sources ||= {})[field] = [source, flagged] : instance_variable_set(slot, configured)
+      [configured, flagged]
     end
 
     # [source, value] while field still holds what the busybee command applied, else nil.

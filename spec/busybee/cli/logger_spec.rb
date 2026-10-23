@@ -28,11 +28,25 @@ RSpec.describe "the busybee command's logger", :busybee_command, :gateway do # r
     expect(lines.map { |line| line.values_at("level", "message") }).to eq(worker_messages.map { |line| ["info", line] })
   end
 
-  it "logs in the --log-format given over a format configured ahead of it, without a word about it" do
+  it "keeps a format the app configured ahead of it over --log-format, saying so in that format" do
     result = run_outside_rails("-l", "json", env: { "BUSYBEE_SPEC_LOG_FORMAT" => "text" })
 
-    lines = result.stdout.lines.map { |line| JSON.parse(line) }
-    expect(lines.map { |line| line["message"] }).to eq(worker_messages)
+    expect(result.status&.exitstatus).to eq(0), describe_exit(result)
+    expect(result.stdout.lines).to all(match(/\AI, \[\S+ #\d+\]  INFO -- : \[busybee\] /))
+    expect(messages(result.stdout)).to eq(
+      ["[busybee] Overriding --log-format :json with Busybee.log_format :text", *worker_messages]
+    )
+  end
+
+  it "keeps an address the app configured ahead of it over --cluster-address, saying so" do
+    flagged = closed_address
+    result = run_outside_rails("-a", flagged, env: { "BUSYBEE_SPEC_CLUSTER_ADDRESS" => gateway.address })
+
+    expect(result.status&.exitstatus).to eq(0), describe_exit(result)
+    expect(messages(result.stdout)).to eq(
+      ["[busybee] Overriding --cluster-address #{flagged.inspect} with Busybee.cluster_address " \
+       "#{gateway.address.inspect}", *worker_messages]
+    )
   end
 
   it "carries on without a word about Rails when the bundle has no rails" do
