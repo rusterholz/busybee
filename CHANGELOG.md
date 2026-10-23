@@ -25,7 +25,7 @@
 
 - **Configurable Backpressure Statuses** – `Busybee.backpressure_statuses` (default `[:resource_exhausted]`) names the gRPC status codes that mean the gateway is applying backpressure. Polling and hybrid workers back off (sleeping `backpressure_delay`) and retry the fetch when a job-activation call resolves to one of these — matched by status code, independent of which gRPC exception class the gateway raised. In a Rails app, set it as `config.x.busybee.backpressure_statuses`
 
-- **Tunable Shutdown Waits** – `shutdown_wait_timeout` (default 5 seconds) sets how long a stopping worker waits for its other threads to finish their part of the shutdown before carrying on without them, such as a streaming worker's stream reader still inside a slow hook. One value serves the whole process: set `Busybee.shutdown_wait_timeout` (`config.x.busybee.shutdown_wait_timeout` in Rails), or a top-level `shutdown_wait_timeout` in YAML
+- **Tunable Shutdown Waits** – `shutdown_wait_timeout` (default 5 seconds) sets how long a stopping worker waits for its other threads to finish their part of the shutdown before carrying on without them, such as a streaming worker's stream reader still inside a slow hook. One value serves the whole process: set `Busybee.shutdown_wait_timeout` (`config.x.busybee.shutdown_wait_timeout` in Rails), or a top-level `shutdown_wait_timeout` in YAML, which, like the `busybee` command's flags, gives way to a value your app sets itself
 
 - **gRPC Channel Keepalive** – HTTP/2 keepalive pings now guard the streaming worker's deadline-less job-activation stream, so a silently-dropped transport (a suspended host, a connection a proxy reset) surfaces as a recoverable gateway error instead of leaving the worker blocked forever. Tunable via `Busybee.grpc_keepalive_interval` (default 45s) and `Busybee.grpc_keepalive_timeout` (default 20s); set both to `false` to disable. Enabled by default
 
@@ -125,7 +125,7 @@
 - **Empty Environment Variables Count as Unset** – `CLUSTER_ADDRESS=` pointed every client at an empty address, `BUSYBEE_WORKER_NAME=` named the worker `""`, an empty `BUSYBEE_CREDENTIAL_TYPE` logged an invalid-type warning, an empty credential variable such as `CAMUNDA_CLIENT_ID` stopped autodetection with `CannotDetectCredentials`, and `BUSYBEE_SKIP_RAILS=` skipped loading Rails. Each now behaves as though the variable were never set
 
 - **A Configured Cluster Address Wins Over `CLUSTER_ADDRESS`** – with `CLUSTER_ADDRESS` set, a client built without arguments connected there even where `Busybee.cluster_address` or `busybee --cluster-address` pointed somewhere else. An app with `CLUSTER_ADDRESS` set and a different configured address now connects to the configured one, as the docs describe. With only one of the two set, nothing changes: `CLUSTER_ADDRESS` still applies when no address is configured, and `localhost:26500` when neither is
-  - In a Rails app whose `config.x.busybee` sets credential keys but no address, `busybee --cluster-address` now reaches the credentials built from them. It used to be ignored there, even as busybee logged that it had applied it
+  - In a Rails app whose `config.x.busybee` sets credential keys but no address, `busybee --cluster-address` now reaches the credentials built from them. It used to be ignored there
 
 ### Breaking Changes:
 
