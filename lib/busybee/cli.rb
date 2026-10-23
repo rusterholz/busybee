@@ -38,6 +38,7 @@ module Busybee
       build_config!
       apply_global_config!
       LoadEnvironment.call
+      report_credentials_address!
       load_workers!
     end
 
@@ -205,6 +206,17 @@ module Busybee
       return if configured.nil? || Busybee._same_setting?(configured, flagged)
 
       Logging.info("Overriding #{source} #{flagged.inspect} with Busybee.#{field} #{configured.inspect}")
+    end
+
+    # An assigned credentials object keeps its own address, so a --cluster-address
+    # still in place gives way to it too; one the Railtie built carries the flag's.
+    def report_credentials_address!
+      source, flagged = Busybee._cli_source(:cluster_address)
+      address = Busybee.credentials&.cluster_address
+      return if source.nil? || address.nil? || address == flagged
+
+      Logging.info("Overriding #{source} #{flagged.inspect} " \
+                   "with Busybee.credentials.cluster_address #{address.inspect}")
     end
   end
 end

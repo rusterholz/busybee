@@ -49,6 +49,17 @@ RSpec.describe "the busybee command's logger", :busybee_command, :gateway do # r
     )
   end
 
+  it "keeps the address of credentials the app assigned ahead of it over --cluster-address, saying so" do
+    flagged = closed_address
+    result = run_outside_rails("-a", flagged, env: { "BUSYBEE_SPEC_CREDENTIALS_ADDRESS" => gateway.address })
+
+    expect(result.status&.exitstatus).to eq(0), describe_exit(result)
+    expect(messages(result.stdout)).to eq(
+      ["[busybee] Overriding --cluster-address #{flagged.inspect} with Busybee.credentials.cluster_address " \
+       "#{gateway.address.inspect}", *worker_messages]
+    )
+  end
+
   it "carries on without a word about Rails when the bundle has no rails" do
     result = Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "config"))

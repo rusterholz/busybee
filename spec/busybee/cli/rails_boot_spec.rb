@@ -143,6 +143,20 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
     )
   end
 
+  it "gives --cluster-address way to the address of a credentials object config.x.busybee assigns, saying so" do
+    flagged = closed_address
+    app = rails_app(before_app: 'require "busybee/credentials/insecure"', config: <<~RUBY)
+      config.x.busybee.credentials = Busybee::Credentials::Insecure.new(cluster_address: #{gateway.address.inspect})
+    RUBY
+    result = run_in_app(app, "-a", flagged)
+
+    expect(result.status&.exitstatus).to eq(0), describe_exit(result)
+    expect(messages(result.stdout)).to eq(
+      ["[busybee] Overriding --cluster-address #{flagged.inspect} with Busybee.credentials.cluster_address " \
+       "#{gateway.address.inspect}", *worker_messages]
+    )
+  end
+
   it "stays silent when the app set its logger to nil before Rails booted" do
     result = run_in_app(rails_app(before_app: "Busybee.logger = nil"), logged: false)
 

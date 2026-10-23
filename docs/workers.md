@@ -875,7 +875,7 @@ The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `
 [busybee] Overriding --cluster-address "zeebe-a:26500" with config.x.busybee.cluster_address "zeebe-b:26500"
 ```
 
-`shutdown_wait_timeout` follows the same chain with top-level YAML in the flag's place. One exception: when `config.x.busybee` sets any credential key, Busybee builds its credentials while Rails boots, and an initializer that changes the cluster address afterward doesn't reach them; assign `Busybee.credentials` instead. Process-wide settings don't participate in per-worker overrides because they always apply to the entire process.
+A `Busybee.credentials` object your app assigns keeps its own address over `--cluster-address`, and busybee logs that too, naming `Busybee.credentials.cluster_address`. `shutdown_wait_timeout` follows the same chain with top-level YAML in the flag's place. One exception: when `config.x.busybee` sets any credential key, Busybee builds its credentials while Rails boots, and an initializer that changes the cluster address afterward doesn't reach them; assign `Busybee.credentials` instead. Process-wide settings don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
 
