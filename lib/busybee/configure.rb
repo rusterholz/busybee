@@ -216,6 +216,15 @@ module Busybee
       [configured, flagged]
     end
 
+    # Whether two values of one setting agree, a duration in whichever unit it came.
+    # Plain == would match 30.seconds to 30 (milliseconds here) and not to 30_000.
+    # @api private
+    def _same_setting?(left, right)
+      return left == right unless left.is_a?(Numeric) && right.is_a?(Numeric)
+
+      Durations.seconds_from(left) == Durations.seconds_from(right)
+    end
+
     # [source, value] while field still holds what the busybee command applied, else nil.
     # @api private
     def _cli_source(field)

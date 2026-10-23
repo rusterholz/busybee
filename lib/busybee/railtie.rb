@@ -77,7 +77,7 @@ module Busybee
       source, replaced = config._cli_source(field)
       config.public_send(:"#{field}=", value)
       applied = config.public_send(field)
-      return if source.nil? || applied == replaced
+      return if source.nil? || config._same_setting?(applied, replaced)
 
       Busybee::Logging.info("Overriding #{source} #{replaced.inspect} " \
                             "with config.x.busybee.#{field} #{applied.inspect}")

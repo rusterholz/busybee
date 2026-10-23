@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
 require "concurrent"
 require "fileutils"
 require "json"
@@ -452,6 +453,13 @@ RSpec.describe Busybee::CLI do
         expect(Busybee.shutdown_wait_timeout).to eq(3000)
         expect(lines.grep(/Overriding/)).to eq(["INFO [busybee] Overriding YAML shutdown_wait_timeout 8000 with " \
                                                 "Busybee.shutdown_wait_timeout 3000"])
+      end
+
+      it "gives way silently to the same duration the app configured in another unit" do
+        Busybee.shutdown_wait_timeout = 8.seconds
+        lines = capture_busybee_log { described_class.new(["-c", config_with(8000)]) }
+
+        expect(lines.grep(/Overriding/)).to be_empty
       end
 
       it "does not override gem config when flags are not provided" do

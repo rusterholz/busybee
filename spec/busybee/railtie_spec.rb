@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
 require "logger"
 require "pathname"
 require "stringio"
@@ -179,6 +180,12 @@ RSpec.describe "Busybee::Railtie", :rails do
       it "gives way silently when config.x.busybee sets the same value" do
         configure_and_initialize(from_cli: { cluster_address: ["cli:4", "--cluster-address"] },
                                  cluster_address: "cli:4")
+        expect(overrides).to be_empty
+      end
+
+      it "gives way silently to the same duration in another unit" do
+        configure_and_initialize(from_cli: { shutdown_wait_timeout: ["30000", "YAML shutdown_wait_timeout"] },
+                                 shutdown_wait_timeout: 30.seconds)
         expect(overrides).to be_empty
       end
 

@@ -228,7 +228,7 @@ module Busybee
       return unless value
 
       configured, flagged = Busybee._apply_from_cli(field, value, source)
-      return if configured.nil? || configured == flagged
+      return if configured.nil? || Busybee._same_setting?(configured, flagged)
 
       Logging.info("Overriding #{source} #{flagged.inspect} with Busybee.#{field} #{configured.inspect}")
     end
