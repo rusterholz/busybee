@@ -249,7 +249,7 @@ You can also configure shutdown errors globally for all workers in your applicat
 
 `shutdown_on` accepts only `StandardError` subclasses. Classes outside that hierarchy (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise an error at class-definition time, because the per-job rescue that consults `shutdown_on` is `StandardError`-scoped — a non-`StandardError` would never reach the check at runtime. Signal-class errors are handled separately via the CLI's signal traps; there's nothing to configure here.
 
-When a shutdown is triggered, the worker process stops requesting new jobs, fails any in-flight jobs (preserving their retry count so they'll be picked up by another worker), and exits. [Worker lifecycle hooks](hooks.md#worker-hooks) observe the whole sequence, with the closing snapshot reporting [`reason: :unhealthy`](hooks.md#stop-reasons).
+When a shutdown is triggered, the job whose `perform` raised the error is reported as failed, spending a retry like any other failure. The worker process then stops requesting new jobs, hands back the jobs it received but hadn't started, with their retry counts untouched, so another worker picks them up, and exits. [Worker lifecycle hooks](hooks.md#worker-hooks) observe the whole sequence, with the closing snapshot reporting [`reason: :unhealthy`](hooks.md#stop-reasons).
 
 #### Direct Job Access
 
@@ -595,6 +595,8 @@ The CLI loads your Rails environment automatically (if present), instantiates th
 
 If you've used [Racecar](https://github.com/zendesk/racecar) to run Kafka consumers, this pattern should be familiar: one executable, one or more handler classes, and a long-running process that connects to the messaging infrastructure and dispatches work.
 
+Running workers in production, under Kubernetes or another orchestrator? [Operating Busybee](operating.md) covers exit statuses, shutdown and grace periods, health checks, and what to check when a worker goes quiet.
+
 ### CLI Reference
 
 ```
@@ -651,6 +653,8 @@ The worker process responds to standard Unix signals:
 | `QUIT` | Same as INT | Same as INT |
 
 During graceful shutdown, any jobs that were received from the workflow engine but not yet started are handed back to the workflow engine unworked, with their retry count preserved, so they'll be picked up by another worker. A streaming or hybrid worker first waits for the thread reading its job stream to finish, for up to `shutdown_wait_timeout` (5 seconds by default). Each handback is a call to the engine with no deadline of its own, so a gateway that is slow to answer lengthens the shutdown; keep [teardown hooks](hooks.md#keep-hook-bodies-fast) light to leave it room. Two cases leave them to come back when their activation times out instead: the forced second-signal shutdown, and any error outside `StandardError` (such as `NoMemoryError`), including one that arrives while the graceful shutdown is under way. An error that arrives once the shutdown is under way, such as the gateway failing a fetch, a worker declared unhealthy, or a failure on a streaming worker's thread reading the job stream, doesn't turn it into a crash: the shutdown finishes as the graceful stop it was, and the error reaches `on_worker_shutdown` (see [Stop Reasons](hooks.md#stop-reasons)). An error outside `StandardError` still leaves jobs to time out, and not only the struck worker's: in a [multi-worker process](#when-one-worker-fails), every worker leaves its jobs to time out.
+
+For how long a stop can take, and how to size your orchestrator's grace period around it, see [Operating Busybee: Shutting Down](operating.md#shutting-down).
 
 ### Worker Modes
 
@@ -754,7 +758,7 @@ When the Zeebe cluster is under heavy load, it may respond to requests with a `R
 backpressure_delay 10_000  # wait 10 seconds on backpressure
 ```
 
-> Backpressure delays are slated to be overhauled in v0.5, and this section is expected to be rewritten at that time.
+> Backpressure handling is slated to be overhauled in a later release, and this section will be rewritten then.
 
 ### Multiple Workers in One Process
 

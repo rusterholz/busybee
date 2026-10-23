@@ -378,7 +378,7 @@ How long a stopping worker waits for its other threads to finish their part of t
 Busybee.shutdown_wait_timeout = 10_000
 ```
 
-See [Workers: Signal Handling](workers.md#signal-handling) for how a worker shuts down.
+See [Workers: Signal Handling](workers.md#signal-handling) for how a worker shuts down, and [Operating Busybee: Sizing the Grace Period](operating.md#sizing-the-grace-period) for how long it can take.
 
 ## Rails Integration
 
