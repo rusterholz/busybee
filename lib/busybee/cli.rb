@@ -111,7 +111,7 @@ module Busybee
 
     # The process-wide flags given win over the YAML's kwargs.
     def build_config!
-      flags = @parsed_options.slice(*RuntimeConfig::PROCESS_WIDE_KEYS).compact
+      flags = @parsed_options.slice(*RuntimeConfig::PROCESS_WIDE_FLAGS).compact
       @runtime_config = RuntimeConfig.new(**(@yaml_kwargs ? @yaml_kwargs.merge(flags) : @parsed_options))
     end
 
@@ -185,27 +185,28 @@ module Busybee
       end
     end
 
-    # Applies process-wide flags, and YAML's top-level shutdown_wait_timeout, to
-    # gem-level config before the app loads, as Sidekiq does, so the app's own
-    # configuration has the last word: a value it set ahead of the command stands,
-    # and Rails config or an initializer replaces the flag's after. --log-format
-    # first, so it governs every line from the first.
+    # Applies process-wide flags and YAML's shutdown_wait_timeout before the app loads,
+    # as Sidekiq does, so the app has the last word: a value it set ahead of the command
+    # stands, and Rails config or an initializer replaces the flag's after.
     def apply_global_config!
-      apply_global_setting!(:log_format)
-      apply_global_setting!(:worker_name)
-      apply_global_setting!(:cluster_address)
-      apply_global_setting!(:shutdown_wait_timeout, source: "YAML shutdown_wait_timeout")
+      RuntimeConfig::PROCESS_WIDE_SETTINGS.each { |field| apply_global_setting!(field) }
     end
 
     # Logged after the app's value is back, so a --log-format giving way logs in the one kept.
-    def apply_global_setting!(field, source: "--#{field.to_s.tr('_', '-')}")
+    def apply_global_setting!(field)
       value = @runtime_config.public_send(field)
       return unless value
 
+      source = setting_source(field)
       configured, flagged = Busybee._apply_from_cli(field, value, source)
       return if configured.nil? || Busybee._same_setting?(configured, flagged)
 
       Logging.info("Overriding #{source} #{flagged.inspect} with Busybee.#{field} #{configured.inspect}")
+    end
+
+    # How a log line names where a process-wide value came from: its flag, or its YAML key.
+    def setting_source(field)
+      RuntimeConfig::PROCESS_WIDE_YAML_KEYS.include?(field) ? "YAML #{field}" : "--#{field.to_s.tr('_', '-')}"
     end
 
     # An assigned credentials object keeps its own address, so a --cluster-address

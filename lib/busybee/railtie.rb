@@ -5,6 +5,8 @@ require "active_support/core_ext/object/blank"
 require "rails"
 require "busybee"
 
+require "busybee/runtime_config"
+
 module Busybee
   # Rails integration for Busybee.
   # Automatically configures Busybee from Rails configuration.
@@ -30,9 +32,6 @@ module Busybee
       token_url audience scope certificate_file
     ].freeze
 
-    # Settings the busybee command may have applied from its flags or YAML before Rails booted.
-    PROCESS_WIDE_SETTINGS = %i[log_format cluster_address worker_name shutdown_wait_timeout].freeze
-
     initializer "busybee.configure" do
       Busybee.configure do |config|
         busybee_conf = Rails.configuration.x.busybee
@@ -48,7 +47,7 @@ module Busybee
 
         next unless busybee_conf.presence
 
-        PROCESS_WIDE_SETTINGS.each do |field|
+        Busybee::RuntimeConfig::PROCESS_WIDE_SETTINGS.each do |field|
           value = busybee_conf.public_send(field)
           Busybee::Railtie.apply_over_cli(config, field, value) if value.present?
         end

@@ -37,9 +37,8 @@ RSpec.describe Busybee::CLI do
 
   # Save/restore gem-level config that apply_global_config! may modify
   around do |example|
-    saved = %i[@log_format @worker_name @cluster_address @shutdown_wait_timeout @cli_sources].to_h do |ivar|
-      [ivar, Busybee.instance_variable_get(ivar)]
-    end
+    ivars = Busybee::RuntimeConfig::PROCESS_WIDE_SETTINGS.map { |field| :"@#{field}" } << :@cli_sources
+    saved = ivars.to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
     saved.each_key { |ivar| Busybee.instance_variable_set(ivar, nil) } # a flag fills only an unset slot
     example.run
   ensure
