@@ -37,7 +37,7 @@ I, [2026-10-22T09:16:20.747377 #21385]  INFO -- : [busybee] Handed back process-
 I, [2026-10-22T09:16:20.747721 #21385]  INFO -- : [busybee] Stopped SlowOrderWorker (sigterm)
 ```
 
-Each job's activation is logged too, at `debug`. To quiet the per-job lines, set your logger's level to `warn`.
+Each job's activation is logged too, at `debug`. The per-job lines share `info` with each worker's `Started`, `Stopping` and `Stopped` lines, so setting your logger's level to `warn` quiets both. To keep the worker lines and drop the per-job ones, log JSON and filter out `info` and `debug` lines carrying a `job_key`, which only lines about a job have.
 
 With `--log-format json`, each line is one JSON object carrying the fields of the job or worker it concerns, so you can filter on `job_key`, `job_type` or `worker_class` instead of parsing messages:
 
@@ -91,12 +91,15 @@ A worker that can't reach the gateway when it starts stops with reason `gateway_
 |--------|------|
 | `0` | A graceful stop on `INT`, `TERM` or `QUIT`, or a worker whose job stream the engine closed cleanly (reason `gateway_closed`) |
 | `1` | A worker stopped on an error: the gateway failed (`gateway_error`), the worker declared itself unhealthy (`unhealthy`), or anything else (`crash`). The error and its backtrace are on stderr |
+| `1` | A graceful stop was under way when `perform` raised an error outside `StandardError`, such as a `NotImplementedError`. The reason stays the signal's, and the error and its backtrace are on stderr |
 | `1` | A second termination signal forced the exit (see [A Forced Stop](#a-forced-stop)) |
 | `1` | A line beginning `Exiting process immediately` was logged: an error the process can't recover from, such as `NoMemoryError`, struck a thread that couldn't raise it |
 | `1` | The command couldn't start: your app failed to boot, a worker class couldn't be found, or the flags or YAML were invalid |
 | `137` | The orchestrator's SIGKILL ended the process (see [Sizing the Grace Period](#sizing-the-grace-period)) |
 
-The reason in the `Stopping` and `Stopped` lines is the same one [`on_worker_shutdown`](hooks.md#stop-reasons) receives, so an alert built on either agrees with the other.
+A clean stream close exits with status 0, so use a restart policy that restarts the process however it exits. Kubernetes' default, `Always`, does; a policy that restarts only on failure leaves that worker down.
+
+Except after a signal busybee doesn't handle (see [Signals](#signals)), the reason in the `Stopping` and `Stopped` lines is the same one [`on_worker_shutdown`](hooks.md#stop-reasons) receives, so an alert built on either agrees with the other.
 
 ## Shutting Down
 
@@ -104,7 +107,7 @@ The reason in the `Stopping` and `Stopped` lines is the same one [`on_worker_shu
 
 `INT`, `TERM` and `QUIT` each begin a graceful stop: the worker stops taking jobs, lets the `perform` in progress finish, hands back every job it received but hadn't started, and exits. Any second one of them forces the exit. [Workers: Signal Handling](workers.md#signal-handling) describes both.
 
-Busybee handles no other signal. A `HUP`, for example, ends the process as a crash: the worker logs a stop with reason `crash`, hands nothing back, and the jobs it held come back to the engine once their [`job_timeout`](workers.md#job_timeout) lapses.
+Busybee handles no other signal. A `HUP`, for example, is no graceful stop: the process exits without finishing the `perform` in progress or handing jobs back, and the jobs it held come back to the engine once their [`job_timeout`](workers.md#job_timeout) lapses. The reasons in its `Stopping` and `Stopped` lines don't describe what happened.
 
 ### Make Sure the Signal Reaches Busybee
 
@@ -124,7 +127,7 @@ A graceful stop waits for:
 - **A polling worker's open request for jobs**, up to its `request_timeout` (60 seconds by default). A polling worker asks the gateway for jobs and waits for an answer, and a stop doesn't cut that wait short.
 - **Your [teardown hooks](hooks.md#worker-hooks)** (`on_worker_stop_requested`, `on_worker_stopping`, `on_worker_shutdown`). See [Keep Hook Bodies Fast](hooks.md#keep-hook-bodies-fast).
 - **A streaming or hybrid worker's job stream reader**, up to [`shutdown_wait_timeout`](configuration.md#shutdown_wait_timeout) (5 seconds by default).
-- **Handing back each job not yet started**, one call to the engine per job. These calls have no deadline of their own, so a gateway slow to answer lengthens the stop.
+- **Handing back each job not yet started**, one call to the engine per job. These calls have no deadline of their own, so a gateway slow to answer lengthens the stop. A handed-back job reaches the next worker once [`fail_job_backoff`](workers.md#fail_job_backoff) has passed (5 seconds by default).
 
 There is no overall shutdown deadline. `shutdown_wait_timeout` bounds only how long a stopping worker waits on its other threads: its stream reader, or an `on_worker_stop_requested` hook still running on the thread that handled the signal.
 
@@ -146,7 +149,7 @@ workers:
 
 ### A Forced Stop
 
-A second termination signal forces the exit: the process exits with status 1 within `shutdown_wait_timeout`, hands nothing back, and may skip your teardown hooks. Every job it held comes back once its `job_timeout` lapses. A streaming or hybrid worker logs how many jobs it was holding in its buffer:
+A second termination signal forces the exit: the process exits with status 1 within `shutdown_wait_timeout`, hands nothing back, and may skip your teardown hooks. Every job it held comes back once its `job_timeout` lapses. A streaming or hybrid worker holding jobs in its buffer logs how many it discards:
 
 ```
 I, [2026-10-22T09:20:49.959278 #22170]  INFO -- : [busybee] Stopping SlowOrderWorker (sigterm)
@@ -175,11 +178,11 @@ A gateway under load answers with `RESOURCE_EXHAUSTED` instead. A polling worker
 
 ## Health Checks
 
-**Liveness:** the process exits on anything fatal it detects, so your restart policy does the rest. The one failure it can't see is a process that hangs on its way out, which [Hooks and Threads](hooks.md#the-failure-mode) describes.
+**Liveness:** the process exits on anything fatal it detects, so your restart policy does the rest. Two failures it can't see: a process that hangs on its way out, which [Hooks and Threads](hooks.md#the-failure-mode) describes, and a `perform` that never returns (below).
 
 **Don't probe the gateway for liveness.** A probe that fails whenever the gateway is unreachable restarts every worker at once on the first gateway hiccup, and a worker that loses the gateway already stops by itself.
 
-**Not available yet:** busybee has no readiness signal, and nothing detects a `perform` that never returns. Such a job goes back to the engine once its `job_timeout` lapses, but the worker stays busy with it, and since a worker runs its jobs one at a time, that job type gets no more work from that worker.
+**Not available yet:** busybee has no readiness signal, and nothing detects a `perform` that never returns. That job goes back to the engine once its `job_timeout` lapses, but the worker stays busy with it, since a worker runs its jobs one at a time. A streaming or hybrid worker meanwhile keeps taking jobs into its buffer, and each waits there until its own `job_timeout` lapses and the engine hands it out again, often to this same worker. With one replica, that job type stalls; with several, this one keeps taking a share of the jobs and finishing none of them.
 
 ## When a Worker Goes Quiet
 
@@ -188,8 +191,8 @@ A gateway under load answers with `RESOURCE_EXHAUSTED` instead. A polling worker
 | `Started`, then nothing, on a streaming worker | A job stream delivers only jobs that become available after it opens, so jobs that were already waiting never reach it. Use hybrid mode, the default, which also polls for them. See [Workers: Streaming](workers.md#streaming) |
 | `Started`, then nothing, on any worker | The `Started` line names the job type the worker asks for: compare it with the task type in your BPMN |
 | Nothing for about a minute after a crash or a forced stop | The jobs the old process held are still locked to it. They come back once their `job_timeout` lapses |
-| A job's last line is its `Activated` line | Its `perform` hasn't returned. `Activated` lines are logged at `debug`, so lower your [logger's](configuration.md#logger) level to see them |
-| Jobs piling up in the engine while a streaming worker idles | A stream the gateway judged too slow misses new jobs. See [Workers: Buffer Throttle](workers.md#buffer-throttle) |
+| Jobs whose last line is their `Activated` line | The oldest of them is the one whose `perform` hasn't returned. On a streaming or hybrid worker, the rest may be waiting in the buffer behind it. `Activated` lines are logged at `debug`, so lower your [logger's](configuration.md#logger) level to see them |
+| Jobs piling up in the engine while a streaming worker with `buffer: false` or a `buffer_throttle` idles | A stream too slow to accept jobs misses new ones. See [Workers: Buffer Throttle](workers.md#buffer-throttle) |
 | Jobs waiting in the engine, and a polling or hybrid worker logging nothing | It may be backing off from `RESOURCE_EXHAUSTED`, which isn't logged. `backpressure_count`, on the worker status your [hooks](hooks.md#reading-workerstatus) receive, counts each backoff |
 
 ## One Worker Down, Whole Container Down
