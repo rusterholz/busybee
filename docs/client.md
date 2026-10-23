@@ -107,7 +107,7 @@ For convenience, many of the credential parameters may be read implicitly from t
 
 | Environment Variable | Purpose | Used By |
 |---------------------|---------|---------|
-| `CLUSTER_ADDRESS` | Zeebe cluster address (host:port) | All credential types |
+| `CLUSTER_ADDRESS` | Zeebe cluster address (host:port) | All but Camunda Cloud, which derives its own |
 | `BUSYBEE_CREDENTIAL_TYPE` | Credential type (insecure, tls, oauth, camunda_cloud) | Auto-detection |
 | `ZEEBE_TOKEN_URL` | OAuth token endpoint | OAuth |
 | `ZEEBE_AUDIENCE` | OAuth audience | OAuth |
