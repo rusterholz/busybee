@@ -10,8 +10,9 @@ This document describes the internal architecture of the busybee gem. It is for 
 exe/
 └── busybee                  # CLI executable (thin shim)
 lib/busybee/
-├── cli.rb                   # CLI entry point: arg parsing, env loading, signal handling, runner wiring
+├── cli.rb                   # CLI entry point: arg parsing, process-wide config, signal handling, runner wiring
 ├── cli/
+│   ├── load_environment.rb  # Brings the app up alongside busybee; Rails is the one strategy
 │   └── log_formatter.rb     # The CLI's own logger's formatter: stdlib line, or bare JSON
 ├── configure.rb             # Validated setters for gem-level config (included into Busybee singleton)
 ├── client.rb                # Client class - main user-facing API
@@ -444,14 +445,15 @@ Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` — works
 
 ```
 exe/busybee                      # Thin shim: require "busybee" + CLI.main(ARGV)
-lib/busybee/cli.rb               # CLI class: initialize (setup) + run (execution)
-lib/busybee/cli/log_formatter.rb # CLI::LogFormatter, its default logger's formatter
+lib/busybee/cli.rb                  # CLI class: initialize (setup) + run (execution)
+lib/busybee/cli/load_environment.rb # CLI::LoadEnvironment, which brings the app up (Rails today)
+lib/busybee/cli/log_formatter.rb    # CLI::LogFormatter, its default logger's formatter
 ```
 
 ### Lifecycle
 
 1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
-2. **`initialize(args)`** -- all setup: parse options (`OptionParser`), install the default logger and apply `--log-format`, load Rails environment, extract workers from YAML if `--config`, load worker classes, build `RuntimeConfig`, apply process-wide config.
+2. **`initialize(args)`** -- all setup: parse options (`OptionParser`), install the default logger, extract workers from YAML if `--config`, build `RuntimeConfig`, apply process-wide config (`--log-format` first), load the app's environment (`CLI::LoadEnvironment.call`), load worker classes.
 3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks), joins the signal threads within `shutdown_wait_timeout`, then exits 1 if the fire alarm is up (see [Signal Handling](#signal-handling)).
 
 ### CLI Flags
@@ -468,7 +470,7 @@ The CLI exposes 5 flags, besides `--version` and `--help`. Worker-scoped tuning 
 
 **YAML config flow:** When `--config` is provided, the CLI calls `RuntimeConfig.parse_yaml` to get YAML-sourced kwargs, extracts worker class names from the `workers:` keys, merges CLI process-wide flags into the kwargs, and constructs RuntimeConfig from the result.
 
-**Process-wide application:** `apply_global_config!` applies process-wide flags, and the YAML's top-level `shutdown_wait_timeout`, to gem config before `load_environment!` (e.g., `Busybee.log_format = :json`), `--log-format` first, so every line of the boot follows it. Each goes through `Busybee._apply_from_cli`, which fills only a raw slot nothing has set, recording the flag or YAML key it came from. The app has the last word either way, as with Sidekiq's flags. A value already in the slot (an app's config file run ahead of the command, say) stands: the setter still validates the flag, the slot gets the app's value back, and `apply_global_setting!` then logs `Overriding <flag> <value> with Busybee.<field> <value>`, so a `--log-format` giving way logs in the format kept. In a Rails app the Railtie's `apply_over_cli` replaces a value the command applied and, while `Busybee._cli_source` shows that value still in place, logs `Overriding <flag> <value> with config.x.busybee.<field> <value>`; an initializer replaces it silently. YAML parses before the boot too, since worker class names stay strings until `load_workers!`.
+**Process-wide application:** `apply_global_config!` applies process-wide flags, and the YAML's top-level `shutdown_wait_timeout`, to gem config before `LoadEnvironment.call` (e.g., `Busybee.log_format = :json`), `--log-format` first, so every line of the boot follows it. Each goes through `Busybee._apply_from_cli`, which fills only a raw slot nothing has set, recording the flag or YAML key it came from. The app has the last word either way, as with Sidekiq's flags. A value already in the slot (an app's config file run ahead of the command, say) stands: the setter still validates the flag, the slot gets the app's value back, and `apply_global_setting!` then logs `Overriding <flag> <value> with Busybee.<field> <value>`, so a `--log-format` giving way logs in the format kept. In a Rails app the Railtie's `apply_over_cli` replaces a value the command applied and, while `Busybee._cli_source` shows that value still in place, logs `Overriding <flag> <value> with config.x.busybee.<field> <value>`; an initializer replaces it silently. YAML parses before the boot too, since worker class names stay strings until `load_workers!`.
 
 **Default logger:** before loading Rails, the CLI sets `$stdout.sync` and installs `Logger.new($stdout)` at `info` through `Busybee._default_logger=`. Its `CLI::LogFormatter` reads `Busybee.log_format` per line: stdlib's line under `:text`, the bare JSON object under `:json`, so a format set after it was installed (by `--log-format`, or by the app as it boots) still applies. It stands only where no logger was configured, and the Railtie's `Rails.logger` default replaces it (see [Gem-Level Configuration](#gem-level-configuration)). Outside Rails it stays the process's logger.
 
@@ -484,7 +486,7 @@ The CLI tells them apart by its own set-once `@signalled` flag, created in `init
 
 ### Rails Environment Loading
 
-`load_environment!` tells three cases apart, by the `path` a `LoadError` names where one is involved, never by its message:
+`CLI::LoadEnvironment.call` brings the rest of the app up alongside busybee, before the workers load; Rails is its one strategy. It tells three cases apart, by the `path` a `LoadError` names where one is involved, never by its message:
 
 1. **`BUSYBEE_SKIP_RAILS` set, or no rails in the bundle** (`require "rails"` raises a `LoadError` whose `path` is `"rails"`): skips Rails silently. The env var is checked before any `require`, since gem config, which the Railtie sets, doesn't exist yet.
 2. **Rails loads, but there's no `./config/environment`** (a `LoadError` whose `path` is `"./config/environment"`): logs `Continuing without Rails, no config/environment.rb in <dir>` at `info` and carries on.

@@ -30,8 +30,8 @@ RSpec.describe Busybee::CLI do
 
   # Runs the block where config/environment.rb would load, in its place.
   def while_loading_rails(&block)
-    allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
-      block.call if path == described_class::RAILS_ENVIRONMENT
+    allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
+      block.call if path == Busybee::CLI::LoadEnvironment::RAILS_ENVIRONMENT
     end
   end
 
@@ -281,7 +281,7 @@ RSpec.describe Busybee::CLI do
     context "with Rails environment loading" do
       it "requires the Railtie then config/environment when Rails is available" do
         loaded_paths = []
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
           loaded_paths << path
           true
         end
@@ -292,7 +292,7 @@ RSpec.describe Busybee::CLI do
       end
 
       it "skips Rails loading when BUSYBEE_SKIP_RAILS is set" do
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, _path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |_path|
           raise "should not be called"
         end
 
@@ -306,7 +306,7 @@ RSpec.describe Busybee::CLI do
 
       it "loads Rails when BUSYBEE_SKIP_RAILS is empty" do
         loaded_paths = []
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
           loaded_paths << path
           true
         end
@@ -322,7 +322,7 @@ RSpec.describe Busybee::CLI do
 
       it "logs a failure to load config/environment, then raises it" do
         boot_failure = StandardError.new("boot failed")
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
           raise boot_failure if path == "./config/environment"
         end
 
@@ -501,7 +501,7 @@ RSpec.describe Busybee::CLI do
       end
 
       it "writes in the --log-format given, from the first line it logs while loading Rails" do
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
           Busybee::Logging.info("booting") if path == "./config/environment"
         end
         lines = capture_busybee_log do

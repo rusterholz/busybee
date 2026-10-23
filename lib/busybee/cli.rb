@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
-require "active_support/core_ext/object/blank"
 require "concurrent"
 require "logger"
 require "optparse"
 
+require "busybee/cli/load_environment"
 require "busybee/cli/log_formatter"
 require "busybee/client"
 require "busybee/configure"
@@ -23,7 +23,6 @@ module Busybee
 
     # Signals we trap to begin a graceful stop.
     STOP_SIGNALS = %w[INT QUIT TERM].freeze
-    RAILS_ENVIRONMENT = "./config/environment"
 
     delegate :exit_immediately?, :exit_immediately_reason, to: :"Busybee::Runner", private: true
 
@@ -38,7 +37,7 @@ module Busybee
       extract_workers_from_yaml! if @parsed_options[:config_file]
       build_config!
       apply_global_config!
-      load_environment!
+      LoadEnvironment.call
       load_workers!
     end
 
@@ -103,31 +102,6 @@ module Busybee
       $stdout.sync = true
       Busybee._default_logger = Logger.new($stdout, level: :info, formatter: LogFormatter.new)
     end
-
-    # Rails loads unless BUSYBEE_SKIP_RAILS is set or the bundle has no rails,
-    # and the CLI carries on where there's no config/environment.rb to load. Any
-    # other failure is logged, then raised, for Ruby's own report and exit 1.
-    def load_environment!
-      return if ENV["BUSYBEE_SKIP_RAILS"].present? || !rails_present?
-
-      require "busybee/railtie" # defensive: busybee.rb's :before_configuration hook registers it already
-      require RAILS_ENVIRONMENT
-    rescue StandardError, ScriptError => e
-      return Logging.info("Continuing without Rails, no config/environment.rb in #{Dir.pwd}") if missing?(e)
-
-      Logging.error("Failed to load Rails environment in #{Dir.pwd}; set BUSYBEE_SKIP_RAILS=1 if this is not a " \
-                    "Rails app", error: e)
-      raise
-    end
-
-    def rails_present?
-      require "rails"
-      true
-    rescue LoadError => e
-      missing?(e, "rails") ? false : raise
-    end
-
-    def missing?(error, feature = RAILS_ENVIRONMENT) = error.is_a?(LoadError) && error.path == feature
 
     def extract_workers_from_yaml!
       @yaml_kwargs = RuntimeConfig.parse_yaml(@parsed_options[:config_file])
