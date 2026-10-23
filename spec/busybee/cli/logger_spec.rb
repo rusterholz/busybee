@@ -28,14 +28,11 @@ RSpec.describe "the busybee command's logger", :busybee_command, :gateway do # r
     expect(lines.map { |line| line.values_at("level", "message") }).to eq(worker_messages.map { |line| ["info", line] })
   end
 
-  it "logs its override of a format configured before it in the --log-format given" do
+  it "logs in the --log-format given over a format configured ahead of it, without a word about it" do
     result = run_outside_rails("-l", "json", env: { "BUSYBEE_SPEC_LOG_FORMAT" => "text" })
 
     lines = result.stdout.lines.map { |line| JSON.parse(line) }
-    expect(lines.first).to include(
-      "level" => "info", "message" => "[busybee] Overriding configured value with --log-format: :text → :json"
-    )
-    expect(lines.drop(1).map { |line| line["message"] }).to eq(worker_messages)
+    expect(lines.map { |line| line["message"] }).to eq(worker_messages)
   end
 
   it "carries on without a word about Rails when the bundle has no rails" do

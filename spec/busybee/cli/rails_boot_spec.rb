@@ -2,6 +2,7 @@
 
 require "fileutils"
 require "json"
+require "socket"
 require "tmpdir"
 
 # The busybee command loading a Rails app, run as a real process in a directory
@@ -28,12 +29,12 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
     RUBY
   end
 
-  def run_in_app(environment, *args, logged: true)
+  def run_in_app(environment, *args, logged: true, env: {})
     if environment
       FileUtils.mkdir_p(File.join(app_dir, "config"))
       File.write(File.join(app_dir, "config/environment.rb"), environment)
     end
-    run_command_to_completion(*args, chdir: app_dir, logged: logged)
+    run_command_to_completion(*args, chdir: app_dir, logged: logged, env: env)
   end
 
   def failure_line(error)
@@ -118,6 +119,37 @@ RSpec.describe "the busybee command's Rails boot", :busybee_command, :gateway, :
     expect(result.status&.exitstatus).to eq(1), describe_exit(result)
     expect(messages(result.stdout)).to eq([])
     expect(result.stderr).to include("late initializer failed (RuntimeError)")
+  end
+
+  # An address nothing listens on: bound, then let go.
+  def closed_address
+    server = TCPServer.new("127.0.0.1", 0)
+    "127.0.0.1:#{server.addr[1]}"
+  ensure
+    server&.close
+  end
+
+  it "addresses the credentials config.x.busybee builds with --cluster-address, over CLUSTER_ADDRESS" do
+    app = rails_app(config: <<~RUBY)
+      config.x.busybee.credential_type = :insecure
+      config.x.busybee.certificate_file = "credentials-key-only.pem"
+    RUBY
+    result = run_in_app(app, env: { "CLUSTER_ADDRESS" => closed_address })
+
+    expect(result.status&.exitstatus).to eq(0), describe_exit(result)
+    expect(messages(result.stdout)).to eq(worker_messages)
+  end
+
+  it "gives --cluster-address way to config.x.busybee.cluster_address, saying so" do
+    flagged = closed_address
+    result = run_in_app(rails_app(config: "config.x.busybee.cluster_address = #{gateway.address.inspect}"),
+                        "-a", flagged)
+
+    expect(result.status&.exitstatus).to eq(0), describe_exit(result)
+    expect(messages(result.stdout)).to eq(
+      ["[busybee] Overriding --cluster-address #{flagged.inspect} with config.x.busybee.cluster_address " \
+       "#{gateway.address.inspect}", *worker_messages]
+    )
   end
 
   it "stays silent when the app set its logger to nil before Rails booted" do

@@ -520,8 +520,11 @@ When resolving configuration values, Busybee follows this precedence (highest to
 
 1. **Explicit parameter** - Values passed directly to methods (e.g., `Client.new(cluster_address: "...")`)
 2. **Module or Rails configuration, whichever is written last** - Values set via `Busybee.configure` or direct assignment, and values from `config.x.busybee.*` (when Rails is present). The Railtie applies the keys you set while Rails boots, before `config/initializers/*` run, so `Busybee.configure` in an initializer overrides Rails configuration. A value set before boot (in `spec_helper.rb`, say) holds unless `config.x.busybee` sets the same key
-3. **Environment variables** - Fallback for supported options
-4. **Defaults** - Built-in default values
+3. **`busybee` command flags** - `--cluster-address`, `--worker-name` and `--log-format`, and the top-level `shutdown_wait_timeout` in its YAML. The command applies them before your Rails app loads, so module or Rails configuration for the same setting replaces them, and busybee logs when `config.x.busybee` does
+4. **Environment variables** - Fallback for supported options
+5. **Defaults** - Built-in default values
+
+One exception: when `config.x.busybee` sets any credential key, Busybee builds its credentials while Rails boots, and an initializer that changes the cluster address or credential settings afterward doesn't reach them. Assign `Busybee.credentials` instead.
 
 For credential parameters specifically, see [Client: Cluster Address Resolution](client.md#cluster-address-resolution).
 

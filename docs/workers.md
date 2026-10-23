@@ -868,7 +868,13 @@ The first non-nil value wins. This means `0` and `false` are valid explicit valu
 
 The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `max_jobs`, `request_timeout`, `job_timeout`, `fail_job_backoff`, `backpressure_delay`, `buffer`, and `buffer_throttle`.
 
-**Process-wide settings** (like `--log-format`, `--worker-name` and `--cluster-address`) follow a simpler 2-level chain: the CLI flag, then gem config / default. `shutdown_wait_timeout` follows the same chain with top-level YAML in the flag's place: top-level YAML, then gem config, then the default. They don't participate in per-worker overrides because they always apply to the entire process.
+**Process-wide settings** (like `--log-format`, `--worker-name` and `--cluster-address`) follow a simpler chain: your Rails app's configuration, then the CLI flag, then any environment variable and the default. The CLI applies its flags before your app loads, so a value from `config.x.busybee` or from `Busybee.configure` in an initializer replaces the flag's, and busybee logs a line when `config.x.busybee` does:
+
+```
+[busybee] Overriding --cluster-address "zeebe-a:26500" with config.x.busybee.cluster_address "zeebe-b:26500"
+```
+
+`shutdown_wait_timeout` follows the same chain with top-level YAML in the flag's place. One exception: when `config.x.busybee` sets any credential key, Busybee builds its credentials while Rails boots, and an initializer that changes the cluster address afterward doesn't reach them; assign `Busybee.credentials` instead. Process-wide settings don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
 

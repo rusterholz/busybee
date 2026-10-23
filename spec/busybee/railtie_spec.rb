@@ -6,6 +6,7 @@ require "stringio"
 require "tempfile"
 
 require "busybee/credentials/insecure"
+require "busybee/credentials/tls"
 require "busybee/railtie" if defined?(Rails::Railtie)
 
 # All Busybee config instance variables that the Railtie may set
@@ -17,7 +18,7 @@ def busybee_config_ivars
     @grpc_retry_delay @grpc_retry_enabled @grpc_retry_errors
     @grpc_keepalive_interval @grpc_keepalive_timeout
     @log_format @logger @logger_configured @default_backpressure_delay @shutdown_wait_timeout
-    @worker_name @backpressure_statuses
+    @worker_name @backpressure_statuses @cli_sources
   ]
 end
 
@@ -70,11 +71,17 @@ RSpec.describe "Busybee::Railtie", :rails do
       busybee_config_ivars.each { |ivar| Busybee.instance_variable_set(ivar, nil) }
     end
 
-    # Helper to simulate Railtie initialization with given config; preset: is
-    # what the app configured on Busybee directly before boot
-    def configure_and_initialize(preset: {}, **settings)
-      reset_busybee_config!
+    def configure_before_boot(from_cli, preset)
+      from_cli.each { |field, (value, source)| Busybee._apply_from_cli(field, value, source) }
       preset.each { |k, v| Busybee.public_send(:"#{k}=", v) }
+    end
+
+    # Helper to simulate Railtie initialization with given config; from_cli: is
+    # what the busybee command applied before boot, as field => [value, source],
+    # and preset: what the app configured on Busybee directly, after it
+    def configure_and_initialize(preset: {}, from_cli: {}, **settings)
+      reset_busybee_config!
+      configure_before_boot(from_cli, preset)
       settings.each { |k, v| rails_config.x.busybee[k] = v }
       railtie_class.initializers.find { |i| i.name == "busybee.configure" }.run(rails_app)
     end
@@ -144,6 +151,55 @@ RSpec.describe "Busybee::Railtie", :rails do
       it "keeps a value configured before boot when another key is configured" do
         configure_and_initialize(preset: { cluster_address: "explicit:26500" }, grpc_retry_enabled: true)
         expect(Busybee.cluster_address).to eq("explicit:26500")
+      end
+    end
+
+    describe "a process-wide value the busybee command set" do
+      let(:rails_log) { StringIO.new }
+      let(:rails_logger) { Logger.new(rails_log) }
+
+      def overrides = rails_log.string.lines.filter_map { |line| line[/\[busybee\] Overriding .*/] }
+
+      {
+        cluster_address: ["--cluster-address", "cli:4", "rails:3", '"cli:4"', '"rails:3"'],
+        worker_name: ["--worker-name", "cli-worker", "rails-worker", '"cli-worker"', '"rails-worker"'],
+        log_format: ["--log-format", :json, :text, ":json", ":text"],
+        shutdown_wait_timeout: ["YAML shutdown_wait_timeout", "8000", 3000, "8000", "3000"]
+      }.each do |field, (source, cli_value, rails_value, cli_shown, rails_shown)|
+        it "gives way to config.x.busybee.#{field}, saying so" do
+          configure_and_initialize(from_cli: { field => [cli_value, source] }, field => rails_value)
+
+          expect(Busybee.public_send(field)).to eq(rails_value)
+          expect(overrides).to eq(
+            ["[busybee] Overriding #{source} #{cli_shown} with config.x.busybee.#{field} #{rails_shown}"]
+          )
+        end
+      end
+
+      it "gives way silently when config.x.busybee sets the same value" do
+        configure_and_initialize(from_cli: { cluster_address: ["cli:4", "--cluster-address"] },
+                                 cluster_address: "cli:4")
+        expect(overrides).to be_empty
+      end
+
+      it "stays silent replacing a value the app configured itself" do
+        configure_and_initialize(preset: { cluster_address: "app:5" }, cluster_address: "rails:3")
+        expect(overrides).to be_empty
+      end
+
+      it "stays silent once the app has replaced the command's value itself" do
+        configure_and_initialize(from_cli: { cluster_address: ["cli:4", "--cluster-address"] },
+                                 preset: { cluster_address: "app:5" }, cluster_address: "rails:3")
+        expect(overrides).to be_empty
+      end
+
+      it "addresses the credentials config.x.busybee builds, with config.x's other values" do
+        configure_and_initialize(from_cli: { cluster_address: ["cli:4", "--cluster-address"] },
+                                 credential_type: :tls, certificate_file: "/path/to/ca.pem")
+
+        expect(Busybee.credentials).to have_attributes(
+          class: Busybee::Credentials::TLS, cluster_address: "cli:4", certificate_file: "/path/to/ca.pem"
+        )
       end
     end
 

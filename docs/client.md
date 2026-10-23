@@ -99,7 +99,7 @@ When `cluster_address` is not explicitly provided, Busybee uses this precedence:
 3. `CLUSTER_ADDRESS` environment variable
 4. Default: `"localhost:26500"` (lowest priority)
 
-This allows you to set a default cluster address once and override it selectively when needed.
+This allows you to set a default cluster address once and override it selectively when needed. One exception: when `config.x.busybee` sets any credential key, Busybee builds its credentials while Rails boots, and an initializer that changes `Busybee.cluster_address` afterward doesn't reach them. Assign `Busybee.credentials` instead.
 
 ### Environment Variables
 

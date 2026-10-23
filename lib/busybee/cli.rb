@@ -35,11 +35,11 @@ module Busybee
       @parsed_options = {}
       parse_options!(args.dup)
       install_logger!
-      load_environment!
       extract_workers_from_yaml! if @parsed_options[:config_file]
-      load_workers!
       build_config!
       apply_global_config!
+      load_environment!
+      load_workers!
     end
 
     # Exits 1 once the run has returned if the process must exit immediately, an
@@ -97,14 +97,11 @@ module Busybee
       @signal_threads&.each { |thread| thread.join(wait) }
     end
 
-    # The process's logger until one is configured, Rails' included, in the
-    # --log-format given from its first line. stdout is synced, or a pipe holds
-    # every line until exit.
+    # The process's logger until one is configured, Rails' included. stdout is
+    # synced, or a pipe holds every line until exit.
     def install_logger!
       $stdout.sync = true
       Busybee._default_logger = Logger.new($stdout, level: :info, formatter: LogFormatter.new)
-      format = @parsed_options[:log_format]
-      apply_global_setting!(:log_format, format) if Configure::VALID_LOG_FORMATS.include?(format)
     end
 
     # Rails loads unless BUSYBEE_SKIP_RAILS is set or the bundle has no rails,
@@ -214,8 +211,9 @@ module Busybee
     end
 
     # Applies process-wide flags, and YAML's top-level shutdown_wait_timeout, to
-    # gem-level config before runners start. Only sets values explicitly provided.
-    # Logs when overriding a value already set (e.g., by the Railtie).
+    # gem-level config before the app loads, as Sidekiq does, so the app's own
+    # configuration has the last word; --log-format first, so it governs every
+    # line from the first. Only sets values explicitly provided.
     def apply_global_config!
       apply_global_setting!(:log_format)
       apply_global_setting!(:worker_name)
@@ -223,16 +221,9 @@ module Busybee
       apply_global_setting!(:shutdown_wait_timeout, source: "YAML shutdown_wait_timeout")
     end
 
-    def apply_global_setting!(field, cli_value = @runtime_config.public_send(field),
-                              source: "--#{field.to_s.tr('_', '-')}")
-      return unless cli_value
-
-      # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
-      existing = Busybee.instance_variable_get(:"@#{field}")
-      Busybee.public_send(:"#{field}=", cli_value) # first, so the line below follows a --log-format it overrides
-      return unless existing && existing != cli_value
-
-      Logging.info("Overriding configured value with #{source}: #{existing.inspect} → #{cli_value.inspect}")
+    def apply_global_setting!(field, source: "--#{field.to_s.tr('_', '-')}")
+      value = @runtime_config.public_send(field)
+      Busybee._apply_from_cli(field, value, source) if value
     end
   end
 end
