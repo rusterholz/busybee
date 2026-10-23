@@ -2,7 +2,7 @@
 
 This page is for whoever runs the `busybee` command in production, under Kubernetes or any other orchestrator, and has to answer for it when something goes wrong. It covers what the process logs, what its exit status means, how long it takes to stop, what to probe, and where to look when a worker goes quiet. For how to define and configure workers, see [Workers](workers.md).
 
-The log lines on this page were captured from real runs.
+The log lines on this page come from real runs, with only file paths and host names changed.
 
 ## Table of Contents
 
@@ -42,7 +42,7 @@ Each job's activation is logged too, at `debug`. To quiet the per-job lines, set
 With `--log-format json`, each line is one JSON object carrying the fields of the job or worker it concerns, so you can filter on `job_key`, `job_type` or `worker_class` instead of parsing messages:
 
 ```json
-{"retries":2,"deadline":"2026-10-22T15:16:55.450Z","job_type":"job-type-a","bpmn_process_id":"multi-job-process","element_id":"ServiceTask_A","job_key":2251799813685331,"process_instance_key":2251799813685321,"source":"poll","worker_class":"BoomWorker","buffered":false,"status":"failed","error_class":"ArgumentError","error_message":"bad order payload","activated_at":"2026-10-22T15:15:55.466Z","execution_started_at":"2026-10-22T15:15:55.466Z","perform_started_at":"2026-10-22T15:15:55.466Z","perform_finished_at":"2026-10-22T15:15:55.466Z","resolved_at":"2026-10-22T15:15:55.476Z","error_location":"/.../workers.rb:12:in `perform'","message":"[busybee] Failed job-type-a job #2251799813685331, 2 retries left (ArgumentError: bad order payload)","level":"info","time":"2026-10-22T15:15:55.477Z"}
+{"retries":2,"deadline":"2026-10-22T15:16:55.450Z","job_type":"job-type-a","bpmn_process_id":"multi-job-process","element_id":"ServiceTask_A","job_key":2251799813685331,"process_instance_key":2251799813685321,"source":"poll","worker_class":"BoomWorker","buffered":false,"status":"failed","error_class":"ArgumentError","error_message":"bad order payload","activated_at":"2026-10-22T15:15:55.466Z","execution_started_at":"2026-10-22T15:15:55.466Z","perform_started_at":"2026-10-22T15:15:55.466Z","perform_finished_at":"2026-10-22T15:15:55.466Z","resolved_at":"2026-10-22T15:15:55.476Z","error_location":"/app/app/workers/boom_worker.rb:12:in `perform'","message":"[busybee] Failed job-type-a job #2251799813685331, 2 retries left (ArgumentError: bad order payload)","level":"info","time":"2026-10-22T15:15:55.477Z"}
 ```
 
 **When the process exits on an error, the error goes to stderr.** The log lines name the stop's reason, and Ruby prints the error with its backtrace on stderr. Collect both streams:
@@ -53,7 +53,7 @@ I, [2026-10-22T09:18:54.565677 #21845]  INFO -- : [busybee] Stopped OkWorker (ga
 ```
 
 ```
-/.../lib/busybee/grpc/error.rb:27:in `wrap': GRPC call failed (failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:26599: Failed to connect to remote host: Connection refused) (Busybee::GRPC::Error)
+/usr/local/bundle/gems/busybee-0.4.0/lib/busybee/grpc/error.rb:27:in `wrap': GRPC call failed (failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:26599: Failed to connect to remote host: Connection refused) (Busybee::GRPC::Error)
 ```
 
 ## Booting
@@ -64,13 +64,13 @@ In a bundle that includes Rails, the command loads your app from `./config/envir
 - **Rails in the bundle, but no `config/environment.rb` where the command runs:** it says so and carries on without Rails. If you expected your app to load, check the working directory:
 
   ```
-  I, [2026-10-23T09:09:29.264094 #92086]  INFO -- : [busybee] Continuing without Rails, no config/environment.rb in /private/tmp/ar-v0.4-dev-m22/norails
+  I, [2026-10-23T09:09:29.264094 #92086]  INFO -- : [busybee] Continuing without Rails, no config/environment.rb in /app
   ```
 
 - **Your app fails to boot:** the command logs why, Ruby prints the error and its backtrace on stderr, and the process exits with status 1, so a broken deploy shows up as a failed container:
 
   ```
-  E, [2026-10-23T09:09:30.274450 #92096] ERROR -- : [busybee] Failed to load Rails environment in /private/tmp/ar-v0.4-dev-m22/badapp; set BUSYBEE_SKIP_RAILS=1 if this is not a Rails app (KeyError: key not found: "DATABASE_URL")
+  E, [2026-10-23T09:09:30.274450 #92096] ERROR -- : [busybee] Failed to load Rails environment in /app; set BUSYBEE_SKIP_RAILS=1 if this is not a Rails app (KeyError: key not found: "DATABASE_URL")
   ```
 
   Once Rails has set up your app's logger, this line goes there instead of stdout. The stderr report arrives either way.
@@ -168,7 +168,7 @@ I, [2026-10-23T09:12:49.190382 #92723]  INFO -- : [busybee] Stopped OkWorker (ga
 ```
 
 ```
-/.../lib/busybee/grpc/error.rb:27:in `wrap': Job stream failed (Stream removed (Socket closed (GOAWAY received; Error code: 0; Debug Text: app_requested))) (Busybee::GRPC::Error)
+/usr/local/bundle/gems/busybee-0.4.0/lib/busybee/grpc/error.rb:27:in `wrap': Job stream failed (Stream removed (Socket closed (GOAWAY received; Error code: 0; Debug Text: app_requested))) (Busybee::GRPC::Error)
 ```
 
 A gateway under load answers with `RESOURCE_EXHAUSTED` instead. A polling worker, and a hybrid worker while it polls for jobs that were waiting before it started, backs off for [`backpressure_delay`](workers.md#backpressure) and asks again, without stopping. The statuses that mean "back off" are [`backpressure_statuses`](configuration.md#backpressure_statuses), and only those requests consult it. A job stream doesn't: a streaming or hybrid worker whose stream fails stops, whatever the status.
@@ -200,7 +200,7 @@ When several workers run in one process, the process has one health. If any work
 I, [2026-10-23T09:11:18.434365 #92579]  INFO -- : [busybee] Stopping UnhealthyWorker (unhealthy)
 I, [2026-10-23T09:11:18.444358 #92579]  INFO -- : [busybee] Handed back job-type-a job #2251799813685323, UnhealthyWorker shutting down (unhealthy)
 I, [2026-10-23T09:11:18.444740 #92579]  INFO -- : [busybee] Stopped UnhealthyWorker (unhealthy)
-E, [2026-10-23T09:11:18.444831 #92579] ERROR -- : [busybee] Stopping all workers after UnhealthyWorker failed (Busybee::Worker::Shutdown: Shutting down worker MacBookPro.localdomain due to ConnectionLost in UnhealthyWorker: "database went away")
+E, [2026-10-23T09:11:18.444831 #92579] ERROR -- : [busybee] Stopping all workers after UnhealthyWorker failed (Busybee::Worker::Shutdown: Shutting down worker orders-worker-7d9f8 due to ConnectionLost in UnhealthyWorker: "database went away")
 I, [2026-10-23T09:11:18.444925 #92579]  INFO -- : [busybee] Stopping OkWorker (unhealthy)
 I, [2026-10-23T09:11:18.445387 #92579]  INFO -- : [busybee] Stopped OkWorker (unhealthy)
 ```
@@ -224,7 +224,7 @@ I, [2026-10-23T09:15:55.116084 #93346]  INFO -- : [busybee] Stopped InvoiceWorke
 ```
 
 ```
-/.../workers.rb:42:in `generate_invoice': invoices for this region (NotImplementedError)
+/app/app/workers/invoice_worker.rb:42:in `generate_invoice': invoices for this region (NotImplementedError)
 ```
 
 If the error happens every time, every worker that takes the job crashes the same way, and the engine never raises an incident. The signs are restarts at roughly `job_timeout` intervals with the same backtrace on stderr each time. Until you can deploy the fix, rescue the error in `perform` and report it, so the job spends its retries and ends in an incident like any other failure:
