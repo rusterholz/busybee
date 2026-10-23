@@ -107,7 +107,7 @@ Except after a signal busybee doesn't handle (see [Signals](#signals)), the reas
 
 `INT`, `TERM` and `QUIT` each begin a graceful stop: the worker stops taking jobs, lets the `perform` in progress finish, hands back every job it received but hadn't started, and exits. Any second one of them forces the exit. [Workers: Signal Handling](workers.md#signal-handling) describes both.
 
-Busybee handles no other signal. A `HUP`, for example, is no graceful stop: the process exits without finishing the `perform` in progress or handing jobs back, and the jobs it held come back to the engine once their [`job_timeout`](workers.md#job_timeout) lapses. The reasons in its `Stopping` and `Stopped` lines don't describe what happened.
+Busybee handles no other signal: one that ends the process skips the graceful stop, and the jobs it held come back to the engine once their [`job_timeout`](workers.md#job_timeout) lapses.
 
 ### Make Sure the Signal Reaches Busybee
 

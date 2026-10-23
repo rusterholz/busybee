@@ -88,7 +88,7 @@ Capabilities:
 
 **[Full worker documentation &rarr;](docs/workers.md)**
 
-**[Operating Busybee in production &rarr;](docs/operating.md)**: exit statuses, shutdown and grace periods, health checks, and what to check when a worker goes quiet.
+**[Operating Busybee &rarr;](docs/operating.md)**: exit statuses, shutdown and grace periods, health checks, and what to check when a worker goes quiet.
 
 ### Idiomatic Zeebe Client (available now!)
 
