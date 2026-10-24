@@ -88,6 +88,8 @@ Capabilities:
 
 **[Full worker documentation &rarr;](docs/workers.md)**
 
+**[Operating Busybee &rarr;](docs/operating.md)**: exit statuses, shutdown and grace periods, health checks, and what to check when a worker goes quiet.
+
 ### Idiomatic Zeebe Client (available now!)
 
 A Ruby-native client for Zeebe with keyword arguments, sensible defaults, and proper exception handling.

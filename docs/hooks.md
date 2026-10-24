@@ -618,7 +618,7 @@ Job fetching is the one place where the seam currently sees less than the whole 
 
 `:activate_jobs` and `:stream_activated_jobs` are server-streaming RPCs, and the call resolves when the stream **opens** — before a single job has arrived. The hooks all fire, and `before_call` can inspect or rewrite the request as usual, but what `after_call` reports is the dispatch: a `network_ms` near zero, a live enumerator as `result`, and `:succeeded` even when the broker goes on to report a failure while jobs are being read.
 
-The gap is in the telemetry, not in the behavior. A fetch failure still reaches your worker as a `Busybee::GRPC::Error` with `grpc_status` intact; backpressure is still backed off and retried; the ending still arrives at `on_worker_shutdown` as `:gateway_error`. What you can't do today is watch a fetch fail *through `after_call`* — so alert on worker shutdown reasons rather than on fetch-call outcomes. Per-attempt fetch telemetry lands with the async work in v0.5.
+The gap is in the telemetry, not in the behavior. A fetch failure still reaches your worker as a `Busybee::GRPC::Error` with `grpc_status` intact; backpressure is still backed off and retried; the ending still arrives at `on_worker_shutdown` as `:gateway_error`. What you can't do today is watch a fetch fail *through `after_call`*, so alert on worker shutdown reasons rather than on fetch-call outcomes. Per-attempt fetch telemetry is planned for a later release.
 
 ## When Hooks Raise
 
