@@ -20,12 +20,15 @@ module Busybee
   #
   # Runners hold the resolved config at runtime.
   class RuntimeConfig
-    # Top-level keys allowed in YAML config: worker-scoped fields, the one
-    # process-wide field YAML may set, and workers.
     WORKER_SCOPED_KEYS = %i[worker_mode backpressure_delay max_jobs request_timeout
                             buffer buffer_throttle job_timeout fail_job_backoff].freeze
-    VALID_YAML_KEYS = (WORKER_SCOPED_KEYS + %i[shutdown_wait_timeout workers]).freeze
-    PROCESS_WIDE_KEYS = %i[log_format worker_name cluster_address].freeze
+    # Process-wide settings, in the order the CLI applies them, --log-format first;
+    # YAML may set the one in PROCESS_WIDE_YAML_KEYS, the rest are CLI flags only.
+    PROCESS_WIDE_SETTINGS = %i[log_format worker_name cluster_address shutdown_wait_timeout].freeze
+    PROCESS_WIDE_YAML_KEYS = %i[shutdown_wait_timeout].freeze
+    PROCESS_WIDE_FLAGS = (PROCESS_WIDE_SETTINGS - PROCESS_WIDE_YAML_KEYS).freeze
+    # Top-level keys allowed in YAML config.
+    VALID_YAML_KEYS = (WORKER_SCOPED_KEYS + PROCESS_WIDE_YAML_KEYS + %i[workers]).freeze
 
     # Parses a YAML config file and returns a kwargs hash suitable for
     # RuntimeConfig.new(**result). Raw YAML types flow through — the
@@ -48,7 +51,7 @@ module Busybee
     end
 
     def self.validate_yaml_key!(key)
-      if PROCESS_WIDE_KEYS.include?(key)
+      if PROCESS_WIDE_FLAGS.include?(key)
         raise ArgumentError, "#{key} is CLI-only and cannot be set in YAML. Use the corresponding CLI flag instead."
       end
       return if VALID_YAML_KEYS.include?(key)

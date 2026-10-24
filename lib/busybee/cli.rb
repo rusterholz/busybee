@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
-require "active_support/core_ext/object/blank"
 require "concurrent"
 require "logger"
 require "optparse"
 
+require "busybee/cli/load_environment"
 require "busybee/cli/log_formatter"
 require "busybee/client"
 require "busybee/configure"
@@ -23,7 +23,6 @@ module Busybee
 
     # Signals we trap to begin a graceful stop.
     STOP_SIGNALS = %w[INT QUIT TERM].freeze
-    RAILS_ENVIRONMENT = "./config/environment"
 
     delegate :exit_immediately?, :exit_immediately_reason, to: :"Busybee::Runner", private: true
 
@@ -35,11 +34,12 @@ module Busybee
       @parsed_options = {}
       parse_options!(args.dup)
       install_logger!
-      load_environment!
       extract_workers_from_yaml! if @parsed_options[:config_file]
-      load_workers!
       build_config!
       apply_global_config!
+      LoadEnvironment.call
+      report_credentials_address!
+      load_workers!
     end
 
     # Exits 1 once the run has returned if the process must exit immediately, an
@@ -97,40 +97,12 @@ module Busybee
       @signal_threads&.each { |thread| thread.join(wait) }
     end
 
-    # The process's logger until one is configured, Rails' included, in the
-    # --log-format given from its first line. stdout is synced, or a pipe holds
-    # every line until exit.
+    # The process's logger until one is configured, Rails' included. stdout is
+    # synced, or a pipe holds every line until exit.
     def install_logger!
       $stdout.sync = true
       Busybee._default_logger = Logger.new($stdout, level: :info, formatter: LogFormatter.new)
-      format = @parsed_options[:log_format]
-      apply_global_setting!(:log_format, format) if Configure::VALID_LOG_FORMATS.include?(format)
     end
-
-    # Rails loads unless BUSYBEE_SKIP_RAILS is set or the bundle has no rails,
-    # and the CLI carries on where there's no config/environment.rb to load. Any
-    # other failure is logged, then raised, for Ruby's own report and exit 1.
-    def load_environment!
-      return if ENV["BUSYBEE_SKIP_RAILS"].present? || !rails_present?
-
-      require "busybee/railtie" # defensive: busybee.rb's :before_configuration hook registers it already
-      require RAILS_ENVIRONMENT
-    rescue StandardError, ScriptError => e
-      return Logging.info("Continuing without Rails, no config/environment.rb in #{Dir.pwd}") if missing?(e)
-
-      Logging.error("Failed to load Rails environment in #{Dir.pwd}; set BUSYBEE_SKIP_RAILS=1 if this is not a " \
-                    "Rails app", error: e)
-      raise
-    end
-
-    def rails_present?
-      require "rails"
-      true
-    rescue LoadError => e
-      missing?(e, "rails") ? false : raise
-    end
-
-    def missing?(error, feature = RAILS_ENVIRONMENT) = error.is_a?(LoadError) && error.path == feature
 
     def extract_workers_from_yaml!
       @yaml_kwargs = RuntimeConfig.parse_yaml(@parsed_options[:config_file])
@@ -139,7 +111,7 @@ module Busybee
 
     # The process-wide flags given win over the YAML's kwargs.
     def build_config!
-      flags = @parsed_options.slice(*RuntimeConfig::PROCESS_WIDE_KEYS).compact
+      flags = @parsed_options.slice(*RuntimeConfig::PROCESS_WIDE_FLAGS).compact
       @runtime_config = RuntimeConfig.new(**(@yaml_kwargs ? @yaml_kwargs.merge(flags) : @parsed_options))
     end
 
@@ -213,26 +185,39 @@ module Busybee
       end
     end
 
-    # Applies process-wide flags, and YAML's top-level shutdown_wait_timeout, to
-    # gem-level config before runners start. Only sets values explicitly provided.
-    # Logs when overriding a value already set (e.g., by the Railtie).
+    # Applies process-wide flags and YAML's shutdown_wait_timeout before the app loads,
+    # as Sidekiq does, so the app has the last word: a value it set ahead of the command
+    # stands, and Rails config or an initializer replaces the flag's after.
     def apply_global_config!
-      apply_global_setting!(:log_format)
-      apply_global_setting!(:worker_name)
-      apply_global_setting!(:cluster_address)
-      apply_global_setting!(:shutdown_wait_timeout, source: "YAML shutdown_wait_timeout")
+      RuntimeConfig::PROCESS_WIDE_SETTINGS.each { |field| apply_global_setting!(field) }
     end
 
-    def apply_global_setting!(field, cli_value = @runtime_config.public_send(field),
-                              source: "--#{field.to_s.tr('_', '-')}")
-      return unless cli_value
+    # Logged after the app's value is back, so a --log-format giving way logs in the one kept.
+    def apply_global_setting!(field)
+      value = @runtime_config.public_send(field)
+      return unless value
 
-      # The raw slot, not the reader: that falls back to ENV and defaults, which nothing configured.
-      existing = Busybee.instance_variable_get(:"@#{field}")
-      Busybee.public_send(:"#{field}=", cli_value) # first, so the line below follows a --log-format it overrides
-      return unless existing && existing != cli_value
+      source = setting_source(field)
+      configured, flagged = Busybee._apply_from_cli(field, value, source)
+      return if configured.nil? || Busybee._same_setting?(configured, flagged)
 
-      Logging.info("Overriding configured value with #{source}: #{existing.inspect} → #{cli_value.inspect}")
+      Logging.info("Overriding #{source} #{flagged.inspect} with Busybee.#{field} #{configured.inspect}")
+    end
+
+    # How a log line names where a process-wide value came from: its flag, or its YAML key.
+    def setting_source(field)
+      RuntimeConfig::PROCESS_WIDE_YAML_KEYS.include?(field) ? "YAML #{field}" : "--#{field.to_s.tr('_', '-')}"
+    end
+
+    # An assigned credentials object keeps its own address, so a --cluster-address
+    # still in place gives way to it too; one the Railtie built carries the flag's.
+    def report_credentials_address!
+      source, flagged = Busybee._cli_source(:cluster_address)
+      address = Busybee.credentials&.cluster_address
+      return if source.nil? || address.nil? || address == flagged
+
+      Logging.info("Overriding #{source} #{flagged.inspect} " \
+                   "with Busybee.credentials.cluster_address #{address.inspect}")
     end
   end
 end

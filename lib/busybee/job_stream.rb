@@ -36,9 +36,10 @@ module Busybee
     #
     # @param operation [GRPC::ActiveCall::Operation] The gRPC operation (from return_op: true)
     # @param client [Busybee::Client] The client for job operations
+    # @raise [Busybee::GRPC::Error] If the stream can't be opened (an unreachable gateway, say)
     def initialize(operation, client:)
       @operation = operation
-      @enumerator = operation.execute
+      @enumerator = open_stream(operation)
       @client = client
       @closed = false
     end
@@ -83,6 +84,15 @@ module Busybee
     # @return [Boolean] true if the stream has been closed
     def closed?
       @closed
+    end
+
+    private
+
+    # execute sends eagerly, so a gateway that can't be reached fails here, before any read.
+    def open_stream(operation)
+      operation.execute
+    rescue ::GRPC::BadStatus => e
+      raise Busybee::GRPC::Error.wrap(e, "Job stream failed to open")
     end
   end
 end

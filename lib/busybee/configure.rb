@@ -201,6 +201,37 @@ module Busybee
       @logger = value unless @logger_configured
     end
 
+    # --- Values from the busybee command ---
+
+    # Applies a value from the busybee command's flags or YAML to a field nothing has set,
+    # remembering its source; a value already there stands. The setter still runs, so
+    # the flag is validated either way. Returns [value already there, flag's value as set].
+    # @api private
+    def _apply_from_cli(field, value, source)
+      slot = :"@#{field}"
+      configured = instance_variable_get(slot)
+      public_send(:"#{field}=", value)
+      flagged = instance_variable_get(slot)
+      configured.nil? ? (@cli_sources ||= {})[field] = [source, flagged] : instance_variable_set(slot, configured)
+      [configured, flagged]
+    end
+
+    # Whether two values of one setting agree, a duration in whichever unit it came.
+    # Plain == would match 30.seconds to 30 (milliseconds here) and not to 30_000.
+    # @api private
+    def _same_setting?(left, right)
+      return left == right unless left.is_a?(Numeric) && right.is_a?(Numeric)
+
+      Durations.seconds_from(left) == Durations.seconds_from(right)
+    end
+
+    # [source, value] while field still holds what the busybee command applied, else nil.
+    # @api private
+    def _cli_source(field)
+      source, value = @cli_sources&.[](field)
+      [source, value] if source && instance_variable_get(:"@#{field}") == value
+    end
+
     # --- Log format ---
 
     def log_format=(value)

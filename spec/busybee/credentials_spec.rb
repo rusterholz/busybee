@@ -2,6 +2,11 @@
 
 require "active_support/core_ext/numeric/time"
 
+require "busybee/credentials/camunda_cloud"
+require "busybee/credentials/insecure"
+require "busybee/credentials/oauth"
+require "busybee/credentials/tls"
+
 RSpec.describe Busybee::Credentials do
   describe ".build" do
     # As new credential types are added (OAuth, CamundaCloud, etc.),
@@ -19,12 +24,75 @@ RSpec.describe Busybee::Credentials do
       expect(creds).to be_a(Busybee::Credentials::Insecure)
     end
 
-    it "extracts credentials from environment variables when no params given" do
-      stub_credential_env_vars
-      allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return("env:26500")
+    # CLUSTER_ADDRESS reaches a param-less build only through Busybee.cluster_address's
+    # fallback, so a configured address outranks it for every credential type.
+    context "when no params are given and CLUSTER_ADDRESS is set" do
+      around do |example|
+        saved = Busybee.instance_variable_get(:@cluster_address)
+        Busybee.cluster_address = nil
+        example.run
+      ensure
+        Busybee.instance_variable_set(:@cluster_address, saved)
+      end
 
-      creds = described_class.build
-      expect(creds.cluster_address).to eq("env:26500")
+      before do
+        stub_credential_env_vars
+        allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return("env:26500")
+      end
+
+      def with_env(vars) = vars.each { |name, value| allow(ENV).to receive(:fetch).with(name, nil).and_return(value) }
+
+      let(:oauth_env) do
+        { "CAMUNDA_CLIENT_ID" => "id", "CAMUNDA_CLIENT_SECRET" => "secret",
+          "ZEEBE_TOKEN_URL" => "https://auth.example.com/token", "ZEEBE_AUDIENCE" => "zeebe" }
+      end
+
+      it "connects to CLUSTER_ADDRESS when no address is configured" do
+        expect(described_class.build.cluster_address).to eq("env:26500")
+      end
+
+      it "connects to the configured address instead, with insecure credentials" do
+        Busybee.cluster_address = "configured:26500"
+
+        creds = described_class.build
+        expect(creds).to have_attributes(class: Busybee::Credentials::Insecure, cluster_address: "configured:26500")
+      end
+
+      it "connects to the configured address instead, with TLS credentials from the env" do
+        with_env("ZEEBE_CERTIFICATE_FILE" => "/path/to/cert.pem")
+        Busybee.cluster_address = "configured:26500"
+
+        creds = described_class.build
+        expect(creds).to have_attributes(class: Busybee::Credentials::TLS, cluster_address: "configured:26500")
+      end
+
+      it "connects to the configured address instead, with OAuth credentials from the env" do
+        with_env(oauth_env)
+        Busybee.cluster_address = "configured:26500"
+
+        creds = described_class.build
+        expect(creds).to have_attributes(class: Busybee::Credentials::OAuth, cluster_address: "configured:26500")
+      end
+
+      it "connects to the configured address instead, with an explicit credential_type" do
+        with_env(oauth_env)
+        Busybee.cluster_address = "configured:26500"
+        Busybee.credential_type = :oauth
+
+        expect(described_class.build.cluster_address).to eq("configured:26500")
+      ensure
+        Busybee.credential_type = nil
+      end
+
+      it "still derives a Camunda Cloud address from its cluster id and region" do
+        with_env("CAMUNDA_CLIENT_ID" => "id", "CAMUNDA_CLIENT_SECRET" => "secret",
+                 "CAMUNDA_CLUSTER_ID" => "abc", "CAMUNDA_CLUSTER_REGION" => "bru-2")
+        Busybee.cluster_address = "configured:26500"
+
+        creds = described_class.build
+        expect(creds).to have_attributes(class: Busybee::Credentials::CamundaCloud,
+                                         cluster_address: "abc.bru-2.zeebe.camunda.io:443")
+      end
     end
 
     it "treats empty credential env vars as unset" do
@@ -212,7 +280,7 @@ RSpec.describe Busybee::Credentials do
 
   describe "#cluster_address" do
     it "defaults to Busybee.cluster_address" do
-      original = Busybee.cluster_address
+      original = Busybee.instance_variable_get(:@cluster_address) # the reader falls back to ENV
       Busybee.cluster_address = "default:26500"
 
       creds = described_class.new

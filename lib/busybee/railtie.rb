@@ -5,6 +5,8 @@ require "active_support/core_ext/object/blank"
 require "rails"
 require "busybee"
 
+require "busybee/runtime_config"
+
 module Busybee
   # Rails integration for Busybee.
   # Automatically configures Busybee from Rails configuration.
@@ -45,10 +47,10 @@ module Busybee
 
         next unless busybee_conf.presence
 
-        config.log_format = busybee_conf.log_format if busybee_conf.log_format.present?
-        config.cluster_address = busybee_conf.cluster_address if busybee_conf.cluster_address.present?
-        config.worker_name = busybee_conf.worker_name if busybee_conf.worker_name.present?
-        config.shutdown_wait_timeout = busybee_conf.shutdown_wait_timeout if busybee_conf.shutdown_wait_timeout.presence
+        Busybee::RuntimeConfig::PROCESS_WIDE_SETTINGS.each do |field|
+          value = busybee_conf.public_send(field)
+          Busybee::Railtie.apply_over_cli(config, field, value) if value.present?
+        end
 
         # Credentials: explicit object, or build from type + params
         Busybee::Railtie.configure_credentials(config, busybee_conf)
@@ -66,6 +68,18 @@ module Busybee
         # Worker defaults
         Busybee::Railtie.configure_worker_defaults(config, busybee_conf)
       end
+    end
+
+    # Applies a process-wide setting, saying so when it replaces what the busybee command applied.
+    # @api private
+    def self.apply_over_cli(config, field, value)
+      source, replaced = config._cli_source(field)
+      config.public_send(:"#{field}=", value)
+      applied = config.public_send(field)
+      return if source.nil? || config._same_setting?(applied, replaced)
+
+      Busybee::Logging.info("Overriding #{source} #{replaced.inspect} " \
+                            "with config.x.busybee.#{field} #{applied.inspect}")
     end
 
     # @api private

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
 require "concurrent"
 require "fileutils"
 require "json"
@@ -27,14 +28,18 @@ RSpec.describe Busybee::CLI do
     Busybee.logger = nil # keeps the CLI's own logger off the suite's stdout, except where it's the subject
   end
 
-  # The messages of the JSON Overriding lines in a text capture's "LEVEL line"s.
-  def override_messages(lines) = lines.grep(/Overriding/).map { |line| JSON.parse(line.split(" ", 2).last)["message"] }
+  # Runs the block where config/environment.rb would load, in its place.
+  def while_loading_rails(&block)
+    allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
+      block.call if path == Busybee::CLI::LoadEnvironment::RAILS_ENVIRONMENT
+    end
+  end
 
   # Save/restore gem-level config that apply_global_config! may modify
   around do |example|
-    saved = %i[@log_format @worker_name @cluster_address @shutdown_wait_timeout].to_h do |ivar|
-      [ivar, Busybee.instance_variable_get(ivar)]
-    end
+    ivars = Busybee::RuntimeConfig::PROCESS_WIDE_SETTINGS.map { |field| :"@#{field}" } << :@cli_sources
+    saved = ivars.to_h { |ivar| [ivar, Busybee.instance_variable_get(ivar)] }
+    saved.each_key { |ivar| Busybee.instance_variable_set(ivar, nil) } # a flag fills only an unset slot
     example.run
   ensure
     saved.each { |ivar, val| Busybee.instance_variable_set(ivar, val) }
@@ -275,7 +280,7 @@ RSpec.describe Busybee::CLI do
     context "with Rails environment loading" do
       it "requires the Railtie then config/environment when Rails is available" do
         loaded_paths = []
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
           loaded_paths << path
           true
         end
@@ -286,7 +291,7 @@ RSpec.describe Busybee::CLI do
       end
 
       it "skips Rails loading when BUSYBEE_SKIP_RAILS is set" do
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, _path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |_path|
           raise "should not be called"
         end
 
@@ -300,7 +305,7 @@ RSpec.describe Busybee::CLI do
 
       it "loads Rails when BUSYBEE_SKIP_RAILS is empty" do
         loaded_paths = []
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
           loaded_paths << path
           true
         end
@@ -316,7 +321,7 @@ RSpec.describe Busybee::CLI do
 
       it "logs a failure to load config/environment, then raises it" do
         boot_failure = StandardError.new("boot failed")
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
           raise boot_failure if path == "./config/environment"
         end
 
@@ -367,6 +372,42 @@ RSpec.describe Busybee::CLI do
         described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
         expect(Busybee.cluster_address).to eq("zeebe.example.com:26500")
       end
+
+      it "connects to the --cluster-address given over CLUSTER_ADDRESS" do
+        stub_credential_env_vars
+        allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return("env:26500")
+
+        cli = described_class.new(["-a", "zeebe.example.com:26500", "TestCLIWorker"])
+        expect(cli.send(:client).cluster_address).to eq("zeebe.example.com:26500")
+      end
+
+      it "applies them before loading Rails, so the app's configuration has the last word" do
+        seen = nil
+        while_loading_rails do
+          seen = [Busybee.log_format, Busybee.worker_name, Busybee.cluster_address]
+          Busybee.worker_name = "app-worker"
+        end
+        described_class.new(["-l", "json", "-n", "flag-worker", "-a", "flag:26500", "TestCLIWorker"])
+
+        expect(seen).to eq([:json, "flag-worker", "flag:26500"])
+        expect(Busybee.worker_name).to eq("app-worker")
+      end
+
+      it "keeps a value the app configured ahead of it, saying so" do
+        Busybee.worker_name = "app-worker"
+        lines = capture_busybee_log { described_class.new(["-n", "flag-worker", "TestCLIWorker"]) }
+
+        expect(Busybee.worker_name).to eq("app-worker")
+        expect(lines.grep(/Overriding/)).to eq(['INFO [busybee] Overriding --worker-name "flag-worker" with ' \
+                                                'Busybee.worker_name "app-worker"'])
+      end
+
+      it "gives way silently to the same value configured ahead of it" do
+        Busybee.worker_name = "same-worker"
+        lines = capture_busybee_log { described_class.new(["-n", "same-worker", "TestCLIWorker"]) }
+
+        expect(lines.grep(/Overriding/)).to be_empty
+      end
     end
 
     context "with shutdown_wait_timeout spelled as a String in YAML" do
@@ -392,32 +433,38 @@ RSpec.describe Busybee::CLI do
         expect(Busybee::Logging).to have_received(:warn).with(/shutdown_wait_timeout.*500ms/)
       end
 
-      it "names YAML as the source when it overrides a configured value" do
-        Busybee.instance_variable_set(:@shutdown_wait_timeout, 3000) # restored by the file's around
+      it "applies it before loading Rails, so the app's configuration has the last word" do
+        seen = nil
+        while_loading_rails do
+          seen = Busybee.shutdown_wait_timeout
+          Busybee.shutdown_wait_timeout = 3000
+        end
+        described_class.new(["-c", config_with(8000)])
+
+        expect(seen).to eq(8000)
+        expect(Busybee.shutdown_wait_timeout).to eq(3000)
+      end
+
+      it "keeps a value the app configured ahead of it, naming YAML as what gave way" do
+        Busybee.shutdown_wait_timeout = 3000
         lines = capture_busybee_log { described_class.new(["-c", config_with(8000)]) }
 
-        expect(lines).to include("INFO [busybee] Overriding configured value with YAML shutdown_wait_timeout: " \
-                                 "3000 \u2192 \"8000\"")
+        expect(Busybee.shutdown_wait_timeout).to eq(3000)
+        expect(lines.grep(/Overriding/)).to eq(["INFO [busybee] Overriding YAML shutdown_wait_timeout 8000 with " \
+                                                "Busybee.shutdown_wait_timeout 3000"])
+      end
+
+      it "gives way silently to the same duration the app configured in another unit" do
+        Busybee.shutdown_wait_timeout = 8.seconds
+        lines = capture_busybee_log { described_class.new(["-c", config_with(8000)]) }
+
+        expect(lines.grep(/Overriding/)).to be_empty
       end
 
       it "does not override gem config when flags are not provided" do
         original_format = Busybee.log_format
         described_class.new(["TestCLIWorker"])
         expect(Busybee.log_format).to eq(original_format)
-      end
-
-      it "logs when overriding a value already set, in the format it sets" do
-        lines = capture_busybee_log { described_class.new(["-l", "json", "TestCLIWorker"]) }
-
-        expect(override_messages(lines)).to eq(["[busybee] Overriding configured value with --log-format: " \
-                                                ":text \u2192 :json"])
-      end
-
-      it "does not log when no prior value was configured" do
-        Busybee.instance_variable_set(:@worker_name, nil)
-        lines = capture_busybee_log { described_class.new(["-n", "my-worker", "TestCLIWorker"]) }
-
-        expect(lines.grep(/Overriding/)).to be_empty
       end
     end
 
@@ -453,7 +500,7 @@ RSpec.describe Busybee::CLI do
       end
 
       it "writes in the --log-format given, from the first line it logs while loading Rails" do
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
+        allow(Busybee::CLI::LoadEnvironment).to receive(:require) do |path|
           Busybee::Logging.info("booting") if path == "./config/environment"
         end
         lines = capture_busybee_log do
@@ -464,26 +511,17 @@ RSpec.describe Busybee::CLI do
         expect(JSON.parse(lines.first.delete_prefix("INFO "))).to include("message" => "[busybee] booting")
       end
 
-      it "does not log an override of the --log-format it applied itself before loading Rails" do
+      it "keeps a format configured while Rails loads, in place of the --log-format given" do
+        while_loading_rails { Busybee.log_format = :text }
+        format = nil
         lines = capture_busybee_log do
           Busybee.instance_variable_set(:@log_format, nil)
           described_class.new(["-l", "json", "TestCLIWorker"])
+          format = Busybee.log_format # the capture restores its own format on the way out
         end
 
+        expect(format).to eq(:text)
         expect(lines.grep(/Overriding/)).to be_empty
-      end
-
-      it "logs an override of a format configured while Rails loaded" do
-        allow_any_instance_of(described_class).to receive(:require) do |_instance, path| # rubocop:disable RSpec/AnyInstance
-          Busybee.log_format = :text if path == "./config/environment"
-        end
-        lines = capture_busybee_log do
-          Busybee.instance_variable_set(:@log_format, nil)
-          described_class.new(["-l", "json", "TestCLIWorker"])
-        end
-
-        expect(override_messages(lines)).to eq(["[busybee] Overriding configured value with --log-format: " \
-                                                ":text → :json"])
       end
     end
   end

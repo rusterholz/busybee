@@ -240,7 +240,7 @@ module Busybee
 
     # error: takes only an Exception, so a plain message rides in the text.
     def log_failure(message_or_exception, retries)
-      tail = ", #{retries} retries left"
+      tail = ", #{retries} #{retries == 1 ? 'retry' : 'retries'} left"
       return log_resolution("Failed", message_or_exception, tail: tail) unless message_or_exception.is_a?(Exception)
 
       Logging.info("Failed #{type} job ##{key}#{tail}", self, error: message_or_exception)

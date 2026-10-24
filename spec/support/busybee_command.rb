@@ -3,6 +3,7 @@
 require "concurrent"
 require "open3"
 require "rbconfig"
+require "socket"
 
 # Runs the busybee executable in a process of its own, the way an operator does,
 # with the worker in spec/fixtures/cli_logging_worker.rb required ahead of it.
@@ -28,6 +29,14 @@ module BusybeeCommand
       status = finish(waiter, deadline)
       Result.new(stdout.read, stderr.read, status, seen)
     end
+  end
+
+  # An address nothing listens on: bound, then let go.
+  def closed_address
+    server = TCPServer.new("127.0.0.1", 0)
+    "127.0.0.1:#{server.addr[1]}"
+  ensure
+    server&.close
   end
 
   private

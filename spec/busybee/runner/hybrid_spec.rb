@@ -214,13 +214,16 @@ RSpec.describe Busybee::Runner::Hybrid do
           0 # fewer than max_jobs → caught up
         end
 
-        # After drain exits, runner enters blocking buffer phase. Stop via background thread.
-        Thread.new do
+        # After drain exits, runner enters blocking buffer phase. Stop via background thread,
+        # handed this example's runner and joined: past the example, `runner` builds a new one.
+        stopping = runner
+        stopper = Thread.new do
           sleep 0.1
-          runner.stop!
+          stopping.stop!
         end
 
         runner.run!
+        stopper.join
 
         # Should have polled exactly once (0 < max_jobs → exit drain immediately)
         expect(poll_count).to eq(1)

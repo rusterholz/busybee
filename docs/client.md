@@ -99,7 +99,7 @@ When `cluster_address` is not explicitly provided, Busybee uses this precedence:
 3. `CLUSTER_ADDRESS` environment variable
 4. Default: `"localhost:26500"` (lowest priority)
 
-This allows you to set a default cluster address once and override it selectively when needed.
+This allows you to set a default cluster address once and override it selectively when needed. One exception: when `config.x.busybee` sets any credential key, Busybee builds its credentials while Rails boots, and an initializer that changes `Busybee.cluster_address` afterward doesn't reach them. Assign `Busybee.credentials` instead.
 
 ### Environment Variables
 
@@ -107,7 +107,7 @@ For convenience, many of the credential parameters may be read implicitly from t
 
 | Environment Variable | Purpose | Used By |
 |---------------------|---------|---------|
-| `CLUSTER_ADDRESS` | Zeebe cluster address (host:port) | All credential types |
+| `CLUSTER_ADDRESS` | Zeebe cluster address (host:port) | All but Camunda Cloud, which derives its own |
 | `BUSYBEE_CREDENTIAL_TYPE` | Credential type (insecure, tls, oauth, camunda_cloud) | Auto-detection |
 | `ZEEBE_TOKEN_URL` | OAuth token endpoint | OAuth |
 | `ZEEBE_AUDIENCE` | OAuth audience | OAuth |

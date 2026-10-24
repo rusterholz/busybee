@@ -30,6 +30,8 @@ module Busybee
       # First checks Busybee.credential_type for explicit type selection.
       # If not set, autodetects credential type based on which keys are present in params.
       # If no keys are given in params, attempts to load them from environment vars.
+      # CLUSTER_ADDRESS is not among them: an address left nil resolves through
+      # Busybee.cluster_address, which puts configuration ahead of the env.
       #
       # @param cluster_address [String, nil] Override cluster address
       # @param params [Hash] Configuration parameters (keys inform credential type selection)
@@ -44,11 +46,7 @@ module Busybee
       #   Credentials.build  # Uses configured type
       #
       def build(cluster_address: nil, **params)
-        if params.empty?
-          params = extract_possible_credential_params_from_env
-          extracted_address = params.delete(:cluster_address) # always delete to avoid duplicate keyword arg
-          cluster_address ||= extracted_address # allow explicit kwarg to override env
-        end
+        params = extract_possible_credential_params_from_env if params.empty?
 
         case Busybee.credential_type
         when :insecure
@@ -156,7 +154,6 @@ module Busybee
       # Attempt to extract credentials from environment variables, if present.
       def extract_possible_credential_params_from_env
         {
-          cluster_address: ENV.fetch("CLUSTER_ADDRESS", nil),
           # Camunda Cloud params
           client_id: ENV.fetch("CAMUNDA_CLIENT_ID", nil),
           client_secret: ENV.fetch("CAMUNDA_CLIENT_SECRET", nil),

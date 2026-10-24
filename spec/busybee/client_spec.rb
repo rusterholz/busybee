@@ -5,13 +5,14 @@ require "busybee/credentials/insecure"
 RSpec.describe Busybee::Client do
   describe ".new" do
     around do |example|
-      original_cluster_address = Busybee.cluster_address
+      original_cluster_address = Busybee.instance_variable_get(:@cluster_address) # the reader falls back to ENV
       original_credential_type = Busybee.credential_type
       original_credentials = Busybee.credentials
+      Busybee.cluster_address = nil
       Busybee.credential_type = nil
       Busybee.credentials = nil
       example.run
-      Busybee.cluster_address = original_cluster_address
+      Busybee.instance_variable_set(:@cluster_address, original_cluster_address)
       Busybee.credential_type = original_credential_type
       Busybee.credentials = original_credentials
     end
@@ -33,12 +34,33 @@ RSpec.describe Busybee::Client do
         expect(client.credentials).to be_a(Busybee::Credentials::Insecure)
       end
 
-      it "uses Busybee.cluster_address via credentials" do
-        stub_credential_env_vars
-        Busybee.cluster_address = "configured:26500"
+      context "when resolving the cluster address" do
+        before { stub_credential_env_vars }
 
-        client = described_class.new
-        expect(client.cluster_address).to eq("configured:26500")
+        def with_env_address(address) = allow(ENV).to receive(:fetch).with("CLUSTER_ADDRESS", nil).and_return(address)
+
+        it "connects to localhost:26500 when nothing names an address" do
+          expect(described_class.new.cluster_address).to eq("localhost:26500")
+        end
+
+        it "connects to CLUSTER_ADDRESS when nothing is configured" do
+          with_env_address("env:26500")
+
+          expect(described_class.new.cluster_address).to eq("env:26500")
+        end
+
+        it "connects to Busybee.cluster_address when CLUSTER_ADDRESS is unset" do
+          Busybee.cluster_address = "configured:26500"
+
+          expect(described_class.new.cluster_address).to eq("configured:26500")
+        end
+
+        it "connects to Busybee.cluster_address over CLUSTER_ADDRESS" do
+          with_env_address("env:26500")
+          Busybee.cluster_address = "configured:26500"
+
+          expect(described_class.new.cluster_address).to eq("configured:26500")
+        end
       end
     end
 

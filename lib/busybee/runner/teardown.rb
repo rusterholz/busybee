@@ -69,9 +69,9 @@ module Busybee
 
       # A Shutdown from a T1/T2/T3 hook stays here, as does a recoverable error
       # safe: true lets past, each recorded for T3: a worker already tearing down
-      # cannot shut down harder. Past RECOVERABLE_ERRORS, an error raises the fire
-      # alarm and propagates, taking the rest of the teardown with it. T0 is
-      # excluded by not being wrapped.
+      # cannot shut down harder. Past RECOVERABLE_ERRORS, an error is recorded for
+      # T3 too, then raises the fire alarm and propagates, taking the rest of the
+      # teardown with it. T0 is excluded by not being wrapped.
       def contain_teardown_hooks(type)
         yield
       rescue Busybee::Worker::Shutdown => e
@@ -81,6 +81,7 @@ module Busybee
       rescue *RECOVERABLE_ERRORS => e
         @teardown_error.compare_and_set(nil, e)
       rescue Exception => e # rubocop:disable Lint/RescueException
+        @teardown_error.compare_and_set(nil, e) # first: a teardown on another thread stops waiting at the alarm
         exit_immediately!(reason: reason_for(e))
         raise
       end
