@@ -75,10 +75,11 @@ In a bundle that includes Rails, the command loads your app from `./config/envir
 
   Once Rails has set up your app's logger, this line goes there instead of stdout. The stderr report arrives either way.
 
-`--cluster-address`, `--worker-name` and `--log-format` take effect before your app boots, so a value your app configures for the same setting wins over the flag, and Busybee logs when that happens:
+The flags `--cluster-address`, `--worker-name` and `--log-format`, and the top-level `shutdown_wait_timeout` in a YAML config, count only where your app sets nothing. A value your app configures for the same setting wins, and Busybee logs when that happens:
 
 ```
-PLACEHOLDER: the Railtie's override line, to be copied from a real run
+I, [2026-10-24T11:09:47.096669 #85255]  INFO -- : [busybee] Overriding --worker-name "staging-worker" with config.x.busybee.worker_name "orders-worker"
+I, [2026-10-24T11:09:47.097172 #85255]  INFO -- : [busybee] Overriding --cluster-address "zeebe-staging:26500" with config.x.busybee.cluster_address "zeebe-gateway:26500"
 ```
 
 [Configuration Precedence](configuration.md#configuration-precedence) has the full order.
@@ -190,6 +191,7 @@ A gateway under load answers with `RESOURCE_EXHAUSTED` instead. A polling worker
 |--------------|---------------|
 | `Started`, then nothing, on a streaming worker | A job stream delivers only jobs that become available after it opens, so jobs that were already waiting never reach it. Use hybrid mode, the default, which also polls for them. See [Workers: Streaming](workers.md#streaming) |
 | `Started`, then nothing, on any worker | The `Started` line names the job type the worker asks for: compare it with the task type in your BPMN |
+| A worker using a gateway address, worker name or log format other than its flags gave | Your app's configuration wins over the flags. Look for an `Overriding` line as the process boots (see [Booting](#booting)) |
 | Nothing for about a minute after a crash or a forced stop | The jobs the old process held are still locked to it. They come back once their `job_timeout` lapses |
 | Jobs whose last line is their `Activated` line | The oldest of them is the one whose `perform` hasn't returned. On a streaming or hybrid worker, the rest may be waiting in the buffer behind it. `Activated` lines are logged at `debug`, so lower your [logger's](configuration.md#logger) level to see them |
 | Jobs piling up in the engine while a streaming worker with `buffer: false` or a `buffer_throttle` idles | A stream too slow to accept jobs misses new ones. See [Workers: Buffer Throttle](workers.md#buffer-throttle) |
