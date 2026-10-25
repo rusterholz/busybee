@@ -23,9 +23,12 @@ RSpec.describe "a stop announcement failing unrecoverably after the stream faile
     Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
   end
 
+  # The stream reader logs the hook's error after the run has returned, since
+  # nothing waits for it under the fire alarm; in production the process may
+  # exit first, so the line is best-effort there. Here the reader gets the time.
   it "logs the hook's error, while the run ends on the gateway's" do
     raised = nil
-    lines = capture_busybee_log { raised = run_to_completion }
+    lines = capture_busybee_log(awaiting: /Exiting process immediately/) { raised = run_to_completion }
 
     expect(raised).to be_a(Busybee::GRPC::Error)
     expect(lines.grep(/\A(WARN|ERROR)/)).
