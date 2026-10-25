@@ -107,6 +107,14 @@ RSpec.describe "a worker meeting an unrecoverable error", :gateway do # rubocop:
                              %i[on_worker_shutdown crash] + [NoMemoryError]])
     end
 
+    # The job in perform leaves on the pump's stop, which comes with the fire alarm already up.
+    it "runs no closing hook for the job it was running, nor for the one buffered" do
+      brackets = record_job_brackets
+      run_to_completion
+
+      expect(brackets).to eq([[:activated, 1], [:activated, 2]])
+    end
+
     it "leaves the runner no longer running" do
       run_to_completion
 

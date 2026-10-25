@@ -194,12 +194,12 @@ module Busybee
       end
 
       # Whatever ends the pump claims the stop like any other error (see
-      # Stopping#claim_stop): the main thread raises a winner as the run's exit
-      # error; a loser is a post-stop error. A won claim announces the stop, and
-      # what that announcement raises meets a stop already claimed: post-stop.
+      # Stopping#claim_stop), raising the fire alarm for an unrecoverable one: the
+      # main thread raises a winner as the run's exit error; a loser is a post-stop
+      # error. A won claim announces the stop, and what that announcement raises
+      # meets a stop already claimed: post-stop.
       def end_pump(error, reason)
-        exit_immediately!(reason: reason) unless recoverable?(error) # whether or not its claim wins
-        claim_stop(reason, error)
+        claim_stop(reason, error, exit_immediately: !recoverable?(error))
       rescue Exception => e # rubocop:disable Lint/RescueException
         end_pump(e, reason_for(e))
       end
