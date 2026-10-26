@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "concurrent"
 require "grpc"
 
 require "busybee"
@@ -14,6 +15,8 @@ class FaultInjectionGateway
   # port off-host. Overridable because it is the one seam an exotic environment
   # (a UDS path, a different interface) needs to redirect.
   DEFAULT_BIND = "127.0.0.1:0"
+
+  BOUND_ADDRESSES = Concurrent::Set.new
 
   # One handler per Gateway RPC, defined off the generated rpc_descs so the set
   # can never drift from the service definition. Every RPC routes through the
@@ -94,17 +97,24 @@ class FaultInjectionGateway
     handler.call(request)
   end
 
-  # Short of a ready thread, grpc answers RESOURCE_EXHAUSTED itself, so the pool
-  # has room for every concurrent call a spec makes, plus each thread's moment
-  # between finishing a call and taking the next.
+  # A port-0 gateway never takes an address an earlier one in this process had:
+  # grpc shares connections process-wide by address, so a client still failing
+  # against a stopped gateway would fail a later one given the same port. A
+  # reused port stays bound until a fresh one is found, so the kernel moves on.
   def start
-    @server = ::GRPC::RpcServer.new(pool_size: 8)
-    port = bind_port!
-    @address = @bind.sub(/:\d+\z/, ":#{port}")
-    @server.handle(Service.new(self))
-    @thread = Thread.new { @server.run }
-    @server.wait_till_running
+    reused = []
+    loop do
+      boot
+      break if BOUND_ADDRESSES.add?(@address) || !@bind.end_with?(":0")
+
+      reused << [@server, @thread]
+    end
     self
+  ensure
+    reused.each do |server, thread|
+      server.stop
+      thread.join(5)
+    end
   end
 
   # Safe to call when start never got as far as binding, which is exactly what an
@@ -119,6 +129,18 @@ class FaultInjectionGateway
   end
 
   private
+
+  # Short of a ready thread, grpc answers RESOURCE_EXHAUSTED itself, so the pool
+  # has room for every concurrent call a spec makes, plus each thread's moment
+  # between finishing a call and taking the next.
+  def boot
+    @server = ::GRPC::RpcServer.new(pool_size: 8)
+    port = bind_port!
+    @address = @bind.sub(/:\d+\z/, ":#{port}")
+    @server.handle(Service.new(self))
+    @thread = Thread.new { @server.run }
+    @server.wait_till_running
+  end
 
   # grpc reports a bind failure inconsistently — 1.81 raises "not sure why",
   # other versions return port 0 — and neither names the knob that fixes it.
