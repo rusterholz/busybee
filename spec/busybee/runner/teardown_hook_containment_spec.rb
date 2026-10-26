@@ -88,8 +88,9 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
     end
 
     let(:runner) { Busybee::Runner::Streaming.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
-    # The reader logs the hook's error after the run has returned; each example
-    # waits for that line, so the reader finishes inside it.
+    # The reader may log the hook's error after the run has returned, since
+    # nothing waits for it under the fire alarm; each example waits for that
+    # line, so the reader finishes inside it.
     let(:post_stop_line) { /Exiting process immediately: unrecoverable error while .* \(NoMemoryError: / }
 
     before do
@@ -98,7 +99,8 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
     end
 
     it "finishes the stop, reports and logs the error and says to exit immediately" do
-      raised, status = nil
+      raised = nil
+      status = nil
       lines = capture_busybee_log(awaiting: post_stop_line) { raised, status = run_with_shutdown_status }
 
       aggregate_failures do
