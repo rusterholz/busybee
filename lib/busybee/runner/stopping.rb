@@ -53,10 +53,12 @@ module Busybee
       # Claim the stop for an error. A won claim caused the stop: its error is the
       # exit error, raised at loop exit, recorded before the announcement wakes
       # anyone. A lost one met a stop under way: a post-stop error, never raised,
-      # reported at T3 and logged, unless it is the exit error already (a re-raised
-      # claim). Both effects run after the lock is released.
-      def claim_stop(reason, error) # rubocop:disable Naming/PredicateMethod
+      # reported at T3 and logged, unless already the exit error (a re-raised claim).
+      # Both effects run after the lock; exit_immediately: first raises the fire
+      # alarm inside it, won or lost, so whatever sees the claim sees the alarm.
+      def claim_stop(reason, error, exit_immediately: false) # rubocop:disable Naming/PredicateMethod
         outcome = synchronize_claim do
+          exit_immediately!(reason: reason) if exit_immediately
           if @stop_reason.compare_and_set(nil, reason)
             record_shutdown_error(error)
             :won
@@ -91,7 +93,8 @@ module Busybee
         end
       end
 
-      # The exit and post-stop slots are plain ivars, read and written only inside this.
+      # Every read and write of the exit and post-stop slots (plain ivars) goes
+      # through this: a claim may raise the fire alarm before its record lands.
       def synchronize_claim
         # Subclasses may lock here; the base doesn't, since only its main thread claims.
         yield

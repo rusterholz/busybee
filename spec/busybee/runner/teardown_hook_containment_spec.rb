@@ -88,25 +88,36 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
     end
 
     let(:runner) { Busybee::Runner::Streaming.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
+    # The reader may log the hook's error after the run has returned, since
+    # nothing waits for it under the fire alarm; each example waits for that
+    # line, so the reader finishes inside it.
+    let(:post_stop_line) { /Exiting process immediately: unrecoverable error while .* \(NoMemoryError: / }
 
     before do
       gateway.on(:stream_activated_jobs) { [wire_job(1)] }
       Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "failed to allocate memory" }
     end
 
-    it "finishes the stop, reports the error at on_worker_shutdown and says to exit immediately" do
-      raised, status = run_with_shutdown_status
+    it "finishes the stop, reports and logs the error and says to exit immediately" do
+      raised = nil
+      status = nil
+      lines = capture_busybee_log(awaiting: post_stop_line) { raised, status = run_with_shutdown_status }
 
       aggregate_failures do
         expect(raised).to be_nil
         expect([status&.reason, status&.error]).to match([:gateway_closed, an_instance_of(NoMemoryError)])
+        expect(lines.grep(post_stop_line).size).to eq(1)
         expect(runner.running?).to be(false)
         expect(Busybee::Runner.exit_immediately?).to be(true)
       end
     end
 
     it "leaves the stream reader alive to finish, rather than dying by exception" do
-      expect { run_to_completion }.not_to output(/terminated with exception/).to_stderr
+      lines = nil
+      run = -> { lines = capture_busybee_log(awaiting: post_stop_line) { run_to_completion } }
+
+      expect(&run).not_to output(/terminated with exception/).to_stderr
+      expect(lines.grep(post_stop_line).size).to eq(1)
     end
 
     # The stream fails instead, so the stop the reader announces is its own error's.
@@ -116,10 +127,16 @@ RSpec.describe "an unrecoverable error from a teardown hook", :gateway do # rubo
       it "ends the run on the stream's error, rather than the stream reader dying of the hook's" do
         raised = nil
         status = nil
-        run = -> { status = shutdown_status_from { raised = run_to_completion } }
+        lines = nil
+        run = lambda do
+          lines = capture_busybee_log(awaiting: post_stop_line) do
+            status = shutdown_status_from { raised = run_to_completion }
+          end
+        end
         expect(&run).not_to output(/terminated with exception/).to_stderr
 
         aggregate_failures do
+          expect(lines.grep(post_stop_line).size).to eq(1)
           expect(raised).to be_a(Busybee::GRPC::Error)
           expect([status&.reason, status&.error]).to match([:gateway_error, be(raised)])
           expect(Busybee::Runner.exit_immediately?).to be(true)
