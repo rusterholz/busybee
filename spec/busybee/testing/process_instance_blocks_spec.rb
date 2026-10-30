@@ -3,6 +3,7 @@
 require "concurrent"
 
 require "busybee/testing/helpers"
+require "busybee/testing/no_job_available"
 
 # with_process_instance and with_activated_job_instance against a gateway that
 # answers like Zeebe: instance keys count up from 1001, cancels succeed.

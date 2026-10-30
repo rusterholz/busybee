@@ -71,6 +71,42 @@ module Busybee
           jobs
         end
 
+        # Activates until a job of the test's own arrives or the wait runs out,
+        # handing back each foreign one as it comes.
+        #
+        # @param foreign [ForeignJobs] which jobs to refuse
+        # @return [Array(Array, Array)] the jobs kept, and those handed back (one per job key)
+        def activate_own_jobs(type, max_jobs:, foreign:, timeout: nil)
+          wait = timeout || Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS
+          deadline = deadline_after(wait)
+          refused = {}
+          loop do
+            others, own = activate_jobs_raw(type, max_jobs: max_jobs, timeout: wait).partition { foreign.foreign?(_1) }
+            others.each { |job| refused[job.key] = hand_back(job, foreign) }
+            wait = ms_left(deadline)
+            return [own, refused.values] if own.any? || others.empty? || wait < 1
+          end
+        end
+
+        def deadline_after(wait) = monotonic_now + (Busybee::Durations.milliseconds_from(wait) / 1000.0)
+        def ms_left(deadline) = ((deadline - monotonic_now) * 1000).floor
+
+        # Back to the engine unworked: retries untouched, and out of reach for
+        # FOREIGN_JOB_BACKOFF_MS so the next activation can find another job.
+        def hand_back(job, foreign)
+          grpc_client.fail_job(
+            Busybee::GRPC::FailJobRequest.new(
+              jobKey: job.key, retries: job.retries, errorMessage: foreign.hand_back_message(job),
+              retryBackOff: Busybee::Testing::FOREIGN_JOB_BACKOFF_MS
+            )
+          )
+          job
+        rescue ::GRPC::NotFound
+          job # its instance ended meanwhile
+        end
+
+        def monotonic_now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
         # This is the central grpc_client implementation (the one you should usually mock in a test).
         # The actual public helper instance method delegates to this. It uses Busybee.credential_type
         # if set, and attempts to autodetect from env vars otherwise.

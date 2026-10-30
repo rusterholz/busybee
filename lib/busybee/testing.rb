@@ -11,6 +11,7 @@ end
 # Auto-load RSpec integration if RSpec is available
 if defined?(RSpec)
   require "busybee/testing/activated_job"
+  require "busybee/testing/foreign_jobs"
   require "busybee/testing/helpers"
   require "busybee/testing/helpers/hook_scoping"
 
@@ -22,6 +23,11 @@ if defined?(RSpec)
     # `without_busybee_hooks: [:worker, :call]` on a group or example; innermost wins.
     config.around(:example, :without_busybee_hooks) do |example|
       Busybee::Testing::Helpers::HookScoping.without(*example.metadata[:without_busybee_hooks]) { example.run }
+    end
+
+    # `busybee_foreign_jobs: :accept` (or `:refuse`) on a group or example; innermost wins.
+    config.around(:example, :busybee_foreign_jobs) do |example|
+      Busybee::Testing.with_foreign_jobs(example.metadata[:busybee_foreign_jobs]) { example.run }
     end
 
     # A runner's fire alarm is process-wide, so one example's must not reach the next.

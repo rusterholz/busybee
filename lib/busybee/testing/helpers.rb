@@ -6,6 +6,7 @@ require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 require "busybee/testing/activated_job"
+require "busybee/testing/foreign_jobs"
 require "busybee/testing/helpers/builders"
 require "busybee/testing/helpers/execution"
 require "busybee/testing/helpers/hook_firing"
@@ -165,7 +166,9 @@ module Busybee
         false
       end
 
-      # Activate a single job of the given type.
+      # Activate a single job of the given type. Inside with_process_instance,
+      # a job of any other process instance is handed back to the engine
+      # unworked, and the wait goes on (see Testing.accepting_foreign_jobs).
       #
       # @param type [String] job type
       # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
@@ -173,13 +176,16 @@ module Busybee
       # @return [ActivatedJob]
       # @raise [NoJobAvailable] if no job is available
       def activate_job(type, timeout: nil)
-        jobs = Busybee::Testing::Helpers.activate_jobs_raw(type, max_jobs: 1, timeout: timeout)
-        raise NoJobAvailable, "No job of type '#{type}' available" if jobs.empty?
+        foreign = busybee_foreign_jobs
+        jobs, refused = Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: 1, timeout: timeout,
+                                                                          foreign: foreign)
+        raise NoJobAvailable, foreign.no_job_message(type, refused) if jobs.empty?
 
         ActivatedJob.new(jobs.first, client: grpc_client)
       end
 
-      # Activate multiple jobs of the given type.
+      # Activate multiple jobs of the given type, handing back foreign ones as
+      # activate_job does.
       #
       # @param type [String] job type
       # @param max_jobs [Integer] maximum number of jobs to activate
@@ -187,8 +193,10 @@ module Busybee
       #   for jobs (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
       # @return [Enumerator<ActivatedJob>]
       def activate_jobs(type, max_jobs:, timeout: nil)
+        foreign = busybee_foreign_jobs
         Enumerator.new do |yielder|
-          Busybee::Testing::Helpers.activate_jobs_raw(type, max_jobs: max_jobs, timeout: timeout).each do |raw_job|
+          Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: max_jobs, timeout: timeout,
+                                                            foreign: foreign).first.each do |raw_job|
             yielder << ActivatedJob.new(raw_job, client: grpc_client)
           end
         end
@@ -266,6 +274,10 @@ module Busybee
 
       # Keys of the with_process_instance blocks the example is inside, outermost first.
       def busybee_process_instances = @busybee_process_instances ||= []
+
+      def busybee_foreign_jobs
+        ForeignJobs.new(busybee_process_instances, accepting: Busybee::Testing.accepting_foreign_jobs?)
+      end
     end
   end
 end
