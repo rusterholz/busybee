@@ -56,6 +56,15 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
               "the job belongs to process instance 777, not the test's process instance 1001")
     end
 
+    it "backs each further foreign job off longer than the last, up to the maximum" do
+      serve(*(1..10).map { |n| job(900 + n, 700 + n) })
+      serve(job(501, 1001))
+
+      with_process_instance("p") { expect(activate_job("t").key).to eq(501) }
+
+      expect(handed_back.map(&:retryBackOff)).to eq([250, 500, 750, 1_000, 1_250, 1_500, 1_750, 2_000, 2_000, 2_000])
+    end
+
     it "names what it handed back, and the switch, when nothing of its own arrives" do
       serve(job(901, 777), job(902, 778))
 

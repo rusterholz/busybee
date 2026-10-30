@@ -82,7 +82,7 @@ module Busybee
           refused = {}
           loop do
             others, own = activate_jobs_raw(type, max_jobs: max_jobs, timeout: wait).partition { foreign.foreign?(_1) }
-            others.each { |job| refused[job.key] = hand_back(job, foreign) }
+            hand_back_all(others, foreign, refused)
             wait = ms_left(deadline)
             return [own, refused.values] if own.any? || others.empty? || wait < 1
           end
@@ -91,13 +91,28 @@ module Busybee
         def deadline_after(wait) = monotonic_now + (Busybee::Durations.milliseconds_from(wait) / 1000.0)
         def ms_left(deadline) = ((deadline - monotonic_now) * 1000).floor
 
+        # @param refused [Hash] the activation's refused jobs by key, added to here
+        def hand_back_all(jobs, foreign, refused)
+          jobs.each do |job|
+            refused[job.key] = job
+            hand_back(job, foreign, backoff: foreign_job_backoff(refused.size))
+          end
+        end
+
+        # Each distinct job an activation refuses sits out longer than the one
+        # before, so the oldest-first queue can't hand the same few back before
+        # the rest have been seen.
+        def foreign_job_backoff(refused_so_far)
+          [Busybee::Testing::FOREIGN_JOB_BACKOFF_MS * refused_so_far, Busybee::Testing::FOREIGN_JOB_MAX_BACKOFF_MS].min
+        end
+
         # Back to the engine unworked: retries untouched, and out of reach for
-        # FOREIGN_JOB_BACKOFF_MS so the next activation can find another job.
-        def hand_back(job, foreign)
+        # the backoff so the next activation can find another job.
+        def hand_back(job, foreign, backoff:)
           grpc_client.fail_job(
             Busybee::GRPC::FailJobRequest.new(
               jobKey: job.key, retries: job.retries, errorMessage: foreign.hand_back_message(job),
-              retryBackOff: Busybee::Testing::FOREIGN_JOB_BACKOFF_MS
+              retryBackOff: backoff
             )
           )
           job

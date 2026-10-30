@@ -75,6 +75,20 @@ RSpec.describe "Workflow test isolation", :integration do
     end
   end
 
+  context "with many leftover instances' jobs waiting" do
+    let!(:leftovers) { Array.new(80) { start_instance(process_id) } }
+
+    after { leftovers.each { |key| running?(key) } }
+
+    it "reaches the example's own job well inside the wait" do
+      with_process_instance(process_id) do |key|
+        started = now
+        expect(activate_job(job_type).process_instance_key).to eq(key)
+        expect(now - started).to be < 3.0
+      end
+    end
+  end
+
   context "with a call activity" do
     let(:child_type) { "isolation-child-#{suffix}" }
     let(:parent_id) do
@@ -110,7 +124,7 @@ RSpec.describe "Workflow test isolation", :integration do
 
         resumed = now
         expect(activate_job(job_type).process_instance_key).to eq(outer)
-        expect(now - resumed).to be < 2.0
+        expect(now - resumed).to be < 4.5
       end
     end
   end
