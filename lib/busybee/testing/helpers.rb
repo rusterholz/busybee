@@ -103,8 +103,8 @@ module Busybee
         busybee_process_instances.push(key)
 
         yield key
-      rescue Exception # rubocop:disable Lint/RescueException
-        failed = true
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        failed = !Busybee::Testing::Helpers.skip?(e)
         raise
       ensure
         if key

@@ -50,6 +50,12 @@ module Busybee
           false
         end
 
+        # RSpec's skip leaves a block by raising; that isn't the example failing.
+        def skip?(error)
+          defined?(::RSpec::Core::Pending::SkipDeclaredInExample) &&
+            error.is_a?(::RSpec::Core::Pending::SkipDeclaredInExample)
+        end
+
         def activate_jobs_raw(type, max_jobs:, timeout: nil)
           worker = "#{type}-#{SecureRandom.hex(4)}"
 

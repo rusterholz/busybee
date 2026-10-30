@@ -112,6 +112,15 @@ RSpec.describe "with_process_instance blocks", :gateway do # rubocop:disable RSp
       ).to_stderr
     end
 
+    # What `skip` raises, without `skip` also marking this example skipped.
+    it "fails a skipped example too, without counting the skip as a failure" do
+      skipping = -> { raise RSpec::Core::Pending::SkipDeclaredInExample, "not today" }
+
+      expect do
+        expect { with_process_instance("p") { skipping.call } }.to raise_error(GRPC::ResourceExhausted)
+      end.not_to output.to_stderr
+    end
+
     it "fails an example that otherwise passed" do
       expect { with_process_instance("p") { |_| } }.to raise_error(GRPC::ResourceExhausted) # rubocop:disable Lint/EmptyBlock
     end
