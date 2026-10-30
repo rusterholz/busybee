@@ -69,6 +69,7 @@ lib/busybee/
 ├── testing/                 # RSpec integration
 │   ├── activated_job.rb     # Fluent job wrapper for tests
 │   ├── client.rb            # Real Client over an in-process stub
+│   ├── foreign_jobs.rb      # Which jobs a workflow test hands back; accepting_foreign_jobs
 │   ├── helpers.rb           # deploy_process, with_process_instance, etc.
 │   ├── helpers/
 │   │   ├── builders.rb      # build_test_job / _raw_job / _worker_status / _call / _client
@@ -691,8 +692,9 @@ A Call folds a **curated** correlation subset — not the carriers' full `contex
 
 ### Architecture
 
-- `testing.rb` — Entry point. When RSpec is defined, loads the helpers, includes `Helpers` into examples tagged `:busybee`, and installs the `around` behind the `without_busybee_hooks:` metadata, which applies to every example whether it opted in or not.
-- `testing/helpers.rb` — Integration test helpers (`deploy_process`, `with_process_instance`, `activate_job`, etc.) that talk to Zeebe via gRPC. `Helpers` also includes the other helper modules and `Matchers`, so it is the one module an example needs.
+- `testing.rb` — Entry point. When RSpec is defined, loads the helpers, includes `Helpers` into examples tagged `:busybee`, and installs the `around`s behind the `without_busybee_hooks:` and `busybee_foreign_jobs:` metadata, which apply to every example whether it opted in or not.
+- `testing/helpers.rb` — Integration test helpers (`deploy_process`, `with_process_instance`, `activate_job`, etc.) that talk to Zeebe via gRPC. `Helpers` also includes the other helper modules and `Matchers`, so it is the one module an example needs. `with_process_instance` keeps its key in a local for its own cancel, and pushes it on the example's enclosure stack (`busybee_process_instances`, outermost first), whose top is `process_instance_key`.
+- `testing/foreign_jobs.rb` — `Testing::ForeignJobs`, built per activation from the enclosure stack and the mode: refusing (the default), any job whose `processInstanceKey` isn't the top's; accepting, only the enclosing blocks' jobs. `Helpers.activate_own_jobs` (in `helpers/support.rb`) activates until a job of its own arrives or the wait runs out, handing each foreign one back through `fail_job` with its own retries and a backoff of `FOREIGN_JOB_BACKOFF_MS` times the distinct jobs refused so far in that activation, capped at `FOREIGN_JOB_MAX_BACKOFF_MS`. With no backoff, a refused older job would win every activation and starve the example's own; with a flat one, the oldest few come back before the rest of a long queue has been seen. The mode is module state on `Busybee::Testing`, set and restored by `with_foreign_jobs`, behind both the metadata and `accepting_foreign_jobs`.
 - `testing/no_job_available.rb` — `NoJobAvailable`, raised by `activate_job` and rescued by `have_available_jobs`.
 - `testing/helpers/builders.rb` — The carrier builders (`build_test_job`, `build_test_raw_job`, `build_test_worker_status`, `build_test_call`, `build_test_client`). Nothing here is doubled: a real `ActivatedJob` proto, a real `Status`, a real `Call` driven through its underscore seam. Hooks read their carrier's projections, so a double would freeze a spec's belief about those projections into its assertions and stay green when the contract moved. Job fixtures are built under `HookRegistry.with_only` (every hook suppressed), since resolving one runs a real call and would otherwise fire the hooks the spec is about to observe.
 - `testing/client.rb` — `Testing::Client`, a real `Busybee::Client` subclass that overrides the private `stub`. Everything above the wire is genuine: a doubled client sits *above* `run_hooked`, the seam call hooks hang off, so with one in place no call hook can fire. Programming keeps grpc-ruby's contract (`client.on(:rpc) { … }`), matching the internal `FaultInjectionGateway` so both sides teach one vocabulary.
