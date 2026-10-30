@@ -82,6 +82,22 @@ RSpec.describe "with_process_instance blocks", :gateway do # rubocop:disable RSp
     end
   end
 
+  describe "assert_process_completed! with no instance to check" do
+    let(:no_instance) { "No current process instance: call assert_process_completed! inside with_process_instance" }
+
+    it "raises outside any block, asking the engine nothing" do
+      expect { assert_process_completed!(wait: 0) }.to raise_error(RuntimeError, no_instance)
+      expect(canceled).to be_empty
+    end
+
+    it "raises once the block has ended" do
+      with_process_instance("p") { |_| } # rubocop:disable Lint/EmptyBlock
+
+      expect { assert_process_completed!(wait: 0) }.to raise_error(RuntimeError, no_instance)
+      expect(canceled).to eq([1001])
+    end
+  end
+
   describe "a cancel that fails" do
     before { gateway.on(:cancel_process_instance) { raise GRPC::ResourceExhausted, "broker under pressure" } }
 

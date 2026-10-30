@@ -230,8 +230,13 @@ module Busybee
       #
       # @param wait [Numeric] seconds to wait before checking (see zeebe_available?
       #   for why `wait:` is the one parameter name that means seconds)
-      # @raise [RuntimeError] if process is still running
+      # @raise [RuntimeError] if process is still running, or if called outside
+      #   with_process_instance, where there is no instance to check
       def assert_process_completed!(wait: 0.25)
+        unless process_instance_key
+          raise "No current process instance: call assert_process_completed! inside with_process_instance"
+        end
+
         sleep(wait) if wait.positive?
 
         request = Busybee::GRPC::CancelProcessInstanceRequest.new(
