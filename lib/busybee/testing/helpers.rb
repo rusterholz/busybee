@@ -102,11 +102,14 @@ module Busybee
         busybee_process_instances.push(key)
 
         yield key
+      rescue Exception # rubocop:disable Lint/RescueException
+        failed = true
+        raise
       ensure
         if key
           busybee_process_instances.delete(key)
           @last_process_instance_key = key
-          Busybee::Testing::Helpers.cancel_process_instance(key)
+          Busybee::Testing::Helpers.cancel_process_instance(key, after_failure: failed)
         end
       end
 

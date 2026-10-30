@@ -31,7 +31,9 @@ module Busybee
             gsub(/(<bpmndi:BPMNPlane\s++[^>]*+bpmnElement=")[^"]++/, "\\1#{process_id}")
         end
 
-        def cancel_process_instance(key)
+        # A failure to cancel fails the example, unless the example already failed:
+        # then its own error stands and the instance left running is only warned of.
+        def cancel_process_instance(key, after_failure: false)
           request = Busybee::GRPC::CancelProcessInstanceRequest.new(
             processInstanceKey: key
           )
@@ -39,6 +41,12 @@ module Busybee
           true
         rescue ::GRPC::NotFound
           # Process already completed, ignore
+          false
+        rescue StandardError => e
+          raise unless after_failure
+
+          warn "[busybee] Failed to cancel process instance #{key} after the example failed; " \
+               "it is still running (#{e.class}: #{e.message})"
           false
         end
 
