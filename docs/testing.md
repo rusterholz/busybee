@@ -99,6 +99,7 @@ Those durations have defaults, and the defaults belong to the harness rather tha
 | `activate_job` / `activate_jobs` — `timeout:` | 5 s | `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` |
 | the lock an activated job holds | 30 s | `Busybee::Testing::ACTIVATE_JOB_LOCK_MS` |
 | `publish_message` — `ttl:` | 5 s | `Busybee::Testing::PUBLISH_MESSAGE_TTL_MS` |
+| how long a [foreign job](#jobs-from-other-process-instances) sits out after being handed back | 250 ms | `Busybee::Testing::FOREIGN_JOB_BACKOFF_MS` |
 
 These helpers don't read `Busybee.default_polling_request_timeout`, `Busybee.default_job_timeout`, or `Busybee.default_message_ttl`, so the values you size for production never slow your suite, and your test environment needs no overrides.
 
@@ -141,7 +142,7 @@ result[:process_id] #=> "my-test-order-process"
 
 #### `with_process_instance(process_id, variables = {})`
 
-Creates a process instance, yields its key, and automatically cancels it when the block exits. This ensures cleanup even if tests fail.
+Creates a process instance, yields its key, and automatically cancels it when the block exits. This ensures cleanup even if tests fail. Blocks nest: each cancels its own instance, and once an inner block ends, the enclosing block's instance is the current one again. Inside the block, the activation helpers work only this instance's jobs; see [Workflow Test Isolation](#workflow-test-isolation).
 
 **Parameters:**
 - `process_id` (String) - BPMN process ID
@@ -166,7 +167,7 @@ end
 
 #### `process_instance_key`
 
-Returns the current process instance key within a `with_process_instance` block.
+Returns the current process instance key: the innermost `with_process_instance` block's. Outside every block, `nil`.
 
 **Returns:** Integer or nil
 
@@ -228,7 +229,7 @@ end
 
 #### `activate_job(type, timeout: nil)`
 
-Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAvailable` if no job is available.
+Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAvailable` if no job is available. Inside `with_process_instance`, a job of any other process instance is handed back and the wait goes on; see [Jobs From Other Process Instances](#jobs-from-other-process-instances).
 
 **Parameters:**
 - `type` (String) - Job type to activate
@@ -251,7 +252,7 @@ job = activate_job("process-order", timeout: 100)
 
 #### `activate_jobs(type, max_jobs:, timeout: nil)`
 
-Activates multiple jobs of the specified type.
+Activates multiple jobs of the specified type. Inside `with_process_instance`, it hands back other process instances' jobs and returns the rest, as `activate_job` does.
 
 **Parameters:**
 - `type` (String) - Job type to activate
@@ -328,7 +329,7 @@ Asserts that the current process instance has completed. Useful for verifying en
 **Parameters:**
 - `wait` (Numeric) - Seconds to wait before checking (default: `0.25`). See [A note on units](#a-note-on-units)
 
-**Raises:** RuntimeError if process is still running
+**Raises:** RuntimeError if process is still running, or if called outside `with_process_instance`, where there is no instance to check
 
 **Example:**
 
@@ -698,19 +699,90 @@ RSpec.describe "Order edge cases", :busybee do
 end
 ```
 
-## Testing Best Practices
+## Workflow Test Isolation
 
-### 1. Use Unique Process IDs for Isolation
+A workflow test runs against a real engine, which every example shares and which outlives your test run. The helpers keep each example to its own process instance: they cancel what they start, and they work only the jobs of the instance they're in.
 
-Deploy processes with unique IDs when tests might interfere:
+### What the Helpers Clean Up
+
+- **Every instance `with_process_instance` starts** is canceled when its block ends, however it ends: passing, failing, raising, or as an inner block of a nested pair. Canceling an instance also cancels the child instances its call activities started, and none of their jobs can be activated afterwards.
+- **A cancel that fails** (the broker is under pressure or unreachable, say) fails an example that otherwise passed, with the cancel's error. An example that had already failed keeps its own failure as the one reported, and busybee warns on stderr which instance was left running:
+
+  ```
+  [busybee] Failed to cancel process instance 2251799813685300 after the example failed; it is still running (GRPC::Unavailable: ...)
+  ```
+
+### Jobs From Other Process Instances
+
+Job types are shared by every instance of every process deployed to the engine, and the engine hands out the oldest job of a type first. So inside `with_process_instance`, `activate_job`, `activate_jobs` and `with_activated_job_instance` work only the jobs of the block's own instance. Any other job they're offered, such as one from an instance an interrupted run left behind, or from another test process on the same engine, is handed back to the engine unworked: its retries untouched, out of reach for at least `FOREIGN_JOB_BACKOFF_MS` (250 ms), and the helper keeps waiting for its own. If none arrives, `NoJobAvailable` says what was handed back:
+
+```
+No job of type 'charge-card' available for process instance 2251799813685300. Handed back unworked: 1 job of another process instance (2251799813685291). To accept jobs of instances the example didn't start itself, such as a call activity's, tag it busybee_foreign_jobs: :accept
+```
+
+Outside `with_process_instance`, nothing is handed back: there's no instance for a job to belong to.
+
+#### Accepting Jobs of Instances Your Example Didn't Start
+
+A call activity starts a child instance, and its jobs belong to the child, so they're handed back too. So are the jobs of an instance your example starts by publishing a message to a message start event. To work them, tag the group or example `busybee_foreign_jobs: :accept`:
 
 ```ruby
-# Good: Each test gets isolated process
+it "charges the card in the payment subprocess", busybee_foreign_jobs: :accept do
+  with_process_instance(process_id, order_id: order_id) do
+    activate_job("charge-card").expect_variables(order_id: order_id).and_complete
+  end
+end
+```
+
+Or accept them for a few steps only, with the block form:
+
+```ruby
+with_process_instance(process_id, order_id: order_id) do
+  Busybee::Testing.accepting_foreign_jobs do
+    activate_job("charge-card").and_complete
+  end
+end
+```
+
+`busybee_foreign_jobs: :refuse` puts an example inside an accepting group back to the default; the innermost tag wins.
+
+busybee can't yet tell a child instance of your block's from any other instance, so under `:accept` the jobs of every instance are accepted, including one left behind by an interrupted run. Only the jobs of enclosing `with_process_instance` blocks are still handed back (see below).
+
+#### Nested Blocks Sharing a Job Type
+
+When an inner `with_process_instance` block activates a job type the enclosing block's instance also has a job waiting for, the enclosing instance's job is offered first, since it's older. The inner block hands it back, under either setting, and takes its own. The enclosing block's job is back a fraction of a second later, and the enclosing block's next activation waits for it:
+
+```ruby
+with_process_instance(process_id) do |outer|
+  with_process_instance(process_id) do |inner|
+    activate_job("charge-card").and_complete # inner's job; outer's was handed back
+  end
+  activate_job("charge-card").and_complete   # outer's job
+end
+```
+
+### What the Helpers Can't Clean Up
+
+- **A run killed hard.** SIGKILL, or a second Ctrl-C (RSpec's forced quit), ends the process without running a single block's cleanup, so every instance it had started stays running in the engine, for good. A single Ctrl-C (RSpec finishes the current example first) or SIGTERM still cleans up. Later runs hand those leftovers' jobs back, but the instances stay, so after a killed run, restart the engine with its data cleared.
+- **A second test process on the same engine.** Its instances are live, not leftovers, and nothing in your process may cancel them. Handing back keeps each process from working the other's jobs, but under `:accept` they take each other's. Run one test process per engine, or give each parallel process its own.
+- **Instances you start yourself**, with `publish_message` to a message start event, `Busybee::Client#start_instance`, a timer start event, or code under test. busybee never learns their keys, so cancel them yourself.
+- **What `uniquify: true` doesn't isolate.** It gives each deployment its own process id, and nothing else: job types, message names and signals stay shared. Every deployed copy also keeps its start event subscriptions, so with `deploy_process(bpmn_path, uniquify: true)` in a `let`, each example adds another copy, and one `publish_message` to a message start event starts an instance of every copy deployed so far, none of which any block cancels.
+
+## Testing Best Practices
+
+### 1. Use Unique Process IDs per Deployment
+
+`uniquify: true` gives each deployment its own process id, so an example's `with_process_instance` starts exactly the definition it deployed, even when other specs deploy a different version of the same file:
+
+```ruby
+# Each example deploys, and starts, its own copy
 let(:process_id) { deploy_process(bpmn_path, uniquify: true)[:process_id] }
 
-# Avoid: Shared process might cause cross-test pollution
+# Shared: a spec deploying a changed copy of this file changes which version the others start
 before(:all) { @process_id = deploy_process(bpmn_path)[:process_id] }
 ```
+
+It leaves job types and message names shared; see [What the Helpers Can't Clean Up](#what-the-helpers-cant-clean-up).
 
 ### 2. Always Clean Up Process Instances
 
@@ -765,6 +837,13 @@ Common causes:
 - Job type name doesn't match BPMN definition
 - Job already activated by another worker
 - Process completed or failed before reaching task
+
+### "Handed back unworked: ... of another process instance"
+
+`NoJobAvailable` names jobs it handed back when the job it was offered belonged to a process instance other than the `with_process_instance` block's (see [Jobs From Other Process Instances](#jobs-from-other-process-instances)). Common causes:
+- The job is a call activity's, or belongs to an instance your example started by message: tag the example `busybee_foreign_jobs: :accept`
+- An interrupted run left instances running: restart the engine with its data cleared
+- Another test process is using the same engine: give it its own
 
 ### "Process instance still running"
 
