@@ -51,7 +51,6 @@ House/HeaderCommentDensity:
     - 'lib/busybee/grpc/error.rb'
     - 'lib/busybee/job/resolution.rb'
     - 'spec/demo/app/services/monitoring/recorder.rb'
-    - 'spec/support/fault_injection_gateway.rb'
     - 'spec/support/integration_helper.rb'
 
 # Offense count: 4

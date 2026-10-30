@@ -84,7 +84,9 @@ module Busybee
         }
       end
 
-      # Create a process instance, yield its key, and cancel on block exit.
+      # Create a process instance, yield its key, and cancel it on block exit.
+      # Blocks nest: each cancels its own instance, and the enclosing block's
+      # instance is current again once an inner block ends.
       #
       # @param process_name [String] BPMN process ID
       # @param variables [Hash] variables to start the process with
@@ -96,23 +98,24 @@ module Busybee
           variables: Busybee::Serialization.to_json(variables)
         )
 
-        response = grpc_client.create_process_instance(request)
-        @current_process_instance_key = response.processInstanceKey
+        key = grpc_client.create_process_instance(request).processInstanceKey
+        busybee_process_instances.push(key)
 
-        yield @current_process_instance_key
+        yield key
       ensure
-        if @current_process_instance_key
-          Busybee::Testing::Helpers.cancel_process_instance(@current_process_instance_key)
-          @last_process_instance_key = @current_process_instance_key
-          @current_process_instance_key = nil
+        if key
+          busybee_process_instances.delete(key)
+          @last_process_instance_key = key
+          Busybee::Testing::Helpers.cancel_process_instance(key)
         end
       end
 
-      # Returns the current process instance key (set by with_process_instance).
+      # Returns the current process instance key: the innermost
+      # with_process_instance block's.
       #
       # @return [Integer, nil]
       def process_instance_key
-        @current_process_instance_key
+        busybee_process_instances.last
       end
 
       # Returns the last process instance key from the most recent with_process_instance call.
@@ -130,20 +133,13 @@ module Busybee
       # @yield [ActivatedJob] the activated job
       def with_activated_job_instance(job_type)
         job = activate_job(job_type)
-        @current_job_key = job.key
         yield job
       ensure
-        if @current_job_key
+        if job
           begin
-            request = Busybee::GRPC::CompleteJobRequest.new(
-              jobKey: @current_job_key,
-              variables: "{}"
-            )
-            grpc_client.complete_job(request)
+            grpc_client.complete_job(Busybee::GRPC::CompleteJobRequest.new(jobKey: job.key, variables: "{}"))
           rescue ::GRPC::BadStatus
             # Job may have already been completed/failed in the test block - ignore
-          ensure
-            @current_job_key = nil
           end
         end
       end
@@ -257,6 +253,11 @@ module Busybee
       def grpc_client
         Busybee::Testing::Helpers.grpc_client
       end
+
+      private
+
+      # Keys of the with_process_instance blocks the example is inside, outermost first.
+      def busybee_process_instances = @busybee_process_instances ||= []
     end
   end
 end
