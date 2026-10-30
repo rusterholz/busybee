@@ -65,6 +65,29 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       expect(handed_back.map(&:retryBackOff)).to eq([250, 500, 750, 1_000, 1_250, 1_500, 1_750, 2_000, 2_000, 2_000])
     end
 
+    it "keeps looking when a foreign job's instance ended before it could be handed back" do
+      gateway.on(:fail_job) { raise GRPC::NotFound, "job not found" }
+      serve(job(901, 777))
+      serve(job(501, 1001))
+
+      with_process_instance("p") { expect(activate_job("t").key).to eq(501) }
+
+      expect(handed_back.map(&:jobKey)).to eq([901])
+    end
+
+    it "hands back the whole batch before raising a hand-back's error" do
+      gateway.on(:fail_job) do |request|
+        raise GRPC::Unavailable, "gateway restarting" if request.jobKey == 901
+
+        Busybee::GRPC::FailJobResponse.new
+      end
+      serve(job(901, 777), job(902, 778), job(501, 1001))
+
+      with_process_instance("p") { expect { activate_job("t") }.to raise_error(GRPC::Unavailable, /gateway restarting/) }
+
+      expect(handed_back.map(&:jobKey)).to eq([901, 902])
+    end
+
     it "names what it handed back, and the switch, when nothing of its own arrives" do
       serve(job(901, 777), job(902, 778))
 

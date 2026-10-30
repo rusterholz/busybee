@@ -91,12 +91,18 @@ module Busybee
         def deadline_after(wait) = monotonic_now + (Busybee::Durations.milliseconds_from(wait) / 1000.0)
         def ms_left(deadline) = ((deadline - monotonic_now) * 1000).floor
 
+        # Every job goes back before the first hand-back error is raised.
+        #
         # @param refused [Hash] the activation's refused jobs by key, added to here
         def hand_back_all(jobs, foreign, refused)
-          jobs.each do |job|
+          errors = jobs.filter_map do |job|
             refused[job.key] = job
             hand_back(job, foreign, backoff: foreign_job_backoff(refused.size))
+            nil
+          rescue StandardError => e
+            e
           end
+          raise errors.first if errors.any?
         end
 
         # Each distinct job an activation refuses sits out longer than the one
