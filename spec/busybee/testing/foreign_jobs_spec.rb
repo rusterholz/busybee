@@ -101,6 +101,20 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       end
     end
 
+    it "stops at the end of the wait even while foreign jobs keep arriving" do
+      polls = Concurrent::AtomicFixnum.new
+      gateway.on(:activate_jobs) do
+        raise GRPC::Internal, "still polling" if polls.increment > 60
+
+        sleep 0.02
+        [Busybee::GRPC::ActivateJobsResponse.new(jobs: [job(900 + polls.value, 777)])]
+      end
+
+      with_process_instance("p") do
+        expect { activate_job("t", timeout: 200) }.to raise_error(Busybee::Testing::NoJobAvailable)
+      end
+    end
+
     it "hands back the batch's foreign jobs and returns the rest from activate_jobs" do
       serve(job(501, 1001), job(901, 777), job(502, 1001))
 
