@@ -77,6 +77,38 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       expect(handed_back.map(&:jobKey)).to eq([901])
     end
 
+    it "says an enclosing block's job waits for that block, without suggesting the tag" do
+      serve(job(501, 1001))
+
+      with_process_instance("p") do
+        with_process_instance("p") do
+          expect { activate_job("t") }.to raise_error(
+            Busybee::Testing::NoJobAvailable,
+            "No job of type 't' available for process instance 1002. Handed back unworked: " \
+            "1 job of an enclosing with_process_instance block's process instance (1001), " \
+            "which can take it once that block resumes"
+          )
+        end
+      end
+    end
+
+    it "words an enclosing block's job and another instance's each on its own" do
+      serve(job(501, 1001), job(901, 777))
+
+      with_process_instance("p") do
+        with_process_instance("p") do
+          expect { activate_job("t") }.to raise_error(
+            Busybee::Testing::NoJobAvailable,
+            "No job of type 't' available for process instance 1002. Handed back unworked: " \
+            "1 job of an enclosing with_process_instance block's process instance (1001), " \
+            "which can take it once that block resumes, and 1 job of another process instance (777). " \
+            "To accept jobs of instances the example didn't start itself, such as a call activity's, " \
+            "tag it busybee_foreign_jobs: :accept"
+          )
+        end
+      end
+    end
+
     it "refuses the enclosing block's job inside an inner block" do
       serve(job(501, 1001))
       serve(job(502, 1002))

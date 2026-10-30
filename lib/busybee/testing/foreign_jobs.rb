@@ -58,26 +58,33 @@ module Busybee
         message = "No job of type '#{type}' available"
         return message if refused.empty?
 
-        owners = refused.map(&:processInstanceKey).uniq
-        jobs = refused.size == 1 ? "1 job" : "#{refused.size} jobs"
-        "#{message} for process instance #{current}. Handed back unworked: #{jobs} " +
-          (@accepting ? from_enclosing(refused.size, owners) : from_others(owners))
+        enclosing, others = refused.partition { @instances.include?(_1.processInstanceKey) }
+        groups = [(from_enclosing(enclosing) if enclosing.any?), (from_others(others) if others.any?)].compact
+        message = "#{message} for process instance #{current}. Handed back unworked: #{groups.join(', and ')}"
+        others.any? ? "#{message}. #{ACCEPT_HINT}" : message
       end
+
+      ACCEPT_HINT = "To accept jobs of instances the example didn't start itself, such as a call activity's, " \
+                    "tag it busybee_foreign_jobs: :accept"
+      private_constant :ACCEPT_HINT
 
       private
 
-      def from_enclosing(jobs, owners)
+      def from_enclosing(jobs)
+        owners = jobs.map(&:processInstanceKey).uniq
         whose = owners.one? ? "an enclosing with_process_instance block's" : "enclosing with_process_instance blocks'"
-        "of #{whose} #{owners.one? ? 'process instance' : 'process instances'} (#{owners.join(', ')}), " \
-          "which can take #{jobs == 1 ? 'it' : 'them'} once " \
+        "#{count(jobs)} of #{whose} #{owners.one? ? 'process instance' : 'process instances'} " \
+          "(#{owners.join(', ')}), which can take #{jobs.one? ? 'it' : 'them'} once " \
           "#{owners.one? ? 'that block resumes' : 'those blocks resume'}"
       end
 
-      def from_others(owners)
-        "of #{owners.one? ? 'another process instance' : 'other process instances'} (#{owners.join(', ')}). " \
-          "To accept jobs of instances the example didn't start itself, such as a call activity's, " \
-          "tag it busybee_foreign_jobs: :accept"
+      def from_others(jobs)
+        owners = jobs.map(&:processInstanceKey).uniq
+        "#{count(jobs)} of #{owners.one? ? 'another process instance' : 'other process instances'} " \
+          "(#{owners.join(', ')})"
       end
+
+      def count(jobs) = jobs.one? ? "1 job" : "#{jobs.size} jobs"
     end
   end
 end
