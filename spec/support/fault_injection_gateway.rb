@@ -41,11 +41,11 @@ class FaultInjectionGateway
   # cannot. Defaults keep a spec to the fields it actually cares about.
   def self.activated_job(type: "test", variables: {}, headers: {}, key: nil, # rubocop:disable Metrics/ParameterLists
                          bpmn_process_id: "test-process", element_id: "test-element",
-                         retries: 3, worker: "test-worker", tenant_id: nil)
+                         retries: 3, worker: "test-worker", tenant_id: nil, process_instance_key: nil)
     Busybee::GRPC::ActivatedJob.new(
       key: key || rand(100_000..999_999),
       type: type,
-      processInstanceKey: rand(100_000..999_999),
+      processInstanceKey: process_instance_key || rand(100_000..999_999),
       bpmnProcessId: bpmn_process_id,
       elementId: element_id,
       retries: retries,
@@ -76,9 +76,7 @@ class FaultInjectionGateway
     self
   end
 
-  # Requests this RPC actually received, in order. Recorded for every RPC whether
-  # or not one was programmed, so "did the mutated request reach the wire?" is
-  # answerable without programming a behavior first.
+  # Requests this RPC received, in order, whether or not a behavior was programmed.
   def received(rpc) = @mutex.synchronize { @received[rpc].dup }
 
   # A client built through the entirely real path — real Insecure credentials,

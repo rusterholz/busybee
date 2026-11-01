@@ -18,7 +18,6 @@ House/FileCommentDensity:
     - 'lib/busybee/job/resolution.rb'
     - 'lib/busybee/job_stream.rb'
     - 'lib/busybee/serialization.rb'
-    - 'lib/busybee/testing/timings.rb'
     - 'lib/busybee/worker/timestamps.rb'
     - 'spec/demo/app/models/delivery/driver.rb'
     - 'spec/demo/app/models/delivery/driver_request.rb'
@@ -51,7 +50,6 @@ House/HeaderCommentDensity:
     - 'lib/busybee/grpc/error.rb'
     - 'lib/busybee/job/resolution.rb'
     - 'spec/demo/app/services/monitoring/recorder.rb'
-    - 'spec/support/fault_injection_gateway.rb'
     - 'spec/support/integration_helper.rb'
 
 # Offense count: 4

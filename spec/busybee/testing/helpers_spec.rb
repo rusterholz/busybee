@@ -314,18 +314,25 @@ RSpec.describe Busybee::Testing::Helpers do
   end
 
   describe "#assert_process_completed!" do
+    before do
+      allow(mock_client).to receive(:create_process_instance).
+        and_return(double("CreateResponse", processInstanceKey: 99_999)) # rubocop:disable RSpec/VerifiedDoubles
+    end
+
     it "returns true when process has completed" do
       allow(mock_client).to receive(:cancel_process_instance).and_raise(GRPC::NotFound)
 
-      helper.instance_variable_set(:@current_process_instance_key, 99_999)
-      expect(helper.assert_process_completed!).to be(true)
+      helper.with_process_instance("my-process") do
+        expect(helper.assert_process_completed!).to be(true)
+      end
     end
 
     it "raises when process is still running" do
       allow(mock_client).to receive(:cancel_process_instance)
 
-      helper.instance_variable_set(:@current_process_instance_key, 99_999)
-      expect { helper.assert_process_completed! }.to raise_error(/Process instance 99999 is still running/)
+      helper.with_process_instance("my-process") do
+        expect { helper.assert_process_completed! }.to raise_error(/Process instance 99999 is still running/)
+      end
     end
   end
 end
