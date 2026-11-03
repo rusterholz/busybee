@@ -72,7 +72,6 @@ RSpec.describe "activate_jobs", :integration do
   it "leaves any jobs past the expected number in the engine" do
     with_process_instance(process_id, correlationId: correlation_id) do
       release_second_job
-      sleep 0.3
 
       taken = activate_jobs(job_type, expected: 1)
 
@@ -101,13 +100,15 @@ RSpec.describe "activate_jobs", :integration do
     end
 
     it "hands them back, and returns only its own" do
+      allow(Busybee::Testing::Helpers).to receive(:hand_back).and_call_original
+
       with_process_instance(process_id, correlationId: correlation_id) do |key|
         release_second_job
-        sleep 0.3
 
         expect(activate_jobs(job_type, expected: 2).map(&:process_instance_key)).to eq([key, key])
       end
 
+      expect(Busybee::Testing::Helpers).to have_received(:hand_back).at_least(:once)
       back = activate_jobs(job_type, expected: 2)
       expect(back.map { |job| [job.process_instance_key, job.retries] }).to eq([[leftover, 3], [leftover, 3]])
     end
