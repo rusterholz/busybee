@@ -11,8 +11,9 @@ module Busybee
 
       # Matcher to check if jobs are available for activation.
       #
-      # This matcher is designed to work with blocks that call `activate_job` or similar methods
-      # that raise `Busybee::Testing::NoJobAvailable` when no jobs are found.
+      # This matcher is designed to work with blocks that call `activate_job` or `activate_jobs`.
+      # A block raising `Busybee::Testing::NoJobAvailable` or returning an empty Array has found
+      # no jobs. Any other error raises through it, in either form.
       #
       # @example Check that jobs are available
       #   expect { activate_job("process-order") }.to have_available_jobs
@@ -24,22 +25,17 @@ module Busybee
         supports_block_expectations
 
         match do |block|
-          block.call
-          @job_found = true
-          true
-        rescue Busybee::Testing::NoJobAvailable
-          @job_found = false
-          false
-        rescue StandardError => e
-          @unexpected_error = e
+          block.call != []
+        rescue Busybee::Testing::NoJobAvailable => e
+          @no_job_error = e
           false
         end
 
         failure_message do
-          if @unexpected_error
-            "expected jobs to be available, but got #{@unexpected_error.class}: #{@unexpected_error.message}"
+          if @no_job_error
+            "expected jobs to be available, but got #{@no_job_error.class}: #{@no_job_error.message}"
           else
-            "expected jobs to be available, but no jobs were found (Busybee::Testing::NoJobAvailable raised)"
+            "expected jobs to be available, but none were activated"
           end
         end
 
