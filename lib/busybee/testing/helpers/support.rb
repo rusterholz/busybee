@@ -77,8 +77,11 @@ module Busybee
           jobs
         end
 
-        # @raise [ArgumentError] unless the count is a positive Integer
-        def validate_job_count(name, count)
+        # @raise [ArgumentError] unless just one is given, and it's a positive Integer
+        def validate_job_counts(expected, max_jobs)
+          raise ArgumentError, "Pass exactly one of expected: or max_jobs:" if expected.nil? == max_jobs.nil?
+
+          name, count = expected.nil? ? [:max_jobs, max_jobs] : [:expected, expected]
           return if count.is_a?(Integer) && count.positive?
 
           message = "#{name}: must be a positive Integer, got #{count.inspect}"
@@ -88,21 +91,35 @@ module Busybee
                                "expect { activate_job(type) }.not_to have_available_jobs"
         end
 
-        # Activates until a job of the test's own arrives or the wait runs out,
-        # handing back each foreign one as it comes.
+        # Activates until enough of the test's own jobs are in hand or the wait
+        # runs out, asking only for what's missing and handing back each foreign
+        # one as it comes. An empty poll is the wait running out on the engine's clock.
         #
+        # @param max_jobs [Integer] the most to hold
+        # @param enough [Integer] how many to hold before returning
         # @param foreign [ForeignJobs] which jobs to refuse
-        # @return [Array(Array, Array)] the jobs kept, and those handed back (one per job key)
-        def activate_own_jobs(type, max_jobs:, foreign:, timeout: nil)
+        # @return [Array(Array, Array)] the jobs kept, and those handed back (each one per job key)
+        def activate_own_jobs(type, max_jobs:, foreign:, enough: 1, timeout: nil)
           wait = timeout || Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS
           deadline = deadline_after(wait)
+          kept = {}
           refused = {}
           loop do
-            others, own = activate_jobs_raw(type, max_jobs: max_jobs, timeout: wait).partition { foreign.foreign?(_1) }
-            hand_back_all(others, foreign, refused)
+            polled = activate_jobs_raw(type, max_jobs: max_jobs - kept.size, timeout: wait)
+            keep_own_jobs(polled, kept, refused, foreign)
             wait = ms_left(deadline)
-            return [own, refused.values] if own.any? || others.empty? || wait < 1
+            return [kept.values, refused.values] if kept.size >= enough || polled.empty? || wait < 1
           end
+        end
+
+        # By key, since a lock lapsing mid-wait re-offers a job.
+        #
+        # @param kept [Hash] the activation's own jobs by key, added to here
+        # @param refused [Hash] the activation's refused jobs by key, added to here
+        def keep_own_jobs(polled, kept, refused, foreign)
+          others, own = polled.partition { foreign.foreign?(_1) }
+          own.each { kept[_1.key] = _1 }
+          hand_back_all(others, foreign, refused)
         end
 
         def deadline_after(wait) = monotonic_now + (Busybee::Durations.milliseconds_from(wait) / 1000.0)

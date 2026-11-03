@@ -185,19 +185,29 @@ module Busybee
       end
 
       # Activate multiple jobs of the given type, once, when called, handing
-      # back foreign ones as activate_job does.
+      # back foreign ones as activate_job does. Pass one of expected: or max_jobs:.
       #
       # @param type [String] job type
-      # @param max_jobs [Integer] maximum number of jobs to activate
+      # @param expected [Integer] how many jobs to wait for; returns exactly this
+      #   many, and raises if the wait runs out first
+      # @param max_jobs [Integer] maximum number of jobs to activate; returns as
+      #   soon as any are in hand, and returns fewer or none without raising
       # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
       #   for jobs (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
       # @return [Array<ActivatedJob>]
-      # @raise [ArgumentError] unless max_jobs is a positive Integer
-      def activate_jobs(type, max_jobs:, timeout: nil)
-        Busybee::Testing::Helpers.validate_job_count(:max_jobs, max_jobs)
+      # @raise [NoJobAvailable] if fewer than expected are in hand when the wait runs out
+      # @raise [ArgumentError] unless given just one of expected: or max_jobs:, a positive Integer
+      def activate_jobs(type, expected: nil, max_jobs: nil, timeout: nil)
+        Busybee::Testing::Helpers.validate_job_counts(expected, max_jobs)
 
-        jobs, = Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: max_jobs, timeout: timeout,
-                                                                  foreign: busybee_foreign_jobs)
+        foreign = busybee_foreign_jobs
+        jobs, refused = Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: expected || max_jobs,
+                                                                          enough: expected || 1,
+                                                                          timeout: timeout, foreign: foreign)
+        if expected && jobs.size < expected
+          raise NoJobAvailable, foreign.shortfall_message(type, expected, jobs.size, refused)
+        end
+
         jobs.map { |raw_job| ActivatedJob.new(raw_job, client: grpc_client) }
       end
 
