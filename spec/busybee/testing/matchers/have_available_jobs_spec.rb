@@ -36,13 +36,13 @@ RSpec.describe "have_available_jobs", :gateway do
     end
   end
 
-  context "when the block raises NoJobAvailable" do
+  context "when the block raises NoJobsAvailable" do
     it("doesn't match") { expect { activate_job("t", timeout: 50) }.not_to have_available_jobs }
 
     it "says what the block raised" do
       expect { expect { activate_job("t", timeout: 50) }.to have_available_jobs }.to raise_error(
         expectation_failure,
-        "expected jobs to be available, but got Busybee::Testing::NoJobAvailable: No job of type 't' available"
+        "expected jobs to be available, but got Busybee::Testing::NoJobsAvailable: No job of type 't' available"
       )
     end
   end
@@ -55,7 +55,7 @@ RSpec.describe "have_available_jobs", :gateway do
     it "says how many arrived" do
       expect { expect { activate_jobs("t", expected: 2) }.to have_available_jobs }.to raise_error(
         expectation_failure,
-        "expected jobs to be available, but got Busybee::Testing::NoJobAvailable: " \
+        "expected jobs to be available, but got Busybee::Testing::NoJobsAvailable: " \
         "Expected 2 jobs of type 't', got 1"
       )
     end

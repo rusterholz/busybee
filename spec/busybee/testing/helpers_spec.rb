@@ -192,7 +192,7 @@ RSpec.describe Busybee::Testing::Helpers do
 
       expect do
         helper.activate_job("missing-task")
-      end.to raise_error(Busybee::Testing::NoJobAvailable, /No job of type 'missing-task' available/)
+      end.to raise_error(Busybee::Testing::NoJobsAvailable, /No job of type 'missing-task' available/)
     end
 
     # The harness owns its timings. A suite shouldn't inherit a production

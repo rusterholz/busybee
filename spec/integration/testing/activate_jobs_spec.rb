@@ -3,7 +3,7 @@
 require "securerandom"
 
 require "busybee/testing/helpers"
-require "busybee/testing/no_job_available"
+require "busybee/testing/no_jobs_available"
 
 # activate_jobs against real Zeebe. Each example deploys its own process id and
 # job type, so nothing another example leaves running can reach it. An instance
@@ -62,7 +62,7 @@ RSpec.describe "activate_jobs", :integration do
       started = now
 
       expect { activate_jobs(job_type, expected: 2, timeout: 500) }.to raise_error(
-        Busybee::Testing::NoJobAvailable,
+        Busybee::Testing::NoJobsAvailable,
         "Expected 2 jobs of type '#{job_type}' for process instance #{key}, got 1"
       )
       expect(now - started).to be >= 0.5

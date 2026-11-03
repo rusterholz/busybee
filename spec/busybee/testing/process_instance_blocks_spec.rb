@@ -3,7 +3,7 @@
 require "concurrent"
 
 require "busybee/testing/helpers"
-require "busybee/testing/no_job_available"
+require "busybee/testing/no_jobs_available"
 
 # with_process_instance and with_activated_job_instance against a gateway that
 # answers like Zeebe: instance keys count up from 1001, cancels succeed.
@@ -132,7 +132,7 @@ RSpec.describe "with_process_instance blocks", :gateway do # rubocop:disable RSp
 
       with_process_instance("p") do
         with_activated_job_instance("t") do |job|
-          expect { with_activated_job_instance("t") { |_| } }.to raise_error(Busybee::Testing::NoJobAvailable) # rubocop:disable Lint/EmptyBlock
+          expect { with_activated_job_instance("t") { |_| } }.to raise_error(Busybee::Testing::NoJobsAvailable) # rubocop:disable Lint/EmptyBlock
           expect(completed).to be_empty
           expect(job.key).to eq(501)
         end

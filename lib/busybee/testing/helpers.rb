@@ -18,7 +18,7 @@ require "busybee/testing/matchers/have_available_jobs"
 require "busybee/testing/matchers/have_received_headers"
 require "busybee/testing/matchers/have_received_variables"
 require "busybee/testing/matchers/throw_bpmn_error_on"
-require "busybee/testing/no_job_available"
+require "busybee/testing/no_jobs_available"
 require "busybee/testing/timings"
 
 module Busybee
@@ -174,12 +174,12 @@ module Busybee
       # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
       #   for a job (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
       # @return [ActivatedJob]
-      # @raise [NoJobAvailable] if no job is available
+      # @raise [NoJobsAvailable] if no job is available
       def activate_job(type, timeout: nil)
         foreign = busybee_foreign_jobs
         jobs, refused = Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: 1, timeout: timeout,
                                                                           foreign: foreign)
-        raise NoJobAvailable, foreign.no_job_message(type, refused) if jobs.empty?
+        raise NoJobsAvailable, foreign.no_job_message(type, refused) if jobs.empty?
 
         ActivatedJob.new(jobs.first, client: grpc_client)
       end
@@ -195,7 +195,7 @@ module Busybee
       # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
       #   for jobs (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
       # @return [Array<ActivatedJob>]
-      # @raise [NoJobAvailable] if fewer than expected are in hand when the wait runs out
+      # @raise [NoJobsAvailable] if fewer than expected are in hand when the wait runs out
       # @raise [ArgumentError] unless given just one of expected: or max_jobs:, a positive Integer
       def activate_jobs(type, expected: nil, max_jobs: nil, timeout: nil)
         Busybee::Testing::Helpers.validate_job_counts(expected, max_jobs)
@@ -205,7 +205,7 @@ module Busybee
                                                                           enough: expected || 1,
                                                                           timeout: timeout, foreign: foreign)
         if expected && jobs.size < expected
-          raise NoJobAvailable, foreign.shortfall_message(type, expected, jobs.size, refused)
+          raise NoJobsAvailable, foreign.shortfall_message(type, expected, jobs.size, refused)
         end
 
         jobs.map { |raw_job| ActivatedJob.new(raw_job, client: grpc_client) }

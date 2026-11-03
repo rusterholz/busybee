@@ -230,7 +230,7 @@ end
 
 #### `activate_job(type, timeout: nil)`
 
-Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAvailable` if no job is available. Inside `with_process_instance`, a job of any other process instance is handed back and the wait goes on; see [Jobs From Other Process Instances](#jobs-from-other-process-instances).
+Activates a single job of the specified type. Raises `Busybee::Testing::NoJobsAvailable` if no job is available; its former name, `NoJobAvailable`, still works. Inside `with_process_instance`, a job of any other process instance is handed back and the wait goes on; see [Jobs From Other Process Instances](#jobs-from-other-process-instances).
 
 **Parameters:**
 - `type` (String) - Job type to activate
@@ -238,7 +238,7 @@ Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAva
 
 **Returns:** `ActivatedJob` instance
 
-**Raises:** `NoJobAvailable` if no matching job found
+**Raises:** `NoJobsAvailable` if no matching job found
 
 **Example:**
 
@@ -255,7 +255,7 @@ job = activate_job("process-order", timeout: 100)
 
 Activates several jobs of one type, once, when you call it, and returns them as an Array. Inside `with_process_instance`, it hands back other process instances' jobs and counts only its own, as `activate_job` does. Pass exactly one of `expected:` or `max_jobs:`. The two are mirror images:
 
-- **`expected: N` fails when there aren't at least N available.** It waits until N jobs are in hand, and raises `NoJobAvailable`, saying how many arrived, if the wait runs out first. Use it when the step you're testing should have created N jobs, such as one for each element of a multi-instance collection.
+- **`expected: N` fails when there aren't at least N available.** It waits until N jobs are in hand, and raises `NoJobsAvailable`, saying how many arrived, if the wait runs out first. Use it when the step you're testing should have created N jobs, such as one for each element of a multi-instance collection.
 - **`max_jobs: N` succeeds even when there are fewer than N available.** It returns as soon as any jobs are waiting, up to N, and returns fewer, or none, without complaint.
 
 `expected:` asks the engine only for the jobs it still needs, so it returns exactly N, and any more stay in the engine, unactivated. See [Checking That No More Are Waiting](#checking-that-no-more-are-waiting).
@@ -270,7 +270,7 @@ Every job `activate_jobs` returns is activated and locked, even if you use only 
 
 **Returns:** Array of `ActivatedJob` instances
 
-**Raises:** `NoJobAvailable` if fewer than `expected` jobs are in hand when the wait runs out. `ArgumentError` unless you pass exactly one of `expected:` or `max_jobs:`, as a positive Integer
+**Raises:** `NoJobsAvailable` if fewer than `expected` jobs are in hand when the wait runs out. `ArgumentError` unless you pass exactly one of `expected:` or `max_jobs:`, as a positive Integer
 
 **Example:**
 
@@ -584,7 +584,7 @@ expect(job).to have_received_headers("workflow_version" => "2")
 
 ### `have_available_jobs`
 
-Matcher to check if jobs are available for activation. Primarily used in negated form to verify that no jobs exist. A block that raises `NoJobAvailable` or returns an empty Array has found none. Any other error, such as an unreachable gateway, raises through the matcher in either form, so it fails the example.
+Matcher to check if jobs are available for activation. Primarily used in negated form to verify that no jobs exist. A block that raises `NoJobsAvailable` or returns an empty Array has found none. Any other error, such as an unreachable gateway, raises through the matcher in either form, so it fails the example.
 
 **Aliases:** `have_an_available_job`
 
@@ -751,7 +751,7 @@ A workflow test runs against a real engine, which every example shares and which
 
 ### Jobs From Other Process Instances
 
-Job types are shared by every instance of every process deployed to the engine, and the engine hands out the oldest job of a type first. So inside `with_process_instance`, `activate_job`, `activate_jobs` and `with_activated_job_instance` work only the jobs of the block's own instance. Any other job they're offered, such as one from an instance an interrupted run left behind, or from another test process on the same engine, is handed back to the engine unworked: its retries untouched, and out of reach for a while, so the engine offers the next job of the type. The first job an activation refuses sits out 250 ms (`FOREIGN_JOB_BACKOFF_MS`), the second 500 ms, and so on up to 2 s (`FOREIGN_JOB_MAX_BACKOFF_MS`), and the helper keeps waiting for its own. If none arrives, `NoJobAvailable` says what was handed back:
+Job types are shared by every instance of every process deployed to the engine, and the engine hands out the oldest job of a type first. So inside `with_process_instance`, `activate_job`, `activate_jobs` and `with_activated_job_instance` work only the jobs of the block's own instance. Any other job they're offered, such as one from an instance an interrupted run left behind, or from another test process on the same engine, is handed back to the engine unworked: its retries untouched, and out of reach for a while, so the engine offers the next job of the type. The first job an activation refuses sits out 250 ms (`FOREIGN_JOB_BACKOFF_MS`), the second 500 ms, and so on up to 2 s (`FOREIGN_JOB_MAX_BACKOFF_MS`), and the helper keeps waiting for its own. If none arrives, `NoJobsAvailable` says what was handed back:
 
 ```
 No job of type 'charge-card' available for process instance 2251799813685300. Handed back unworked: 1 job of another process instance (2251799813685291). To accept jobs of instances the example didn't start itself, such as a call activity's, tag it busybee_foreign_jobs: :accept
@@ -803,7 +803,7 @@ end
 ### What the Helpers Can't Clean Up
 
 - **A run killed hard.** SIGKILL, or a second Ctrl-C (RSpec's forced quit), ends the process without running a single block's cleanup, so every instance it had started stays running in the engine, for good. A single Ctrl-C (RSpec finishes the current example first) or SIGTERM still cleans up. Later runs hand those leftovers' jobs back, but the instances stay, so after a killed run, restart the engine with its data cleared. Past a couple of hundred leftovers of one job type, an example's wait can run out before the engine has offered its own job.
-- **A second test process on the same engine.** Its instances are live, not leftovers, and nothing in your process may cancel them. Handing back keeps each process from working the other's jobs, but not from taking them: a process waiting on a job type takes the other's job again each time its backoff lapses, which can delay the other's activations, or starve them until they end in `NoJobAvailable`. Under `:accept`, they work each other's jobs outright. Run one test process per engine, or give each parallel process its own.
+- **A second test process on the same engine.** Its instances are live, not leftovers, and nothing in your process may cancel them. Handing back keeps each process from working the other's jobs, but not from taking them: a process waiting on a job type takes the other's job again each time its backoff lapses, which can delay the other's activations, or starve them until they end in `NoJobsAvailable`. Under `:accept`, they work each other's jobs outright. Run one test process per engine, or give each parallel process its own.
 - **Instances you start yourself**, with `publish_message` to a message start event, `Busybee::Client#start_instance`, a timer start event, or code under test. busybee never learns their keys, so cancel them yourself.
 - **What `uniquify: true` doesn't isolate.** It gives each deployment its own process id, and nothing else: job types, message names and signals stay shared. Every deployed copy also keeps its start event subscriptions, so with `deploy_process(bpmn_path, uniquify: true)` in a `let`, each example adds another copy, and one `publish_message` to a message start event starts an instance of every copy deployed so far, none of which any block cancels.
 
@@ -886,7 +886,7 @@ Common causes:
 
 ### "Handed back unworked: ... of another process instance"
 
-`NoJobAvailable` names jobs it handed back when the job it was offered belonged to a process instance other than the `with_process_instance` block's (see [Jobs From Other Process Instances](#jobs-from-other-process-instances)). Common causes:
+`NoJobsAvailable` names jobs it handed back when the job it was offered belonged to a process instance other than the `with_process_instance` block's (see [Jobs From Other Process Instances](#jobs-from-other-process-instances)). Common causes:
 - The job is a call activity's, or belongs to an instance your example started by message: tag the example `busybee_foreign_jobs: :accept`
 - An interrupted run left instances running: restart the engine with its data cleared. With a couple of hundred or more of one job type, the example's own job may not be reached at all within the wait
 - Another test process is using the same engine: give it its own

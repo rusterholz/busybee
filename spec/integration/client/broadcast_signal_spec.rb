@@ -8,7 +8,7 @@ RSpec.describe Busybee::Client, "#broadcast_signal" do
     # Clean up any leftover jobs before each test
     before do
       loop { activate_job("process-order", timeout: 100).mark_completed }
-    rescue Busybee::Testing::NoJobAvailable
+    rescue Busybee::Testing::NoJobsAvailable
       # All jobs cleaned up
     end
   end

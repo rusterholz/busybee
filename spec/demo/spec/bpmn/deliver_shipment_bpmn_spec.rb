@@ -144,7 +144,7 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
 
         # update_order_status should NOT activate - process should complete without it
         expect { activate_job("update_order_status") }.
-          to raise_error(Busybee::Testing::NoJobAvailable)
+          to raise_error(Busybee::Testing::NoJobsAvailable)
 
         assert_process_completed!
       end
@@ -171,7 +171,7 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
 
         # Parallel join should NOT fire yet — branch B is waiting for a driver
         expect { activate_job("update_shipment_status") }.
-          to raise_error(Busybee::Testing::NoJobAvailable)
+          to raise_error(Busybee::Testing::NoJobsAvailable)
 
         # A driver becomes available — publish the correlation message
         publish_message("driver_available",

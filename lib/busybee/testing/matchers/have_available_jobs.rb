@@ -2,7 +2,7 @@
 
 require "rspec/expectations"
 
-require "busybee/testing/no_job_available"
+require "busybee/testing/no_jobs_available"
 
 module Busybee
   module Testing
@@ -12,7 +12,7 @@ module Busybee
       # Matcher to check if jobs are available for activation.
       #
       # This matcher is designed to work with blocks that call `activate_job` or `activate_jobs`.
-      # A block raising `Busybee::Testing::NoJobAvailable` or returning an empty Array has found
+      # A block raising `Busybee::Testing::NoJobsAvailable` or returning an empty Array has found
       # no jobs. Any other error raises through it, in either form.
       #
       # @example Check that jobs are available
@@ -26,7 +26,7 @@ module Busybee
 
         match do |block|
           block.call != []
-        rescue Busybee::Testing::NoJobAvailable => e
+        rescue Busybee::Testing::NoJobsAvailable => e
           @no_job_error = e
           false
         end

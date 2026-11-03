@@ -4,7 +4,7 @@ require "concurrent"
 
 require "busybee/testing/activated_job"
 require "busybee/testing/helpers"
-require "busybee/testing/no_job_available"
+require "busybee/testing/no_jobs_available"
 
 # activate_jobs against a gateway that serves each activation the next batch
 # queued for it, then nothing. The instance with_process_instance starts is 1001.
@@ -140,14 +140,14 @@ RSpec.describe "activate_jobs", :gateway do # rubocop:disable RSpec/DescribeClas
         [Busybee::GRPC::ActivateJobsResponse.new(jobs: [job(served.value)])]
       end
 
-      expect { activate_jobs("t", expected: 100, timeout: 200) }.to raise_error(Busybee::Testing::NoJobAvailable)
+      expect { activate_jobs("t", expected: 100, timeout: 200) }.to raise_error(Busybee::Testing::NoJobsAvailable)
     end
 
     context "when the wait runs out first" do
       it "takes an empty poll as the wait's end, not a reason to ask again" do
         serve(job(1))
 
-        expect { activate_jobs("t", expected: 2) }.to raise_error(Busybee::Testing::NoJobAvailable)
+        expect { activate_jobs("t", expected: 2) }.to raise_error(Busybee::Testing::NoJobsAvailable)
         expect(polls.size).to eq(2)
       end
 
@@ -155,7 +155,7 @@ RSpec.describe "activate_jobs", :gateway do # rubocop:disable RSpec/DescribeClas
         serve(job(1))
 
         expect { activate_jobs("t", expected: 2) }.
-          to raise_error(Busybee::Testing::NoJobAvailable, "Expected 2 jobs of type 't', got 1")
+          to raise_error(Busybee::Testing::NoJobsAvailable, "Expected 2 jobs of type 't', got 1")
       end
 
       it "names the instance inside with_process_instance" do
@@ -163,7 +163,7 @@ RSpec.describe "activate_jobs", :gateway do # rubocop:disable RSpec/DescribeClas
 
         with_process_instance("p") do
           expect { activate_jobs("t", expected: 2) }.
-            to raise_error(Busybee::Testing::NoJobAvailable,
+            to raise_error(Busybee::Testing::NoJobsAvailable,
                            "Expected 2 jobs of type 't' for process instance 1001, got 1")
         end
       end
@@ -171,7 +171,7 @@ RSpec.describe "activate_jobs", :gateway do # rubocop:disable RSpec/DescribeClas
       it "says job for a single job" do
         with_process_instance("p") do
           expect { activate_jobs("t", expected: 1) }.
-            to raise_error(Busybee::Testing::NoJobAvailable,
+            to raise_error(Busybee::Testing::NoJobsAvailable,
                            "Expected 1 job of type 't' for process instance 1001, got 0")
         end
       end
@@ -181,7 +181,7 @@ RSpec.describe "activate_jobs", :gateway do # rubocop:disable RSpec/DescribeClas
 
         with_process_instance("p") do
           expect { activate_jobs("t", expected: 2) }.to raise_error(
-            Busybee::Testing::NoJobAvailable,
+            Busybee::Testing::NoJobsAvailable,
             "Expected 2 jobs of type 't' for process instance 1001, got 1. Handed back unworked: " \
             "1 job of another process instance (777). To accept jobs of instances the example " \
             "didn't start itself, such as a call activity's, tag it busybee_foreign_jobs: :accept"
@@ -192,7 +192,7 @@ RSpec.describe "activate_jobs", :gateway do # rubocop:disable RSpec/DescribeClas
       it "keeps holding the jobs it activated" do
         serve(job(1))
 
-        with_process_instance("p") { expect { activate_jobs("t", expected: 2) }.to raise_error(Busybee::Testing::NoJobAvailable) }
+        with_process_instance("p") { expect { activate_jobs("t", expected: 2) }.to raise_error(Busybee::Testing::NoJobsAvailable) }
 
         expect(handed_back).to be_empty
       end
