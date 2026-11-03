@@ -93,7 +93,8 @@ module Busybee
 
         # Activates until enough of the test's own jobs are in hand or the wait
         # runs out, asking only for what's missing and handing back each foreign
-        # one as it comes. An empty poll is the wait running out on the engine's clock.
+        # one as it comes. An empty poll ends the wait: under the gateway's long polling,
+        # its default, that's the wait running out on the engine's clock.
         #
         # @param max_jobs [Integer] the most to hold
         # @param enough [Integer] how many to hold before returning

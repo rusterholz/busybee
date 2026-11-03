@@ -106,6 +106,8 @@ These helpers don't read `Busybee.default_polling_request_timeout`, `Busybee.def
 
 The defaults assume a job the engine produces in well under a second. Pass `timeout:` or `ttl:` explicitly when a particular example needs something different.
 
+`activate_job` and `activate_jobs` do their waiting through the gateway's long polling, which is on by default: with it turned off, an empty poll comes back at once, so they stop waiting within milliseconds whatever `timeout:` says, and `not_to have_available_jobs` passes without having waited.
+
 ## Helper Methods
 
 ### Process Deployment
@@ -255,7 +257,7 @@ job = activate_job("process-order", timeout: 100)
 
 Activates several jobs of one type, once, when you call it, and returns them as an Array. Inside `with_process_instance`, it hands back other process instances' jobs and counts only its own, as `activate_job` does. Pass exactly one of `expected:` or `max_jobs:`. The two are mirror images:
 
-- **`expected: N` fails when there aren't at least N available.** It waits until N jobs are in hand, and raises `NoJobsAvailable`, saying how many arrived, if the wait runs out first. Use it when the step you're testing should have created N jobs, such as one for each element of a multi-instance collection.
+- **`expected: N` fails when there aren't at least N available.** It waits until N jobs are in hand, and raises `NoJobsAvailable`, saying how many arrived, if the wait runs out first. Use it when the step you're testing should have created N jobs, such as one for each element of a parallel multi-instance collection.
 - **`max_jobs: N` succeeds even when there are fewer than N available.** It returns as soon as any jobs are waiting, up to N, and returns fewer, or none, without complaint.
 
 `expected:` asks the engine only for the jobs it still needs, so it returns exactly N, and any more stay in the engine, unactivated. See [Checking That No More Are Waiting](#checking-that-no-more-are-waiting).
@@ -305,6 +307,8 @@ expect { activate_job("pick-and-pack", timeout: 1_000) }.not_to have_available_j
 ```
 
 A short check passes falsely if a job arrives after it ends, so keep the default when a job could still come from somewhere slower, such as a branch that's still running, a message or a timer.
+
+`timeout: 0` isn't the shortest wait: it asks the engine for its own default, about 10 seconds with nothing waiting, and `expected:` polls only once under it, so a job arriving after the first response counts as missing. For one poll with no wait at all, pass `timeout: -1`.
 
 ### Message Publishing
 
@@ -883,6 +887,7 @@ Common causes:
 - The step created fewer jobs than you expected, such as a multi-instance over a shorter collection
 - Your example already activated some of them
 - The rest are still on the way: pass a longer `timeout:`
+- The step creates its jobs one at a time, as a sequential multi-instance does, where each job exists only after the previous one completes. A longer `timeout:` won't help: activate and complete them one by one with `activate_job`
 
 ### "Handed back unworked: ... of another process instance"
 
