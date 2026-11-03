@@ -99,4 +99,18 @@ RSpec.describe "have_available_jobs", :gateway do
         to raise_error(ArgumentError, /expected: must be a positive Integer/)
     end
   end
+
+  context "when an expectation inside the block fails" do
+    before { serve(job(1)) }
+
+    it "surfaces that failure from the positive form" do
+      expect { expect { activate_job("t").expect_variables(nope: 1) }.to have_available_jobs }.
+        to raise_error(expectation_failure, /nope/)
+    end
+
+    it "surfaces that failure from the negated form" do
+      expect { expect { activate_job("t").expect_variables(nope: 1) }.not_to have_available_jobs }.
+        to raise_error(expectation_failure, /nope/)
+    end
+  end
 end

@@ -584,7 +584,7 @@ expect(job).to have_received_headers("workflow_version" => "2")
 
 ### `have_available_jobs`
 
-Matcher to check if jobs are available for activation. Primarily used in negated form to verify that no jobs exist. A block that raises `NoJobsAvailable` or returns an empty Array has found none. Any other error, such as an unreachable gateway, raises through the matcher in either form, so it fails the example.
+Matcher to check if jobs are available for activation. Primarily used in negated form to verify that no jobs exist. A block that raises `NoJobsAvailable` or returns an empty Array counts as finding none. Under `activate_jobs(expected:)`, that raise can also mean too few arrived, with some of them activated, so use `activate_job` to check that nothing is waiting. Anything else the block raises, such as an unreachable gateway's error or a failed expectation, raises through the matcher in either form, so it fails the example.
 
 **Aliases:** `have_an_available_job`
 
