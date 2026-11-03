@@ -62,22 +62,16 @@ RSpec.describe Busybee::Client, "#broadcast_signal" do
       expect(signal_key_2).to be > 0
       expect(signal_key_1).not_to eq(signal_key_2)
 
-      # Give Zeebe a moment to create instances and reach the service task
-      sleep 0.1
-
-      # Both instances should be waiting at the job - request more to verify only 2 exist
-      jobs = activate_jobs("process-order", max_jobs: 5)
-
-      # Convert enumerator to array
-      jobs_array = jobs.to_a
-      expect(jobs_array.size).to eq(2)
+      # Both instances should be waiting at the job, and no others
+      jobs = activate_jobs("process-order", expected: 2)
+      expect { activate_job("process-order", timeout: 1_000) }.not_to have_available_jobs
 
       # Verify each has the correct orderId
-      order_ids = jobs_array.map { |j| j.variables["orderId"] }.sort
+      order_ids = jobs.map { |j| j.variables["orderId"] }.sort
       expect(order_ids).to eq(%w[111 222])
 
       # Complete both jobs
-      jobs_array.each(&:mark_completed)
+      jobs.each(&:mark_completed)
     end
 
     it "handles broadcasting a signal that has no matching subscriptions" do

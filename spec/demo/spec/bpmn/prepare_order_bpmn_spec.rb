@@ -30,8 +30,8 @@ RSpec.describe "prepare_order BPMN", :zeebe do
         and_complete(warehouses: mock_warehouses)
 
       # Branch B: load_item_availability should activate for each item
-      jobs = activate_jobs("load_item_availability", max_jobs: 10).to_a
-      expect(jobs.size).to eq(2)
+      jobs = activate_jobs("load_item_availability", expected: 2)
+      expect { activate_job("load_item_availability", timeout: 1_000) }.not_to have_available_jobs
 
       item_types = jobs.map { |j| j.variables["item_type"] }.sort
       expect(item_types).to eq(%w[usb-c-hub wireless-mouse])
@@ -47,15 +47,13 @@ RSpec.describe "prepare_order BPMN", :zeebe do
         and_complete(warehouses: mock_warehouses)
 
       # Complete Branch B so it doesn't block later steps
-      activate_jobs("load_item_availability", max_jobs: 10).each do |job|
+      activate_jobs("load_item_availability", expected: 2).each do |job|
         job.mark_completed(warehouse_ids: %w[wh-alpha wh-beta])
       end
 
-      sleep(0.3)
-
       # calculate_distance should activate for each warehouse
-      calc_jobs = activate_jobs("calculate_distance", max_jobs: 10).to_a
-      expect(calc_jobs.size).to eq(2)
+      calc_jobs = activate_jobs("calculate_distance", expected: 2)
+      expect { activate_job("calculate_distance", timeout: 1_000) }.not_to have_available_jobs
 
       calc_jobs.each do |job|
         expect(job.variables).to include("from_lat", "from_lon", "to_lat", "to_lon")
@@ -71,18 +69,14 @@ RSpec.describe "prepare_order BPMN", :zeebe do
       activate_job("load_warehouses").and_complete(warehouses: mock_warehouses)
 
       # Complete Branch B: load_item_availability for all items
-      activate_jobs("load_item_availability", max_jobs: 10).each do |job|
+      activate_jobs("load_item_availability", expected: 2).each do |job|
         job.mark_completed(warehouse_ids: %w[wh-alpha wh-beta])
       end
 
-      sleep(0.3)
-
       # Complete calculate_distance for each warehouse
-      activate_jobs("calculate_distance", max_jobs: 10).each do |job|
+      activate_jobs("calculate_distance", expected: 2).each do |job|
         job.mark_completed(distance: 7.5)
       end
-
-      sleep(0.3)
 
       # plan_shipments should now activate with merged data
       plan_job = activate_job("plan_shipments")
@@ -109,12 +103,10 @@ RSpec.describe "prepare_order BPMN", :zeebe do
     with_process_instance("prepare_order", test_variables) do
       # Complete all steps up to plan_shipments
       activate_job("load_warehouses").and_complete(warehouses: mock_warehouses)
-      activate_jobs("load_item_availability", max_jobs: 10).each do |job|
+      activate_jobs("load_item_availability", expected: 2).each do |job|
         job.mark_completed(warehouse_ids: %w[wh-alpha wh-beta])
       end
-      sleep(0.3)
-      activate_jobs("calculate_distance", max_jobs: 10).each { |j| j.mark_completed(distance: 7.5) }
-      sleep(0.3)
+      activate_jobs("calculate_distance", expected: 2).each { |j| j.mark_completed(distance: 7.5) }
 
       planned_shipments = [
         { warehouse_id: "wh-alpha", items: [{ type: "wireless-mouse", quantity: 2 }] },
@@ -122,11 +114,10 @@ RSpec.describe "prepare_order BPMN", :zeebe do
       ]
 
       activate_job("plan_shipments").and_complete(planned_shipments: planned_shipments)
-      sleep(0.3)
 
       # create_shipment should activate for each planned shipment
-      create_jobs = activate_jobs("create_shipment", max_jobs: 10).to_a
-      expect(create_jobs.size).to eq(2)
+      create_jobs = activate_jobs("create_shipment", expected: 2)
+      expect { activate_job("create_shipment", timeout: 1_000) }.not_to have_available_jobs
 
       create_jobs.each do |job|
         expect(job.variables["order_id"]).to eq(test_variables[:order][:id])
@@ -139,23 +130,17 @@ RSpec.describe "prepare_order BPMN", :zeebe do
     with_process_instance("prepare_order", test_variables) do
       # Complete all steps through create_shipment
       activate_job("load_warehouses").and_complete(warehouses: mock_warehouses)
-      activate_jobs("load_item_availability", max_jobs: 10).each do |job|
+      activate_jobs("load_item_availability", expected: 2).each do |job|
         job.mark_completed(warehouse_ids: %w[wh-alpha wh-beta])
       end
-      sleep(0.3)
-      activate_jobs("calculate_distance", max_jobs: 10).each { |j| j.mark_completed(distance: 7.5) }
-      sleep(0.3)
+      activate_jobs("calculate_distance", expected: 2).each { |j| j.mark_completed(distance: 7.5) }
 
       planned_shipments = [
         { warehouse_id: "wh-alpha", items: [{ type: "wireless-mouse", quantity: 2 }] }
       ]
       activate_job("plan_shipments").and_complete(planned_shipments: planned_shipments)
-      sleep(0.3)
 
-      activate_jobs("create_shipment", max_jobs: 10).each do |job|
-        job.mark_completed(shipment_id: "ship-#{SecureRandom.hex(4)}", item_count: 2)
-      end
-      sleep(0.3)
+      activate_job("create_shipment").and_complete(shipment_id: "ship-#{SecureRandom.hex(4)}", item_count: 2)
 
       # update_order_status should now activate
       final_job = activate_job("update_order_status")
