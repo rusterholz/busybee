@@ -184,22 +184,21 @@ module Busybee
         ActivatedJob.new(jobs.first, client: grpc_client)
       end
 
-      # Activate multiple jobs of the given type, handing back foreign ones as
-      # activate_job does.
+      # Activate multiple jobs of the given type, once, when called, handing
+      # back foreign ones as activate_job does.
       #
       # @param type [String] job type
       # @param max_jobs [Integer] maximum number of jobs to activate
       # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
       #   for jobs (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
-      # @return [Enumerator<ActivatedJob>]
+      # @return [Array<ActivatedJob>]
+      # @raise [ArgumentError] unless max_jobs is a positive Integer
       def activate_jobs(type, max_jobs:, timeout: nil)
-        foreign = busybee_foreign_jobs
-        Enumerator.new do |yielder|
-          Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: max_jobs, timeout: timeout,
-                                                            foreign: foreign).first.each do |raw_job|
-            yielder << ActivatedJob.new(raw_job, client: grpc_client)
-          end
-        end
+        Busybee::Testing::Helpers.validate_job_count(:max_jobs, max_jobs)
+
+        jobs, = Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: max_jobs, timeout: timeout,
+                                                                  foreign: busybee_foreign_jobs)
+        jobs.map { |raw_job| ActivatedJob.new(raw_job, client: grpc_client) }
       end
 
       # Publish a message to Zeebe.

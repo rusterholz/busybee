@@ -77,6 +77,17 @@ module Busybee
           jobs
         end
 
+        # @raise [ArgumentError] unless the count is a positive Integer
+        def validate_job_count(name, count)
+          return if count.is_a?(Integer) && count.positive?
+
+          message = "#{name}: must be a positive Integer, got #{count.inspect}"
+          raise ArgumentError, message unless count.eql?(0)
+
+          raise ArgumentError, "#{message}. To check that no job is waiting, use " \
+                               "expect { activate_job(type) }.not_to have_available_jobs"
+        end
+
         # Activates until a job of the test's own arrives or the wait runs out,
         # handing back each foreign one as it comes.
         #

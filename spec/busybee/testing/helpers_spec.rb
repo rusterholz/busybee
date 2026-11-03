@@ -246,13 +246,12 @@ RSpec.describe Busybee::Testing::Helpers do
       allow(mock_client).to receive(:activate_jobs).and_return([activate_response])
     end
 
-    it "returns an Enumerator of ActivatedJob" do
+    it "returns an Array of ActivatedJob" do
       result = helper.activate_jobs("my-task", max_jobs: 2)
-      expect(result).to be_an(Enumerator)
 
-      jobs = result.to_a
-      expect(jobs.length).to eq(2)
-      expect(jobs.first).to be_a(Busybee::Testing::ActivatedJob)
+      expect(result).to be_an(Array)
+      expect(result.map(&:key)).to eq([1, 2])
+      expect(result).to all(be_a(Busybee::Testing::ActivatedJob))
     end
   end
 
