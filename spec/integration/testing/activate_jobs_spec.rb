@@ -35,11 +35,11 @@ RSpec.describe "activate_jobs", :integration do
   context "with a job created only after the activation began" do
     it "waits for it under expected:" do
       with_process_instance(process_id, correlationId: correlation_id) do |key|
+        started = now
         publisher = Thread.new do
           sleep 0.5
           release_second_job
         end
-        started = now
         jobs = activate_jobs(job_type, expected: 2)
 
         expect(now - started).to be >= 0.5
