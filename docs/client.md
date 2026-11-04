@@ -126,7 +126,7 @@ Busybee wraps low-level GRPC errors in Ruby exceptions that are easier to work w
 
 ### Error Hierarchy
 
-All Busybee errors inherit from `Busybee::Error`, so you can rescue broadly or narrowly:
+All Busybee errors inherit from `Busybee::Error`, so you can rescue broadly or narrowly. The exception is the errors the testing helpers raise at test time, which inherit from [`Busybee::Testing::Error`](testing.md#testing-errors) instead.
 
 | Error Class | When Raised |
 |-------------|-------------|
