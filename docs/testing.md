@@ -610,13 +610,15 @@ See [Checking That No More Are Waiting](#checking-that-no-more-are-waiting) for 
 
 ## Testing Errors
 
-The errors the testing helpers raise at test time all inherit from `Busybee::Testing::Error`, a `StandardError` that isn't a `Busybee::Error`. It's never raised directly; it exists for `rescue Busybee::Testing::Error`.
+The testing helpers' own errors all inherit from `Busybee::Testing::Error`, a `StandardError` that isn't a `Busybee::Error`. It's never raised directly; it exists for `rescue Busybee::Testing::Error`.
 
 | Error Class | Raised By |
 |-------------|-----------|
 | `Busybee::Testing::NoJobsAvailable` | `activate_job`, `with_activated_job_instance` and `activate_jobs(expected:)`, when the jobs asked for don't arrive. Its former name, `NoJobAvailable`, still works |
 | `Busybee::Testing::ProcessStillRunning` | `assert_process_completed!`, when the process instance is still running |
 | `Busybee::Testing::NoCurrentProcessInstance` | `assert_process_completed!`, outside `with_process_instance` |
+
+Beyond these, a wrong call to a helper raises `ArgumentError`, and a gateway failure raises as its own `GRPC` error, unless the helper handles it, as `zeebe_available?` does by returning false.
 
 ## Complete Workflow Example
 

@@ -2,7 +2,7 @@
 
 module Busybee
   module Testing
-    # Base class for all errors raised by the testing helpers.
+    # Base class for the testing helpers' own errors.
     # Never raised directly; exists for `rescue Busybee::Testing::Error`.
     Error = Class.new(StandardError)
 
