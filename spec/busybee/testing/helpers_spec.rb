@@ -330,7 +330,8 @@ RSpec.describe Busybee::Testing::Helpers do
       allow(mock_client).to receive(:cancel_process_instance)
 
       helper.with_process_instance("my-process") do
-        expect { helper.assert_process_completed! }.to raise_error(/Process instance 99999 is still running/)
+        expect { helper.assert_process_completed! }.
+          to raise_error(Busybee::Testing::ProcessStillRunning, /Process instance 99999 is still running/)
       end
     end
   end

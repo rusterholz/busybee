@@ -2,8 +2,8 @@
 
 require "securerandom"
 
+require "busybee/testing/error"
 require "busybee/testing/helpers"
-require "busybee/testing/no_jobs_available"
 require "busybee/testing/timings"
 
 # What the workflow helpers leave behind, and which jobs they work, against real

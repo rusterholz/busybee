@@ -2,8 +2,8 @@
 
 require "securerandom"
 
+require "busybee/testing/error"
 require "busybee/testing/helpers"
-require "busybee/testing/no_jobs_available"
 
 # activate_jobs against real Zeebe. Each example deploys its own process id and
 # job type, so nothing another example leaves running can reach it. An instance

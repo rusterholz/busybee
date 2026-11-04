@@ -2,8 +2,8 @@
 
 require "concurrent"
 
+require "busybee/testing/error"
 require "busybee/testing/helpers"
-require "busybee/testing/no_jobs_available"
 
 # with_process_instance and with_activated_job_instance against a gateway that
 # answers like Zeebe: instance keys count up from 1001, cancels succeed.
@@ -87,15 +87,28 @@ RSpec.describe "with_process_instance blocks", :gateway do # rubocop:disable RSp
     let(:no_instance) { "No current process instance: call assert_process_completed! inside with_process_instance" }
 
     it "raises outside any block, asking the engine nothing" do
-      expect { assert_process_completed!(wait: 0) }.to raise_error(RuntimeError, no_instance)
+      expect { assert_process_completed!(wait: 0) }.
+        to raise_error(Busybee::Testing::NoCurrentProcessInstance, no_instance)
       expect(canceled).to be_empty
     end
 
     it "raises once the block has ended" do
       with_process_instance("p") { |_| } # rubocop:disable Lint/EmptyBlock
 
-      expect { assert_process_completed!(wait: 0) }.to raise_error(RuntimeError, no_instance)
+      expect { assert_process_completed!(wait: 0) }.
+        to raise_error(Busybee::Testing::NoCurrentProcessInstance, no_instance)
       expect(canceled).to eq([1001])
+    end
+  end
+
+  describe "assert_process_completed! with the instance still running" do
+    it "raises, naming the instance" do
+      with_process_instance("p") do |key|
+        expect { assert_process_completed!(wait: 0) }.to raise_error(
+          Busybee::Testing::ProcessStillRunning,
+          "Process instance #{key} is still running (expected it to be completed)"
+        )
+      end
     end
   end
 

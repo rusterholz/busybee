@@ -3,8 +3,8 @@
 require "concurrent"
 
 require "busybee/testing/activated_job"
+require "busybee/testing/error"
 require "busybee/testing/helpers"
-require "busybee/testing/no_jobs_available"
 
 # activate_jobs against a gateway that serves each activation the next batch
 # queued for it, then nothing. The instance with_process_instance starts is 1001.

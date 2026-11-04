@@ -2,9 +2,9 @@
 
 require "concurrent"
 
+require "busybee/testing/error"
 require "busybee/testing/foreign_jobs"
 require "busybee/testing/helpers"
-require "busybee/testing/no_jobs_available"
 require "busybee/testing/timings"
 
 # Activation inside with_process_instance, against a gateway that serves each

@@ -6,6 +6,7 @@ require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 require "busybee/testing/activated_job"
+require "busybee/testing/error"
 require "busybee/testing/foreign_jobs"
 require "busybee/testing/helpers/builders"
 require "busybee/testing/helpers/execution"
@@ -18,7 +19,6 @@ require "busybee/testing/matchers/have_available_jobs"
 require "busybee/testing/matchers/have_received_headers"
 require "busybee/testing/matchers/have_received_variables"
 require "busybee/testing/matchers/throw_bpmn_error_on"
-require "busybee/testing/no_jobs_available"
 require "busybee/testing/timings"
 
 module Busybee
@@ -247,11 +247,13 @@ module Busybee
       #
       # @param wait [Numeric] seconds to wait before checking (see zeebe_available?
       #   for why `wait:` is the one parameter name that means seconds)
-      # @raise [RuntimeError] if process is still running, or if called outside
-      #   with_process_instance, where there is no instance to check
+      # @raise [ProcessStillRunning] if the process instance is still running
+      # @raise [NoCurrentProcessInstance] if called outside with_process_instance,
+      #   where there is no instance to check
       def assert_process_completed!(wait: 0.25)
         unless process_instance_key
-          raise "No current process instance: call assert_process_completed! inside with_process_instance"
+          raise NoCurrentProcessInstance,
+                "No current process instance: call assert_process_completed! inside with_process_instance"
         end
 
         sleep(wait) if wait.positive?
@@ -265,7 +267,8 @@ module Busybee
         rescue ::GRPC::NotFound
           true # Expected - process has completed
         else
-          raise "Process instance #{process_instance_key} is still running (expected it to be completed)"
+          raise ProcessStillRunning,
+                "Process instance #{process_instance_key} is still running (expected it to be completed)"
         end
       end
 

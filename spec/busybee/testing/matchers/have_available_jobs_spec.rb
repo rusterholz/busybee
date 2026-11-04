@@ -113,4 +113,26 @@ RSpec.describe "have_available_jobs", :gateway do
         to raise_error(expectation_failure, /nope/)
     end
   end
+
+  context "when the block raises another testing error" do
+    it "surfaces it from the positive form" do
+      expect { expect { assert_process_completed!(wait: 0) }.to have_available_jobs }.
+        to raise_error(Busybee::Testing::NoCurrentProcessInstance)
+    end
+
+    it "surfaces it from the negated form" do
+      expect { expect { assert_process_completed!(wait: 0) }.not_to have_available_jobs }.
+        to raise_error(Busybee::Testing::NoCurrentProcessInstance)
+    end
+
+    it "surfaces a process still running" do
+      gateway.on(:create_process_instance) { Busybee::GRPC::CreateProcessInstanceResponse.new(processInstanceKey: 1001) }
+      gateway.on(:cancel_process_instance) { Busybee::GRPC::CancelProcessInstanceResponse.new }
+
+      with_process_instance("p") do
+        expect { expect { assert_process_completed!(wait: 0) }.not_to have_available_jobs }.
+          to raise_error(Busybee::Testing::ProcessStillRunning)
+      end
+    end
+  end
 end

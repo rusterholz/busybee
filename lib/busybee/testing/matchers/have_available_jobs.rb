@@ -2,7 +2,7 @@
 
 require "rspec/expectations"
 
-require "busybee/testing/no_jobs_available"
+require "busybee/testing/error"
 
 module Busybee
   module Testing
