@@ -2,9 +2,9 @@
 
 require "concurrent"
 
+require "busybee/testing/error"
 require "busybee/testing/foreign_jobs"
 require "busybee/testing/helpers"
-require "busybee/testing/no_job_available"
 require "busybee/testing/timings"
 
 # Activation inside with_process_instance, against a gateway that serves each
@@ -93,7 +93,7 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
 
       with_process_instance("p") do
         expect { activate_job("t") }.to raise_error(
-          Busybee::Testing::NoJobAvailable,
+          Busybee::Testing::NoJobsAvailable,
           "No job of type 't' available for process instance 1001. Handed back unworked: " \
           "2 jobs of other process instances (777, 778). To accept jobs of instances the example " \
           "didn't start itself, such as a call activity's, tag it busybee_foreign_jobs: :accept"
@@ -111,7 +111,7 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       end
 
       with_process_instance("p") do
-        expect { activate_job("t", timeout: 200) }.to raise_error(Busybee::Testing::NoJobAvailable)
+        expect { activate_job("t", timeout: 200) }.to raise_error(Busybee::Testing::NoJobsAvailable)
       end
     end
 
@@ -129,7 +129,7 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       with_process_instance("p") do
         with_process_instance("p") do
           expect { activate_job("t") }.to raise_error(
-            Busybee::Testing::NoJobAvailable,
+            Busybee::Testing::NoJobsAvailable,
             "No job of type 't' available for process instance 1002. Handed back unworked: " \
             "1 job of an enclosing with_process_instance block's process instance (1001), " \
             "which can take it once that block resumes"
@@ -144,7 +144,7 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       with_process_instance("p") do
         with_process_instance("p") do
           expect { activate_job("t") }.to raise_error(
-            Busybee::Testing::NoJobAvailable,
+            Busybee::Testing::NoJobsAvailable,
             "No job of type 't' available for process instance 1002. Handed back unworked: " \
             "1 job of an enclosing with_process_instance block's process instance (1001), " \
             "which can take it once that block resumes, and 1 job of another process instance (777). " \
@@ -189,7 +189,7 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       with_process_instance("p") do
         with_process_instance("p") do
           expect { activate_job("t") }.to raise_error(
-            Busybee::Testing::NoJobAvailable,
+            Busybee::Testing::NoJobsAvailable,
             "No job of type 't' available for process instance 1002. Handed back unworked: " \
             "1 job of an enclosing with_process_instance block's process instance (1001), " \
             "which can take it once that block resumes"
@@ -202,7 +202,7 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       it "lets an example go back to refusing", busybee_foreign_jobs: :refuse do
         serve(job(901, 777))
 
-        with_process_instance("p") { expect { activate_job("t") }.to raise_error(Busybee::Testing::NoJobAvailable) }
+        with_process_instance("p") { expect { activate_job("t") }.to raise_error(Busybee::Testing::NoJobsAvailable) }
       end
     end
 
@@ -213,7 +213,7 @@ RSpec.describe "Foreign jobs in workflow tests", :gateway do # rubocop:disable R
       with_process_instance("p") do
         Busybee::Testing.accepting_foreign_jobs { expect(activate_job("t").key).to eq(901) }
         expect { Busybee::Testing.accepting_foreign_jobs { raise "spec failed" } }.to raise_error("spec failed")
-        expect { activate_job("t") }.to raise_error(Busybee::Testing::NoJobAvailable)
+        expect { activate_job("t") }.to raise_error(Busybee::Testing::NoJobsAvailable)
       end
     end
 

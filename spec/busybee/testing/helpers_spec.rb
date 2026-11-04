@@ -192,7 +192,7 @@ RSpec.describe Busybee::Testing::Helpers do
 
       expect do
         helper.activate_job("missing-task")
-      end.to raise_error(Busybee::Testing::NoJobAvailable, /No job of type 'missing-task' available/)
+      end.to raise_error(Busybee::Testing::NoJobsAvailable, /No job of type 'missing-task' available/)
     end
 
     # The harness owns its timings. A suite shouldn't inherit a production
@@ -246,13 +246,12 @@ RSpec.describe Busybee::Testing::Helpers do
       allow(mock_client).to receive(:activate_jobs).and_return([activate_response])
     end
 
-    it "returns an Enumerator of ActivatedJob" do
+    it "returns an Array of ActivatedJob" do
       result = helper.activate_jobs("my-task", max_jobs: 2)
-      expect(result).to be_an(Enumerator)
 
-      jobs = result.to_a
-      expect(jobs.length).to eq(2)
-      expect(jobs.first).to be_a(Busybee::Testing::ActivatedJob)
+      expect(result).to be_an(Array)
+      expect(result.map(&:key)).to eq([1, 2])
+      expect(result).to all(be_a(Busybee::Testing::ActivatedJob))
     end
   end
 
@@ -331,7 +330,8 @@ RSpec.describe Busybee::Testing::Helpers do
       allow(mock_client).to receive(:cancel_process_instance)
 
       helper.with_process_instance("my-process") do
-        expect { helper.assert_process_completed! }.to raise_error(/Process instance 99999 is still running/)
+        expect { helper.assert_process_completed! }.
+          to raise_error(Busybee::Testing::ProcessStillRunning, /Process instance 99999 is still running/)
       end
     end
   end

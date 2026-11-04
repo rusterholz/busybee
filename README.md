@@ -209,7 +209,7 @@ Each step activates the job waiting at a task, checks what the process handed it
 
 - `deploy_process(path, uniquify:)` - Deploy BPMN files with optional unique IDs for test isolation
 - `with_process_instance(process_id, variables)` - Create instances with automatic cleanup
-- `activate_job(type)` / `activate_jobs(type, max_jobs:)` - Activate jobs for assertions
+- `activate_job(type)` / `activate_jobs(type, expected:)` / `activate_jobs(type, max_jobs:)` - Activate jobs for assertions
 - `expect_variables` / `expect_headers`, then `and_complete` / `and_fail` / `and_throw_error_event` - Check and resolve an activated job, in one chain
 - `publish_message(name, correlation_key:, vars:)` - Trigger message catch events
 - `set_variables(scope_key, variables)` - Update process variables

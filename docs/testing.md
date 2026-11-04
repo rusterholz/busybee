@@ -106,6 +106,8 @@ These helpers don't read `Busybee.default_polling_request_timeout`, `Busybee.def
 
 The defaults assume a job the engine produces in well under a second. Pass `timeout:` or `ttl:` explicitly when a particular example needs something different.
 
+`activate_job` and `activate_jobs` do their waiting through the gateway's long polling, which is on by default: with it turned off, an empty poll comes back at once, so they stop waiting within milliseconds whatever `timeout:` says, and `not_to have_available_jobs` passes without having waited.
+
 ## Helper Methods
 
 ### Process Deployment
@@ -230,7 +232,7 @@ end
 
 #### `activate_job(type, timeout: nil)`
 
-Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAvailable` if no job is available. Inside `with_process_instance`, a job of any other process instance is handed back and the wait goes on; see [Jobs From Other Process Instances](#jobs-from-other-process-instances).
+Activates a single job of the specified type. Raises `Busybee::Testing::NoJobsAvailable` if no job is available; its former name, `NoJobAvailable`, still works. Inside `with_process_instance`, a job of any other process instance is handed back and the wait goes on; see [Jobs From Other Process Instances](#jobs-from-other-process-instances).
 
 **Parameters:**
 - `type` (String) - Job type to activate
@@ -238,7 +240,7 @@ Activates a single job of the specified type. Raises `Busybee::Testing::NoJobAva
 
 **Returns:** `ActivatedJob` instance
 
-**Raises:** `NoJobAvailable` if no matching job found
+**Raises:** `NoJobsAvailable` if no matching job found
 
 **Example:**
 
@@ -251,26 +253,62 @@ job.mark_completed(payment_status: "success")
 job = activate_job("process-order", timeout: 100)
 ```
 
-#### `activate_jobs(type, max_jobs:, timeout: nil)`
+#### `activate_jobs(type, expected: nil, max_jobs: nil, timeout: nil)`
 
-Activates multiple jobs of the specified type. Inside `with_process_instance`, it hands back other process instances' jobs and returns the rest, as `activate_job` does.
+Activates several jobs of one type, once, when you call it, and returns them as an Array. Inside `with_process_instance`, it hands back other process instances' jobs and counts only its own, as `activate_job` does. Pass exactly one of `expected:` or `max_jobs:`. The two are mirror images:
+
+- **`expected: N` fails when there aren't at least N available.** It waits until N jobs are in hand, and raises `NoJobsAvailable`, saying how many arrived, if the wait runs out first. Use it when the step you're testing should have created N jobs, such as one for each element of a parallel multi-instance collection.
+- **`max_jobs: N` succeeds even when there are fewer than N available.** It returns as soon as any jobs are waiting, up to N, and returns fewer, or none, without complaint.
+
+`expected:` asks the engine only for the jobs it still needs, so it returns exactly N, and any more stay in the engine, unactivated. See [Checking That No More Are Waiting](#checking-that-no-more-are-waiting).
+
+Every job `activate_jobs` returns is activated and locked, even if you use only the first. Reading the result again never activates more. When `expected:` raises, the jobs it had activated stay locked until `with_process_instance` cancels their instance or, outside a block, until their lock lapses.
 
 **Parameters:**
 - `type` (String) - Job type to activate
-- `max_jobs` (Integer) - Maximum number of jobs to activate
-- `timeout` (Integer, ActiveSupport::Duration, optional) - How long to wait for a job. Defaults to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5,000ms) — see [The harness picks its own timings](#the-harness-picks-its-own-timings)
+- `expected` (Integer) - How many jobs to wait for. Must be positive
+- `max_jobs` (Integer) - The most jobs to activate. Must be positive
+- `timeout` (Integer, ActiveSupport::Duration, optional) - How long to wait for jobs. Defaults to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5,000ms); see [The harness picks its own timings](#the-harness-picks-its-own-timings)
 
-**Returns:** Enumerator of `ActivatedJob` instances
+**Returns:** Array of `ActivatedJob` instances
+
+**Raises:** `NoJobsAvailable` if fewer than `expected` jobs are in hand when the wait runs out. `ArgumentError` unless you pass exactly one of `expected:` or `max_jobs:`, as a positive Integer
 
 **Example:**
 
 ```ruby
-jobs = activate_jobs("send-notification", max_jobs: 5)
-jobs.each do |job|
-  recipient = job.variables["email"]
+activate_job("load-order-shipments").and_complete(shipments: shipments)
+
+jobs = activate_jobs("pick-and-pack", expected: 2)
+expect(jobs.map { |job| job.variables["shipment_id"] }).to contain_exactly("ship-1", "ship-2")
+jobs.each(&:mark_completed)
+
+# Whatever is waiting, up to five
+activate_jobs("send-notification", max_jobs: 5).each do |job|
   job.mark_completed(sent_at: Time.now.iso8601)
 end
 ```
+
+##### Checking That No More Are Waiting
+
+`expected:` can't tell you that more jobs are waiting than you expected, since it never asks for them. To check, follow it with [`have_available_jobs`](#have_available_jobs):
+
+```ruby
+jobs = activate_jobs("pick-and-pack", expected: 2)
+expect { activate_job("pick-and-pack") }.not_to have_available_jobs
+```
+
+A check that nothing is there has to wait out its whole timeout, 5 seconds by default. That's the typical form, and it gives a late job the longest chance to show up.
+
+Pass a shorter `timeout:` when no further job can still be on the way. The jobs of a parallel multi-instance, for example, come from one quick burst, so any more than you expected follow within moments of the ones you hold:
+
+```ruby
+expect { activate_job("pick-and-pack", timeout: 1_000) }.not_to have_available_jobs
+```
+
+A short check passes falsely if a job arrives after it ends, so keep the default when a job could still come from somewhere slower, such as a branch that's still running, a message or a timer.
+
+`timeout: 0` isn't the shortest wait: it asks the engine for its own default, about 10 seconds with nothing waiting, and `expected:` polls only once under it, so a job arriving after the first response counts as missing. For one poll with no wait at all, pass `timeout: -1`.
 
 ### Message Publishing
 
@@ -330,7 +368,7 @@ Asserts that the current process instance has completed. Useful for verifying en
 **Parameters:**
 - `wait` (Numeric) - Seconds to wait before checking (default: `0.25`). See [A note on units](#a-note-on-units)
 
-**Raises:** RuntimeError if process is still running, or if called outside `with_process_instance`, where there is no instance to check
+**Raises:** `ProcessStillRunning` if the process instance is still running. `NoCurrentProcessInstance` if called outside `with_process_instance`, where there is no instance to check
 
 **Example:**
 
@@ -550,7 +588,7 @@ expect(job).to have_received_headers("workflow_version" => "2")
 
 ### `have_available_jobs`
 
-Matcher to check if jobs are available for activation. Primarily used in negated form to verify that no jobs exist.
+Matcher to check if jobs are available for activation. Primarily used in negated form to verify that no jobs exist. A block that raises `NoJobsAvailable` or returns an empty Array counts as finding none. Under `activate_jobs(expected:)`, that raise can also mean too few arrived, with some of them activated, so use `activate_job` to check that nothing is waiting. Anything else the block raises, such as an unreachable gateway's error or a failed expectation, raises through the matcher in either form, so it fails the example.
 
 **Aliases:** `have_an_available_job`
 
@@ -567,6 +605,20 @@ expect { activate_job("process-order") }.not_to have_available_jobs
 Busybee::Client.new.broadcast_signal("non-existent-signal")
 expect { activate_job("process-order") }.not_to have_an_available_job
 ```
+
+See [Checking That No More Are Waiting](#checking-that-no-more-are-waiting) for its use after `activate_jobs(expected:)`, and for when a shorter `timeout:` is the better choice.
+
+## Testing Errors
+
+The testing helpers' own errors all inherit from `Busybee::Testing::Error`, a `StandardError` that isn't a `Busybee::Error`. It's never raised directly; it exists for `rescue Busybee::Testing::Error`.
+
+| Error Class | Raised By |
+|-------------|-----------|
+| `Busybee::Testing::NoJobsAvailable` | `activate_job`, `with_activated_job_instance` and `activate_jobs(expected:)`, when the jobs asked for don't arrive. Its former name, `NoJobAvailable`, still works |
+| `Busybee::Testing::ProcessStillRunning` | `assert_process_completed!`, when the process instance is still running |
+| `Busybee::Testing::NoCurrentProcessInstance` | `assert_process_completed!`, outside `with_process_instance` |
+
+Beyond these, a wrong call to a helper raises `ArgumentError`, and a gateway failure raises as its own `GRPC` error, unless the helper handles it, as `zeebe_available?` does by returning false.
 
 ## Complete Workflow Example
 
@@ -715,11 +767,13 @@ A workflow test runs against a real engine, which every example shares and which
 
 ### Jobs From Other Process Instances
 
-Job types are shared by every instance of every process deployed to the engine, and the engine hands out the oldest job of a type first. So inside `with_process_instance`, `activate_job`, `activate_jobs` and `with_activated_job_instance` work only the jobs of the block's own instance. Any other job they're offered, such as one from an instance an interrupted run left behind, or from another test process on the same engine, is handed back to the engine unworked: its retries untouched, and out of reach for a while, so the engine offers the next job of the type. The first job an activation refuses sits out 250 ms (`FOREIGN_JOB_BACKOFF_MS`), the second 500 ms, and so on up to 2 s (`FOREIGN_JOB_MAX_BACKOFF_MS`), and the helper keeps waiting for its own. If none arrives, `NoJobAvailable` says what was handed back:
+Job types are shared by every instance of every process deployed to the engine, and the engine hands out the oldest job of a type first. So inside `with_process_instance`, `activate_job`, `activate_jobs` and `with_activated_job_instance` work only the jobs of the block's own instance. Any other job they're offered, such as one from an instance an interrupted run left behind, or from another test process on the same engine, is handed back to the engine unworked: its retries untouched, and out of reach for a while, so the engine offers the next job of the type. The first job an activation refuses sits out 250 ms (`FOREIGN_JOB_BACKOFF_MS`), the second 500 ms, and so on up to 2 s (`FOREIGN_JOB_MAX_BACKOFF_MS`), and the helper keeps waiting for its own. If none arrives, `NoJobsAvailable` says what was handed back:
 
 ```
 No job of type 'charge-card' available for process instance 2251799813685300. Handed back unworked: 1 job of another process instance (2251799813685291). To accept jobs of instances the example didn't start itself, such as a call activity's, tag it busybee_foreign_jobs: :accept
 ```
+
+`activate_jobs` with `expected:` says the same when too few of its own arrive, starting `Expected 2 jobs of type 'charge-card' for process instance 2251799813685300, got 1`. With `max_jobs:`, it returns what it has, which may be nothing, and raises nothing.
 
 Outside `with_process_instance`, nothing is handed back: there's no instance for a job to belong to.
 
@@ -765,7 +819,7 @@ end
 ### What the Helpers Can't Clean Up
 
 - **A run killed hard.** SIGKILL, or a second Ctrl-C (RSpec's forced quit), ends the process without running a single block's cleanup, so every instance it had started stays running in the engine, for good. A single Ctrl-C (RSpec finishes the current example first) or SIGTERM still cleans up. Later runs hand those leftovers' jobs back, but the instances stay, so after a killed run, restart the engine with its data cleared. Past a couple of hundred leftovers of one job type, an example's wait can run out before the engine has offered its own job.
-- **A second test process on the same engine.** Its instances are live, not leftovers, and nothing in your process may cancel them. Handing back keeps each process from working the other's jobs, but not from taking them: a process waiting on a job type takes the other's job again each time its backoff lapses, which can delay the other's activations, or starve them until they end in `NoJobAvailable`. Under `:accept`, they work each other's jobs outright. Run one test process per engine, or give each parallel process its own.
+- **A second test process on the same engine.** Its instances are live, not leftovers, and nothing in your process may cancel them. Handing back keeps each process from working the other's jobs, but not from taking them: a process waiting on a job type takes the other's job again each time its backoff lapses, which can delay the other's activations, or starve them until they end in `NoJobsAvailable`. Under `:accept`, they work each other's jobs outright. Run one test process per engine, or give each parallel process its own.
 - **Instances you start yourself**, with `publish_message` to a message start event, `Busybee::Client#start_instance`, a timer start event, or code under test. busybee never learns their keys, so cancel them yourself.
 - **What `uniquify: true` doesn't isolate.** It gives each deployment its own process id, and nothing else: job types, message names and signals stay shared. Every deployed copy also keeps its start event subscriptions, so with `deploy_process(bpmn_path, uniquify: true)` in a `let`, each example adds another copy, and one `publish_message` to a message start event starts an instance of every copy deployed so far, none of which any block cancels.
 
@@ -814,7 +868,7 @@ activate_job("send-email")
 
 # Also Good: separate verification and completion — useful when you need to
 # activate multiple jobs of the same type and distinguish between them
-jobs = activate_jobs("send-comms", max_jobs: 2)
+jobs = activate_jobs("send-comms", expected: 2)
   .group_by { |j| j.headers["medium"] }
   .transform_values(&:first)
 
@@ -839,9 +893,17 @@ Common causes:
 - Job already activated by another worker
 - Process completed or failed before reaching task
 
+### "Expected 2 jobs of type 'my-task' ..., got 1"
+
+`activate_jobs(expected:)` ran out its wait with too few jobs in hand. Common causes:
+- The step created fewer jobs than you expected, such as a multi-instance over a shorter collection
+- Your example already activated some of them
+- The rest are still on the way: pass a longer `timeout:`
+- The step creates its jobs one at a time, as a sequential multi-instance does, where each job exists only after the previous one completes. A longer `timeout:` won't help: activate and complete them one by one with `activate_job`
+
 ### "Handed back unworked: ... of another process instance"
 
-`NoJobAvailable` names jobs it handed back when the job it was offered belonged to a process instance other than the `with_process_instance` block's (see [Jobs From Other Process Instances](#jobs-from-other-process-instances)). Common causes:
+`NoJobsAvailable` names jobs it handed back when the job it was offered belonged to a process instance other than the `with_process_instance` block's (see [Jobs From Other Process Instances](#jobs-from-other-process-instances)). Common causes:
 - The job is a call activity's, or belongs to an instance your example started by message: tag the example `busybee_foreign_jobs: :accept`
 - An interrupted run left instances running: restart the engine with its data cleared. With a couple of hundred or more of one job type, the example's own job may not be reached at all within the wait
 - Another test process is using the same engine: give it its own

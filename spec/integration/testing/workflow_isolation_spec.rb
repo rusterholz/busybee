@@ -2,8 +2,8 @@
 
 require "securerandom"
 
+require "busybee/testing/error"
 require "busybee/testing/helpers"
-require "busybee/testing/no_job_available"
 require "busybee/testing/timings"
 
 # What the workflow helpers leave behind, and which jobs they work, against real
@@ -101,7 +101,7 @@ RSpec.describe "Workflow test isolation", :integration do
     it "refuses the child's job by default, naming it and the switch" do
       with_process_instance(parent_id) do |key|
         expect { activate_job(child_type, timeout: 1_500) }.to raise_error(
-          Busybee::Testing::NoJobAvailable,
+          Busybee::Testing::NoJobsAvailable,
           /\ANo job of type '#{child_type}' available for process instance #{key}\. Handed back unworked: 1 job of another process instance \(\d+\)\. .* tag it busybee_foreign_jobs: :accept\z/ # rubocop:disable Layout/LineLength
         )
       end
@@ -140,7 +140,7 @@ RSpec.describe "Workflow test isolation", :integration do
 
     with_process_instance(process_id) do |key|
       running?(key) # the example's own job never arrives, so only the leftover's is on offer
-      expect { activate_job(job_type, timeout: 3_000) }.to raise_error(Busybee::Testing::NoJobAvailable)
+      expect { activate_job(job_type, timeout: 3_000) }.to raise_error(Busybee::Testing::NoJobsAvailable)
     end
 
     expect(Busybee::Testing::Helpers).to have_received(:hand_back).at_least(2).times

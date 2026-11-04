@@ -26,10 +26,8 @@ RSpec.describe "ship_order BPMN", :zeebe do
       activate_job("load_order_shipments").
         and_complete(shipments: mock_shipments)
 
-      sleep(0.3)
-
-      jobs = activate_jobs("simulate_pick_and_pack", max_jobs: 10).to_a
-      expect(jobs.size).to eq(2)
+      jobs = activate_jobs("simulate_pick_and_pack", expected: 2)
+      expect { activate_job("simulate_pick_and_pack", timeout: 1_000) }.not_to have_available_jobs
 
       item_counts = jobs.map { |j| j.variables["item_count"] }.sort
       expect(item_counts).to eq([1, 3])
@@ -42,15 +40,13 @@ RSpec.describe "ship_order BPMN", :zeebe do
   it "activates update_shipment_status (packed) after pick-and-pack for each shipment" do
     with_process_instance("ship_order", test_variables) do
       activate_job("load_order_shipments").and_complete(shipments: mock_shipments)
-      sleep(0.3)
 
       # Complete all pick-and-pack jobs
-      activate_jobs("simulate_pick_and_pack", max_jobs: 10).each(&:mark_completed)
-      sleep(0.3)
+      activate_jobs("simulate_pick_and_pack", expected: 2).each(&:mark_completed)
 
       # update_shipment_status (packed) should activate for each shipment
-      pack_jobs = activate_jobs("update_shipment_status", max_jobs: 10).to_a
-      expect(pack_jobs.size).to eq(2)
+      pack_jobs = activate_jobs("update_shipment_status", expected: 2)
+      expect { activate_job("update_shipment_status", timeout: 1_000) }.not_to have_available_jobs
 
       shipment_ids = pack_jobs.map { |j| j.variables["shipment_id"] }.sort
       expect(shipment_ids).to eq(%w[ship-1 ship-2])
@@ -60,13 +56,10 @@ RSpec.describe "ship_order BPMN", :zeebe do
   it "activates update_order_status (packed) after all shipments are packed" do
     with_process_instance("ship_order", test_variables) do
       activate_job("load_order_shipments").and_complete(shipments: mock_shipments)
-      sleep(0.3)
 
-      activate_jobs("simulate_pick_and_pack", max_jobs: 10).each(&:mark_completed)
-      sleep(0.3)
+      activate_jobs("simulate_pick_and_pack", expected: 2).each(&:mark_completed)
 
-      activate_jobs("update_shipment_status", max_jobs: 10).each(&:mark_completed)
-      sleep(0.3)
+      activate_jobs("update_shipment_status", expected: 2).each(&:mark_completed)
 
       # update_order_status should activate after all subprocess instances complete
       job = activate_job("update_order_status")

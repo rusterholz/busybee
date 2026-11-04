@@ -58,10 +58,14 @@ module Busybee
         message = "No job of type '#{type}' available"
         return message if refused.empty?
 
-        enclosing, others = refused.partition { @instances.include?(_1.processInstanceKey) }
-        groups = [(from_enclosing(enclosing) if enclosing.any?), (from_others(others) if others.any?)].compact
-        message = "#{message} for process instance #{current}. Handed back unworked: #{groups.join(', and ')}"
-        others.any? ? "#{message}. #{ACCEPT_HINT}" : message
+        "#{message} for process instance #{current}#{refused_detail(refused)}"
+      end
+
+      # @param refused [Array] raw jobs handed back, one per job key
+      def shortfall_message(type, expected, got, refused)
+        whose = " for process instance #{current}" if current
+        "Expected #{expected} #{expected == 1 ? 'job' : 'jobs'} of type '#{type}'#{whose}, got #{got}" \
+          "#{refused_detail(refused)}"
       end
 
       ACCEPT_HINT = "To accept jobs of instances the example didn't start itself, such as a call activity's, " \
@@ -69,6 +73,15 @@ module Busybee
       private_constant :ACCEPT_HINT
 
       private
+
+      def refused_detail(refused)
+        return "" if refused.empty?
+
+        enclosing, others = refused.partition { @instances.include?(_1.processInstanceKey) }
+        groups = [(from_enclosing(enclosing) if enclosing.any?), (from_others(others) if others.any?)].compact
+        detail = ". Handed back unworked: #{groups.join(', and ')}"
+        others.any? ? "#{detail}. #{ACCEPT_HINT}" : detail
+      end
 
       def from_enclosing(jobs)
         owners = jobs.map(&:processInstanceKey).uniq

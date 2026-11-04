@@ -6,6 +6,7 @@ require "busybee/durations"
 require "busybee/grpc"
 require "busybee/serialization"
 require "busybee/testing/activated_job"
+require "busybee/testing/error"
 require "busybee/testing/foreign_jobs"
 require "busybee/testing/helpers/builders"
 require "busybee/testing/helpers/execution"
@@ -18,7 +19,6 @@ require "busybee/testing/matchers/have_available_jobs"
 require "busybee/testing/matchers/have_received_headers"
 require "busybee/testing/matchers/have_received_variables"
 require "busybee/testing/matchers/throw_bpmn_error_on"
-require "busybee/testing/no_job_available"
 require "busybee/testing/timings"
 
 module Busybee
@@ -174,32 +174,41 @@ module Busybee
       # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
       #   for a job (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
       # @return [ActivatedJob]
-      # @raise [NoJobAvailable] if no job is available
+      # @raise [NoJobsAvailable] if no job is available
       def activate_job(type, timeout: nil)
         foreign = busybee_foreign_jobs
         jobs, refused = Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: 1, timeout: timeout,
                                                                           foreign: foreign)
-        raise NoJobAvailable, foreign.no_job_message(type, refused) if jobs.empty?
+        raise NoJobsAvailable, foreign.no_job_message(type, refused) if jobs.empty?
 
         ActivatedJob.new(jobs.first, client: grpc_client)
       end
 
-      # Activate multiple jobs of the given type, handing back foreign ones as
-      # activate_job does.
+      # Activate multiple jobs of the given type, once, when called, handing
+      # back foreign ones as activate_job does. Pass one of expected: or max_jobs:.
       #
       # @param type [String] job type
-      # @param max_jobs [Integer] maximum number of jobs to activate
+      # @param expected [Integer] how many jobs to wait for; returns exactly this
+      #   many, and raises if the wait runs out first
+      # @param max_jobs [Integer] maximum number of jobs to activate; returns as
+      #   soon as any are in hand, and returns fewer or none without raising
       # @param timeout [Integer, ActiveSupport::Duration, nil] how long to wait
       #   for jobs (defaults to Testing::ACTIVATE_JOB_TIMEOUT_MS)
-      # @return [Enumerator<ActivatedJob>]
-      def activate_jobs(type, max_jobs:, timeout: nil)
+      # @return [Array<ActivatedJob>]
+      # @raise [NoJobsAvailable] if fewer than expected are in hand when the wait runs out
+      # @raise [ArgumentError] unless given just one of expected: or max_jobs:, a positive Integer
+      def activate_jobs(type, expected: nil, max_jobs: nil, timeout: nil)
+        Busybee::Testing::Helpers.validate_job_counts(expected, max_jobs)
+
         foreign = busybee_foreign_jobs
-        Enumerator.new do |yielder|
-          Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: max_jobs, timeout: timeout,
-                                                            foreign: foreign).first.each do |raw_job|
-            yielder << ActivatedJob.new(raw_job, client: grpc_client)
-          end
+        jobs, refused = Busybee::Testing::Helpers.activate_own_jobs(type, max_jobs: expected || max_jobs,
+                                                                          enough: expected || 1,
+                                                                          timeout: timeout, foreign: foreign)
+        if expected && jobs.size < expected
+          raise NoJobsAvailable, foreign.shortfall_message(type, expected, jobs.size, refused)
         end
+
+        jobs.map { |raw_job| ActivatedJob.new(raw_job, client: grpc_client) }
       end
 
       # Publish a message to Zeebe.
@@ -238,11 +247,13 @@ module Busybee
       #
       # @param wait [Numeric] seconds to wait before checking (see zeebe_available?
       #   for why `wait:` is the one parameter name that means seconds)
-      # @raise [RuntimeError] if process is still running, or if called outside
-      #   with_process_instance, where there is no instance to check
+      # @raise [ProcessStillRunning] if the process instance is still running
+      # @raise [NoCurrentProcessInstance] if called outside with_process_instance,
+      #   where there is no instance to check
       def assert_process_completed!(wait: 0.25)
         unless process_instance_key
-          raise "No current process instance: call assert_process_completed! inside with_process_instance"
+          raise NoCurrentProcessInstance,
+                "No current process instance: call assert_process_completed! inside with_process_instance"
         end
 
         sleep(wait) if wait.positive?
@@ -256,7 +267,8 @@ module Busybee
         rescue ::GRPC::NotFound
           true # Expected - process has completed
         else
-          raise "Process instance #{process_instance_key} is still running (expected it to be completed)"
+          raise ProcessStillRunning,
+                "Process instance #{process_instance_key} is still running (expected it to be completed)"
         end
       end
 
