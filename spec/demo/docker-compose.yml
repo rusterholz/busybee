@@ -28,6 +28,8 @@ services:
       - xpack.security.enabled=false
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
       - xpack.ml.enabled=false
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
     networks:
       - camunda
     deploy:
@@ -54,6 +56,8 @@ services:
       - CAMUNDA_DATA_SECONDARYSTORAGE_TYPE=elasticsearch
       - CAMUNDA_DATA_SECONDARYSTORAGE_ELASTICSEARCH_URL=http://elasticsearch:9200
       - JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - zeebe-data:/usr/local/camunda/data
     networks:
       - camunda
     depends_on:
@@ -180,4 +184,8 @@ networks:
 
 volumes:
   sqlite-data:
+    driver: local
+  zeebe-data:
+    driver: local
+  elasticsearch-data:
     driver: local
