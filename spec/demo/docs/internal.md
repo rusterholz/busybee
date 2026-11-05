@@ -141,9 +141,20 @@ The writer must also be **drained before the process exits**. Ruby's shutdown ru
 
 `Monitoring::Stats` computes the headline numbers over the filtered scope; duration means are taken over resolved rows only (`status != "ready"`), so async dispatch-time near-zeros don't drag them down.
 
+## Asynchronous Settlement
+
+The Sim workers (`complete_job_on_success false`) dispatch each job to a `Concurrent::Promises` future in `perform` and settle it from there. busybee's model of such a worker:
+
+- **Executed at dispatch.** busybee counts the job executed when `perform` returns. It doesn't track, wait for, or hand back a job the worker dispatched to its own future.
+- **Locked until its deadline after a stop.** A stopping worker hands back the jobs it hasn't run; a dispatched job isn't one, so the engine keeps it locked until its `job_timeout` (five minutes for the Sim workers) unless the worker returns it.
+- **Durations cover the dispatch.** Job hooks bracket `perform`, so a run's recorded durations measure the dispatch, not the work (see Resolution folding above).
+- **Every path is the worker's.** Success, failure and anything the future raises each need a `complete!` or `fail!` the worker makes itself.
+
+`Sim::AsyncSettlement` covers the stop. Each dispatched job sits in a per-class registry until settled, and an `on_worker_stopping` hook returns what is left with `fail!("Worker shutting down", retries: job.retries)`: no retry spent, and the engine offers the job again at once. Settling and handing back each claim the registry entry first, so a future that finishes mid-stop never settles a job the stop already returned.
+
 ## Stop and Resume
 
-Three named volumes hold the demo's state: `sqlite-data` (the domain and monitoring databases), `zeebe-data` (the broker's log, mounted at `/usr/local/camunda/data`) and `elasticsearch-data`. With the engine's state and the app's kept together, `bin/demo stop` then `start` resumes every process instance against app state that still matches it. Losing one without the other strands work: process instances that vanish while SQLite remembers them hold their drivers forever, and every later delivery queues behind them.
+Three named volumes hold the demo's state: `sqlite-data` (the domain and monitoring databases), `zeebe-data` (the broker's log, mounted at `/usr/local/camunda/data`) and `elasticsearch-data`. With the engine's state and the app's kept together, `bin/demo stop` then `start` resumes every process instance against app state that still matches it. Losing one without the other strands work: process instances that vanish while SQLite remembers them hold their drivers forever, and every later delivery queues behind them. The Sim workers hand back their in-flight jobs as they stop (see Asynchronous Settlement), so resumed work doesn't wait out a job timeout.
 
 `stop` runs `docker compose stop`, then `rm -f -v`, then `down`. The camunda image declares `/tmp` and `/usr/local/camunda/logs` as anonymous volumes; `rm -v` removes those with their containers, where a bare `down` would leave them behind on every stop. Named volumes are untouched by `rm -v`.
 
