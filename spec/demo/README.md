@@ -17,13 +17,18 @@ Open [localhost:3000](http://localhost:3000). The dashboard shows order counts b
 Other commands:
 
 ```bash
-bin/demo stop       # Stop containers, keep data
+bin/demo stop       # Stop containers; the next start resumes in-flight work
 bin/demo clean      # Stop and destroy everything
-bin/demo test       # Smoke test: start, run 25 orders, tear down
+bin/demo test       # Smoke test: clean, start, run 25 orders, tear down
 bin/demo status     # Show containers + order status counts
 ```
 
 `bin/stop`, `bin/clean`, and `bin/status` are shortcuts for the corresponding `bin/demo` subcommands.
+
+**Stop and resume.** Zeebe, Elasticsearch and the SQLite databases each keep their data in a Docker volume, so `bin/demo stop` then `bin/demo start` picks up every order where it left off. Two things carry over that you might not expect:
+
+- **The driver fleet is sized once**, from `--speed`, when the data is first created. Starting again at another speed keeps the old fleet; run `bin/demo clean` first to resize it.
+- **There is one demo state per machine.** The volumes are shared by every checkout of busybee, so `bin/demo clean` and `bin/demo test` destroy it wherever you run them.
 
 ## Business Domains
 
