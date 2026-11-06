@@ -29,10 +29,9 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
     Monitoring::WorkerProcess.create!(worker_name: "oms-worker-ab12", job_type: "update_order_status",
                                       status: "shutdown", reason: "rollover", total_job_count: 9,
                                       write_queue_depth: 2, started_at: 30.seconds.ago)
-    Monitoring::CallMetric.observe("engine_call",
-                                   { rpc: "complete_job", worker_class: "Oms::UpdateOrderStatusWorker" }, 117.0)
     Monitoring::EngineCall.create!(job_key: 476, worker_name: "oms-worker-ab12", rpc: "complete_job",
-                                   status: "succeeded", network_ms: 117.0, seq: 1.0)
+                                   worker_class: "Oms::UpdateOrderStatusWorker", status: "succeeded",
+                                   network_ms: 117.0, seq: 1.0, at: Time.current)
 
     get "/monitoring?worker_status=all"
 
@@ -99,7 +98,7 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
     w.update!(total_job_count: 9, peak_buffer_size: 3, started_at: 5.minutes.ago,
               error_class: "RuntimeError", error_message: "full error text here")
     Monitoring::EngineCall.create!(job_key: 900, worker_name: "oms-worker-deet1", rpc: "activate_jobs",
-                                   status: "succeeded", network_ms: 12.0, seq: 1.0)
+                                   status: "succeeded", network_ms: 12.0, seq: 1.0, at: Time.current)
 
     get "/monitoring/workers/#{w.id}"
 
@@ -120,7 +119,7 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
                                perform_duration_ms: 12.5, total_duration_ms: 30.0,
                                tags: { "element_id" => "plan-shipments-task", "retries" => 3 })
     Monitoring::EngineCall.create!(job_key: 901, worker_name: "logistics-worker-x", rpc: "complete_job",
-                                   status: "succeeded", network_ms: 7.5, seq: 2.0)
+                                   status: "succeeded", network_ms: 7.5, seq: 2.0, at: Time.current)
 
     get "/monitoring/runs/901"
 

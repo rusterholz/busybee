@@ -94,7 +94,7 @@
 </section>
 
 <section>
-  <h2>Engine calls <small>— gRPC to the Zeebe gateway, the low-cardinality aggregate (context_tags)</small></h2>
+  <h2>Engine calls <small>— gRPC to the Zeebe gateway, grouped by context_tags</small></h2>
   <div class="stat-grid">
     <article class="stat-card"><h2><%= fmt_int.(@call_stats.total_calls) %></h2><small>engine calls</small></article>
     <article class="stat-card"><h2><%= @calls_per_job.round(1) %></h2><small>calls / job</small></article>

@@ -175,23 +175,19 @@ RSpec.describe Monitoring::Recorder, :busybee do
   end
 
   describe ".record_call" do
-    it "folds a resolved call's duration into the engine_call metric under its tags" do
-      # A fetch call: no job in scope, so it carries worker identity and no job keys.
+    it "records a fetch call, with its worker's tags and no job keys" do
       call = resolved_call(:activate_jobs, worker_status: worker_status)
 
       described_class.record_call(call)
 
-      metric = Monitoring::CallMetric.find_by(metric_name: "engine_call")
-      expect(metric).to have_attributes(count: 1, ewma: call.network_ms)
-      expect(call.network_ms).to be > 0
-      expect(metric.tags).to include("rpc" => "activate_jobs", "status" => "succeeded", "grpc_status" => "ok",
-                                     "worker_class" => "Oms::UpdateOrderStatusWorker",
-                                     "job_type" => "update_order_status", "worker_mode" => "hybrid")
-      expect(metric.tags.keys).not_to include("job_key", "bpmn_process_id")
-      expect(Monitoring::EngineCall.count).to eq(0) # a fetch call is aggregate-only
+      expect(Monitoring::EngineCall.sole).to have_attributes(
+        rpc: "activate_jobs", status: "succeeded", worker_class: "Oms::UpdateOrderStatusWorker",
+        job_type: "update_order_status", worker_mode: "hybrid", job_key: nil, bpmn_process_id: nil,
+        network_ms: call.network_ms
+      )
     end
 
-    it "also records a job-correlated call as an EngineCall row (the per-job log twin)" do
+    it "records a job-correlated call with the job's keys" do
       job = activated_job(key: 476, worker_status: worker_status)
       call = resolved_call(:complete_job, complete_request(476), job: job)
 
@@ -208,7 +204,6 @@ RSpec.describe Monitoring::Recorder, :busybee do
 
       described_class.record_call(call)
 
-      expect(Monitoring::CallMetric.count).to eq(0)
       expect(Monitoring::EngineCall.count).to eq(0)
     end
 
@@ -283,6 +278,29 @@ RSpec.describe Monitoring::Recorder, :busybee do
       described_class.shutdown!
 
       expect(described_class.instance_variable_get(:@executor)).to be_nil
+    end
+  end
+
+  # The writer's own connection can't see into the example's transaction.
+  describe ".record_call on the writer thread", :no_transaction do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.instance_variable_get(:@executor)&.kill
+      described_class.instance_variable_set(:@executor, nil)
+      Monitoring::EngineCall.delete_all
+    end
+
+    it "queues the write rather than making it on the calling thread" do
+      gate = Concurrent::CountDownLatch.new(1)
+      described_class.executor.post { gate.wait(2) }
+
+      described_class.record_call(resolved_call(:activate_jobs, worker_status: worker_status))
+      expect(Monitoring::EngineCall.count).to eq(0)
+
+      gate.count_down
+      described_class.flush
+      expect(Monitoring::EngineCall.count).to eq(1)
     end
   end
 

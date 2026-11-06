@@ -25,7 +25,7 @@ Busybee.configure do |config|
   # the closing row lands even when the process exits immediately afterwards.
   config.on_worker_shutdown       { |_worker| Monitoring::Recorder.flush }
 
-  # Fold every gRPC call into the engine_call aggregate.
+  # Record every gRPC call as a row of Monitoring::EngineCall.
   config.after_call { |call| Monitoring::Recorder.record_call(call) }
   # ...and refresh the worker's row from each call — keeps counters live, even for idle workers that only fetch.
   config.after_call { |call| Monitoring::Recorder.record_worker(:running, call.worker_status) if call.worker_status }
@@ -72,7 +72,7 @@ Rails.application.config.to_prepare do
 end
 
 # Stop the recorder's writer cleanly before the VM starts killing threads — a
-# writer killed mid-SQLite-write orphans the connection's native mutex and the
-# exit-time finalizer that closes the DB deadlocks the process (see
+# writer killed mid-write inside a native driver can orphan the connection's
+# lock, and the exit-time finalizer that closes it deadlocks the process (see
 # Monitoring::Recorder.shutdown!). at_exit runs before the thread-kill step.
 at_exit { Monitoring::Recorder.shutdown! }

@@ -5,13 +5,16 @@ require "concurrent"
 module Monitoring
   # Records busybee lifecycle into the Monitoring models — the demo's stand-in
   # for an observability sink (Datadog, etc.). Job activation/execution feed
-  # Monitoring::JobRun; the four worker-lifecycle hooks feed WorkerProcess.
+  # Monitoring::JobRun; the four worker-lifecycle hooks feed WorkerProcess; every
+  # call feeds EngineCall.
   #
-  # Writes offload to a single background thread: each hook snapshots its subject
-  # synchronously (a Job mutates as it progresses, so we can't defer reading it)
-  # and posts the write. One writer matches SQLite's single-writer model. But a
-  # real observability sink is async, out-of-order, and at-least-once — so the
-  # write must not trust arrival order. Each observation carries its lifecycle
+  # Writes offload to a single background thread per process, so no hook waits
+  # on the database: each hook snapshots its subject synchronously (a Job mutates
+  # as it progresses, so we can't defer reading it) and posts the write. Every
+  # row has exactly one writing process, so the writer also serializes each
+  # row's read-compare-write. But a real observability sink is async,
+  # out-of-order, and at-least-once — so the write must not trust arrival order.
+  # Each observation carries its lifecycle
   # rank (a semantic phase order) plus a monotonic seen_at (an intra-rank
   # freshness tiebreaker, stamped at observation time); #apply rejects any write a
   # superseding one has already overtaken. Best-effort: a failed write is logged
@@ -85,32 +88,27 @@ module Monitoring
                **worker_columns(worker))
       end
 
-      # Fold a resolved call two ways — the call stream projected across both
-      # cardinalities. Low-card: its duration into the engine_call aggregate under
-      # its context_tags. High-card: its logging_context as an EngineCall row, but
-      # only for perform-phase calls (EngineCall.record no-ops without a job_key),
-      # so the per-job log stays bounded. Neither is offloaded — both are atomic
-      # single-statement writes, safe (and cheaper) inline on the worker thread.
-      # (The resolution fold is the exception: a guarded upsert, so it rides the
-      # executor like the other lifecycle writes.)
+      # Every resolved call becomes an EngineCall row, snapshotted here and
+      # inserted on the writer; a resolution call also folds its outcome into
+      # its JobRun.
       def record_call(call)
-        return if call.network_ms.nil?
+        row = EngineCall.row_for(call, seq: monotonic_seq)
+        return unless row
 
-        CallMetric.observe("engine_call", call.context_tags, call.network_ms)
-        EngineCall.record(call, seq: monotonic_seq)
+        write("EngineCall #{row[:rpc]}") { EngineCall.insert_all([row]) }
         record_resolution(call)
       end
 
       # One background thread, unbounded queue: posts never block the runner, and
-      # writes serialize (matching SQLite) in the order they were posted.
+      # writes land in the order they were posted.
       def executor
         @executor ||= Concurrent::SingleThreadExecutor.new(fallback_policy: :discard)
       end
 
       # Drain the queue and stop the writer — registered at_exit (initializer).
       # Ruby's exit sequence runs at_exit handlers, then KILLS remaining threads,
-      # then runs finalizers; a writer killed mid-SQLite-write leaves the
-      # connection's native mutex locked, and the finalizer that closes the DB
+      # then runs finalizers; a writer killed mid-write inside a native driver can
+      # leave the connection's native lock held, and the finalizer that closes it
       # then deadlocks the process — immortal PID 1, restart policy never fires.
       # Draining here, before the kill step, removes that window; late posts fall
       # to the executor's :discard policy.
@@ -153,13 +151,18 @@ module Monitoring
       # since write order is exactly what gets scrambled — then offload the write.
       def upsert(model, identity, rank:, **attributes)
         seen_at = monotonic_seq
+        write("#{model.name} #{identity.values.join('/')}") { apply(model, identity, rank, seen_at, attributes) }
+      end
+
+      # Offload one write to the writer thread, in its own (sub)transaction so a
+      # dropped write rolls back alone.
+      def write(label, &)
         executor.post do
           Monitoring::Record.connection_pool.with_connection do
-            # Its own (sub)transaction: a dropped write rolls back alone.
-            Monitoring::Record.transaction(requires_new: true) { apply(model, identity, rank, seen_at, attributes) }
+            Monitoring::Record.transaction(requires_new: true, &)
           end
         rescue StandardError => e
-          Rails.logger.warn("[monitoring] dropped #{model.name} #{identity.values.join('/')}: #{e.message}")
+          Rails.logger.warn("[monitoring] dropped #{label}: #{e.message}")
         end
       end
 

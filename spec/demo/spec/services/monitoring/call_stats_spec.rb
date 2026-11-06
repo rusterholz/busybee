@@ -2,20 +2,21 @@
 
 require_relative "../../rails_helper"
 
-RSpec.describe Monitoring::CallStats do
-  def observe(rpc:, worker_class:, value:)
-    Monitoring::CallMetric.observe("engine_call", { rpc: rpc, worker_class: worker_class }, value)
+RSpec.describe Monitoring::CallStats, :busybee do
+  def observe(rpc, worker_class, network:)
+    status = build_test_worker_status(worker_class: worker_class)
+    Monitoring::EngineCall.record(build_test_call(rpc, worker_status: status, network: network), seq: 1.0)
   end
 
   # Two rpcs from one worker class, one from another.
   before do
-    observe(rpc: "complete_job", worker_class: "Oms::UpdateOrderStatusWorker", value: 100.0)
-    observe(rpc: "complete_job", worker_class: "Oms::UpdateOrderStatusWorker", value: 120.0)
-    observe(rpc: "activate_jobs", worker_class: "Oms::UpdateOrderStatusWorker", value: 50.0)
-    observe(rpc: "activate_jobs", worker_class: "Logistics::CreateShipmentWorker", value: 40.0)
+    observe(:complete_job, Oms::UpdateOrderStatusWorker, network: 10)
+    observe(:complete_job, Oms::UpdateOrderStatusWorker, network: 30)
+    observe(:activate_jobs, Oms::UpdateOrderStatusWorker, network: 1)
+    observe(:activate_jobs, Logistics::CreateShipmentWorker, network: 1)
   end
 
-  it "totals every folded call" do
+  it "totals every recorded call" do
     expect(described_class.new.total_calls).to eq(4)
   end
 
@@ -30,13 +31,13 @@ RSpec.describe Monitoring::CallStats do
   end
 
   describe "#by_rpc" do
-    it "groups by rpc with counts and a typical duration, busiest first" do
-      by_rpc = described_class.new.by_rpc
+    it "groups by rpc with counts and exact duration stats over the raw calls" do
+      complete = described_class.new.by_rpc.find { |r| r[:rpc] == "complete_job" }
+      network = Monitoring::EngineCall.where(rpc: "complete_job").pluck(:network_ms)
 
-      expect(by_rpc.map { |r| r[:rpc] }).to eq(%w[activate_jobs complete_job]) # 2 vs 2 — tie broken by name is fine
-      complete = by_rpc.find { |r| r[:rpc] == "complete_job" }
-      expect(complete).to include(count: 2, min_ms: 100.0, max_ms: 120.0)
-      expect(complete[:mean_ms]).to be_within(0.001).of(102.0) # ewma 100 → 102 at α=0.1
+      expect(complete).to include(count: 2, min_ms: network.min, max_ms: network.max)
+      expect(complete[:mean_ms]).to be_within(0.001).of(network.sum / 2)
+      expect(network.max).to be > 25
     end
   end
 
