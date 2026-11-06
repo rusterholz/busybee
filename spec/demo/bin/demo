@@ -7,11 +7,14 @@ set -euo pipefail
 #   bin/demo start              Start with auto-ordering at speed 1
 #   bin/demo start --speed 40   Start with auto-ordering at speed 40
 #   bin/demo start --manual     Start without auto-ordering (no clockwork)
-#   bin/demo stop               Stop containers, preserve data
+#   bin/demo stop               Stop containers; the next start resumes in-flight work
 #   bin/demo clean              Stop and destroy volumes/data
-#   bin/demo test               Smoke test: start stack, run 25 orders, tear down
+#   bin/demo test               Smoke test: clean, start stack, run 25 orders, tear down
 #   bin/demo test 20            Smoke test with 20 orders
 #   bin/demo status             Show running containers and order counts
+#
+# The data volumes are shared by every checkout on this machine, so clean and
+# test destroy the one demo state wherever they run.
 
 DEMO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -21,14 +24,20 @@ Usage: bin/demo <command> [options]
 
 Commands:
   start [--speed N] [--manual]   Start the Docker stack
-  stop                           Stop containers (preserves data)
+  stop                           Stop containers; the next start resumes in-flight work
   clean                          Stop and destroy all data
-  test [N]                       Smoke test: start, run N orders (default: 25), tear down
+  test [N]                       Smoke test: clean, start, run N orders (default: 25), tear down
   status                         Show container and order status
 
 Options for start:
   --speed N    Set simulation speed (default: 1)
   --manual     Start without auto-ordering (no clockwork process)
+
+The driver fleet is sized from --speed when the data is first created, and a
+later start at another speed keeps it: clean first to resize it.
+
+All checkouts on this machine share one demo state, so clean and test
+destroy it wherever they run.
 EOF
   exit 1
 }
@@ -62,8 +71,11 @@ cmd_start() {
 }
 
 cmd_stop() {
-  echo "Stopping demo app (preserving data)..."
+  echo "Stopping demo app (the next start resumes in-flight work)..."
   cd "$DEMO_DIR"
+  docker compose --profile auto stop
+  # rm -v drops the image-declared anonymous volumes; the named ones stay
+  docker compose --profile auto rm -f -v
   docker compose --profile auto down
 }
 
@@ -84,6 +96,8 @@ cmd_test() {
   # Start a clean stack at high speed for fast feedback. Rollovers off: the smoke
   # verifies the end-to-end pipeline, not the shadow orchestrator's recycling, and
   # at this speed rollovers add nondeterministic churn (see Sim::RolloverPolicy).
+  echo "Destroying existing demo data..."
+  docker compose --profile auto down -v
   echo "Starting demo stack..."
   DEMO_SPEED="$speed" DEMO_ROLLOVERS=false docker compose up -d --build
   echo ""

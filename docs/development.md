@@ -358,18 +358,18 @@ spec/demo/bin/demo start --manual
 # Check status
 spec/demo/bin/demo status
 
-# Stop (preserves data)
+# Stop; the next start resumes in-flight work
 spec/demo/bin/demo stop
 
 # Stop and destroy all data
 spec/demo/bin/demo clean
 ```
 
-The dashboard is at http://localhost:3000 when running.
+The dashboard is at http://localhost:3000 when running. The demo's data volumes are shared by every checkout on the machine, worktrees included, so there is one demo state: `clean` and `test` destroy it from wherever they run. See `spec/demo/README.md` for what carries across a stop.
 
 ### Smoke Testing Against the Demo App
 
-After making changes to busybee, verify they don't break the demo app. The `test` command handles the full lifecycle — starts a fresh stack at high speed, runs orders through the pipeline, and tears down:
+After making changes to busybee, verify they don't break the demo app. The `test` command handles the full lifecycle: it destroys any existing demo data, starts a fresh stack at high speed, runs orders through the pipeline, and tears down:
 
 ```bash
 # Run 25 orders (default) through the full pipeline

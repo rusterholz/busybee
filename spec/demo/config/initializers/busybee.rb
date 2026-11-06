@@ -14,6 +14,12 @@ Busybee.configure do |config|
   config.on_worker_started        { |worker| Monitoring::Recorder.record_worker(:running, worker) }
   config.on_worker_stop_requested { |worker| Monitoring::Recorder.record_worker(:stop_requested, worker) }
   config.on_worker_stopping       { |worker| Monitoring::Recorder.record_worker(:stopping, worker) }
+  # Return the jobs the Sim workers dispatched to futures and haven't settled (see Sim::AsyncSettlement).
+  config.on_worker_stopping do |worker|
+    next unless worker.worker_class.include?(Sim::AsyncSettlement)
+
+    worker.worker_class.hand_back_in_flight_jobs(reason: worker.reason)
+  end
   config.on_worker_shutdown       { |worker| Monitoring::Recorder.record_worker(:shutdown, worker) }
   # ...and hold shutdown until the queue drains (registered after, runs after), so
   # the closing row lands even when the process exits immediately afterwards.

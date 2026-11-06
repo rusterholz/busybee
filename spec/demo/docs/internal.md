@@ -49,6 +49,8 @@ Jitter is uniform in `[0.8, 1.2)` for both Sim workers.
 
 The driver fleet is a fixed size, seeded at startup via `db/seeds.rb`. Fleet size scales linearly with speed: `round((4 * speed + 83) / 29)` — giving 3 drivers at speed 1 and 7 at speed 30.
 
+The seed runs only when `db:prepare` creates the databases, so the fleet is sized by the speed of the first start after a `clean`. A `stop` and a `start --speed N` keep the old fleet: the delays rescale, the driver count doesn't. `bin/demo clean` before the start resizes it.
+
 **Assignment** (`AssignDriverWorker`): When a shipment needs a driver, the worker creates a `DriverRequest` record and tries to assign the available driver with the lowest total mileage. If a driver is available, it's assigned immediately and the process continues. If all drivers are busy, the worker returns nil driver info along with the request ID, and the BPMN process waits at an intermediate message catch event.
 
 **Request fulfillment** (`CompleteDriverDeliveryWorker`): After completing a delivery, the worker releases the driver (adds mileage, clears assignment) and checks for queued `DriverRequest` records. If an open request exists, it claims the oldest one atomically (using `SELECT FOR UPDATE` via ActiveRecord's `lock` scope), assigns the driver to the new shipment, and publishes a `driver_available` BPMN message. This unblocks the waiting process instance via Zeebe message correlation.
@@ -139,11 +141,34 @@ The writer must also be **drained before the process exits**. Ruby's shutdown ru
 
 `Monitoring::Stats` computes the headline numbers over the filtered scope; duration means are taken over resolved rows only (`status != "ready"`), so async dispatch-time near-zeros don't drag them down.
 
+## Asynchronous Settlement
+
+The Sim workers (`complete_job_on_success false`) dispatch each job to a `Concurrent::Promises` future in `perform` and settle it from there. busybee's model of such a worker:
+
+- **Executed at dispatch.** busybee counts the job executed when `perform` returns. It doesn't track, wait for, or hand back a job the worker dispatched to its own future.
+- **Locked until its deadline after a stop.** A stopping worker hands back the jobs it hasn't run; a dispatched job isn't one, so the engine keeps it locked until its `job_timeout` (five minutes for the Sim workers) unless the worker returns it.
+- **Durations cover the dispatch.** Job hooks bracket `perform`, so a run's recorded durations measure the dispatch, not the work (see Resolution folding above).
+- **Every path is the worker's.** Success, failure and anything the future raises each need a `complete!` or `fail!` the worker makes itself.
+
+`Sim::AsyncSettlement` covers the stop. Each dispatched job sits in a per-class registry until settled, and an `on_worker_stopping` hook returns what is left with `fail!("Worker shutting down", retries: job.retries)`: no retry spent, and the engine offers the job again after the fail backoff (`default_fail_job_backoff`, 10 seconds here). The rules:
+
+- **One owner per job.** Settling and the handback each claim the registry entry first, and only the claimant calls the engine. A future that gets its semaphore after the handback stops there, with no call; one already past that point when the handback comes may still send its `update_timeout`, but never a completion.
+- **A failed completion leaves the job to its deadline.** The completion claims the job before calling `complete!`, so if that call fails, nothing fails the job: the engine re-offers it once its deadline passes, with no retry spent.
+- **A kill hands nothing back.** The hook skips a stop whose `reason` is `:kill`, as busybee's own handback does. A kill that follows a graceful stop keeps the graceful [stop reason](../../../docs/hooks.md#stop-reasons), and nothing a hook receives says the stop became immediate, so in that case the handback still runs.
+
+## Stop and Resume
+
+Three named volumes hold the demo's state: `sqlite-data` (the domain and monitoring databases), `zeebe-data` (the broker's log, mounted at `/usr/local/camunda/data`) and `elasticsearch-data`. With the engine's state and the app's kept together, `bin/demo stop` then `start` resumes every process instance against app state that still matches it. Losing one without the other strands work: process instances that vanish while SQLite remembers them hold their drivers forever, and every later delivery queues behind them. The Sim workers hand back their in-flight jobs as they stop (see Asynchronous Settlement), so resumed work doesn't wait out a job timeout.
+
+`stop` runs `docker compose stop`, then `rm -f -v`, then `down`. The camunda image declares `/tmp` and `/usr/local/camunda/logs` as anonymous volumes; `rm -v` removes those with their containers, where a bare `down` would leave them behind on every stop. Named volumes are untouched by `rm -v`.
+
+Compose names the volumes after the project directory, `spec/demo`, so every checkout on a machine (the main one and each worktree) uses the same `demo_*` volumes. Fixed container names and ports already allow only one demo stack at a time; the shared volumes make it one demo *state* as well. A branch's `start` resumes whatever the last stack left, against that branch's workflows and schema, and `clean` or `test` from any checkout destroys it.
+
 ## Test Hardpoints
 
 ### Smoke Test: `bin/demo test`
 
-Self-contained smoke test that starts a fresh stack at speed 30, runs orders through the pipeline, and tears down:
+Self-contained smoke test that destroys any existing demo data (the machine's one demo state, whichever checkout it came from), starts a fresh stack at speed 30, runs orders through the pipeline, and tears down:
 
 ```bash
 bin/demo test           # 25 orders (default)

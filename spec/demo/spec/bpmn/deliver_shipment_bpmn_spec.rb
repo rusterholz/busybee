@@ -19,7 +19,6 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
                                                 request_id: "req-1" })
     activate_job("load_order_address").and_complete(lat: 5.3, lon: -2.1)
     activate_job("assign_driver").and_complete(assign_driver_result)
-    sleep(0.3)
   end
 
   it "activates load_order_address and assign_driver in parallel" do
@@ -52,7 +51,6 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
       complete_branch_a
 
       activate_job("calculate_distance").and_complete(distance: 12.45)
-      sleep(0.3)
 
       transit_job = activate_job("update_shipment_status")
       expect(transit_job.variables["shipment_id"]).to eq(test_variables[:shipment][:id])
@@ -64,10 +62,7 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
       complete_branch_a
 
       activate_job("calculate_distance").and_complete(distance: 12.45)
-      sleep(0.3)
-
       activate_job("update_shipment_status").and_complete
-      sleep(0.3)
 
       delivery_job = activate_job("simulate_delivery_run")
       expect(delivery_job.variables["shipment_id"]).to eq(test_variables[:shipment][:id])
@@ -80,11 +75,8 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
       complete_branch_a
 
       activate_job("calculate_distance").and_complete(distance: 12.45)
-      sleep(0.3)
       activate_job("update_shipment_status").and_complete
-      sleep(0.3)
       activate_job("simulate_delivery_run").and_complete
-      sleep(0.3)
 
       # Both should activate from the second parallel split
       delivered_job = activate_job("update_shipment_status")
@@ -104,16 +96,12 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
         complete_branch_a
 
         activate_job("calculate_distance").and_complete(distance: 12.45)
-        sleep(0.3)
         activate_job("update_shipment_status").and_complete
-        sleep(0.3)
         activate_job("simulate_delivery_run").and_complete
-        sleep(0.3)
 
         # Mark as all delivered
         activate_job("update_shipment_status").and_complete(all_delivered: true)
         activate_job("complete_driver_delivery").and_complete
-        sleep(0.3)
 
         # update_order_status (fulfilled) should activate
         fulfill_job = activate_job("update_order_status")
@@ -131,16 +119,12 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
         complete_branch_a
 
         activate_job("calculate_distance").and_complete(distance: 12.45)
-        sleep(0.3)
         activate_job("update_shipment_status").and_complete
-        sleep(0.3)
         activate_job("simulate_delivery_run").and_complete
-        sleep(0.3)
 
         # Mark as NOT all delivered
         activate_job("update_shipment_status").and_complete(all_delivered: false)
         activate_job("complete_driver_delivery").and_complete
-        sleep(0.3)
 
         # update_order_status should NOT activate - process should complete without it
         expect { activate_job("update_order_status") }.
@@ -163,11 +147,9 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
         activate_job("assign_driver").and_complete(
           driver_id: nil, driver_name: nil, request_id: request_id
         )
-        sleep(0.3)
 
         # Branch A continues independently
         activate_job("calculate_distance").and_complete(distance: 12.45)
-        sleep(0.3)
 
         # Parallel join should NOT fire yet — branch B is waiting for a driver
         expect { activate_job("update_shipment_status") }.
@@ -177,7 +159,6 @@ RSpec.describe "deliver_shipment BPMN", :zeebe do
         publish_message("driver_available",
                         correlation_key: request_id,
                         vars: { driver_id: "drv-late", driver_name: "Late Driver" })
-        sleep(0.5)
 
         # Parallel join fires — process continues with the late driver's info
         transit_job = activate_job("update_shipment_status")

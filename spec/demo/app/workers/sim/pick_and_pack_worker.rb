@@ -6,8 +6,11 @@ module Sim
   # Non-blocking: runs delays in background Futures so a single worker thread can
   # handle many concurrent pick-and-pack operations. The semaphore limits concurrency
   # to 3 simultaneous pickers. The 5-minute job_timeout covers semaphore wait time;
-  # update_timeout tightens the deadline once a picker is acquired.
+  # update_timeout tightens the deadline once a picker is acquired. Settles through
+  # AsyncSettlement, so a stop hands back picks still in flight.
   class PickAndPackWorker < Busybee::Worker
+    include AsyncSettlement
+
     job_type "simulate_pick_and_pack"
     description "Simulates warehouse workers picking and packing items with realistic delays"
     complete_job_on_success false
@@ -24,6 +27,7 @@ module Sim
       Rails.logger.info("Queued pick-and-pack for #{item_count} items " \
                         "(#{delay.round(1)}s delay, #{PICKERS.available_permits}/3 pickers free)")
 
+      track_in_flight
       Concurrent::Promises.
         future { run_pick_and_pack(delay) }.
         then { on_pick_and_pack_done }.
@@ -40,6 +44,8 @@ module Sim
 
     def run_pick_and_pack(delay)
       PICKERS.acquire
+      return unless in_flight?
+
       update_timeout((delay.ceil + 2).seconds)
       Rails.logger.info("Picker started on #{item_count} items (#{delay.round(1)}s)...")
       sleep(delay)
@@ -48,13 +54,15 @@ module Sim
     end
 
     def on_pick_and_pack_done
-      Rails.logger.info("Pick and pack complete for #{item_count} items")
-      complete!
+      settle do
+        Rails.logger.info("Pick and pack complete for #{item_count} items")
+        complete!
+      end
     end
 
     def on_pick_and_pack_error(error)
       Rails.logger.error("Pick and pack failed: #{error.message}")
-      fail!(error.message)
+      settle { fail!(error.message) }
     end
   end
 end

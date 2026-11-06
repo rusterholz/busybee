@@ -6,13 +6,16 @@ module Sim
   # Non-blocking: runs delays in background Futures so a single worker thread can
   # handle all deliveries concurrently. The semaphore (lazy-loaded to avoid querying
   # Driver.count before seeds run) limits concurrency to the actual number of drivers.
-  # New drivers recruited by AssignDriverWorker are detected automatically — the
-  # semaphore gains permits to match. The 5-minute job_timeout covers semaphore wait
-  # time; update_timeout tightens the deadline once a driver is acquired.
+  # Each run re-reads Driver.count, and the semaphore gains permits if the fleet has
+  # grown. The 5-minute job_timeout covers semaphore wait
+  # time; update_timeout tightens the deadline once a driver is acquired. Settles
+  # through AsyncSettlement, so a stop hands back runs still in flight.
   #
   # TODO: Revert this to a blocking worker to showcase busybee's native thread pool
   # feature.
   class DeliveryRunWorker < Busybee::Worker
+    include AsyncSettlement
+
     job_type "simulate_delivery_run"
     description "Simulates a driver's delivery trip with distance-proportional delays"
     complete_job_on_success false
@@ -45,6 +48,7 @@ module Sim
                         "(#{delay.round(1)}s delay, #{semaphore.available_permits}/" \
                         "#{Delivery::Driver.count} drivers free)")
 
+      track_in_flight
       Concurrent::Promises.
         future { run_delivery(semaphore, delay) }.
         then { on_delivery_done(delay) }.
@@ -61,6 +65,8 @@ module Sim
 
     def run_delivery(semaphore, delay)
       semaphore.acquire
+      return unless in_flight?
+
       update_timeout((delay.ceil + 2).seconds)
       Rails.logger.info("Driver en route, #{distance} units (#{delay.round(1)}s)...")
       sleep(delay)
@@ -69,13 +75,15 @@ module Sim
     end
 
     def on_delivery_done(delay)
-      Rails.logger.info("Driver arrived after #{delay.round(1)}s")
-      complete!
+      settle do
+        Rails.logger.info("Driver arrived after #{delay.round(1)}s")
+        complete!
+      end
     end
 
     def on_delivery_error(error)
       Rails.logger.error("Delivery run failed: #{error.message}")
-      fail!(error.message)
+      settle { fail!(error.message) }
     end
   end
 end
