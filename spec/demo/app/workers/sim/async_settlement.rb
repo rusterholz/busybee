@@ -24,6 +24,7 @@ module Sim
 
         in_flight.each_key do |key|
           job = in_flight.delete(key) or next
+          job.context[:handed_back] = true # for Monitoring: a handback, not a failure
           job.fail!("Worker shutting down", retries: job.retries)
         rescue StandardError => e
           Rails.logger.warn("Failed to hand back #{job_type} job ##{key}: #{e.class}: #{e.message}")

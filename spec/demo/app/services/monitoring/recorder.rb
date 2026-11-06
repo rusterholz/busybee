@@ -29,6 +29,10 @@ module Monitoring
     RESOLUTION_STATUSES = { "complete_job" => "complete", "fail_job" => "failed",
                             "throw_error" => "error" }.freeze
 
+    # A run returned to the engine unworked: busybee's own shutdown handback, or
+    # a worker's that marks the job with job.context[:handed_back] before failing it.
+    HANDED_BACK = "handed_back"
+
     class << self
       def record_activation(job)
         upsert(JobRun, activation(job),
@@ -57,13 +61,16 @@ module Monitoring
       # the job straight back unworked. Same rank as an execution because it is the
       # same slot in the bracket — without it a deploy leaves rows stuck at rank 0
       # forever, which is exactly the leak the pairing exists to prevent. Nothing
-      # was attempted, so there are no durations and the status is still :ready;
-      # a handback that failed to reach the engine is the worker's error, not the
-      # job's, which is why it comes off worker_status.
+      # was attempted, so there are no durations; the job is still :ready, and the
+      # run is handed_back (which also overtakes the handback's own fail_job,
+      # folded just before it as "failed"). A handback that failed to reach the
+      # engine is the worker's error, not the job's, which is why it comes off
+      # worker_status.
       def record_handback(job)
         upsert(JobRun, activation(job),
                rank: 1,
                **job_columns(job),
+               status: HANDED_BACK,
                executed_at: Time.current,
                buffer_latency_ms: job.buffer_latency_ms,
                error_message: job.worker_status&.error_message)
@@ -137,6 +144,7 @@ module Monitoring
         status = RESOLUTION_STATUSES[call.rpc.to_s]
         return unless status && job && call.succeeded?
 
+        status = HANDED_BACK if job.context[:handed_back]
         total_ms = ((call.resolved_at(:monotonic) - job.activated_at(:monotonic)) * 1000).round(1)
         upsert(JobRun, activation(job), rank: 1, status: status,
                                         resolved_at: call.resolved_at, total_duration_ms: total_ms)

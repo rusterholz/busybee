@@ -179,7 +179,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
       described_class.record_handback(handed_back)
 
       expect(Monitoring::JobRun.where(job_key: 8888).count).to eq(1)
-      expect(recorded(8888)).to have_attributes(status: "ready", executed_at: be_present, lifecycle_rank: 1,
+      expect(recorded(8888)).to have_attributes(status: "handed_back", executed_at: be_present, lifecycle_rank: 1,
                                                 buffer_latency_ms: handed_back.buffer_latency_ms)
       expect(handed_back.buffer_latency_ms).to be > 0
     end
@@ -192,7 +192,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
 
       described_class.record_handback(handed_back)
 
-      expect(recorded(8889)).to have_attributes(error_message: "broker unreachable", status: "ready")
+      expect(recorded(8889)).to have_attributes(error_message: "broker unreachable", status: "handed_back")
     end
   end
 
