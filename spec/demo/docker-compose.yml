@@ -13,6 +13,7 @@ x-app: &app
     DEMO_SPEED: ${DEMO_SPEED:-1.0}
     DEMO_ROLLOVERS: ${DEMO_ROLLOVERS:-true}
     MONITORING_DATABASE_URL: postgres://postgres:postgres@postgres:5432/monitoring_development
+    SKIP_TEST_DATABASE: "true" # db:prepare in development also prepares test databases otherwise
   networks:
     - camunda
   volumes:
