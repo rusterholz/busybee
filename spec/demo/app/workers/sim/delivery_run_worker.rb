@@ -75,15 +75,12 @@ module Sim
     end
 
     def on_delivery_done(delay)
-      settle do
-        Rails.logger.info("Driver arrived after #{delay.round(1)}s")
-        complete!
-      end
+      settle_complete { Rails.logger.info("Driver arrived after #{delay.round(1)}s") }
     end
 
     def on_delivery_error(error)
       Rails.logger.error("Delivery run failed: #{error.message}")
-      settle { fail!(error.message) }
+      settle_fail(error)
     end
   end
 end

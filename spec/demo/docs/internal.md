@@ -153,7 +153,7 @@ The Sim workers (`complete_job_on_success false`) dispatch each job to a `Concur
 `Sim::AsyncSettlement` covers the stop. Each dispatched job sits in a per-class registry until settled, and an `on_worker_stopping` hook returns what is left with `fail!("Worker shutting down", retries: job.retries)`: no retry spent, and the engine offers the job again after the fail backoff (`default_fail_job_backoff`, 10 seconds here). The rules:
 
 - **One owner per job.** Settling and the handback each claim the registry entry first, and only the claimant calls the engine. A future that gets its semaphore after the handback stops there, with no call; one already past that point when the handback comes may still send its `update_timeout`, but never a completion.
-- **A failed completion leaves the job to its deadline.** The completion claims the job before calling `complete!`, so if that call fails, nothing fails the job: the engine re-offers it once its deadline passes, with no retry spent.
+- **A failed completion fails the job.** Completion is the last step of the work, so an error from `complete!` sends `fail!` with that error's message, spending a retry, as an error in the work itself does. Only the future that claimed the job sends either.
 - **A kill hands nothing back.** The hook skips a stop whose `reason` is `:kill`, as busybee's own handback does. A kill that follows a graceful stop keeps the graceful [stop reason](../../../docs/hooks.md#stop-reasons), and nothing a hook receives says the stop became immediate, so in that case the handback still runs.
 
 ## Stop and Resume

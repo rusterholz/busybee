@@ -36,8 +36,27 @@ module Sim
     def track_in_flight = self.class.in_flight[job.key] = job
     def in_flight? = self.class.in_flight.key?(job.key)
 
-    def settle
-      yield if self.class.in_flight.delete(job.key)
+    # The block runs once claimed. Completion closes the work, so its error fails
+    # the job as an error in the work would.
+    def settle_complete
+      return unless claim
+
+      yield if block_given?
+      begin
+        complete!
+      rescue StandardError => e
+        fail_claimed(e)
+      end
+    end
+
+    def settle_fail(error) = (fail_claimed(error) if claim)
+    def claim = self.class.in_flight.delete(job.key)
+
+    def fail_claimed(error)
+      fail!(error.message)
+    rescue StandardError => e
+      Rails.logger.warn("Failed to fail #{job.type} job ##{job.key}, will time out and retry: " \
+                        "#{e.class}: #{e.message}")
     end
   end
 end

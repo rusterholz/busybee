@@ -54,15 +54,12 @@ module Sim
     end
 
     def on_pick_and_pack_done
-      settle do
-        Rails.logger.info("Pick and pack complete for #{item_count} items")
-        complete!
-      end
+      settle_complete { Rails.logger.info("Pick and pack complete for #{item_count} items") }
     end
 
     def on_pick_and_pack_error(error)
       Rails.logger.error("Pick and pack failed: #{error.message}")
-      settle { fail!(error.message) }
+      settle_fail(error)
     end
   end
 end
