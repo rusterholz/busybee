@@ -7,27 +7,27 @@ class RecordEngineCallsAsAHypertable < ActiveRecord::Migration[7.0]
     drop_table :monitoring_engine_calls
 
     create_table :monitoring_engine_calls, id: false do |t|
-      t.datetime :at, null: false
+      t.timestamptz :at, null: false
       # context_tags: low-cardinality, safe to group or chart by
-      t.string :rpc, null: false
-      t.string :status
-      t.string :grpc_status
-      t.string :error_class
-      t.string :worker_class
-      t.string :job_type
-      t.string :worker_mode
-      t.string :bpmn_process_id
-      t.string :source
+      t.text :rpc, null: false
+      t.text :status
+      t.text :grpc_status
+      t.text :error_class
+      t.text :worker_class
+      t.text :job_type
+      t.text :worker_mode
+      t.text :bpmn_process_id
+      t.text :source
       # logging_context: identifiers and measures, for filtering and drilling in
-      t.string :worker_name
+      t.text :worker_name
       t.bigint :job_key
       t.bigint :process_instance_key
-      t.string :element_id
+      t.text :element_id
       t.integer :attempts
       t.float :network_ms
       t.float :backoff_ms
       t.float :total_ms
-      t.string :error_message
+      t.text :error_message
       t.float :seq, null: false
     end
 

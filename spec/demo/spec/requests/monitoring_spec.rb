@@ -24,7 +24,8 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
   end
 
   it "renders workers, engine calls and a per-job call sequence" do
-    Monitoring::JobRun.create!(job_key: 476, job_type: "update_order_status", status: "complete",
+    Monitoring::JobRun.create!(job_key: 476, activated_at: Time.current, job_type: "update_order_status",
+                               status: "complete",
                                perform_duration_ms: 12.0, total_duration_ms: 30.0)
     Monitoring::WorkerProcess.create!(worker_name: "oms-worker-ab12", job_type: "update_order_status",
                                       status: "shutdown", reason: "rollover", total_job_count: 9,
@@ -74,8 +75,8 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
     # still feed the domain map — the job sections are what's under test.
     worker!("oms-worker-a", "Oms::AWorker", job_type: "type_a", status: "shutdown")
     worker!("logistics-worker-b", "Logistics::BWorker", job_type: "type_b", status: "shutdown")
-    Monitoring::JobRun.create!(job_key: 1, job_type: "type_a", status: "complete")
-    Monitoring::JobRun.create!(job_key: 2, job_type: "type_b", status: "complete")
+    Monitoring::JobRun.create!(job_key: 1, activated_at: Time.current, job_type: "type_a", status: "complete")
+    Monitoring::JobRun.create!(job_key: 2, activated_at: Time.current, job_type: "type_b", status: "complete")
 
     get "/monitoring?domain=oms"
 
@@ -85,7 +86,8 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
 
   it "links index lines to the show pages" do
     w = worker!("oms-worker-link1", "Oms::UpdateOrderStatusWorker")
-    Monitoring::JobRun.create!(job_key: 850, job_type: "update_order_status", status: "complete")
+    Monitoring::JobRun.create!(job_key: 850, activated_at: Time.current, job_type: "update_order_status",
+                               status: "complete")
 
     get "/monitoring"
 
@@ -115,7 +117,8 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
   end
 
   it "renders a run's full detail with its tags and call sequence" do
-    Monitoring::JobRun.create!(job_key: 901, job_type: "plan_shipments", status: "complete",
+    Monitoring::JobRun.create!(job_key: 901, activated_at: Time.current, job_type: "plan_shipments",
+                               status: "complete",
                                perform_duration_ms: 12.5, total_duration_ms: 30.0,
                                tags: { "element_id" => "plan-shipments-task", "retries" => 3 })
     Monitoring::EngineCall.create!(job_key: 901, worker_name: "logistics-worker-x", rpc: "complete_job",

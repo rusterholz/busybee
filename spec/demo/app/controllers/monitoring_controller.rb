@@ -35,7 +35,7 @@ class MonitoringController < ApplicationController
   # One run's full detail: timings, the full tag set, and its call sequence,
   # with each call linked back to the incarnation that made it.
   def run
-    @run = Monitoring::JobRun.find_by!(job_key: params[:job_key])
+    @run = Monitoring::JobRun.where(job_key: params[:job_key]).recent.first!
     @calls = Monitoring::EngineCall.for_job(@run.job_key)
     @call_workers = Monitoring::WorkerProcess.where(worker_name: @calls.map(&:worker_name).uniq,
                                                     job_type: @run.job_type).index_by(&:worker_name)

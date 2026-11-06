@@ -9,7 +9,7 @@ RSpec.describe Monitoring::Prune do
   end
 
   def run!(key, status, touched_at)
-    Monitoring::JobRun.create!(job_key: key, job_type: "t", status: status).
+    Monitoring::JobRun.create!(job_key: key, activated_at: Time.current, job_type: "t", status: status).
       tap { |r| r.update_column(:updated_at, touched_at) }
   end
 

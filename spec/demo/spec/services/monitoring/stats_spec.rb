@@ -6,7 +6,7 @@ RSpec.describe Monitoring::Stats do
   subject(:stats) { described_class.new(Monitoring::JobRun.all) }
 
   def create_run(**attrs)
-    defaults = { job_key: next_job_key, job_type: "assign_driver", status: "complete" }
+    defaults = { job_key: next_job_key, activated_at: Time.current, job_type: "assign_driver", status: "complete" }
     Monitoring::JobRun.create!(defaults.merge(attrs))
   end
 

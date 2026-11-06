@@ -55,6 +55,29 @@ RSpec.describe Monitoring::Recorder, :busybee do
 
       expect(recorded(4243)).to have_attributes(buffer_size: nil, buffered: false)
     end
+
+    it "records the job's place in its workflow and the process that ran it" do
+      job = activated_job(key: 4244)
+
+      described_class.record_activation(job)
+
+      expect(recorded(4244)).to have_attributes(
+        bpmn_process_id: "ship-order", element_id: job.element_id,
+        process_instance_key: job.process_instance_key, worker_name: Busybee.worker_name
+      )
+      expect(job.process_instance_key).to be_positive
+    end
+
+    it "records each activation of a job as its own run" do
+      first = activated_job(key: 4245)
+      described_class.record_activation(first)
+      sleep 0.002
+      described_class.record_activation(activated_job(key: 4245)) # re-offered after a timeout
+
+      expect(Monitoring::JobRun.where(job_key: 4245).pluck(:activated_at)).to contain_exactly(
+        be_within(0.001).of(first.activated_at), be > first.activated_at
+      )
+    end
   end
 
   describe ".record_worker" do
@@ -133,13 +156,12 @@ RSpec.describe Monitoring::Recorder, :busybee do
 
   describe "out-of-order guard (JobRun)" do
     it "fills a late activation's gaps without downgrading a resolved status" do
-      executed = completed_job(key: 7777)
-      activated = activated_job(key: 7777)
+      job = completed_job(key: 7777)
 
-      described_class.record_execution(executed)   # rank 1
-      described_class.record_activation(activated) # rank 0 — arrives late
+      described_class.record_execution(job)  # rank 1
+      described_class.record_activation(job) # rank 0 — arrives late
 
-      expect(recorded(7777)).to have_attributes(status: "complete", activated_at: be_present)
+      expect(recorded(7777)).to have_attributes(status: "complete", buffered: false)
     end
   end
 
@@ -148,15 +170,15 @@ RSpec.describe Monitoring::Recorder, :busybee do
     # landed leaves its row stuck at rank 0 forever — the leak the pairing exists
     # to prevent, and the reason the demo wires all three hooks rather than two.
     it "closes an activation the worker never got to run" do
-      activated = activated_job(key: 8888)
-      described_class.record_activation(activated)
-
       handed_back = activated_job(key: 8888)
+      described_class.record_activation(handed_back)
+
       sleep 0.005
       handed_back.timestamps.stamp!(:execution_started_at) # the moment it was handed back, not run
 
       described_class.record_handback(handed_back)
 
+      expect(Monitoring::JobRun.where(job_key: 8888).count).to eq(1)
       expect(recorded(8888)).to have_attributes(status: "ready", executed_at: be_present, lifecycle_rank: 1,
                                                 buffer_latency_ms: handed_back.buffer_latency_ms)
       expect(handed_back.buffer_latency_ms).to be > 0
@@ -217,6 +239,23 @@ RSpec.describe Monitoring::Recorder, :busybee do
       described_class.record_call(resolved_call(:complete_job, complete_request(600), job: job))
 
       expect(recorded(600).status).to eq("complete")
+    end
+
+    # The future settles through the real Job#complete! with the demo's hooks live,
+    # so after_call fires where production fires it: before the job marks itself
+    # resolved, which is why the fold times the run off the call.
+    it "times an async run from activation to its resolution call" do
+      job = activated_job(key: 604)
+      job.timestamps.stamp!(:execution_started_at)
+      job.timestamps.stamp!(:executed_at)
+      described_class.record_execution(job) # perform only dispatched: unresolved, no total yet
+
+      sleep 0.01
+      job.complete!({})
+
+      run = recorded(604)
+      expect(run).to have_attributes(status: "complete", resolved_at: be_within(0.05).of(job.resolved_at))
+      expect(run.total_duration_ms).to be_between(10, job.total_duration_ms) # the job resolves after its hooks
     end
 
     it "maps fail_job and throw_error to their run outcomes" do

@@ -31,32 +31,26 @@ module Monitoring
 
     class << self
       def record_activation(job)
-        upsert(JobRun, { job_key: job.key },
+        upsert(JobRun, activation(job),
                rank: 0,
-               job_type: job.job_type,
-               bpmn_process_id: job.bpmn_process_id,
-               status: job.status.to_s,
+               **job_columns(job),
                source: job.source&.to_s,
                buffer_size: job.worker_status&.current_buffer_size,
-               buffered: job.buffered?,
-               activated_at: job.activated_at,
-               tags: job.context_tags)
+               buffered: job.buffered?)
       end
 
       def record_execution(job)
-        upsert(JobRun, { job_key: job.key },
+        upsert(JobRun, activation(job),
                rank: 1,
-               job_type: job.job_type,
-               bpmn_process_id: job.bpmn_process_id,
-               status: job.status.to_s,
+               **job_columns(job),
                executed_at: job.executed_at,
+               resolved_at: job.resolved_at,
                total_duration_ms: job.total_duration_ms,
                perform_duration_ms: job.perform_duration_ms,
                execution_duration_ms: job.execution_duration_ms,
                buffer_latency_ms: job.buffer_latency_ms,
                error_message: job.error_message,
-               error_code: job.error_code,
-               tags: job.context_tags)
+               error_code: job.error_code)
       end
 
       # The other way an activation closes: the worker was shutting down and handed
@@ -67,15 +61,12 @@ module Monitoring
       # a handback that failed to reach the engine is the worker's error, not the
       # job's, which is why it comes off worker_status.
       def record_handback(job)
-        upsert(JobRun, { job_key: job.key },
+        upsert(JobRun, activation(job),
                rank: 1,
-               job_type: job.job_type,
-               bpmn_process_id: job.bpmn_process_id,
-               status: job.status.to_s,
+               **job_columns(job),
                executed_at: Time.current,
                buffer_latency_ms: job.buffer_latency_ms,
-               error_message: job.worker_status&.error_message,
-               tags: job.context_tags)
+               error_message: job.worker_status&.error_message)
       end
 
       # Upsert a worker's current lifecycle phase, keyed by its container identity
@@ -136,15 +127,29 @@ module Monitoring
       # An async resolution (a worker thread calling complete!/fail! after perform
       # returned) lands after record_execution snapshotted the run still-ready, and
       # no job hook fires at resolution time — the RPC itself is the last signal.
-      # Fold its outcome back in at execution rank: the (rank, seen_at) guard makes
-      # either arrival order converge (status from the later observation, timing
-      # columns gap-filled from the earlier one).
+      # Fold its outcome and timing back in at execution rank: the (rank, seen_at)
+      # guard makes either arrival order converge (status from the later
+      # observation, other columns gap-filled from the earlier one). after_call
+      # fires before the job marks itself resolved, so the call's own resolution
+      # stamp is the resolution time.
       def record_resolution(call)
-        ctx = call.logging_context
-        status = RESOLUTION_STATUSES[ctx[:rpc].to_s]
-        return unless status && ctx[:job_key] && ctx[:status].to_s == "succeeded"
+        job = call.job
+        status = RESOLUTION_STATUSES[call.rpc.to_s]
+        return unless status && job && call.succeeded?
 
-        upsert(JobRun, { job_key: ctx[:job_key] }, rank: 1, status: status)
+        total_ms = ((call.resolved_at(:monotonic) - job.activated_at(:monotonic)) * 1000).round(1)
+        upsert(JobRun, activation(job), rank: 1, status: status,
+                                        resolved_at: call.resolved_at, total_duration_ms: total_ms)
+      end
+
+      def activation(job) = { job_key: job.key, activated_at: job.activated_at }
+
+      # What every job-run write carries: the job's type, workflow coordinates,
+      # status and tags, and the process recording it.
+      def job_columns(job)
+        { job_type: job.job_type, bpmn_process_id: job.bpmn_process_id, element_id: job.element_id,
+          process_instance_key: job.process_instance_key, worker_name: job.worker_name,
+          status: job.status.to_s, tags: job.context_tags }
       end
 
       # Capture the observation-order key NOW — in the hook, before the async post,
@@ -172,8 +177,9 @@ module Monitoring
       # times). A write at or behind the row's recorded position can still fill
       # gaps it uniquely owns, but never clobbers or regresses current state.
       #
-      # The read-compare-write is atomic here only because the single writer
-      # serializes it; the production twin is one conditional UPSERT (... ON
+      # The read-compare-write is atomic here only because a row's writes all come
+      # from one process, whose single writer serializes them; the production twin
+      # is one conditional UPSERT (... ON
       # CONFLICT DO UPDATE ... WHERE (excluded.lifecycle_rank, excluded.seen_at) >
       # (<table>.lifecycle_rank, <table>.seen_at)).
       def apply(model, identity, rank, seen_at, attributes)
