@@ -66,16 +66,17 @@ RSpec.describe Sim::PickAndPackWorker do
       expect(await_resolution(job)).to be_complete
     end
 
-    # Completion is the last step of the work, so its error fails the job like any other.
-    it "fails the job with the completion's error when the completion call fails" do
+    # The engine's own recovery for an unknown outcome: the job waits out its
+    # deadline and comes back with no retry spent.
+    it "leaves the job to its deadline when the completion call fails" do
       client.on(:complete_job) { raise GRPC::NotFound, "job not found" }
       job = execute_worker(worker, job: pick_job)
 
       free_pickers
+      wait_until(1) { client.received(:complete_job).any? }
 
-      expect(await_resolution(job)).to be_failed
-      expect(client.received(:fail_job).map(&:retries)).to eq([2])
-      expect(client.received(:fail_job).map(&:errorMessage)).to all(include("job not found"))
+      expect(job).to be_ready
+      expect(client.received(:fail_job)).to be_empty
     end
   end
 
