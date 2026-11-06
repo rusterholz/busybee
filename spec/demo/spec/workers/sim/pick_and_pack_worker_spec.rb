@@ -65,6 +65,19 @@ RSpec.describe Sim::PickAndPackWorker do
 
       expect(await_resolution(job)).to be_complete
     end
+
+    # The engine's own recovery for an unknown outcome: the job waits out its
+    # deadline and comes back with no retry spent.
+    it "leaves the job to its deadline when the completion call fails" do
+      client.on(:complete_job) { raise GRPC::NotFound, "job not found" }
+      job = execute_worker(worker, job: pick_job)
+
+      free_pickers
+      wait_until(1) { client.received(:complete_job).any? }
+
+      expect(job).to be_ready
+      expect(client.received(:fail_job)).to be_empty
+    end
   end
 
   # The worker hooks back on: the handback rides on_worker_stopping.
@@ -78,19 +91,47 @@ RSpec.describe Sim::PickAndPackWorker do
       expect(client.received(:fail_job).map(&:retries)).to eq([3])
     end
 
-    # The race: the picker finishes while the handback's call is still on the wire,
-    # before the job knows it is settled, so only the claim can stop a second call.
-    it "doesn't also complete a job the picker finishes mid-handback" do
+    it "makes no further call when the pick gets its picker after the handback" do
+      execute_worker(described_class, job: pick_job)
+      free_pickers
+
+      expect(client.received(:update_job_timeout)).to be_empty
+      expect(client.received(:complete_job)).to be_empty
+    end
+
+    # The race: the pick ends while the handback's call is still on the wire, before
+    # the job knows it is settled, so only the claim can stop a second call.
+    it "doesn't also complete a job whose pick ends mid-handback" do
+      Rails.application.config.x.demo.simulation_speed = 20.0 # a pick of a few tenths of a second
+      worker = start_test_worker(described_class, client: client)
       client.on(:fail_job) do
-        free_pickers
-        wait_until(0.5) { client.received(:complete_job).any? }
+        wait_until(1) { client.received(:complete_job).any? }
         Busybee::GRPC::FailJobResponse.new
       end
 
-      job = execute_worker(described_class, job: pick_job)
+      job = execute_worker(worker, job: pick_job)
+      release_held
+      wait_until(1) { client.received(:update_job_timeout).any? } # picking
+      worker.stop!
+      free_pickers
 
       expect(client.received(:complete_job)).to be_empty
       expect(job).to be_failed
+    end
+
+    # A forced stop hands nothing back in busybee itself, and neither does this.
+    it "hands nothing back when the stop is a kill" do
+      worker = start_test_worker(described_class, client: client)
+      job = execute_worker(worker, job: pick_job)
+
+      fire_busybee_hooks(:on_worker_stopping,
+                         build_test_worker_status(worker_class: described_class, reason: :kill,
+                                                  moments: %i[started_at stop_requested_at stopping_at]))
+
+      expect(client.received(:fail_job)).to be_empty
+      expect(job).to be_ready
+    ensure
+      worker.stop!
     end
   end
 end

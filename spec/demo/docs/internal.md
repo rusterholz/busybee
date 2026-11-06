@@ -150,7 +150,11 @@ The Sim workers (`complete_job_on_success false`) dispatch each job to a `Concur
 - **Durations cover the dispatch.** Job hooks bracket `perform`, so a run's recorded durations measure the dispatch, not the work (see Resolution folding above).
 - **Every path is the worker's.** Success, failure and anything the future raises each need a `complete!` or `fail!` the worker makes itself.
 
-`Sim::AsyncSettlement` covers the stop. Each dispatched job sits in a per-class registry until settled, and an `on_worker_stopping` hook returns what is left with `fail!("Worker shutting down", retries: job.retries)`: no retry spent, and the engine offers the job again at once. Settling and handing back each claim the registry entry first, so a future that finishes mid-stop never settles a job the stop already returned.
+`Sim::AsyncSettlement` covers the stop. Each dispatched job sits in a per-class registry until settled, and an `on_worker_stopping` hook returns what is left with `fail!("Worker shutting down", retries: job.retries)`: no retry spent, and the engine offers the job again after the fail backoff (`default_fail_job_backoff`, 10 seconds here). The rules:
+
+- **One owner per job.** Settling and the handback each claim the registry entry first, and only the claimant calls the engine. A future that gets its semaphore after the handback stops there, with no call; one already past that point when the handback comes may still send its `update_timeout`, but never a completion.
+- **A failed completion leaves the job to its deadline.** The completion claims the job before calling `complete!`, so if that call fails, nothing fails the job: the engine re-offers it once its deadline passes, with no retry spent.
+- **A kill hands nothing back.** The hook skips a stop whose `reason` is `:kill`, as busybee's own handback does. A kill that follows a graceful stop keeps the graceful [stop reason](../../../docs/hooks.md#stop-reasons), and nothing a hook receives says the stop became immediate, so in that case the handback still runs.
 
 ## Stop and Resume
 

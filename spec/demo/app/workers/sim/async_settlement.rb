@@ -3,14 +3,13 @@
 require "concurrent"
 
 module Sim
-  # busybee hands back unworked jobs itself when a worker stops. This exists only
-  # because these workers settle asynchronously: once perform dispatches a job to
-  # the worker's own future, busybee counts it executed and neither tracks, waits
-  # for, nor hands it back, so a stop leaves it locked until its deadline unless
-  # the worker returns it (limits in full: docs/internal.md, Asynchronous Settlement).
-  # Dispatched jobs sit in a per-class registry; settling claims the entry first,
-  # so a future finishing mid-stop and the on_worker_stopping handback never both
-  # reach the engine. A handback keeps the job's retries, as busybee's own does.
+  # These workers settle asynchronously. busybee hands back unworked jobs when a
+  # worker stops, but counts a job executed once perform dispatches it to the
+  # worker's own future, so it returns none of these: a stop leaves them locked
+  # until their deadline unless the worker does (docs/internal.md, Asynchronous
+  # Settlement). Dispatched jobs sit in a per-class registry; whichever of settling
+  # and the on_worker_stopping handback claims an entry first owns the job, and a
+  # future that gets its semaphore after the handback stops without a call.
   module AsyncSettlement
     extend ActiveSupport::Concern
 
@@ -19,7 +18,10 @@ module Sim
     class_methods do
       attr_reader :in_flight
 
-      def hand_back_in_flight_jobs
+      # A kill hands nothing back in busybee itself, so not here either.
+      def hand_back_in_flight_jobs(reason: nil)
+        return if reason == :kill
+
         in_flight.each_key do |key|
           job = in_flight.delete(key) or next
           job.fail!("Worker shutting down", retries: job.retries)
@@ -32,6 +34,7 @@ module Sim
     private
 
     def track_in_flight = self.class.in_flight[job.key] = job
+    def in_flight? = self.class.in_flight.key?(job.key)
 
     def settle
       yield if self.class.in_flight.delete(job.key)

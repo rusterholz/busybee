@@ -44,6 +44,8 @@ module Sim
 
     def run_pick_and_pack(delay)
       PICKERS.acquire
+      return unless in_flight?
+
       update_timeout((delay.ceil + 2).seconds)
       Rails.logger.info("Picker started on #{item_count} items (#{delay.round(1)}s)...")
       sleep(delay)
@@ -52,8 +54,10 @@ module Sim
     end
 
     def on_pick_and_pack_done
-      Rails.logger.info("Pick and pack complete for #{item_count} items")
-      settle { complete! }
+      settle do
+        Rails.logger.info("Pick and pack complete for #{item_count} items")
+        complete!
+      end
     end
 
     def on_pick_and_pack_error(error)

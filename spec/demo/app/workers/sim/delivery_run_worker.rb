@@ -6,8 +6,8 @@ module Sim
   # Non-blocking: runs delays in background Futures so a single worker thread can
   # handle all deliveries concurrently. The semaphore (lazy-loaded to avoid querying
   # Driver.count before seeds run) limits concurrency to the actual number of drivers.
-  # New drivers recruited by AssignDriverWorker are detected automatically — the
-  # semaphore gains permits to match. The 5-minute job_timeout covers semaphore wait
+  # Each run re-reads Driver.count, and the semaphore gains permits if the fleet has
+  # grown. The 5-minute job_timeout covers semaphore wait
   # time; update_timeout tightens the deadline once a driver is acquired. Settles
   # through AsyncSettlement, so a stop hands back runs still in flight.
   #
@@ -65,6 +65,8 @@ module Sim
 
     def run_delivery(semaphore, delay)
       semaphore.acquire
+      return unless in_flight?
+
       update_timeout((delay.ceil + 2).seconds)
       Rails.logger.info("Driver en route, #{distance} units (#{delay.round(1)}s)...")
       sleep(delay)
@@ -73,8 +75,10 @@ module Sim
     end
 
     def on_delivery_done(delay)
-      Rails.logger.info("Driver arrived after #{delay.round(1)}s")
-      settle { complete! }
+      settle do
+        Rails.logger.info("Driver arrived after #{delay.round(1)}s")
+        complete!
+      end
     end
 
     def on_delivery_error(error)
