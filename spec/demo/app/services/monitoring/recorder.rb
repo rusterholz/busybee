@@ -155,7 +155,8 @@ module Monitoring
         seen_at = monotonic_seq
         executor.post do
           Monitoring::Record.connection_pool.with_connection do
-            apply(model, identity, rank, seen_at, attributes)
+            # Its own (sub)transaction: a dropped write rolls back alone.
+            Monitoring::Record.transaction(requires_new: true) { apply(model, identity, rank, seen_at, attributes) }
           end
         rescue StandardError => e
           Rails.logger.warn("[monitoring] dropped #{model.name} #{identity.values.join('/')}: #{e.message}")

@@ -5,6 +5,15 @@ default: &default
   pragma:
     journal_mode: wal
 
+# Monitoring is TimescaleDB (the compose `postgres` service). Its migrations are
+# the schema's source: a schema dump can't carry hypertables or retention
+# policies, so none is written and a fresh database is built by migrating.
+monitoring: &monitoring
+  adapter: postgresql
+  pool: 5
+  migrations_paths: db/monitoring_migrate
+  schema_dump: false
+
 # One database per domain. Each domain's workers, models, and migrations are
 # self-contained (no cross-domain associations), so giving each its own SQLite
 # file removes the single-writer contention of a shared database and more
@@ -24,9 +33,8 @@ development:
     database: db/data/delivery_development.sqlite3
     migrations_paths: db/delivery_migrate
   monitoring:
-    <<: *default
-    database: db/data/monitoring_development.sqlite3
-    migrations_paths: db/monitoring_migrate
+    <<: *monitoring
+    url: <%= ENV.fetch("MONITORING_DATABASE_URL", "postgres://postgres:postgres@localhost:55432/monitoring_development") %>
 
 # seeds: false, so the spec boot's prepare_all creates a database without seeding
 # it: specs build their own rows, and seeded ones would sit outside every
@@ -48,7 +56,6 @@ test:
     migrations_paths: db/delivery_migrate
     seeds: false
   monitoring:
-    <<: *default
-    database: db/monitoring_test.sqlite3
-    migrations_paths: db/monitoring_migrate
+    <<: *monitoring
+    url: <%= ENV.fetch("MONITORING_TEST_DATABASE_URL", "postgres://postgres:postgres@localhost:55432/monitoring_test") %>
     seeds: false

@@ -12,6 +12,7 @@ gem "busybee", path: "../.."
 
 gem "clockwork"
 gem "faker"
+gem "pg"
 gem "puma"
 gem "sqlite3"
 

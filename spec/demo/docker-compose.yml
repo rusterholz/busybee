@@ -12,6 +12,7 @@ x-app: &app
     RAILS_LOG_TO_STDOUT: "true"
     DEMO_SPEED: ${DEMO_SPEED:-1.0}
     DEMO_ROLLOVERS: ${DEMO_ROLLOVERS:-true}
+    MONITORING_DATABASE_URL: postgres://postgres:postgres@postgres:5432/monitoring_development
   networks:
     - camunda
   volumes:
@@ -74,6 +75,27 @@ services:
       retries: 5
       start_period: 60s
 
+  # The monitoring database (the domains stay on SQLite). Published on 55432 so
+  # the demo's specs can reach it from the host: `bin/demo db` starts it alone.
+  postgres:
+    container_name: busybee-demo-postgres
+    image: timescale/timescaledb:2.31.0-pg18
+    ports:
+      - "55432:5432"
+    environment:
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      # The image's declared volume; PGDATA lives under it at 18/docker.
+      - postgres-data:/var/lib/postgresql
+    networks:
+      - camunda
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   web:
     <<: *app
     container_name: busybee-demo-web
@@ -82,6 +104,8 @@ services:
       - "3000:3000"
     depends_on:
       zeebe:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/orders || exit 1"]
@@ -188,4 +212,6 @@ volumes:
   zeebe-data:
     driver: local
   elasticsearch-data:
+    driver: local
+  postgres-data:
     driver: local

@@ -27,8 +27,8 @@ module Monitoring
     # its minimum/maximum are x too.
     FOLD_SQL = <<~SQL.squish
       count = monitoring_call_metrics.count + 1,
-      minimum = min(monitoring_call_metrics.minimum, excluded.minimum),
-      maximum = max(monitoring_call_metrics.maximum, excluded.maximum),
+      minimum = LEAST(monitoring_call_metrics.minimum, excluded.minimum),
+      maximum = GREATEST(monitoring_call_metrics.maximum, excluded.maximum),
       ewmv = (1 - #{ALPHA}) * (monitoring_call_metrics.ewmv +
              #{ALPHA} * (excluded.ewma - monitoring_call_metrics.ewma) *
                         (excluded.ewma - monitoring_call_metrics.ewma)),
