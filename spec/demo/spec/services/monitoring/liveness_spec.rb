@@ -23,6 +23,15 @@ RSpec.describe Monitoring::Liveness do
       expect(liveness.mean_queue_depth).to eq(5.0)
     end
 
+    it "reads only workers that reported in the last minute, so one killed before its shutdown hooks can't pin it" do
+      worker(status: "running", depth: 4)
+      worker(status: "running", depth: 2205).update_column(:updated_at, 2.minutes.ago)
+
+      liveness = described_class.new
+      expect([liveness.max_queue_depth, liveness.mean_queue_depth]).to eq([4, 4.0])
+      expect(liveness.running_count).to eq(2)
+    end
+
     it "is nil when nothing is running" do
       worker(status: "shutdown", depth: 3)
       expect(described_class.new.max_queue_depth).to be_nil

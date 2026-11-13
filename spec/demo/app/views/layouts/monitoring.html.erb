@@ -120,13 +120,13 @@
                      else "fresh"
                      end
           %>
-          <li class="liveness" title="Workers whose last lifecycle event left them running, and the recorders' write-queue backlog across them. A deep queue means these numbers lag reality.">
+          <li class="liveness" title="Workers whose last lifecycle event left them running, and the recorders' write-queue backlog across the workers reporting in the last minute. A deep queue means these numbers lag reality.">
             <% if running.zero? %>
               <span class="empty">no running workers</span>
             <% else %>
               <span class="dot dot-<%= health %>"></span>
               <span class="metric"><b><%= running %></b> running</span>
-              <span class="metric">· write queue <b><%= depth %></b> max · <b><%= (@liveness.mean_queue_depth || 0).round(1) %></b> mean</span>
+              <span class="metric">· write queue <b><%= depth %></b> max · <b><%= (@liveness.mean_queue_depth || 0).round(1) %></b> mean (workers reporting in the last minute)</span>
             <% end %>
           </li>
         <% end %>
