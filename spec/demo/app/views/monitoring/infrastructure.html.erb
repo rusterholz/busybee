@@ -1,0 +1,72 @@
+<%
+  lifetime = ->(w) { w.started_at ? "#{((w.shutdown_at || Time.current) - w.started_at).round}s" : "--" }
+  idle = ->(at) { (s = (Time.current - at).round) < 60 ? "#{s}s" : "#{s / 60}m" }
+%>
+
+<hgroup>
+  <h1>Infrastructure</h1>
+  <p>Worker processes and their gRPC calls to the Zeebe gateway.</p>
+</hgroup>
+
+<section>
+  <h2>Worker Processes
+    <% %w[running all].each do |phase| %>
+      <% if @worker_status == phase %>
+        <span class="local-toggle"><%= phase %></span>
+      <% else %>
+        <a class="local-toggle" href="<%= url_for(request.query_parameters.merge("worker_status" => phase)) %>"><%= phase %></a>
+      <% end %>
+    <% end %>
+  </h2>
+
+  <% if @workers.any? %>
+    <table>
+      <thead>
+        <tr>
+          <th>Worker</th><th>Job type</th><th>Phase</th><th>Reason</th>
+          <th class="num">Jobs</th><th class="num">Failed</th><th class="num">Age</th><th class="num">Last call</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @workers.each do |w| %>
+          <tr>
+            <td class="mono"><a href="<%= monitoring_worker_path(w) %>"><%= w.worker_name %></a></td>
+            <td><code><%= w.job_type %></code></td>
+            <td class="wstatus-<%= w.status %>"><%= w.status %></td>
+            <td><% if w.reason %><span class="badge <%= w.reason %>"><%= w.reason %></span><% end %></td>
+            <td class="num"><%= fmt_int(w.total_job_count) %></td>
+            <td class="num"><%= fmt_int(w.failed_job_count) %></td>
+            <td class="num"><%= lifetime.(w) %></td>
+            <td class="num"><% if (last = @last_calls[w.worker_name]) %>idle <%= idle.(last) %><% end %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% elsif @workers_exist %>
+    <p class="empty">No workers in this phase.</p>
+  <% else %>
+    <p class="empty">No workers have reported yet.</p>
+  <% end %>
+</section>
+
+<section>
+  <h2>Engine Calls</h2>
+  <% if @call_stats.by_rpc.any? %>
+    <table>
+      <thead><tr><th>RPC</th><th class="num">Calls</th><th class="num">Mean</th><th class="num">Min</th><th class="num">Max</th></tr></thead>
+      <tbody>
+        <% @call_stats.by_rpc.each do |r| %>
+          <tr>
+            <td><code><%= r[:rpc] %></code></td>
+            <td class="num"><%= fmt_int(r[:count]) %></td>
+            <td class="num"><%= fmt_ms(r[:mean_ms]) %></td>
+            <td class="num"><%= fmt_ms(r[:min_ms]) %></td>
+            <td class="num"><%= fmt_ms(r[:max_ms]) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p class="empty">No engine calls recorded yet.</p>
+  <% end %>
+</section>

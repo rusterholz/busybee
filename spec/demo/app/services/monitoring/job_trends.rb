@@ -14,7 +14,7 @@ module Monitoring
     def throughput
       counts = @scope.where(status: JobRun::OUTCOMES).group(@bucket, :status).count
       JobRun::OUTCOMES.index_with do |status|
-        @window.buckets.index_with { |at| @window.per_minute(counts.fetch([at, status], 0)) }
+        @window.buckets.index_with { |at| @window.per_minute(counts.fetch([at, status], 0), at) }
       end
     end
 

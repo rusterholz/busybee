@@ -18,7 +18,13 @@ module Monitoring
     end
 
     def minutes = (to - from) / 60.0
-    def per_minute(count) = count * 60.0 / bucket
+
+    # A bucket's count per minute over the part of it inside the range, so the
+    # still-filling last bucket and the clipped first one read at their true rate.
+    def per_minute(count, bucket_start)
+      seconds = [bucket_start + bucket, to].min - [bucket_start, from].max
+      seconds.positive? ? (count * 60.0 / seconds).round(2) : 0.0
+    end
 
     # SQL for the bucket holding a timestamp column (time_bucket aligns to the epoch).
     def bucket_sql(column) = "time_bucket(INTERVAL '#{bucket.to_i} seconds', #{column})"

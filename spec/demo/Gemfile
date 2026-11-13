@@ -10,6 +10,7 @@ gem "rails", ">= 7.0"
 # In a real app this would be: gem "busybee", "~> 0.3"
 gem "busybee", path: "../.."
 
+gem "chartkick"
 gem "clockwork"
 gem "faker"
 gem "pg"

@@ -6,7 +6,7 @@ RSpec.describe Monitoring::JobTrends do
   subject(:trends) { described_class.new(Monitoring::JobRun.all, window) }
 
   let(:now) { Time.zone.at(Time.current.to_i - (Time.current.to_i % 30)) }
-  let(:window) { Monitoring::Window.new("15m", now: now) }
+  let(:window) { Monitoring::Window.new("15m", now: now + 15.seconds) } # the current bucket half gone
   let(:earlier) { now - 30.seconds }
 
   let(:job_keys) { (1..).each }
@@ -28,7 +28,7 @@ RSpec.describe Monitoring::JobTrends do
     expect(throughput.keys).to eq(%w[complete failed error handed_back])
     expect(throughput["complete"]).to include(earlier => 4.0, now => 0.0)
     expect(throughput["failed"][earlier]).to eq(2.0)
-    expect(throughput["handed_back"][now]).to eq(2.0)
+    expect(throughput["handed_back"][now]).to eq(4.0) # one run in the 15 s so far
     expect(throughput["complete"].size).to eq(window.buckets.size)
   end
 

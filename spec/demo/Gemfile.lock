@@ -87,6 +87,7 @@ GEM
     base64 (0.3.0)
     bigdecimal (4.1.2)
     builder (3.3.0)
+    chartkick (5.3.0)
     clockwork (4.0.1)
       activesupport
       tzinfo
@@ -322,6 +323,7 @@ PLATFORMS
 
 DEPENDENCIES
   busybee!
+  chartkick
   clockwork
   faker
   pg
