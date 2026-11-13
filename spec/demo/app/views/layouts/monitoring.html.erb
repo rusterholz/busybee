@@ -70,21 +70,20 @@
       <ul>
         <% if @liveness %>
           <%
-            fresh = @liveness.freshness_s
+            running = @liveness.running_count
             depth = @liveness.max_queue_depth || 0
-            health = if fresh.nil? then "stale"
-                     elsif fresh > 30 || depth > 10 then "stale"
-                     elsif fresh > 10 || depth > 3 then "lagging"
+            health = if depth > 10 then "stale"
+                     elsif depth > 3 then "lagging"
                      else "fresh"
                      end
           %>
-          <li class="liveness" title="Recorder write-queue backlog across running workers, and seconds since the freshest write. A deep queue or a stale timestamp means these numbers lag reality.">
-            <span class="dot dot-<%= health %>"></span>
-            <% if fresh.nil? %>
-              <span class="empty">no workers yet</span>
+          <li class="liveness" title="Workers whose last lifecycle event left them running, and the recorders' write-queue backlog across them. A deep queue means these numbers lag reality.">
+            <% if running.zero? %>
+              <span class="empty">no running workers</span>
             <% else %>
-              <span class="metric">write queue <b><%= @liveness.max_queue_depth || 0 %></b> max · <b><%= (@liveness.mean_queue_depth || 0).round(1) %></b> mean</span>
-              <span class="metric">· fresh <b><%= fresh.round %></b>s ago</span>
+              <span class="dot dot-<%= health %>"></span>
+              <span class="metric"><b><%= running %></b> running</span>
+              <span class="metric">· write queue <b><%= depth %></b> max · <b><%= (@liveness.mean_queue_depth || 0).round(1) %></b> mean</span>
             <% end %>
           </li>
         <% end %>

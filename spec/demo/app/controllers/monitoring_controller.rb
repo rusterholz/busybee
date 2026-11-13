@@ -61,6 +61,7 @@ class MonitoringController < ApplicationController
     @call_stats = Monitoring::CallStats.new
     @calls_per_job = @call_stats.calls_per_job(Monitoring::JobRun.count)
     @liveness = Monitoring::Liveness.new
+    @last_calls = @liveness.last_call_at(@workers.map(&:worker_name))
   end
 
   def read_job_filters

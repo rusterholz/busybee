@@ -48,6 +48,19 @@ RSpec.describe "Monitoring control center" do # rubocop:disable RSpec/DescribeCl
                                       job_type: job_type, status: status)
   end
 
+  # A streaming worker with no work makes no calls, so it writes nothing for as
+  # long as it idles; its last lifecycle event still says running.
+  it "reads an idle worker as running, with its idle time as information only" do
+    worker!("oms-worker-idle", "Oms::UpdateOrderStatusWorker").update_column(:updated_at, 10.minutes.ago)
+    Monitoring::EngineCall.create!(worker_name: "oms-worker-idle", rpc: "activate_jobs", seq: 1.0,
+                                   at: 10.minutes.ago)
+
+    get "/monitoring"
+
+    expect(last_response.body).to include("oms-worker-idle", "idle 10m")
+    expect(last_response.body).to include('class="dot dot-fresh"', "<b>1</b> running")
+  end
+
   it "shows only running workers by default; worker_status=all reveals the graveyard" do
     worker!("oms-worker-live1", "Oms::UpdateOrderStatusWorker")
     worker!("oms-worker-dead1", "Oms::UpdateOrderStatusWorker", status: "shutdown")

@@ -2,6 +2,7 @@
   fmt_ms   = ->(ms) { ms.nil? ? "—" : number_with_delimiter(ms.round(1)) }
   fmt_int  = ->(n)  { n.nil? ? "—" : number_with_delimiter(n) }
   lifetime = ->(w)  { w.started_at ? "#{((w.shutdown_at || Time.current) - w.started_at).round}s" : "—" }
+  idle = ->(at) { (s = (Time.current - at).round) < 60 ? "#{s}s" : "#{s / 60}m" }
 %>
 
 <hgroup>
@@ -69,7 +70,7 @@
       <thead>
         <tr>
           <th>Worker</th><th>Job type</th><th>Phase</th><th>Reason</th>
-          <th class="num">Jobs</th><th class="num">Failed</th><th class="num">Age</th>
+          <th class="num">Jobs</th><th class="num">Failed</th><th class="num">Age</th><th class="num">Last call</th>
         </tr>
       </thead>
       <tbody>
@@ -82,6 +83,7 @@
             <td class="num"><%= fmt_int.(w.total_job_count) %></td>
             <td class="num"><%= fmt_int.(w.failed_job_count) %></td>
             <td class="num"><%= lifetime.(w) %></td>
+            <td class="num"><% if (last = @last_calls[w.worker_name]) %>idle <%= idle.(last) %><% end %></td>
           </tr>
         <% end %>
       </tbody>
