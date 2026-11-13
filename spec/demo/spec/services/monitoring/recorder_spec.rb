@@ -338,7 +338,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
       expect(Monitoring::EngineCall.count).to eq(0)
 
       gate.count_down
-      described_class.flush
+      described_class.shutdown!
       expect(Monitoring::EngineCall.count).to eq(1)
     end
   end
@@ -362,13 +362,39 @@ RSpec.describe Monitoring::Recorder, :busybee do
       expect(described_class.send(:queue_depth)).to eq(3)
 
       gate.count_down
-      described_class.flush
+      described_class.shutdown!
 
       expect(Monitoring::JobRun.order(:job_key).pluck(:job_key)).to eq([1, 3])
     end
   end
 
-  describe ".flush" do
+  describe "lifecycle rows under a telemetry backlog", :no_transaction do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.instance_variable_get(:@executor)&.kill
+      described_class.instance_variable_set(:@executor, nil)
+      Monitoring::WorkerProcess.delete_all
+    end
+
+    # Several seconds of queued telemetry ahead of the shutdown row, then the
+    # process's exit sequence: the shutdown hook's flush, then at_exit's drain.
+    it "lands the shutdown row although the process exits with telemetry still queued" do
+      gate = Concurrent::CountDownLatch.new(1)
+      described_class.executor.post { gate.wait(2) }
+      2_000.times { described_class.send(:write, "slow telemetry") { sleep 0.005 } }
+      described_class.record_worker(:shutdown, worker_status(reason: :rollover))
+      gate.count_down
+
+      expect(described_class.flush_lifecycle(timeout: 3)).to be(true)
+      described_class.shutdown!(timeout: 0.1)
+
+      expect(process).to have_attributes(status: "shutdown", reason: "rollover")
+      expect(described_class.send(:queue_depth)).to be > 0 # telemetry was dropped, not waited for
+    end
+  end
+
+  describe ".flush_lifecycle" do
     before { allow(described_class).to receive(:executor).and_call_original }
 
     after do
@@ -376,22 +402,22 @@ RSpec.describe Monitoring::Recorder, :busybee do
       described_class.instance_variable_set(:@executor, nil)
     end
 
-    it "returns true after queued writes complete, leaving the executor accepting" do
+    it "returns true once the queued lifecycle writes land, leaving the executor accepting" do
       flag = Concurrent::AtomicBoolean.new(false)
-      described_class.executor.post do
+      described_class.send(:write, "lifecycle", lane: :lifecycle) do
         sleep 0.05
         flag.make_true
       end
 
-      expect(described_class.flush).to be(true)
+      expect(described_class.flush_lifecycle).to be(true)
       expect(flag).to be_true
       expect(described_class.executor).not_to be_shutdown
     end
 
-    it "returns false when the queue cannot drain in time" do
+    it "returns false when the writer cannot reach them in time" do
       described_class.executor.post { sleep 0.3 }
 
-      expect(described_class.flush(timeout: 0.05)).to be(false)
+      expect(described_class.flush_lifecycle(timeout: 0.05)).to be(false)
     end
   end
 end

@@ -21,14 +21,14 @@ Busybee.configure do |config|
     worker.worker_class.hand_back_in_flight_jobs(reason: worker.reason)
   end
   config.on_worker_shutdown       { |worker| Monitoring::Recorder.record_worker(:shutdown, worker) }
-  # ...and hold shutdown until the queue drains (registered after, runs after), so
-  # the closing row lands even when the process exits immediately afterwards.
-  config.on_worker_shutdown       { |_worker| Monitoring::Recorder.flush }
+  # ...and hold shutdown until the lifecycle rows land (registered after, runs after),
+  # so the closing row lands even when the process exits immediately afterwards.
+  config.on_worker_shutdown       { |_worker| Monitoring::Recorder.flush_lifecycle }
 
   # Record every gRPC call as a row of Monitoring::EngineCall.
   config.after_call { |call| Monitoring::Recorder.record_call(call) }
   # ...and refresh the worker's row from each call — keeps counters live, even for idle workers that only fetch.
-  config.after_call { |call| Monitoring::Recorder.record_worker(:running, call.worker_status) if call.worker_status }
+  config.after_call { |call| Monitoring::Recorder.refresh_worker(call.worker_status) if call.worker_status }
 
   # Wrap these jobs' perform in a domain transaction. Not the async sim jobs (perform
   # returns before the work runs) nor complete_driver_delivery (publishes a message a
