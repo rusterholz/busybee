@@ -9,6 +9,22 @@ module Monitoring
 
     skip_callback :create, :before, :assign_uuid
 
+    OUTCOMES = %w[complete failed error handed_back].freeze
+    RESOLVED = %w[complete failed error].freeze # the runs a failure rate and a timing are taken over
+
     scope :recent, -> { order(activated_at: :desc) }
+    scope :within, ->(window) { where(activated_at: window.from..window.to) }
+    scope :resolved, -> { where(status: RESOLVED) }
+
+    class << self
+      # Exact percentile of total time, as a SELECT expression.
+      def percentile_sql(fraction) = "percentile_cont(#{Float(fraction)}) WITHIN GROUP (ORDER BY total_duration_ms)"
+
+      # Percent of resolved runs with a status, as a SELECT expression.
+      def share_sql(status)
+        "100.0 * COUNT(*) FILTER (WHERE status = #{connection.quote(status)}) / " \
+          "NULLIF(COUNT(*) FILTER (WHERE status IN ('complete', 'failed', 'error')), 0)"
+      end
+    end
   end
 end
