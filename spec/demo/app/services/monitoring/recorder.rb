@@ -13,15 +13,13 @@ module Monitoring
   # as it progresses, so we can't defer reading it) and queues the write. Two
   # lanes: worker lifecycle rows, which the writer lands first, and telemetry
   # (job runs, calls, worker refreshes), which it lands in batches behind them
-  # and which may be dropped at exit under a backlog. Every row has exactly one
-  # writing process, so the writer also serializes each row's
-  # read-compare-write. But a real observability sink is async, out-of-order,
-  # and at-least-once, so the write must not trust arrival order. Each
-  # observation carries its lifecycle rank (a semantic phase order) plus a
-  # monotonic seen_at (an intra-rank freshness tiebreaker, stamped at
-  # observation time); #apply rejects any write a superseding one has already
-  # overtaken. Best-effort: a failed write is logged and dropped, never retried
-  # into the hot path.
+  # and which may be dropped at exit under a backlog. A real observability sink
+  # is async, out-of-order, and at-least-once, so the write must not trust
+  # arrival order. Each observation carries its lifecycle rank (a semantic phase
+  # order) plus a monotonic seen_at (an intra-rank freshness tiebreaker, stamped
+  # at observation time), and lands as one GuardedUpsert, which refuses any write
+  # a superseding one has already overtaken. Best-effort: a failed write is
+  # logged and dropped, never retried into the hot path.
   module Recorder
     # Lifecycle rank of each worker phase: the primary, semantic ordering the
     # guard advances through (running never supersedes shutdown, however it lands).
@@ -161,7 +159,7 @@ module Monitoring
 
         status = HANDED_BACK if job.context[:handed_back]
         total_ms = ((call.resolved_at(:monotonic) - job.activated_at(:monotonic)) * 1000).round(1)
-        upsert(JobRun, activation(job), rank: 1, status: status,
+        upsert(JobRun, activation(job), rank: 1, status: status, job_type: job.job_type, # NOT NULL, even on conflict
                                         resolved_at: call.resolved_at, total_duration_ms: total_ms)
       end
 
@@ -180,7 +178,7 @@ module Monitoring
       def upsert(model, identity, rank:, lane: :telemetry, **attributes)
         seen_at = monotonic_seq
         write("#{model.name} #{identity.values.join('/')}", lane: lane) do
-          apply(model, identity, rank, seen_at, attributes)
+          GuardedUpsert.call(model, identity, rank: rank, seen_at: seen_at, attributes: attributes)
         end
       end
 
@@ -224,29 +222,6 @@ module Monitoring
         Monitoring::Record.transaction(requires_new: true, &)
       rescue StandardError => e
         Rails.logger.warn("[monitoring] dropped #{label}: #{e.message}")
-      end
-
-      # Idempotent, out-of-order-safe apply. The ordering key is composite,
-      # (lifecycle_rank, seen_at): rank is the primary semantic phase order, seen_at
-      # only breaks ties within a rank (a long-running phase is observed many
-      # times). A write at or behind the row's recorded position can still fill
-      # gaps it uniquely owns, but never clobbers or regresses current state.
-      #
-      # The read-compare-write is atomic here only because a row's writes all come
-      # from one process, whose single writer serializes them; the production twin
-      # is one conditional UPSERT (... ON
-      # CONFLICT DO UPDATE ... WHERE (excluded.lifecycle_rank, excluded.seen_at) >
-      # (<table>.lifecycle_rank, <table>.seen_at)).
-      def apply(model, identity, rank, seen_at, attributes)
-        row = model.find_or_initialize_by(identity)
-        incoming = [rank, seen_at]
-        recorded = [row.lifecycle_rank || -1, row.seen_at || -Float::INFINITY]
-        if (incoming <=> recorded).positive?
-          row.update!(attributes.merge(lifecycle_rank: rank, seen_at: seen_at))
-        else
-          gaps = attributes.select { |key, _| row[key].nil? }
-          row.update!(gaps) if gaps.any?
-        end
       end
 
       # A worker's descriptive columns: identity/outcome (scalarised for storage)

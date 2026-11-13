@@ -735,7 +735,7 @@ config.on_worker_shutdown do |_worker|
 end
 ```
 
-For a complete worked example — snapshot-synchronously-then-post, out-of-order-safe writes, the `at_exit` drain, and the shutdown flush — see the demo app's [`Monitoring::Recorder`](../spec/demo/app/services/monitoring/recorder.rb).
+For a complete worked example (snapshot synchronously then post, out-of-order-safe writes, the `at_exit` drain, and the shutdown flush), see the demo app's [`Monitoring::Recorder`](../spec/demo/app/services/monitoring/recorder.rb) and the conditional upsert it writes with, [`Monitoring::GuardedUpsert`](../spec/demo/app/services/monitoring/guarded_upsert.rb).
 
 ## Observing Deferred Resolutions
 
