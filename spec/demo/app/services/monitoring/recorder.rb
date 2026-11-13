@@ -33,6 +33,8 @@ module Monitoring
     # a worker's that marks the job with job.context[:handed_back] before failing it.
     HANDED_BACK = "handed_back"
 
+    BATCH_SIZE = 500
+
     class << self
       def record_activation(job)
         upsert(JobRun, activation(job),
@@ -97,10 +99,13 @@ module Monitoring
         record_resolution(call)
       end
 
-      # One background thread, unbounded queue: posts never block the runner, and
-      # writes land in the order they were posted.
+      # One background thread: posts never block the runner, and writes land in
+      # the order they were posted, a batch per transaction.
       def executor
-        @executor ||= Concurrent::SingleThreadExecutor.new(fallback_policy: :discard)
+        @executor ||= begin
+          @pending = Thread::Queue.new
+          Concurrent::SingleThreadExecutor.new(fallback_policy: :discard)
+        end
       end
 
       # Drain the queue and stop the writer — registered at_exit (initializer).
@@ -167,16 +172,39 @@ module Monitoring
         write("#{model.name} #{identity.values.join('/')}") { apply(model, identity, rank, seen_at, attributes) }
       end
 
-      # Offload one write to the writer thread, in its own (sub)transaction so a
-      # dropped write rolls back alone.
-      def write(label, &)
-        executor.post do
-          Monitoring::Record.connection_pool.with_connection do
-            Monitoring::Record.transaction(requires_new: true, &)
-          end
-        rescue StandardError => e
-          Rails.logger.warn("[monitoring] dropped #{label}: #{e.message}")
+      # Queue one write for the writer thread, which lands whatever has queued
+      # since its last batch (up to BATCH_SIZE) in one transaction.
+      def write(label, &work)
+        writer = executor # first, since a new executor starts a new queue
+        pending << [label, work]
+        writer.post { drain }
+      end
+
+      def pending = @pending ||= Thread::Queue.new
+
+      def drain
+        batch = take_batch
+        return if batch.empty?
+
+        Monitoring::Record.connection_pool.with_connection do
+          Monitoring::Record.transaction(requires_new: true) { batch.each { |entry| entry.last.call } }
+        rescue StandardError
+          batch.each { |label, work| land(label, &work) }
         end
+      end
+
+      def take_batch
+        batch = []
+        batch << pending.pop(true) while batch.size < BATCH_SIZE && !pending.empty?
+        batch
+      end
+
+      # A failed batch's writes, replayed each in its own savepoint, so a bad
+      # write is dropped alone. Every write is safe to replay: the batch rolled back.
+      def land(label, &)
+        Monitoring::Record.transaction(requires_new: true, &)
+      rescue StandardError => e
+        Rails.logger.warn("[monitoring] dropped #{label}: #{e.message}")
       end
 
       # Idempotent, out-of-order-safe apply. The ordering key is composite —
@@ -222,10 +250,9 @@ module Monitoring
 
       def monotonic_seq = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-      # The recorder's own write backlog, sampled synchronously in the hook — a
-      # "how live is this?" gauge persisted per worker. An immediate executor
-      # (tests) doesn't queue, so it has no backlog.
-      def queue_depth = executor.respond_to?(:queue_length) ? executor.queue_length : 0
+      # The recorder's own write backlog, sampled synchronously in the hook: a
+      # "how live is this?" gauge persisted per worker.
+      def queue_depth = pending.size
     end
   end
 end

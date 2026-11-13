@@ -343,6 +343,31 @@ RSpec.describe Monitoring::Recorder, :busybee do
     end
   end
 
+  describe "the writer's batches", :no_transaction do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.instance_variable_get(:@executor)&.kill
+      described_class.instance_variable_set(:@executor, nil)
+      Monitoring::JobRun.delete_all
+    end
+
+    it "drops a failing write alone, landing the writes queued around it" do
+      gate = Concurrent::CountDownLatch.new(1)
+      described_class.executor.post { gate.wait(2) } # hold the writer so all three queue together
+      [[1, "pick"], [2, nil], [3, "pick"]].each do |key, job_type| # job_type is NOT NULL
+        described_class.send(:upsert, Monitoring::JobRun, { job_key: key, activated_at: Time.current },
+                             rank: 0, job_type: job_type, status: "ready")
+      end
+      expect(described_class.send(:queue_depth)).to eq(3)
+
+      gate.count_down
+      described_class.flush
+
+      expect(Monitoring::JobRun.order(:job_key).pluck(:job_key)).to eq([1, 3])
+    end
+  end
+
   describe ".flush" do
     before { allow(described_class).to receive(:executor).and_call_original }
 
