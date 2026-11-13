@@ -52,7 +52,7 @@
       <tbody>
         <% @job_type_rows.each do |row| %>
           <tr>
-            <td><a href="<%= monitoring_workers_path(filter_params(job_type: row[:job_type])) %>"><code><%= row[:job_type] %></code></a></td>
+            <td><a href="<%= monitoring_workers_path(filter_params(job_type: [row[:job_type]])) %>"><code><%= row[:job_type] %></code></a></td>
             <td class="num"><%= fmt_int(row[:jobs]) %></td>
             <td class="num"><%= row[:per_minute] %></td>
             <td class="num"><%= fmt_ms(row[:p50_ms]) %></td>

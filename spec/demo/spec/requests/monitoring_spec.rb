@@ -33,6 +33,32 @@ RSpec.describe "Monitoring" do
                               'href="/monitoring/infrastructure?range=15m&amp;workflow=ship_order"')
     end
 
+    it "carries a selection of several job types on every tab, the range links and the refresh" do
+      run!(1, job_type: "pick")
+      run!(2, job_type: "ship")
+      run!(3, job_type: "drive")
+
+      get "/monitoring/workers?job_type[]=pick&job_type[]=ship"
+
+      selection = "job_type%5B%5D=pick&amp;job_type%5B%5D=ship"
+      expect(body).to include(%(href="/monitoring/infrastructure?#{selection}"),
+                              %(href="/monitoring/workers?#{selection}&amp;range=15m"))
+      expect(body).to include('<input type="checkbox" name="job_type[]" value="pick" checked="checked">',
+                              '<input type="checkbox" name="job_type[]" value="drive">', "2 of 3 job types")
+      expect(body).to include('<meta http-equiv="refresh" content="5">') # reloads this same URL
+    end
+
+    it "sends a selection of every job type to the clean URL, and reads no selection as all" do
+      run!(1, job_type: "pick")
+      run!(2, job_type: "ship")
+
+      get "/monitoring/workers?range=6h&job_type[]=pick&job_type[]=ship"
+      expect(last_response.headers["Location"]).to end_with("/monitoring/workers?range=6h")
+
+      get "/monitoring/workers"
+      expect(body).to include("All job types", "<code>pick</code>", "<code>ship</code>")
+    end
+
     it "offers the three ranges, marking the current one" do
       get "/monitoring/workers?range=6h"
 
@@ -64,7 +90,7 @@ RSpec.describe "Monitoring" do
 
       get "/monitoring/workers"
 
-      expect(body).to include('href="/monitoring/workers?job_type=plan_shipments"', "50.0%")
+      expect(body).to include('href="/monitoring/workers?job_type%5B%5D=plan_shipments"', "50.0%")
       expect(body).to include("failed ÷ (complete + failed + error)")
     end
 
@@ -76,16 +102,17 @@ RSpec.describe "Monitoring" do
       expect(body.scan("new Chartkick").size).to eq(3)
     end
 
-    it "scopes everything to the job type, workflow and range" do
+    it "scopes everything to the selected job types, the workflow and the range" do
       run!(1, job_type: "type_a", bpmn_process_id: "ship_order", error_message: "errmsg-a")
       run!(2, job_type: "type_b", bpmn_process_id: "ship_order", error_message: "errmsg-b")
-      run!(3, job_type: "type_a", bpmn_process_id: "prepare_order", error_message: "errmsg-c")
-      run!(4, job_type: "type_a", bpmn_process_id: "ship_order", error_message: "errmsg-d", at: 2.hours.ago)
+      run!(3, job_type: "type_c", bpmn_process_id: "ship_order", error_message: "errmsg-c")
+      run!(4, job_type: "type_a", bpmn_process_id: "prepare_order", error_message: "errmsg-d")
+      run!(5, job_type: "type_a", bpmn_process_id: "ship_order", error_message: "errmsg-e", at: 2.hours.ago)
 
-      get "/monitoring/workers?job_type=type_a&workflow=ship_order"
+      get "/monitoring/workers?job_type[]=type_a&job_type[]=type_b&workflow=ship_order"
 
-      expect(body).to include("errmsg-a")
-      expect(body).not_to include("errmsg-b", "errmsg-c", "errmsg-d")
+      expect(body).to include("errmsg-a", "errmsg-b")
+      expect(body).not_to include("errmsg-c", "errmsg-d", "errmsg-e", "<code>type_c</code>")
     end
 
     it "shows the ten newest runs, each linked to its detail page and unfolding its calls" do

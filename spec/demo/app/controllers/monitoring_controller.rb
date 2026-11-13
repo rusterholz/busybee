@@ -13,6 +13,7 @@ class MonitoringController < ApplicationController
   FILTERS = %w[range job_type workflow].freeze
 
   before_action :read_filters, :load_liveness, except: :index
+  before_action :drop_complete_selection, except: :index
   helper_method :filter_params
 
   def index = redirect_to(monitoring_workers_path(request.query_parameters))
@@ -68,10 +69,17 @@ class MonitoringController < ApplicationController
 
   def read_filters
     @window = Monitoring::Window.new(params[:range])
-    @job_type = params[:job_type].presence
-    @workflow = params[:workflow].presence
     @job_types = filter_options(:job_type)
+    @selected_types = Array(params[:job_type]).compact_blank
+    @workflow = params[:workflow].presence
     @workflows = filter_options(:bpmn_process_id)
+  end
+
+  # Every job type selected is the same as none: all of them, at the clean URL.
+  def drop_complete_selection
+    return if @selected_types.empty? || @job_types.empty? || (@job_types - @selected_types).any?
+
+    redirect_to url_for(request.query_parameters.except("job_type"))
   end
 
   def filter_options(column)
@@ -88,7 +96,7 @@ class MonitoringController < ApplicationController
 
   def job_scope
     scope = Monitoring::JobRun.all
-    scope = scope.where(job_type: @job_type) if @job_type
+    scope = scope.where(job_type: @selected_types) if @selected_types.any?
     scope = scope.where(bpmn_process_id: @workflow) if @workflow
     scope
   end

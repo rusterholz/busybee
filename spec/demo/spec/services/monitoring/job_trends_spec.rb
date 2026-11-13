@@ -60,6 +60,16 @@ RSpec.describe Monitoring::JobTrends do
     expect(trends.failure_rate[earlier]).to eq(50.0)
   end
 
+  it "pools the selected job types into one percentile" do
+    run!("complete", at: earlier, total: 10, job_type: "pick")
+    run!("complete", at: earlier, total: 30, job_type: "ship")
+    run!("complete", at: earlier, total: 9_000, job_type: "drive")
+
+    pooled = described_class.new(Monitoring::JobRun.where(job_type: %w[pick ship]), window)
+
+    expect(pooled.latency["p50"][earlier]).to eq(20.0)
+  end
+
   it "leaves out runs activated before the range" do
     run!("complete", at: now - 20.minutes, total: 5)
 

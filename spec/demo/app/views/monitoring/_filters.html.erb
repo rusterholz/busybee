@@ -18,17 +18,29 @@
   <% request.query_parameters.except(*MonitoringController::FILTERS).compact_blank.each do |name, value| %>
     <input type="hidden" name="<%= name %>" value="<%= value %>">
   <% end %>
-  <label>
-    Job type
-    <select name="job_type" onchange="this.form.submit()">
-      <option value="">All job types</option>
-      <% (@job_types | [@job_type].compact).each do |job_type| %>
-        <option value="<%= job_type %>" <%= "selected" if @job_type == job_type %>><%= job_type %></option>
-      <% end %>
-    </select>
-  </label>
-  <label>
-    Workflow
+  <% types = @job_types | @selected_types %>
+  <div class="filter">
+    <span class="filter-label">Job types</span>
+    <details class="dropdown job-types">
+      <summary>
+        <% if @selected_types.empty? %>All job types
+        <% elsif @selected_types.one? %><%= @selected_types.first %>
+        <% else %><%= @selected_types.size %> of <%= types.size %> job types<% end %>
+      </summary>
+      <ul>
+        <% types.each do |job_type| %>
+          <li><label><%= tag.input(type: "checkbox", name: "job_type[]", value: job_type,
+                                   checked: @selected_types.empty? || @selected_types.include?(job_type)) %> <%= job_type %></label></li>
+        <% end %>
+        <li class="actions">
+          <button type="submit">Apply</button>
+          <a href="<%= url_for(request.query_parameters.except("job_type")) %>">All</a>
+        </li>
+      </ul>
+    </details>
+  </div>
+  <label class="filter">
+    <span class="filter-label">Workflow</span>
     <select name="workflow" onchange="this.form.submit()">
       <option value="">All workflows</option>
       <% (@workflows | [@workflow].compact).each do |workflow| %>
