@@ -27,7 +27,12 @@ class MonitoringController < ApplicationController
     @calls_by_job = engine_calls_for(@runs)
   end
 
-  def workflows; end
+  # The shares compare workflows, so they cover every workflow whatever the filter.
+  def workflows
+    @shares = Monitoring::WorkflowShare.new(job_scope(by_workflow: false), @window).rows
+    @elements = Monitoring::ElementLatency.new(job_scope, @window).rows
+    @slow_instances = Monitoring::SlowInstances.new(job_scope, @window).rows
+  end
 
   def infrastructure
     @worker_status = params[:worker_status].presence || "running"
@@ -94,10 +99,10 @@ class MonitoringController < ApplicationController
 
   def load_liveness = @liveness = Monitoring::Liveness.new
 
-  def job_scope
+  def job_scope(by_workflow: true)
     scope = Monitoring::JobRun.all
     scope = scope.where(job_type: @selected_types) if @selected_types.any?
-    scope = scope.where(bpmn_process_id: @workflow) if @workflow
+    scope = scope.where(bpmn_process_id: @workflow) if @workflow && by_workflow
     scope
   end
 

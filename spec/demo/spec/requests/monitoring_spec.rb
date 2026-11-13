@@ -148,6 +148,38 @@ RSpec.describe "Monitoring" do
     end
   end
 
+  describe "Workflows page" do
+    before do
+      3.times { |i| run!(10 + i, job_type: "update_order_status", bpmn_process_id: "ship_order") }
+      2.times { |i| run!(20 + i, job_type: "update_order_status", bpmn_process_id: "prepare_order") }
+      run!(30, job_type: "plan_shipments", bpmn_process_id: "prepare_order", element_id: "plan-task",
+               process_instance_key: 7_001, total_duration_ms: 900.0)
+      run!(31, job_type: "plan_shipments", bpmn_process_id: "prepare_order", element_id: "plan-task",
+               process_instance_key: 7_002, total_duration_ms: 100.0)
+    end
+
+    it "glosses each job type that runs in several workflows with its share of each" do
+      get "/monitoring/workflows"
+
+      expect(body).to include("update_order_status: 60% ship_order, 40% prepare_order")
+      expect(body).not_to include("plan_shipments: 100%")
+      expect(body.scan("new Chartkick").size).to eq(2) # shares, element p95
+    end
+
+    it "ranks slow instances against their workflow's median, and says what job time leaves out" do
+      get "/monitoring/workflows"
+
+      expect(body).to include("7001", "1.8×")
+      expect(body).to include("Camunda Operate")
+    end
+
+    it "scopes elements and instances to the workflow filter" do
+      get "/monitoring/workflows?workflow=ship_order"
+
+      expect(body).not_to include("7001")
+    end
+  end
+
   describe "Infrastructure page" do
     it "shows running workers by default; worker_status=all reveals the stopped ones" do
       worker!("oms-worker-live1", "Oms::UpdateOrderStatusWorker")

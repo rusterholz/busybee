@@ -1,6 +1,80 @@
+<%
+  color_of = ->(workflow) { MonitoringHelper::SERIES_COLORS[@workflows.index(workflow).to_i % MonitoringHelper::SERIES_COLORS.size] }
+  shared = @shares.select { |row| row[:shares].size > 1 }
+  # Whole percents that sum to 100 (largest remainder).
+  whole = lambda do |shares|
+    floors = shares.map { |share| share[:pct].floor }
+    by_remainder = shares.each_index.sort_by { |i| -(shares[i][:pct] - floors[i]) }
+    by_remainder.first(100 - floors.sum).each { |i| floors[i] += 1 }
+    shares.zip(floors).map { |share, pct| "#{pct}% #{share[:workflow]}" }.join(", ")
+  end
+  share_series = @workflows.filter_map do |workflow|
+    data = @shares.to_h { |row| [row[:job_type], row[:shares].find { |share| share[:workflow] == workflow }&.dig(:pct) || 0] }
+    { name: workflow, data: data, color: color_of.(workflow) } if data.values.any?(&:positive?)
+  end
+%>
+
 <hgroup>
   <h1>Workflows</h1>
-  <p>Job-level measures sliced by workflow (<code>bpmn_process_id</code>).</p>
+  <p>Job-level measures sliced by workflow (<code>bpmn_process_id</code>) over the last <%= @window.key %>. Where an instance waits between jobs, on a message, a timer or the engine itself, no job hook fires; Camunda Operate shows those waits.</p>
 </hgroup>
 
-<p class="empty">This page is still being built.</p>
+<section>
+  <h2>Job Types by Workflow</h2>
+  <% if @shares.any? %>
+    <p class="caption">Each job type's jobs, split by the workflow they ran in. Covers every workflow, whatever the workflow filter.</p>
+    <% if shared.any? %>
+      <ul class="gloss">
+        <% shared.each do |row| %>
+          <li><%= row[:job_type] %>: <%= whole.(row[:shares]) %></li>
+        <% end %>
+      </ul>
+    <% end %>
+    <%= chart :bar_chart, share_series, stacked: true, max: 100, suffix: "%", round: 1,
+              height: "#{(@shares.size * 26) + 70}px" %>
+  <% else %>
+    <p class="empty">No job runs in this range.</p>
+  <% end %>
+</section>
+
+<section>
+  <h2>p95 by Element</h2>
+  <% if @elements.any? %>
+    <p class="caption">Activation to resolution for each BPMN element's jobs, over completed, failed and errored runs.</p>
+    <%= chart :bar_chart, @elements.to_h { |row| ["#{row[:element_id]} · #{row[:workflow]}", row[:p95_ms]] },
+              colors: [MonitoringHelper::SERIES_COLORS.first], suffix: " ms", legend: false,
+              height: "#{(@elements.size * 26) + 70}px" %>
+  <% else %>
+    <p class="empty">No resolved runs in this range.</p>
+  <% end %>
+</section>
+
+<section>
+  <h2>Slow Instances</h2>
+  <% if @slow_instances.any? %>
+    <table>
+      <thead>
+        <tr>
+          <th>Instance</th><th>Workflow</th><th class="num">Jobs</th><th class="num">Job time</th>
+          <th class="num">Workflow median</th><th class="num">× median</th><th>First job</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @slow_instances.each do |row| %>
+          <tr>
+            <td class="mono"><%= row[:instance_key] %></td>
+            <td><%= row[:workflow] %></td>
+            <td class="num"><%= fmt_int(row[:jobs]) %></td>
+            <td class="num"><%= fmt_ms(row[:job_ms]) %></td>
+            <td class="num"><%= fmt_ms(row[:median_ms]) %></td>
+            <td class="num"><%= row[:ratio] ? "#{row[:ratio].round(1)}×" : "--" %></td>
+            <td><%= local_time(row[:first_at]) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+    <p class="caption">Each instance's job time is the summed total time of its resolved jobs within the range, against the median instance of its workflow. An instance still running, or one that began before the range, counts only the jobs inside it.</p>
+  <% else %>
+    <p class="empty">No resolved runs with an instance key in this range.</p>
+  <% end %>
+</section>
