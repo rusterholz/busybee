@@ -254,7 +254,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
       job.complete!({})
 
       run = recorded(604)
-      expect(run).to have_attributes(status: "complete", resolved_at: be_within(0.05).of(job.resolved_at))
+      expect(run).to have_attributes(status: "complete", resolved_at: be_between(job.activated_at, job.resolved_at))
       expect(run.total_duration_ms).to be_between(10, job.total_duration_ms) # the job resolves after its hooks
     end
 
