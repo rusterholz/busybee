@@ -94,7 +94,7 @@
             <td><%= run.bpmn_process_id %></td>
             <td class="num"><%= fmt_ms(run.perform_duration_ms) %></td>
             <td class="num"><%= fmt_ms(run.total_duration_ms) %></td>
-            <td><%= run.activated_at&.strftime("%H:%M:%S") %></td>
+            <td><%= local_time(run.activated_at) %></td>
             <td><%= run.error_code || run.error_message&.truncate(40) %></td>
           </tr>
           <% calls = @calls_by_job[run.job_key] %>

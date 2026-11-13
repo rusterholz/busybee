@@ -19,6 +19,14 @@ module MonitoringHelper
   # Pins a chart's time axis to the whole range, however much of it has data.
   def time_axis(window) = { xmin: window.from.iso8601, xmax: window.to.iso8601 }
 
+  # A time the layout's script rewrites into the browser's zone, the one the charts use.
+  def local_time(time, millis: false)
+    return "--" if time.nil?
+
+    text = time.utc.strftime(millis ? "%H:%M:%S.%L UTC" : "%H:%M:%S UTC")
+    tag.time(text, datetime: time.utc.iso8601(3), data: { local: millis ? "millis" : "seconds" })
+  end
+
   def fmt_ms(millis) = millis.nil? ? "--" : "#{number_with_delimiter(millis.round(1))} ms"
   def fmt_pct(pct) = pct.nil? ? "--" : "#{pct.round(1)}%"
   def fmt_int(count) = count.nil? ? "--" : number_with_delimiter(count)

@@ -1,26 +1,21 @@
-<%
-  fmt_ms = ->(ms) { ms.nil? ? "—" : "#{number_with_delimiter(ms.round(1))} ms" }
-  fmt_at = ->(t)  { t.nil? ? "—" : t.utc.strftime("%H:%M:%S.%L") }
-%>
-
-<p><a href="<%= monitoring_path %>">← control center</a></p>
+<p><a href="<%= monitoring_workers_path(filter_params) %>">← Workers</a></p>
 
 <hgroup>
   <h1><code><%= @run.job_type %></code> <small class="mono">run <%= @run.job_key %></small></h1>
   <p>
     <span class="status-<%= @run.status %>"><%= @run.status %></span>
-    — <%= @run.bpmn_process_id %> · source <%= @run.source || "—" %><%= ", buffered" if @run.buffered %>
+    · <%= @run.bpmn_process_id %> · source <%= @run.source || "--" %><%= ", buffered" if @run.buffered %>
   </p>
 </hgroup>
 
 <section>
   <div class="stat-grid">
-    <article class="stat-card"><h2><%= fmt_ms.(@run.buffer_latency_ms) %></h2><small>buffer latency</small></article>
-    <article class="stat-card"><h2><%= fmt_ms.(@run.perform_duration_ms) %></h2><small>perform</small></article>
-    <article class="stat-card"><h2><%= fmt_ms.(@run.execution_duration_ms) %></h2><small>execution</small></article>
-    <article class="stat-card"><h2><%= fmt_ms.(@run.total_duration_ms) %></h2><small>total</small></article>
+    <article class="stat-card"><h2><%= fmt_ms(@run.buffer_latency_ms) %></h2><small>buffer latency</small></article>
+    <article class="stat-card"><h2><%= fmt_ms(@run.perform_duration_ms) %></h2><small>perform</small></article>
+    <article class="stat-card"><h2><%= fmt_ms(@run.execution_duration_ms) %></h2><small>execution</small></article>
+    <article class="stat-card"><h2><%= fmt_ms(@run.total_duration_ms) %></h2><small>total</small></article>
   </div>
-  <p><small class="empty">activated <%= fmt_at.(@run.activated_at) %> · executed <%= fmt_at.(@run.executed_at) %>
+  <p><small class="empty">activated <%= local_time(@run.activated_at, millis: true) %> · executed <%= local_time(@run.executed_at, millis: true) %>
      <% if @run.buffer_size %> · buffer depth at activation: <%= @run.buffer_size %><% end %></small></p>
 </section>
 
@@ -32,7 +27,7 @@
 <% end %>
 
 <section>
-  <h2>Tags <small>— the run's context_tags, verbatim</small></h2>
+  <h2>Tags <small>the run's context_tags, verbatim</small></h2>
   <% if @run.tags.present? %>
     <table>
       <tbody>
@@ -47,7 +42,7 @@
 </section>
 
 <section>
-  <h2>Call sequence <small>— every gRPC call this run issued, in order</small></h2>
+  <h2>Call Sequence <small>every gRPC call this run issued, in order</small></h2>
   <% if @calls.any? %>
     <table>
       <thead><tr><th class="num">Seq</th><th>RPC</th><th>Status</th><th class="num">Network</th><th>Worker</th></tr></thead>
@@ -58,7 +53,7 @@
             <td class="num"><%= call.seq&.round(1) %></td>
             <td><code><%= call.rpc %></code></td>
             <td class="<%= "status-failed" if call.status == "errored" %>"><%= call.status %></td>
-            <td class="num"><%= call.network_ms&.round(1) %> ms</td>
+            <td class="num"><%= fmt_ms(call.network_ms) %></td>
             <td class="mono">
               <% if worker %><a href="<%= monitoring_worker_path(worker) %>"><%= call.worker_name %></a>
               <% else %><%= call.worker_name %><% end %>

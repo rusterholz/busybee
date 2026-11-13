@@ -39,4 +39,5 @@
   <% if filter_params.except("range").any? %>
     <a href="<%= url_for(filter_params.slice("range")) %>" class="clear">Clear filters</a>
   <% end %>
+  <small class="zone">Times in <span data-time-zone>UTC</span></small>
 </form>

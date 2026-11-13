@@ -36,7 +36,18 @@ RSpec.describe Monitoring::JobTrends do
     [10, 20, 30, 40, 1000].each { |ms| run!("complete", at: earlier + 1.second, total: ms) }
     run!("handed_back", at: earlier + 1.second, total: 99_999)
 
-    expect(trends.latency).to eq("p50" => { earlier => 30.0 }, "p95" => { earlier => 808.0 })
+    expect(trends.latency["p50"].compact).to eq(earlier => 30.0)
+    expect(trends.latency["p95"].compact).to eq(earlier => 808.0)
+  end
+
+  it "leaves a bucket with no resolved runs empty, so the line breaks there instead of dipping to zero" do
+    run!("complete", at: earlier, total: 10)
+    run!("ready", at: now)
+
+    expect(trends.latency["p95"].keys).to eq(window.buckets)
+    expect(trends.latency["p95"][now]).to be_nil
+    expect(trends.failure_rate.keys).to eq(window.buckets)
+    expect(trends.failure_rate.values_at(earlier, now)).to eq([0.0, nil])
   end
 
   it "rates failures against completed, failed and errored runs, BPMN errors not counted as failures" do
@@ -46,13 +57,13 @@ RSpec.describe Monitoring::JobTrends do
     run!("failed", at: earlier)
     run!("handed_back", at: earlier)
 
-    expect(trends.failure_rate).to eq(earlier => 50.0)
+    expect(trends.failure_rate[earlier]).to eq(50.0)
   end
 
   it "leaves out runs activated before the range" do
     run!("complete", at: now - 20.minutes, total: 5)
 
-    expect(trends.latency).to eq("p50" => {}, "p95" => {})
+    expect(trends.latency.values.flat_map { |series| series.values.compact }).to be_empty
     expect(trends.throughput["complete"].values.sum).to eq(0)
   end
 end

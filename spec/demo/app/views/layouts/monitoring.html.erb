@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="5">
-  <title>Busybee Monitoring — Dropship Co.</title>
+  <title>Busybee Monitoring · Dropship Co.</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
           integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
@@ -17,6 +17,18 @@
     Chart.defaults.borderColor = "#2c2c2a";
     Chart.defaults.font.family = 'ui-monospace, "SF Mono", Menlo, monospace';
     Chart.defaults.font.size = 11;
+
+    // Every time on the page in the browser's zone, the one Chart.js draws its axes in.
+    document.addEventListener("DOMContentLoaded", () => {
+      const seconds = { hour: "numeric", minute: "2-digit", second: "2-digit" };
+      document.querySelectorAll("time[data-local]").forEach((el) => {
+        const options = el.dataset.local === "millis" ? { ...seconds, fractionalSecondDigits: 3 } : seconds;
+        el.textContent = new Date(el.getAttribute("datetime")).toLocaleTimeString([], options);
+      });
+      document.querySelectorAll("[data-time-zone]").forEach((el) => {
+        el.textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      });
+    });
   </script>
   <%= csrf_meta_tags %>
   <style>
@@ -46,6 +58,7 @@
     .filter-row label { margin-bottom: 0; font-size: 0.8rem; color: var(--pico-muted-color); min-width: 14rem; }
     .filter-row select { margin-bottom: 0; font-size: 0.85rem; padding-top: 0.4rem; padding-bottom: 0.4rem; }
     .filter-row .clear { font-size: 0.8rem; padding-bottom: 0.5rem; }
+    .filter-row .zone { margin-left: auto; padding-bottom: 0.5rem; color: var(--pico-muted-color); font-size: 0.75rem; }
     .ranges { display: inline-flex; width: auto; margin-bottom: 0; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); overflow: hidden; }
     .ranges a { padding: 0.45rem 0.9rem; text-decoration: none; color: var(--pico-muted-color); font-size: 0.85rem; }
     .ranges a[aria-current] { background: var(--pico-primary-background); color: var(--pico-primary-inverse); }
@@ -128,7 +141,7 @@
   </main>
 
   <footer class="container">
-    <small>What busybee is doing — recorded via lifecycle hooks, not the business app.</small>
+    <small>What busybee is doing, recorded via lifecycle hooks, not the business app.</small>
   </footer>
 </body>
 </html>

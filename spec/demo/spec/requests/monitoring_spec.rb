@@ -99,6 +99,17 @@ RSpec.describe "Monitoring" do
       expect(body).not_to include("errmsg-01")
     end
 
+    it "renders each time for the browser to show in its own zone, the one the charts use, and names it" do
+      at = 1.minute.ago.utc.change(usec: 0)
+      run!(1, at: at)
+
+      get "/monitoring/workers"
+
+      expect(body).to include(%(<time datetime="#{at.iso8601(3)}" data-local="seconds">),
+                              "#{at.strftime('%H:%M:%S')} UTC</time>")
+      expect(body).to include("<span data-time-zone>UTC</span>")
+    end
+
     it "narrows recent runs to failed ones with the local toggle" do
       run!(1, status: "failed", error_message: "boom-failed")
       run!(2, status: "complete", error_message: "quiet-complete")

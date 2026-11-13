@@ -22,13 +22,19 @@ module Monitoring
     def latency
       rows = @scope.resolved.where.not(total_duration_ms: nil).group(@bucket).
              pluck(@bucket, Arel.sql(JobRun.percentile_sql(0.5)), Arel.sql(JobRun.percentile_sql(0.95)))
-      { "p50" => rows.to_h { |at, p50, _| [at, p50.round(1)] }, "p95" => rows.to_h { |at, _, p95| [at, p95.round(1)] } }
+      { "p50" => every_bucket(rows.to_h { |at, p50, _| [at, p50.round(1)] }),
+        "p95" => every_bucket(rows.to_h { |at, _, p95| [at, p95.round(1)] }) }
     end
 
-    # Percent of resolved runs that failed, per bucket with any resolved run.
+    # Percent of resolved runs that failed, per bucket.
     def failure_rate
-      @scope.resolved.group(@bucket).pluck(@bucket, Arel.sql(JobRun.share_sql("failed"))).
-        to_h { |at, pct| [at, pct.to_f.round(1)] }
+      every_bucket(@scope.resolved.group(@bucket).pluck(@bucket, Arel.sql(JobRun.share_sql("failed"))).
+                     to_h { |at, pct| [at, pct.to_f.round(1)] })
     end
+
+    private
+
+    # A value for every bucket, nil where nothing resolved: a gap in the line, not a zero.
+    def every_bucket(values) = @window.buckets.index_with { |at| values[at] }
   end
 end
