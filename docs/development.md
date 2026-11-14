@@ -392,8 +392,12 @@ The test starts the Docker stack at speed 30 for fast feedback, creates orders, 
 Separate from the smoke test, the demo has a spec suite of its own. It covers what matters from the *app's* perspective rather than the gem's — that the simulation's speed scaling behaves, that each BPMN process routes through its gateways and reaches its end event, that the workers map their inputs and outputs as the models expect:
 
 ```bash
-cd spec/demo && bundle exec rspec
+cd spec/demo
+bin/demo db          # the monitoring database (TimescaleDB on localhost:55432), alone
+bundle exec rspec
 ```
+
+The suite needs that Postgres: the demo's monitoring domain lives there while the business domains stay on SQLite, and the suite stops at boot with a message naming `bin/demo db` when it can't connect. `bin/demo db` starts only the database container, leaving ports 26500 and 9200 free for `rake zeebe:start`.
 
 Run it whenever you refactor the demo or change how it exercises the gem. The smoke test and this suite check different things and neither substitutes for the other: the smoke test drives the real stack and asserts on **application** state (orders reach `fulfilled`, shipments delivered, drivers released), while the BPMN specs are the only thing that asserts a **process instance actually completes**. A process that deadlocks after its last service task will pass the smoke test and fail here.
 
