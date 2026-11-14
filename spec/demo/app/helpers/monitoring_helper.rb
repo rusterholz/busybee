@@ -16,7 +16,9 @@ module MonitoringHelper
 
   CHART_DEFAULTS = { height: "220px", legend: "bottom", points: false, curve: false, thousands: ",",
                      library: { animation: false, maintainAspectRatio: false,
-                                scales: { x: { ticks: { maxRotation: 0, autoSkipPadding: 24 } } } } }.freeze
+                                scales: { x: { ticks: { maxRotation: 0, autoSkipPadding: 24 },
+                                               time: { displayFormats: { second: "h:mm:ss a", minute: "h:mm a",
+                                                                         hour: "h a" } } } } } }.freeze
 
   def chart(kind, data, **options) = public_send(kind, data, **CHART_DEFAULTS.deep_merge(options))
 

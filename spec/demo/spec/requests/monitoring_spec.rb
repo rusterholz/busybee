@@ -316,7 +316,8 @@ RSpec.describe "Monitoring" do
       get "/monitoring/runs/901"
 
       expect(last_response.status).to eq(200)
-      expect(body).to include("plan_shipments", "plan-shipments-task", "complete_job", "logistics-worker-x")
+      expect(body).to include("plan_shipments", "plan-shipments-task", "complete_job", "logistics-worker-x",
+                              "every gRPC call made for this job, across its activations, in order")
     end
   end
 end

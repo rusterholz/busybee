@@ -60,7 +60,7 @@
 </section>
 
 <section>
-  <h2>Call Sequence <small>every gRPC call this run issued, in order</small></h2>
+  <h2>Call Sequence <small>every gRPC call made for this job, across its activations, in order</small></h2>
   <% if @calls.any? %>
     <table>
       <thead><tr><th class="num">Seq</th><th>RPC</th><th>Status</th><th class="num">Network</th><th>Worker</th></tr></thead>
