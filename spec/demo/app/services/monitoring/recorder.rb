@@ -113,6 +113,13 @@ module Monitoring
         end
       end
 
+      # Kill the writer and discard everything queued: the executor and both lanes
+      # start fresh on the next write. For specs; production ends in shutdown!.
+      def reset!
+        @executor&.kill
+        @executor = @lanes = nil
+      end
+
       # Drain the queue and stop the writer, registered at_exit (initializer).
       # Ruby's exit sequence runs at_exit handlers, then KILLS remaining threads,
       # then runs finalizers; a writer killed mid-write inside a native driver can

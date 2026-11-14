@@ -290,8 +290,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
     before { allow(described_class).to receive(:executor).and_call_original }
 
     after do
-      described_class.instance_variable_get(:@executor)&.kill
-      described_class.instance_variable_set(:@executor, nil)
+      described_class.reset!
     end
 
     it "waits for queued writes before returning" do
@@ -325,8 +324,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
     before { allow(described_class).to receive(:executor).and_call_original }
 
     after do
-      described_class.instance_variable_get(:@executor)&.kill
-      described_class.instance_variable_set(:@executor, nil)
+      described_class.reset!
       Monitoring::EngineCall.delete_all
     end
 
@@ -347,8 +345,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
     before { allow(described_class).to receive(:executor).and_call_original }
 
     after do
-      described_class.instance_variable_get(:@executor)&.kill
-      described_class.instance_variable_set(:@executor, nil)
+      described_class.reset!
       Monitoring::JobRun.delete_all
     end
 
@@ -372,8 +369,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
     before { allow(described_class).to receive(:executor).and_call_original }
 
     after do
-      described_class.instance_variable_get(:@executor)&.kill
-      described_class.instance_variable_set(:@executor, nil)
+      described_class.reset!
       Monitoring::WorkerProcess.delete_all
     end
 
@@ -398,8 +394,7 @@ RSpec.describe Monitoring::Recorder, :busybee do
     before { allow(described_class).to receive(:executor).and_call_original }
 
     after do
-      described_class.instance_variable_get(:@executor)&.kill
-      described_class.instance_variable_set(:@executor, nil)
+      described_class.reset!
     end
 
     it "returns true once the queued lifecycle writes land, leaving the executor accepting" do

@@ -34,6 +34,8 @@ RSpec.configure do |config|
     allow(Monitoring::Recorder).to receive(:executor).and_return(Concurrent::ImmediateExecutor.new)
   end
 
+  config.after { Monitoring::Recorder.reset! }
+
   # Worker specs opt in to busybee's helpers as a directory. They keep only the
   # perform hooks, which hold the domain transactions; the monitoring hooks would
   # write rows, some from an async worker's thread, outside the transaction.
