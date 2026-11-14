@@ -36,6 +36,10 @@ module Monitoring
 
     BATCH_SIZE = 200
 
+    # Guards the lazy construction of the executor and lanes: sibling runners
+    # fire their first hooks concurrently.
+    INIT = Mutex.new
+
     class << self
       def record_activation(job)
         upsert(JobRun, activation(job),
@@ -109,17 +113,16 @@ module Monitoring
       # One background thread: posts never block the runner, and each lane's
       # writes land in the order they were posted, a batch per transaction.
       def executor
-        @executor ||= begin
-          @lanes = nil
-          Concurrent::SingleThreadExecutor.new(fallback_policy: :discard)
-        end
+        INIT.synchronize { @executor ||= Concurrent::SingleThreadExecutor.new(fallback_policy: :discard) }
       end
 
       # Kill the writer and discard everything queued: the executor and both lanes
       # start fresh on the next write. For specs; production ends in shutdown!.
       def reset!
-        @executor&.kill
-        @executor = @lanes = nil
+        INIT.synchronize do
+          @executor&.kill
+          @executor = @lanes = nil
+        end
       end
 
       # Drain the queue and stop the writer, registered at_exit (initializer).
@@ -192,12 +195,14 @@ module Monitoring
       # Queue one write for the writer thread. Each pass lands every queued
       # lifecycle write, then up to BATCH_SIZE telemetry writes, a transaction each.
       def write(label, lane: :telemetry, &work)
-        writer = executor # first, since a new executor starts new lanes
+        writer = executor
         lanes.fetch(lane) << [label, work]
         writer.post { drain }
       end
 
-      def lanes = @lanes ||= { lifecycle: Thread::Queue.new, telemetry: Thread::Queue.new }
+      def lanes
+        INIT.synchronize { @lanes ||= { lifecycle: Thread::Queue.new, telemetry: Thread::Queue.new } }
+      end
 
       def drain
         land_batch(take(:lifecycle, Float::INFINITY))

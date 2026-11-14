@@ -284,6 +284,32 @@ RSpec.describe Monitoring::Recorder, :busybee do
     end
   end
 
+  describe "first writes from several threads at once" do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after { described_class.reset! }
+
+    it "share one executor and land every write" do
+      landed = Concurrent::AtomicFixnum.new
+      start = Concurrent::CountDownLatch.new(1)
+      executors = Concurrent::Array.new
+
+      threads = Array.new(16) do
+        Thread.new do
+          start.wait
+          described_class.send(:write, "racing") { landed.increment }
+          executors << described_class.executor
+        end
+      end
+      start.count_down
+      threads.each(&:join)
+      described_class.shutdown!
+
+      expect(executors.uniq.size).to eq(1)
+      expect(landed.value).to eq(16)
+    end
+  end
+
   # The drain semantics need the real background executor, not the file-wide
   # immediate stub — the unit under test is the wait across the writer thread.
   describe ".shutdown!" do
