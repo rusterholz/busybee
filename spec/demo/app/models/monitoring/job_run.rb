@@ -17,8 +17,7 @@ module Monitoring
     scope :resolved, -> { where(status: RESOLVED) }
 
     class << self
-      # Exact percentile of total time, as a SELECT expression.
-      def percentile_sql(fraction) = "percentile_cont(#{Float(fraction)}) WITHIN GROUP (ORDER BY total_duration_ms)"
+      def percentile_sql(fraction, column = :total_duration_ms) = super
 
       # Percent of resolved runs with a status, as a SELECT expression.
       def share_sql(status)

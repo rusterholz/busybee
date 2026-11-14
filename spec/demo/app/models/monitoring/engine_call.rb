@@ -24,6 +24,10 @@ module Monitoring
     # A job's calls in observation order (seq is a per-process monotonic stamp;
     # a job's calls all issue from one worker process, so it orders them true).
     scope :for_job, ->(job_key) { where(job_key: job_key).order(:seq) }
+    scope :within, ->(window) { where(at: window.from..window.to) }
+
+    # The fetch RPCs, whose network time is mostly the long-poll or stream wait for work.
+    LONG_POLLS = %w[activate_jobs stream_activated_jobs].freeze
 
     class << self
       # The row a resolved call becomes, or nil for a call with no observed

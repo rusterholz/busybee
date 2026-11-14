@@ -10,11 +10,17 @@ module MonitoringHelper
   # Categorical series, in a fixed order checked for color-vision deficiency on a dark surface.
   SERIES_COLORS = %w[#3987e5 #d95926 #199e70 #c98500 #d55181 #008300 #9085e9 #e66767].freeze
 
+  # Each rpc keeps its series color whatever else is on the chart.
+  RPCS = %w[complete_job fail_job throw_error update_job_timeout publish_message create_process_instance
+            update_job_retries deploy_resource].freeze
+
   CHART_DEFAULTS = { height: "220px", legend: "bottom", points: false, curve: false, thousands: ",",
                      library: { animation: false, maintainAspectRatio: false,
                                 scales: { x: { ticks: { maxRotation: 0, autoSkipPadding: 24 } } } } }.freeze
 
   def chart(kind, data, **options) = public_send(kind, data, **CHART_DEFAULTS.deep_merge(options))
+
+  def rpc_color(rpc) = (slot = RPCS.index(rpc.to_s)) ? SERIES_COLORS[slot] : "#898781"
 
   # Pins a chart's time axis to the whole range, however much of it has data.
   def time_axis(window) = { xmin: window.from.iso8601, xmax: window.to.iso8601 }

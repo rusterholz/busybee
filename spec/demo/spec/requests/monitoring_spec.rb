@@ -181,6 +181,53 @@ RSpec.describe "Monitoring" do
   end
 
   describe "Infrastructure page" do
+    def call!(rpc, **attrs)
+      Monitoring::EngineCall.create!(rpc: rpc, status: "succeeded", network_ms: 12.0, seq: 1.0,
+                                     at: 1.minute.ago, job_type: "pick", **attrs)
+    end
+
+    it "times each rpc's network calls, naming the long-poll fetches it leaves out" do
+      call!("complete_job")
+      call!("activate_jobs", network_ms: 30_000.0)
+
+      get "/monitoring/infrastructure"
+
+      expect(body).to include("<td><code>complete_job</code></td>")
+      expect(body).not_to include("<td><code>activate_jobs</code></td>")
+      expect(body).to include("activate_jobs</code> and <code>stream_activated_jobs</code>")
+    end
+
+    it "charts replicas per job type, captioned with how a killed worker keeps counting" do
+      Monitoring::WorkerProcess.create!(worker_name: "w1", job_type: "pick", status: "running",
+                                        started_at: 10.minutes.ago)
+      Monitoring::WorkerProcess.create!(worker_name: "w2", job_type: "ship", status: "running",
+                                        started_at: 10.minutes.ago)
+
+      get "/monitoring/infrastructure?job_type[]=pick&job_type[]=nope"
+
+      expect(body).to include("killed before its shutdown hooks", "a day")
+      expect(body).to include("<h3>pick</h3>")
+      expect(body).not_to include("<h3>ship</h3>")
+    end
+
+    it "lists errored calls by class and where they came from, and errored worker stops" do
+      call!("complete_job", status: "errored", error_class: "Busybee::GRPC::Error", error_message: "gateway gone",
+                            worker_class: "PickWorker")
+      Monitoring::WorkerProcess.create!(worker_name: "w1", job_type: "pick", worker_class: "PickWorker",
+                                        status: "shutdown", reason: "unhealthy", error_class: "Sim::Rollover",
+                                        shutdown_at: 1.minute.ago)
+
+      get "/monitoring/infrastructure?worker_status=all"
+
+      expect(body).to include("Busybee::GRPC::Error", "gateway gone", "Sim::Rollover")
+    end
+
+    it "says the workflow filter doesn't apply to it" do
+      get "/monitoring/infrastructure?workflow=ship_order"
+
+      expect(body).to include("The workflow filter doesn't apply here")
+    end
+
     it "shows running workers by default; worker_status=all reveals the stopped ones" do
       worker!("oms-worker-live1", "Oms::UpdateOrderStatusWorker")
       worker!("oms-worker-dead1", "Oms::UpdateOrderStatusWorker", status: "shutdown")

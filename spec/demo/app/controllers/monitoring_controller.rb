@@ -35,14 +35,14 @@ class MonitoringController < ApplicationController
     @slow_instances = Monitoring::SlowInstances.new(job_scope, @window).rows
   end
 
+  # Calls and incarnations serve job types, not workflows, so the workflow filter doesn't apply here.
   def infrastructure
-    @worker_status = params[:worker_status].presence || "running"
-    workers = Monitoring::WorkerProcess.recent
-    workers = workers.where(status: @worker_status) unless @worker_status == "all"
-    @workers = workers.to_a
-    @workers_exist = Monitoring::WorkerProcess.exists?
-    @last_calls = @liveness.last_call_at(@workers.map(&:worker_name))
-    @call_stats = Monitoring::CallStats.new
+    calls = by_job_type(Monitoring::EngineCall.all)
+    @network = Monitoring::NetworkStats.new(calls, @window)
+    @errors = Monitoring::Errors.new(calls, by_job_type(Monitoring::WorkerProcess.all), @window)
+    @replicas = by_job_type_keys(Monitoring::Replicas.new(from: @window.from, to: @window.to,
+                                                          step: @window.bucket).series)
+    load_workers
   end
 
   # One incarnation's full detail: everything the index line compresses, plus
@@ -109,6 +109,18 @@ class MonitoringController < ApplicationController
   end
 
   def load_liveness = @liveness = Monitoring::Liveness.new
+
+  def load_workers
+    @worker_status = params[:worker_status].presence || "running"
+    workers = by_job_type(Monitoring::WorkerProcess.recent)
+    workers = workers.where(status: @worker_status) unless @worker_status == "all"
+    @workers = workers.to_a
+    @workers_exist = Monitoring::WorkerProcess.exists?
+    @last_calls = @liveness.last_call_at(@workers.map(&:worker_name))
+  end
+
+  def by_job_type(scope) = @selected_types.any? ? scope.where(job_type: @selected_types) : scope
+  def by_job_type_keys(series) = @selected_types.any? ? series.slice(*@selected_types) : series
 
   def job_scope(by_workflow: true)
     scope = Monitoring::JobRun.all

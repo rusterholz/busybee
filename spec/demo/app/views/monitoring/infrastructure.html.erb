@@ -1,12 +1,127 @@
 <%
   lifetime = ->(w) { w.started_at ? "#{((w.shutdown_at || Time.current) - w.started_at).round}s" : "--" }
   idle = ->(at) { (s = (Time.current - at).round) < 60 ? "#{s}s" : "#{s / 60}m" }
+  network_rows = @network.rows
+  call_errors = @errors.calls
+  worker_stops = @errors.worker_stops
 %>
 
 <hgroup>
   <h1>Infrastructure</h1>
-  <p>Worker processes and their gRPC calls to the Zeebe gateway.</p>
+  <p>The worker processes and their gRPC calls to the Zeebe gateway over the last <%= @window.key %>: whether calls are slow or retried, how many replicas of each worker run, and where errors happen.</p>
 </hgroup>
+
+<% if @workflow %>
+  <p class="caption">The workflow filter doesn't apply here: gateway calls and worker processes serve job types, not workflows.</p>
+<% end %>
+
+<section>
+  <h2>Network Calls</h2>
+  <p class="caption">Gateway round-trip time per rpc. <code>activate_jobs</code> and <code>stream_activated_jobs</code> are left out: their time is mostly a wait for work.</p>
+  <% if network_rows.any? %>
+    <div class="chart-card">
+      <h3>p95 Network Time by RPC</h3>
+      <%= chart :line_chart, @network.p95_series.map { |rpc, data| { name: rpc, data: data, color: rpc_color(rpc) } },
+                **time_axis(@window), suffix: " ms", round: 1 %>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>RPC</th><th class="num">Calls</th><th class="num">p50</th><th class="num">p95</th>
+          <th class="num">Retried</th><th class="num">Max attempts</th><th class="num">Backoff</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% network_rows.each do |row| %>
+          <tr>
+            <td><code><%= row[:rpc] %></code></td>
+            <td class="num"><%= fmt_int(row[:calls]) %></td>
+            <td class="num"><%= fmt_ms(row[:p50_ms]) %></td>
+            <td class="num"><%= fmt_ms(row[:p95_ms]) %></td>
+            <td class="num"><%= fmt_int(row[:retried]) %></td>
+            <td class="num"><%= fmt_int(row[:max_attempts]) %></td>
+            <td class="num"><%= fmt_ms(row[:backoff_ms]) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p class="empty">No gateway calls in this range.</p>
+  <% end %>
+</section>
+
+<section>
+  <h2>Replicas</h2>
+  <p class="caption">Worker incarnations started and not yet shut down, per job type. A process killed before its shutdown hooks run records no shutdown, so it keeps counting here until the worker sweep removes it a day later.</p>
+  <% if @replicas.any? %>
+    <div class="replica-grid">
+      <% @replicas.each do |job_type, data| %>
+        <div class="chart-card">
+          <h3><%= job_type %></h3>
+          <%= chart :line_chart, data, **time_axis(@window), height: "110px", legend: false, min: 0,
+                    colors: [MonitoringHelper::SERIES_COLORS.first], dataset: { stepped: true },
+                    library: { scales: { y: { ticks: { precision: 0 } } } } %>
+        </div>
+      <% end %>
+    </div>
+  <% else %>
+    <p class="empty">No workers have reported yet.</p>
+  <% end %>
+</section>
+
+<section>
+  <h2>Errors</h2>
+  <div class="chart-card">
+    <h3>Errored Calls per Minute</h3>
+    <%= chart :line_chart, @errors.calls_per_minute, **time_axis(@window), legend: false, min: 0,
+              colors: [MonitoringHelper::STATUS_COLORS["failed"]] %>
+  </div>
+  <% if call_errors.any? %>
+    <table>
+      <thead>
+        <tr>
+          <th>Error</th><th>RPC</th><th>Job type</th><th>Worker</th><th class="num">Calls</th>
+          <th>Last</th><th>Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% call_errors.each do |row| %>
+          <tr>
+            <td><code><%= row[:error_class] %></code></td>
+            <td><code><%= row[:rpc] %></code></td>
+            <td><%= row[:job_type] || "--" %></td>
+            <td><%= row[:worker_class] || "--" %></td>
+            <td class="num"><%= fmt_int(row[:count]) %></td>
+            <td><%= local_time(row[:last_at]) %></td>
+            <td><%= row[:sample_message]&.truncate(80) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p class="empty">No errored calls in this range.</p>
+  <% end %>
+
+  <h3>Worker Stops with an Error</h3>
+  <% if worker_stops.any? %>
+    <table>
+      <thead><tr><th>Error</th><th>Worker</th><th>Reason</th><th class="num">Stops</th><th>Message</th></tr></thead>
+      <tbody>
+        <% worker_stops.each do |row| %>
+          <tr>
+            <td><code><%= row[:error_class] %></code></td>
+            <td><%= row[:worker_class] || "--" %></td>
+            <td><% if row[:reason] %><span class="badge <%= row[:reason] %>"><%= row[:reason] %></span><% end %></td>
+            <td class="num"><%= fmt_int(row[:count]) %></td>
+            <td><%= row[:sample_message]&.truncate(80) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p class="empty">No worker stopped with an error in this range.</p>
+  <% end %>
+</section>
 
 <section>
   <h2>Worker Processes
@@ -46,27 +161,5 @@
     <p class="empty">No workers in this phase.</p>
   <% else %>
     <p class="empty">No workers have reported yet.</p>
-  <% end %>
-</section>
-
-<section>
-  <h2>Engine Calls</h2>
-  <% if @call_stats.by_rpc.any? %>
-    <table>
-      <thead><tr><th>RPC</th><th class="num">Calls</th><th class="num">Mean</th><th class="num">Min</th><th class="num">Max</th></tr></thead>
-      <tbody>
-        <% @call_stats.by_rpc.each do |r| %>
-          <tr>
-            <td><code><%= r[:rpc] %></code></td>
-            <td class="num"><%= fmt_int(r[:count]) %></td>
-            <td class="num"><%= fmt_ms(r[:mean_ms]) %></td>
-            <td class="num"><%= fmt_ms(r[:min_ms]) %></td>
-            <td class="num"><%= fmt_ms(r[:max_ms]) %></td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
-  <% else %>
-    <p class="empty">No engine calls recorded yet.</p>
   <% end %>
 </section>
