@@ -1,0 +1,22 @@
+<%# A checkbox dropdown filter. Locals: key (query key), label, noun (plural), options, selected. %>
+<% choices = options | selected %>
+<div class="filter">
+  <span class="filter-label"><%= label %></span>
+  <details class="dropdown">
+    <summary>
+      <% if selected.empty? %>All <%= noun %>
+      <% elsif selected.one? %><%= selected.first %>
+      <% else %><%= selected.size %> of <%= choices.size %> <%= noun %><% end %>
+    </summary>
+    <ul>
+      <% choices.each do |choice| %>
+        <li><label><%= tag.input(type: "checkbox", name: "#{key}[]", value: choice,
+                                 checked: selected.empty? || selected.include?(choice)) %> <%= choice %></label></li>
+      <% end %>
+      <li class="actions">
+        <button type="submit">Apply</button>
+        <a href="<%= here(key => nil) %>">All</a>
+      </li>
+    </ul>
+  </details>
+</div>

@@ -48,6 +48,41 @@ RSpec.describe "Monitoring" do
       expect(body).to include('<meta http-equiv="refresh" content="5">') # reloads this same URL
     end
 
+    it "carries a selection of several workflows on every tab, as a multi-select" do
+      %w[ship_order prepare_order deliver_shipment].each_with_index { |wf, i| run!(i + 1, bpmn_process_id: wf) }
+
+      get "/monitoring/workers?workflow[]=ship_order&workflow[]=prepare_order"
+
+      selection = "workflow%5B%5D=ship_order&amp;workflow%5B%5D=prepare_order"
+      expect(body).to include(%(href="/monitoring/workflows?#{selection}"),
+                              %(href="/monitoring/infrastructure?#{selection}"))
+      expect(body).to include('<input type="checkbox" name="workflow[]" value="ship_order" checked="checked">',
+                              '<input type="checkbox" name="workflow[]" value="deliver_shipment">',
+                              "2 of 3 workflows")
+    end
+
+    it "sends a selection of every workflow to the clean URL, and reads no selection as all" do
+      run!(1, bpmn_process_id: "ship_order")
+      run!(2, bpmn_process_id: "prepare_order")
+
+      get "/monitoring/workers?range=6h&workflow[]=ship_order&workflow[]=prepare_order"
+      expect(last_response.headers["Location"]).to end_with("/monitoring/workers?range=6h")
+
+      get "/monitoring/workers"
+      expect(body).to include("All workflows", 'name="workflow[]" value="ship_order" checked="checked"',
+                              'name="workflow[]" value="prepare_order" checked="checked"')
+    end
+
+    it "ignores non-string workflow members" do
+      run!(1, bpmn_process_id: "ship_order")
+      run!(2, bpmn_process_id: "prepare_order")
+
+      get "/monitoring/workflows?workflow[]=ship_order&workflow[][a]=b"
+
+      expect(last_response.status).to eq(200)
+      expect(body).to match(%r{<summary>\s*ship_order\s*</summary>})
+    end
+
     it "sends a selection of every job type to the clean URL, and reads no selection as all" do
       run!(1, job_type: "pick")
       run!(2, job_type: "ship")
@@ -76,7 +111,7 @@ RSpec.describe "Monitoring" do
       get "/monitoring/workers?job_type[]=pick&job_type[][a]=b"
 
       expect(last_response.status).to eq(200)
-      expect(body).to include("<summary>\n        pick")
+      expect(body).to match(%r{<summary>\s*pick\s*</summary>})
     end
 
     it "offers the three ranges, marking the current one" do

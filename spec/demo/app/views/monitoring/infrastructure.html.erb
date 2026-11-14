@@ -11,7 +11,7 @@
   <p>The worker processes and their gRPC calls to the Zeebe gateway over the last <%= @window.key %>: whether calls are slow or retried, how many replicas of each worker run, and where errors happen.</p>
 </hgroup>
 
-<% if @workflow %>
+<% if @selected_workflows.any? %>
   <p class="caption">The workflow filter doesn't apply here: gateway calls and worker processes serve job types, not workflows.</p>
 <% end %>
 

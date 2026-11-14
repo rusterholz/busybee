@@ -18,36 +18,10 @@
   <% request.query_parameters.slice(*MonitoringController::LOCAL_KEYS).compact_blank.each do |name, value| %>
     <input type="hidden" name="<%= name %>" value="<%= value %>">
   <% end %>
-  <% types = @job_types | @selected_types %>
-  <div class="filter">
-    <span class="filter-label">Job types</span>
-    <details class="dropdown job-types">
-      <summary>
-        <% if @selected_types.empty? %>All job types
-        <% elsif @selected_types.one? %><%= @selected_types.first %>
-        <% else %><%= @selected_types.size %> of <%= types.size %> job types<% end %>
-      </summary>
-      <ul>
-        <% types.each do |job_type| %>
-          <li><label><%= tag.input(type: "checkbox", name: "job_type[]", value: job_type,
-                                   checked: @selected_types.empty? || @selected_types.include?(job_type)) %> <%= job_type %></label></li>
-        <% end %>
-        <li class="actions">
-          <button type="submit">Apply</button>
-          <a href="<%= here(job_type: nil) %>">All</a>
-        </li>
-      </ul>
-    </details>
-  </div>
-  <label class="filter">
-    <span class="filter-label">Workflow</span>
-    <select name="workflow" onchange="this.form.submit()">
-      <option value="">All workflows</option>
-      <% (@workflows | [@workflow].compact).each do |workflow| %>
-        <option value="<%= workflow %>" <%= "selected" if @workflow == workflow %>><%= workflow %></option>
-      <% end %>
-    </select>
-  </label>
+  <%= render "multi_select", key: :job_type, label: "Job types", noun: "job types",
+                             options: @job_types, selected: @selected_types %>
+  <%= render "multi_select", key: :workflow, label: "Workflows", noun: "workflows",
+                             options: @workflows, selected: @selected_workflows %>
   <% if filter_params.except("range").any? %>
     <a href="<%= page_path(filter_params.slice("range")) %>" class="clear">Clear filters</a>
   <% end %>

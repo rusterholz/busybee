@@ -89,7 +89,7 @@ class MonitoringController < ApplicationController
     @window = Monitoring::Window.new(params[:range])
     @job_types = filter_options(:job_type)
     @selected_types = string_list(:job_type)
-    @workflow = string_param(:workflow)
+    @selected_workflows = string_list(:workflow)
     @workflows = filter_options(:bpmn_process_id)
   end
 
@@ -104,11 +104,15 @@ class MonitoringController < ApplicationController
     Array(params[key]).grep(String).compact_blank
   end
 
-  # Every job type selected is the same as none: all of them, at the clean URL.
+  # Every option selected is the same as none: all of them, at the clean URL.
   def drop_complete_selection
-    return if @selected_types.empty? || @job_types.empty? || (@job_types - @selected_types).any?
+    complete = { job_type: [@job_types, @selected_types],
+                 workflow: [@workflows, @selected_workflows] }.select do |_, (options, selected)|
+      selected.any? && options.any? && (options - selected).empty?
+    end
+    return if complete.empty?
 
-    redirect_to here(job_type: nil)
+    redirect_to here(complete.transform_values { nil })
   end
 
   def filter_options(column)
@@ -138,7 +142,7 @@ class MonitoringController < ApplicationController
   def job_scope(by_workflow: true)
     scope = Monitoring::JobRun.all
     scope = scope.where(job_type: @selected_types) if @selected_types.any?
-    scope = scope.where(bpmn_process_id: @workflow) if @workflow && by_workflow
+    scope = scope.where(bpmn_process_id: @selected_workflows) if @selected_workflows.any? && by_workflow
     scope
   end
 

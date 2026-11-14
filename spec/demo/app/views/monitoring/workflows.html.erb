@@ -73,7 +73,7 @@
         <% end %>
       </tbody>
     </table>
-    <p class="caption">Each instance's job time is the summed total time of its resolved jobs within the range, against the median instance of its workflow. An instance still running, or one that began before the range, counts only the jobs inside it.</p>
+    <p class="caption">Each instance's job time is the summed total time of its resolved jobs within the range, against the median instance of its workflow. An instance still running, or one that began before the range, counts only the jobs inside it. Follows the job-type filter: an instance's job time sums only the selected job types.</p>
   <% else %>
     <p class="empty">No resolved runs with an instance key in this range.</p>
   <% end %>
