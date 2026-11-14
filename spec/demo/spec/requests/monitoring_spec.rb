@@ -59,6 +59,26 @@ RSpec.describe "Monitoring" do
       expect(body).to include("All job types", "<code>pick</code>", "<code>ship</code>")
     end
 
+    %w[job_type workflow worker_status].each do |key|
+      it "ignores a nested #{key} parameter instead of failing" do
+        get "/monitoring/workers?#{key}%5Ba%5D=b"
+        expect(last_response.status).to eq(200)
+
+        get "/monitoring/infrastructure?#{key}%5Ba%5D=b"
+        expect(last_response.status).to eq(200)
+      end
+    end
+
+    it "keeps the string members of a job_type list and drops the rest" do
+      run!(1, job_type: "pick")
+      run!(2, job_type: "ship")
+
+      get "/monitoring/workers?job_type[]=pick&job_type[][a]=b"
+
+      expect(last_response.status).to eq(200)
+      expect(body).to include("<summary>\n        pick")
+    end
+
     it "offers the three ranges, marking the current one" do
       get "/monitoring/workers?range=6h"
 

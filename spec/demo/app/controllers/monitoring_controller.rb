@@ -88,9 +88,20 @@ class MonitoringController < ApplicationController
   def read_filters
     @window = Monitoring::Window.new(params[:range])
     @job_types = filter_options(:job_type)
-    @selected_types = Array(params[:job_type]).compact_blank
-    @workflow = params[:workflow].presence
+    @selected_types = string_list(:job_type)
+    @workflow = string_param(:workflow)
     @workflows = filter_options(:bpmn_process_id)
+  end
+
+  # A query value only counts as a string (or a list of them); a nested hash or a
+  # list of hashes is ignored.
+  def string_param(key)
+    value = params[key]
+    value.presence if value.is_a?(String)
+  end
+
+  def string_list(key)
+    Array(params[key]).grep(String).compact_blank
   end
 
   # Every job type selected is the same as none: all of them, at the clean URL.
@@ -113,7 +124,7 @@ class MonitoringController < ApplicationController
   def load_liveness = @liveness = Monitoring::Liveness.new
 
   def load_workers
-    @worker_status = params[:worker_status].presence || "running"
+    @worker_status = string_param(:worker_status) || "running"
     workers = by_job_type(Monitoring::WorkerProcess.recent)
     workers = workers.where(status: @worker_status) unless @worker_status == "all"
     @workers = workers.to_a
