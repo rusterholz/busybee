@@ -71,8 +71,6 @@ Rails.application.config.to_prepare do
   Busybee.configure { |config| config.shutdown_on_errors = [Sim::Rollover] }
 end
 
-# Stop the recorder's writer cleanly before the VM starts killing threads — a
-# writer killed mid-write inside a native driver can orphan the connection's
-# lock, and the exit-time finalizer that closes it deadlocks the process (see
-# Monitoring::Recorder.shutdown!). at_exit runs before the thread-kill step.
+# Drain the recorder's writer before the VM kills threads at exit, so queued rows
+# land (see Monitoring::Recorder.shutdown!). at_exit runs before the thread-kill step.
 at_exit { Monitoring::Recorder.shutdown! }

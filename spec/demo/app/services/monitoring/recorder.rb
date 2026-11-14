@@ -64,9 +64,11 @@ module Monitoring
       # the job straight back unworked. Same rank as an execution because it is the
       # same slot in the bracket; without it a deploy leaves rows stuck at rank 0
       # forever, which is exactly the leak the pairing exists to prevent. Nothing
-      # was attempted, so there are no durations; the job is still :ready, and the
-      # run is handed_back (which also overtakes the handback's own fail_job,
-      # folded just before it as "failed"). A handback that failed to reach the
+      # was attempted, so the row has no perform or execution durations; it keeps
+      # resolved_at and total_duration_ms (activation to handback) from the
+      # handback's own fail_job fold. The job is still :ready, and the run is
+      # handed_back (which also overtakes that fold's "failed"). A handback that
+      # failed to reach the
       # engine is the worker's error, not the job's, which is why it comes off
       # worker_status.
       def record_handback(job)
@@ -121,11 +123,9 @@ module Monitoring
       end
 
       # Drain the queue and stop the writer, registered at_exit (initializer).
-      # Ruby's exit sequence runs at_exit handlers, then KILLS remaining threads,
-      # then runs finalizers; a writer killed mid-write inside a native driver can
-      # leave the connection's native lock held, and the finalizer that closes it
-      # then deadlocks the process: immortal PID 1, restart policy never fires.
-      # Draining here, before the kill step, removes that window; late posts fall
+      # Ruby's exit sequence runs at_exit handlers, then KILLS remaining threads.
+      # Draining here, before the kill, lets queued rows land within the timeout;
+      # past it, the remaining telemetry is dropped and logged. Late posts fall
       # to the executor's :discard policy.
       def shutdown!(timeout: 10)
         writer = @executor
