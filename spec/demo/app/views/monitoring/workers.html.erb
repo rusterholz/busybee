@@ -70,9 +70,9 @@
 <section>
   <h2>Recent Runs
     <% if @failed_only %>
-      <a class="local-toggle" href="<%= url_for(request.query_parameters.except("failed")) %>">show all runs</a>
+      <a class="local-toggle" href="<%= here(failed: nil) %>">show all runs</a>
     <% else %>
-      <a class="local-toggle" href="<%= url_for(request.query_parameters.merge("failed" => "1")) %>">failed only</a>
+      <a class="local-toggle" href="<%= here(failed: "1") %>">failed only</a>
     <% end %>
   </h2>
   <% if @runs.any? %>

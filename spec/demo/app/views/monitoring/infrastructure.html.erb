@@ -14,7 +14,7 @@
       <% if @worker_status == phase %>
         <span class="local-toggle"><%= phase %></span>
       <% else %>
-        <a class="local-toggle" href="<%= url_for(request.query_parameters.merge("worker_status" => phase)) %>"><%= phase %></a>
+        <a class="local-toggle" href="<%= here(worker_status: phase) %>"><%= phase %></a>
       <% end %>
     <% end %>
   </h2>

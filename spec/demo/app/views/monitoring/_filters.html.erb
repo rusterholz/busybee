@@ -10,12 +10,12 @@
 <form method="get" action="<%= request.path %>" class="filter-row">
   <div class="ranges" role="group" aria-label="Range">
     <% Monitoring::Window::KEYS.each do |key| %>
-      <a href="<%= url_for(request.query_parameters.merge("range" => key).compact_blank) %>"
+      <a href="<%= here(range: key) %>"
          <%= 'aria-current="true"'.html_safe if @window.key == key %>><%= key %></a>
     <% end %>
   </div>
   <input type="hidden" name="range" value="<%= @window.key %>">
-  <% request.query_parameters.except(*MonitoringController::FILTERS).compact_blank.each do |name, value| %>
+  <% request.query_parameters.slice(*MonitoringController::LOCAL_KEYS).compact_blank.each do |name, value| %>
     <input type="hidden" name="<%= name %>" value="<%= value %>">
   <% end %>
   <% types = @job_types | @selected_types %>
@@ -34,7 +34,7 @@
         <% end %>
         <li class="actions">
           <button type="submit">Apply</button>
-          <a href="<%= url_for(request.query_parameters.except("job_type")) %>">All</a>
+          <a href="<%= here(job_type: nil) %>">All</a>
         </li>
       </ul>
     </details>
@@ -49,7 +49,7 @@
     </select>
   </label>
   <% if filter_params.except("range").any? %>
-    <a href="<%= url_for(filter_params.slice("range")) %>" class="clear">Clear filters</a>
+    <a href="<%= page_path(filter_params.slice("range")) %>" class="clear">Clear filters</a>
   <% end %>
   <small class="zone">Times in <span data-time-zone>UTC</span></small>
 </form>

@@ -11,12 +11,13 @@ class MonitoringController < ApplicationController
 
   RECENT_LIMIT = 10
   FILTERS = %w[range job_type workflow].freeze
+  LOCAL_KEYS = %w[failed worker_status].freeze # page-local toggles
 
   before_action :read_filters, :load_liveness, except: :index
   before_action :drop_complete_selection, except: :index
-  helper_method :filter_params
+  helper_method :filter_params, :page_path, :here
 
-  def index = redirect_to(monitoring_workers_path(request.query_parameters))
+  def index = redirect_to(page_path(path: monitoring_workers_path))
 
   def workers
     @stats = Monitoring::Stats.new(job_scope.within(@window))
@@ -72,6 +73,16 @@ class MonitoringController < ApplicationController
     request.query_parameters.slice(*FILTERS).merge(overrides.stringify_keys).compact_blank
   end
 
+  # A path on this site carrying only the monitoring query keys; every link and
+  # redirect built from the query string goes through here.
+  def page_path(query = request.query_parameters, path: request.path)
+    query = query.to_h.stringify_keys.slice(*FILTERS, *LOCAL_KEYS).compact_blank
+    query.empty? ? path : "#{path}?#{query.to_query}"
+  end
+
+  # This page with some query keys changed (nil drops one).
+  def here(changes) = page_path(request.query_parameters.merge(changes.stringify_keys))
+
   def read_filters
     @window = Monitoring::Window.new(params[:range])
     @job_types = filter_options(:job_type)
@@ -84,7 +95,7 @@ class MonitoringController < ApplicationController
   def drop_complete_selection
     return if @selected_types.empty? || @job_types.empty? || (@job_types - @selected_types).any?
 
-    redirect_to url_for(request.query_parameters.except("job_type"))
+    redirect_to here(job_type: nil)
   end
 
   def filter_options(column)
