@@ -55,10 +55,12 @@ class MonitoringController < ApplicationController
     redirect_to monitoring_path
   end
 
-  # One run's full detail: timings, the full tag set, and its call sequence,
+  # One job key's activations (a handed-back or timed-out job is offered again
+  # under the same key), then the newest one's timings, tags and call sequence,
   # with each call linked back to the incarnation that made it.
   def run
-    @run = Monitoring::JobRun.where(job_key: params[:job_key]).recent.first!
+    @activations = Monitoring::JobRun.where(job_key: params[:job_key]).recent.to_a
+    @run = @activations.first or raise ActiveRecord::RecordNotFound
     @calls = Monitoring::EngineCall.for_job(@run.job_key)
     @call_workers = Monitoring::WorkerProcess.where(worker_name: @calls.map(&:worker_name).uniq,
                                                     job_type: @run.job_type).index_by(&:worker_name)

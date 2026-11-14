@@ -276,6 +276,17 @@ RSpec.describe "Monitoring" do
       expect(last_response.headers["Location"]).to include("/monitoring")
     end
 
+    it "lists every activation of a job key, newest first" do
+      run!(902, status: "handed_back", worker_name: "oms-worker-first", at: 2.minutes.ago)
+      run!(902, status: "complete", worker_name: "oms-worker-second", at: 1.minute.ago, total_duration_ms: 42.0)
+
+      get "/monitoring/runs/902"
+
+      expect(body).to include("Activations")
+      expect(body.index("oms-worker-second")).to be < body.index("oms-worker-first")
+      expect(body).to include('class="status-handed_back">handed_back', "42.0 ms")
+    end
+
     it "renders a run's full detail with its tags and call sequence" do
       run!(901, job_type: "plan_shipments", perform_duration_ms: 12.5, total_duration_ms: 30.0,
                 tags: { "element_id" => "plan-shipments-task", "retries" => 3 })
