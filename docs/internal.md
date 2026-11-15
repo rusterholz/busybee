@@ -406,6 +406,29 @@ From the Runner's perspective, `perform_job` has a simple two-outcome contract (
 
 ### Shutdown Sequence
 
+Three ways a run stops, and what each does to jobs and hooks (T1 to T3 as in Run Lifecycle):
+
+```mermaid
+flowchart TD
+    G["<b>stop!</b> a signal, unhealthy, your code, the gateway"]
+    K["<b>kill!</b> the CLI's second signal"]
+    X["<b>an error outside RECOVERABLE_ERRORS</b> (NoMemoryError, say), on any runner thread"]
+
+    G --> G1["intake closes; T1 fires"]
+    G1 --> G2["the job in flight finishes, with its job hooks; other jobs in hand are handed back"]
+    G2 --> G3["T2; the drain hands back each buffered job, firing on_job_not_executed"]
+    G3 --> G4["T3"]
+
+    K --> A
+    K --> K1["Streaming: the pump thread is killed and the buffer discarded, its count logged"]
+    K1 --> K2["the CLI calls exit!(1) after a bounded wait: no T2 or T3, the job in flight abandoned"]
+
+    X --> A
+    A{{"the fire alarm, process-wide"}}
+    A --> A1["every runner skips handbacks, the drain, on_job_activated and on_job_executed; closing hooks may be skipped"]
+    A1 --> A2["unresolved jobs return to the engine when their activation times out"]
+```
+
 **Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` (the set-once reason *is* the gate), then stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), and fire T1. In-progress `perform_job` completes; `run!`'s `ensure` waits for T1 to finish, fires T2, drains (remaining queued/yielded jobs are handed back via `handle_shutdown_job`, preserving the retry count), and fires T3.
 
 **Forced (`kill!`):** Base raises the fire alarm, so no runner in the process hands back or runs job hooks after it, then calls `stop!` with the reason it was given (`:kill` by default; `Multi`'s non-recoverable cascade passes the crash's reason instead). Streaming also kills the pump thread, logs how many activated jobs it is discarding, and flushes the queue (resetting the buffer gauge). Multi kills all child runners and the thread pool.
