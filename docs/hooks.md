@@ -467,6 +467,31 @@ A worker process run has four observable moments, in order:
 | `on_worker_stopping` | the worker began its shutdown drain: intake is closed, in-flight work finishing |
 | `on_worker_shutdown` | the run is over; the closing snapshot carries the final counters, `reason`, and `error` |
 
+Here is a whole run in order, with the job hooks its stop runs on the way out:
+
+```mermaid
+sequenceDiagram
+    participant S as Whatever stops it
+    participant R as busybee
+    participant H as Your hooks
+    participant E as Engine
+
+    R->>H: on_worker_started
+    loop until a stop begins
+        E->>R: jobs, each run through the job hooks
+    end
+    S->>R: stop (a signal, a health trigger, your code, the gateway, a crash)
+    Note over R: intake closes
+    S->>H: on_worker_stop_requested, on the thread that began the stop
+    Note over R: the job in flight finishes<br/>other jobs in hand go back<br/>on_worker_stop_requested finishes<br/>(waited up to shutdown_wait_timeout)
+    R->>H: on_worker_stopping
+    loop each job left in the buffer (buffered workers)
+        R->>E: hand the job back
+        R->>H: on_job_not_executed
+    end
+    R->>H: on_worker_shutdown
+```
+
 After a forced `kill!` or an error the process can't recover from, busybee may skip any of them, or let them overlap, to get out fast.
 
 Lifecycle hooks, these and the job hooks alike, are no substitute for logging and operational monitoring, and they aren't guaranteed to fire in every terminal situation.
