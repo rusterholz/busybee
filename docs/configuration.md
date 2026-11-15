@@ -286,6 +286,8 @@ Every setting that takes a length of time — here, in the [worker DSL](workers.
 | `"2000"` | 2,000 milliseconds — handy for values arriving from `ENV` |
 | `0.5` | half a millisecond; fractions are kept, and truncated to whole milliseconds only when the value reaches the wire |
 
+Spellings like `2.seconds` and `5.minutes` come from ActiveSupport's numeric core extension. Rails loads it for you; outside Rails, add `require "active_support/core_ext/numeric/time"` after `require "busybee"`.
+
 **A bare number always means milliseconds.** That is the one thing to remember, and it is also the one thing that is easy to get wrong: `default_message_ttl = 30` is a message that expires in thirty *milliseconds*. Busybee watches for that mistake and says so:
 
 ```

@@ -506,7 +506,7 @@ Not to be confused with the `description:` option on input and output declaratio
 
 #### `job_timeout`
 
-How long this worker is allowed to hold a job before the workflow engine assumes that the worker has crashed and will make the job available to another worker. Accepts an Integer (milliseconds) or `ActiveSupport::Duration`:
+How long this worker is allowed to hold a job before the workflow engine assumes that the worker has crashed and will make the job available to another worker. Accepts an Integer (milliseconds) or `ActiveSupport::Duration` (outside Rails, `2.minutes` needs [one require](configuration.md#how-busybee-reads-durations)):
 
 ```ruby
 job_timeout 120_000    # 2 minutes
