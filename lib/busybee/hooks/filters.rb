@@ -15,9 +15,8 @@ module Busybee
       # gRPC's own status set, so an upgrade there cannot leave this behind.
       GRPC_STATUSES = ::GRPC::Core::StatusCodes.constants.map { |name| name.to_s.downcase.to_sym }.freeze
 
-      # The RPCs busybee itself issues — deliberately not the gateway's full
-      # descriptor list, which carries seven calls busybee never makes and would
-      # therefore accept filters that can never fire.
+      # The RPCs busybee itself issues, not the gateway's full descriptor list,
+      # whose seven other calls would accept filters that can never fire.
       RPCS = %i[
         activate_jobs broadcast_signal cancel_process_instance complete_job
         create_process_instance deploy_resource fail_job publish_message
@@ -31,7 +30,7 @@ module Busybee
       CALL_STATUSES = %i[pending succeeded errored].freeze
 
       # Filter keys per noun, as [domain, vocabulary]. A nil vocabulary is an
-      # open one — job types, process ids, worker classes and stop reasons are
+      # open one: job types, process ids, worker classes and stop reasons are
       # all supplied by the adopter, so only the domain can be checked.
       FILTERS = {
         job: {
@@ -50,8 +49,8 @@ module Busybee
       }.freeze
 
       # Where a hook's moment narrows its noun's vocabulary. Around-hooks are
-      # here because filters are read when hooks are SELECTED — before the work
-      # runs — so they see the entry state, never the outcome. `[nil]` means the
+      # here because filters are read when hooks are SELECTED, before the work
+      # runs, so they see the entry state, never the outcome. `[nil]` means the
       # reader is always nil there, which only `error: false` can match.
       MOMENTS = {
         before_perform: { status: %i[ready], error: [nil] },
@@ -81,7 +80,7 @@ module Busybee
         # ====== Matching ======
 
         # Test whether a filter matches a value. Arrays match any element; scalars
-        # match by case equality, then equality (Class identity), then by name —
+        # match by case equality, then equality (Class identity), then by name;
         # and a Class is additionally offered its own name, so the same matchers
         # reach it however the adopter spelled the class.
         def match?(filter, value)
@@ -90,10 +89,9 @@ module Busybee
           scalar_match?(filter, value) || (value.is_a?(Class) && scalar_match?(filter, value.name))
         end
 
-        # The error: filter's semantics — the filter describes the error, or its
-        # absence. With no error present only `false` matches, every other matcher
-        # requires one (Procs aren't even called on nil); an Array matches if any
-        # element does.
+        # The error: filter describes the error, or its absence. With no error
+        # present only `false` matches, every other matcher requires one (Procs
+        # aren't even called on nil); an Array matches if any element does.
         def error_match?(filter, error)
           return error.nil? if filter == false
           return false if error.nil?
@@ -154,7 +152,7 @@ module Busybee
         def name?(object) = object.is_a?(String) || object.is_a?(Symbol)
 
         # Name-domain matchers (String/Regexp) see only the error's own class
-        # name, never its ancestry — hierarchy matching takes the live
+        # name, never its ancestry; hierarchy matching takes the live
         # Class/Module, mirroring rescue.
         def present_error_match?(filter, error)
           case filter
@@ -196,9 +194,9 @@ module Busybee
           filter.is_a?(Proc) || values.any? { |value| filter_match?(key, filter, value) }
         end
 
-        # Reject error: values outside the semantic table loudly at registration —
-        # under generic matching an implausible matcher (a Regexp against an
-        # exception instance) compiled fine and silently never fired.
+        # Reject error: values outside the semantic table loudly at registration,
+        # where an implausible matcher (a Regexp against an exception instance)
+        # would otherwise register fine and silently never fire.
         def validate_error_filter!(filter)
           case filter
           when true, false, Module, String, Regexp, Proc then nil
