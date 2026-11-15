@@ -148,7 +148,7 @@ RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
 **Multi-Tenant Mode:**
 
 ```bash
-# Start Zeebe with multi-tenancy enabled
+# Start Zeebe with the multi-tenancy flag set (see the note below)
 MULTITENANCY_ENABLED=true rake zeebe:start
 MULTITENANCY_ENABLED=true rake zeebe:health
 
@@ -156,7 +156,7 @@ MULTITENANCY_ENABLED=true rake zeebe:health
 MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
 ```
 
-**Note:** Full multi-tenancy testing requires Camunda Identity service for tenant authorization. The local Docker Compose environment uses insecure mode without Identity, so `:multi_tenant_only` tests are currently marked as pending. The test infrastructure (filtering, CI matrix) is ready for when Identity is configured.
+**Note:** The multi-tenant mode switches which specs run; it does not give you a cluster with tenancy. On Camunda 8.8 the compose file's `CAMUNDA_MULTITENANCY_ENABLED` is inert: a cluster started with it still rejects a `tenant_id` with "multi-tenancy is disabled". Enforcing tenancy needs a protected API (Identity/OIDC or basic auth), which the local compose environment doesn't run, so the one `:multi_tenant_only` spec is pending ("Requires Camunda Identity service").
 
 **Test Tagging:**
 - `:single_tenant_only` - Only runs when multi-tenancy is disabled
@@ -165,7 +165,7 @@ MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integr
 
 **CI Behavior:**
 
-CI runs the integration tests in parallel for both modes using a matrix strategy. Until Identity is configured, the multi-tenant run's `:multi_tenant_only` specs report as pending (see the note above).
+CI runs the integration tests in parallel for both modes using a matrix strategy. The multi-tenant row runs against the same tenancy-free cluster, so it skips the `:single_tenant_only` specs and reports its one `:multi_tenant_only` spec as pending (see the note above).
 
 ### Camunda Cloud Integration Tests
 
