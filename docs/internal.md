@@ -336,7 +336,7 @@ Runner                    # Base class: run!, stop!, stopping?, stop_reason, run
 
 ### Threading Model
 
-**Sequential processing guarantee:** In v0.3, all `perform_job` calls happen on the main thread. Worker authors do not need to think about concurrency.
+**Sequential processing guarantee:** Each runner calls `perform_job` for one job at a time, on the thread that called `run!` (under `Multi`, one pool thread per worker class), so a worker's `perform` never runs concurrently with itself.
 
 - **Polling:** single-threaded. `with_each_job` yields jobs sequentially.
 - **Streaming (inline mode, `buffer: false`):** single-threaded. `stream.each` calls `perform_job` directly.
