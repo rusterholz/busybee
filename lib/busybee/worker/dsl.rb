@@ -149,7 +149,7 @@ module Busybee
 
         raise InvalidWorkerDefinition,
               "`required:` and `default:` are mutually exclusive on input :#{name} " \
-              "— a default makes the input always available, so `required:` is meaningless"
+              "(a default makes the input always available, so `required:` is meaningless)"
       end
 
       def define_input_accessor(input)
@@ -173,7 +173,7 @@ module Busybee
 
         if RUBY_KEYWORDS.include?(str_name)
           raise InvalidWorkerDefinition,
-                "Cannot define accessor :#{name} — it's a Ruby keyword. " \
+                "Cannot define accessor :#{name}: it's a Ruby keyword. " \
                 "Use `accessor_name:` or `define_accessor: false`"
         end
 

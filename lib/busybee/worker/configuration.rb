@@ -245,7 +245,7 @@ module Busybee
 
         raise InvalidWorkerDefinition,
               "`define_accessor: false` and `accessor_name:` are mutually exclusive on input :#{input.name} " \
-              "— no accessor will be defined, so naming it is meaningless"
+              "(no accessor will be defined, so naming it is meaningless)"
       end
 
       def validate_unique_input!(name)
@@ -270,7 +270,7 @@ module Busybee
         return unless kwargs[:buffer] == false && kwargs.key?(:buffer_throttle)
 
         raise InvalidWorkerDefinition,
-              "`buffer_throttle:` cannot be set when `buffer: false` — there is no buffer to throttle"
+              "`buffer_throttle:` cannot be set when `buffer: false`: there is no buffer to throttle"
       end
 
       # Coerces true → 0 (the minimal throttle) and nil → false (none); anything

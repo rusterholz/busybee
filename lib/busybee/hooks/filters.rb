@@ -203,7 +203,7 @@ module Busybee
           when Array then filter.each { |element| validate_error_filter!(element) }
           when nil
             raise ArgumentError,
-                  "error: does not accept nil inside an array — use `error: false` to match \"no error\""
+                  "error: does not accept nil inside an array; use `error: false` to match \"no error\""
           else
             raise ArgumentError,
                   "error: accepts true/false, an exception Class or Module, a String or Regexp " \
