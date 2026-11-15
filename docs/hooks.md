@@ -257,19 +257,40 @@ A job has two lifecycles, and the hook names tell you which one you're attaching
 
 Here is where each fires, in order:
 
-```text
-on_job_activated            # the runner received the job
-   (buffer wait, if the job came through a streaming buffer)
-around_job_execution ─┐     # the system envelope opens
-   input validation   │
-   before_perform     │
-   around_perform ─┐  │     # your envelope opens
-      perform      │  │
-   around_perform ─┘  │
-   auto-complete / auto-fail
-   after_perform      │     # however the attempt exited (see below)
-around_job_execution ─┘
-on_job_executed             # the runner finished with the job it ran
+```mermaid
+sequenceDiagram
+    participant E as Engine
+    participant B as busybee
+    participant H as Your hooks
+    participant P as Your perform
+
+    E->>B: a job, by poll or stream
+    B->>H: on_job_activated
+    Note over B: buffer wait (buffered workers only)
+    alt a stop reached the job first
+        rect rgba(230, 120, 30, 0.12)
+            Note over E,P: Handed Back: nothing runs
+            B->>E: hand the job back, retries untouched
+            B->>H: on_job_not_executed
+        end
+    else the job runs
+        rect rgba(60, 130, 220, 0.10)
+            Note over E,P: Executed
+            B->>+H: around_job_execution opens
+            Note over B: input validation
+            B->>H: before_perform
+            B->>+H: around_perform opens
+            H->>+P: perform.call runs perform
+            P-->>-H: returns or raises
+            H-->>-B: around_perform closes
+            Note over B: output validation (a failure auto-fails)
+            B->>E: auto-complete or auto-fail
+            B->>H: after_perform, however perform exited
+            H-->>-B: around_job_execution closes
+            B->>H: on_job_executed
+            Note over B,P: a hook that resolves the job early skips perform<br/>and the perform hooks still ahead of it
+        end
+    end
 ```
 
 A job that never gets that far, because the worker had it in hand when a shutdown arrived, ends at `on_job_not_executed` instead. Exactly one of the two fires for every job the runner activated, except after a forced `kill!` or an error the process can't recover from, when busybee may skip hooks to get out fast (see [below](#watching-the-system-lifecycle)).
