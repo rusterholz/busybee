@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
 require "json"
 
 require "busybee/testing/activated_job"
