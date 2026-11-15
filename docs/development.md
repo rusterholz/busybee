@@ -540,7 +540,7 @@ excluded.each { |f| puts \"  - #{f}\" }
 Before each release, audit the complete file list:
 
 ```bash
-bundle exec ruby -e 'puts Gem::Specification.load("busybee.gemspec").files'
+bundle exec ruby -e 'puts Gem::Specification.load("busybee.gemspec").files.select { File.file?(_1) }'
 ```
 
 **Files that SHOULD be in the gem:**
