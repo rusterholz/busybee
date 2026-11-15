@@ -114,6 +114,41 @@ RSpec.describe "Monitoring" do
       expect(body).to match(%r{<summary>\s*pick\s*</summary>})
     end
 
+    describe "redirects" do
+      def location = URI.parse(last_response.headers["Location"])
+
+      def expect_on_site
+        expect(last_response.status).to eq(302)
+        expect(location.host).to eq("example.org")
+        expect(location.path).not_to start_with("//")
+      end
+
+      it "stay on this host for the index, whatever host or protocol params it is given" do
+        get "/monitoring?host=evil.test&protocol=https%3A%2F%2Fevil.test&only_path=false"
+
+        expect_on_site
+        expect(location.path).to eq("/monitoring/workers")
+      end
+
+      it "stay on this host for a full selection, with host and protocol params in the query" do
+        run!(1, job_type: "pick")
+
+        get "/monitoring/workers?job_type[]=pick&host=evil.test&protocol=https%3A%2F%2Fevil.test"
+
+        expect_on_site
+        expect(location.path).to eq("/monitoring/workers")
+      end
+
+      it "never carry a double-slash path, which the router already refuses to match" do
+        run!(1, job_type: "pick")
+
+        get "//monitoring/workers?job_type[]=pick"
+
+        expect(last_response.status).to eq(404)
+        expect(last_response.headers["Location"]).to be_nil
+      end
+    end
+
     it "offers the three ranges, marking the current one" do
       get "/monitoring/workers?range=6h"
 

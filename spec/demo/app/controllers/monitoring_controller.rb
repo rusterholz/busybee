@@ -15,7 +15,7 @@ class MonitoringController < ApplicationController
 
   before_action :read_filters, :load_liveness, except: :index
   before_action :drop_complete_selection, except: :index
-  helper_method :filter_params, :page_path, :here
+  helper_method :filter_params, :page_path, :here, :this_page
 
   def index = redirect_to(page_path(path: monitoring_workers_path))
 
@@ -76,11 +76,14 @@ class MonitoringController < ApplicationController
   end
 
   # A path on this site carrying only the monitoring query keys; every link and
-  # redirect built from the query string goes through here.
-  def page_path(query = request.query_parameters, path: request.path)
+  # redirect built from the query string goes through here. The path comes from
+  # route generation, never from the request.
+  def page_path(query = request.query_parameters, path: this_page)
     query = query.to_h.stringify_keys.slice(*FILTERS, *LOCAL_KEYS).compact_blank
     query.empty? ? path : "#{path}?#{query.to_query}"
   end
+
+  def this_page = url_for(action: action_name, only_path: true)
 
   # This page with some query keys changed (nil drops one).
   def here(changes) = page_path(request.query_parameters.merge(changes.stringify_keys))

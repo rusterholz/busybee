@@ -7,7 +7,7 @@
   <% end %>
 </nav>
 
-<form method="get" action="<%= request.path %>" class="filter-row">
+<form method="get" action="<%= this_page %>" class="filter-row">
   <div class="ranges" role="group" aria-label="Range">
     <% Monitoring::Window::KEYS.each do |key| %>
       <a href="<%= here(range: key) %>"
