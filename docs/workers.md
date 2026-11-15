@@ -28,6 +28,12 @@ Busybee is built around a workflow engine named [Zeebe](https://docs.camunda.io/
   - [Multiple Workers in One Process](#multiple-workers-in-one-process)
   - [YAML Configuration](#yaml-configuration)
   - [Configuration Precedence](#configuration-precedence)
+- [Message Correlation](#message-correlation)
+  - [The BPMN Side](#the-bpmn-side)
+  - [Publishing From a Worker](#publishing-from-a-worker)
+  - [When the Message Arrives First](#when-the-message-arrives-first)
+  - [Retries and Duplicates](#retries-and-duplicates)
+  - [Testing It](#testing-it)
 - [Testing Workers](#testing-workers)
   - [Setup](#setup)
   - [Basic Worker Testing](#basic-worker-testing)
@@ -882,6 +888,127 @@ The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `
 A `Busybee.credentials` object your app assigns keeps its own address over `--cluster-address`, and busybee logs that too, naming `Busybee.credentials.cluster_address`. `shutdown_wait_timeout` follows the same chain with top-level YAML in the flag's place. One exception: when `config.x.busybee` sets any credential key, Busybee builds its credentials while Rails boots, and an initializer that changes the cluster address afterward doesn't reach them; assign `Busybee.credentials` instead. Process-wide settings don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
+
+---
+
+## Message Correlation
+
+Some steps in a business process have to wait for something that happens somewhere else. In BPMN, a process instance waits at a **message intermediate catch event** (or a **receive task**), and a message published to the engine with a matching name and correlation key wakes it. Workers are a natural place to publish those messages, because the work that makes the awaited thing true is often a job in some *other* process instance.
+
+The [demo app](../spec/demo/README.md) does exactly this. When a shipment is packed but no driver is free, its `deliver_shipment` instance records a driver request and waits. When another delivery finishes, `Delivery::CompleteDriverDeliveryWorker`, working a job in *that* delivery's instance, frees the driver, claims the oldest open request, and publishes a `driver_available` message that wakes the instance that was waiting.
+
+### The BPMN Side
+
+The waiting process declares a message, with the name a publisher will use and a **correlation key** expression, and a catch event that references it. From the demo's `deliver_shipment.bpmn` (sequence flows omitted):
+
+```xml
+<bpmn:message id="Message_driver_available" name="driver_available">
+  <bpmn:extensionElements>
+    <zeebe:subscription correlationKey="= driver_request.id" />
+  </bpmn:extensionElements>
+</bpmn:message>
+
+<bpmn:intermediateCatchEvent id="wait_for_driver" name="Wait for Driver">
+  <bpmn:extensionElements>
+    <zeebe:ioMapping>
+      <zeebe:output source="= driver_id" target="driver.id" />
+      <zeebe:output source="= driver_name" target="driver.name" />
+    </zeebe:ioMapping>
+  </bpmn:extensionElements>
+  <bpmn:messageEventDefinition messageRef="Message_driver_available" />
+</bpmn:intermediateCatchEvent>
+```
+
+When an instance enters the catch event, Zeebe evaluates the correlation key expression against that instance's variables and opens a **subscription** for the message name and the resulting key. The key is fixed from then on: changing `driver_request.id` while the instance waits doesn't move the subscription, so the variable has to hold its final value by the time the instance arrives. In the demo, the `assign_driver` task sets it through an output mapping just before. The catch event's own output mappings then take what the message carried, here placing `driver_id` and `driver_name` under `driver`.
+
+### Publishing From a Worker
+
+Inside `perform`, `client` is the `Busybee::Client` that delivered the job (the same object as `job.client`), so a publish travels over the connection the job's own calls use. The demo worker's publish:
+
+```ruby
+def publish_driver_available!(request, driver)
+  client.publish_message(
+    "driver_available",
+    correlation_key: request.id,
+    vars: { driver_id: driver.id, driver_name: driver.name },
+    ttl: 30.seconds
+  )
+end
+```
+
+The full signature is `publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil)`:
+
+- `name` matches the message's `name` in the BPMN, not its `id`.
+- `correlation_key:` is the value the waiting instance's expression produced. Busybee sends it as a String, so `request.id` works whatever its type.
+- `vars:` is a Hash of variables delivered with the message.
+- `ttl:` is how long the engine holds the message for a subscription that hasn't opened yet (below). Like every duration in busybee it takes milliseconds or an `ActiveSupport::Duration`; `30.seconds` needs `require "active_support/core_ext/numeric/time"` outside Rails (see [How Busybee Reads Durations](configuration.md#how-busybee-reads-durations)).
+- `tenant_id:` names the tenant on a multi-tenant cluster.
+
+It returns the message's key, an Integer. A message that matches no subscription isn't an error: the engine accepts it and returns a key all the same. If the publish itself fails, it raises `Busybee::GRPC::Error`, which fails the job like any other error escaping `perform`, so the job comes back for a retry (see [Retries and Duplicates](#retries-and-duplicates)). Because it's a client call, your [call hooks](hooks.md) see it too, as `rpc: :publish_message`. The complete reference is in [Client: publish_message](client.md#publish_message).
+
+### When the Message Arrives First
+
+A publisher and a waiter race more often than you might expect. In the demo, a delivery can finish and claim a request in the moment between `assign_driver` recording that request and its instance reaching `wait_for_driver`, so the message can reach the engine before anyone is waiting for it.
+
+The message's **time-to-live** covers that gap. The engine holds a published message for its TTL, and an instance that opens a matching subscription within that window receives it, even though it started waiting after the publish. Once the TTL runs out, an unclaimed message is discarded. When you leave `ttl:` out, busybee uses [`Busybee.default_message_ttl`](configuration.md#default_message_ttl), 10 seconds by default; `ttl: 0` isn't held at all, and reaches only a subscription that is already open. Size the TTL to the longest gap you expect between the publish and the wait: the demo's 30 seconds is generous for a gap of a few task hops.
+
+### Retries and Duplicates
+
+Within its TTL, one message wakes at most one instance of a given process: once it has been received, the next instance of that process to wait on the same key doesn't get it. A second publish, though, is a second message. If a job publishes and then fails before it completes, its retry publishes again; the first message wakes the waiting instance, and the duplicate stays held for its TTL, ready to wake the next instance that waits on that key.
+
+Two habits keep that harmless:
+
+- **Use a correlation key that is unique to one wait.** The demo keys on the driver request's id, and each request is waited on once, so a duplicate has no second waiter to find.
+- **Make the publishing step safe to repeat.** On a retry, the demo's worker finds the request it already claimed and publishes for that one again, rather than claiming another request and waking a second shipment.
+
+Zeebe can also de-duplicate by a message ID, but `publish_message` doesn't set one.
+
+### Testing It
+
+In a unit spec, a [test client](#programming-failures) records every request that reaches it, so you can assert on the message your worker sent without a running engine. Trimmed from the demo's own spec for this worker:
+
+```ruby
+RSpec.describe Delivery::CompleteDriverDeliveryWorker, :busybee do
+  let(:client) { build_test_client }
+
+  it "publishes driver_available for the request it claims" do
+    driver = Delivery::Driver.create!(name: "Alice", total_mileage: 50.0, current_shipment_id: "ship-1")
+    request = Delivery::DriverRequest.create!(shipment_id: "ship-waiting-1", requested_at: 2.minutes.ago)
+
+    execute_worker(described_class,
+                   job: build_test_job(type: described_class.job_type, client: client,
+                                       variables: { driver_id: driver.id, shipment_id: "ship-1", distance: 5.0 }))
+
+    expect(client.received(:publish_message).sole).to have_attributes(
+      name: "driver_available",
+      correlationKey: request.id,
+      timeToLive: 30_000,
+      variables: JSON.generate("driver_id" => driver.id, "driver_name" => driver.name)
+    )
+  end
+end
+```
+
+The assertion reads the request as it reached the wire, so it checks the variables' serialization and the TTL's conversion to milliseconds along the way.
+
+To test the waiting side, publish from a workflow test with the [`publish_message`](testing.md#publish_messagename-correlation_key-vars--ttl-publish_message_ttl_ms) helper and check that the instance moves on. From the demo's spec for `deliver_shipment`, where `test_variables` holds the shipment the process starts with:
+
+```ruby
+with_process_instance("deliver_shipment", test_variables) do
+  activate_job("load_order_address").and_complete(lat: 5.3, lon: -2.1)
+  activate_job("assign_driver").and_complete(driver_id: nil, driver_name: nil, request_id: "req-1")
+  activate_job("calculate_distance").and_complete(distance: 12.45)
+
+  # No driver yet, so the instance waits at wait_for_driver
+  expect { activate_job("update_shipment_status") }.not_to have_available_jobs
+
+  publish_message("driver_available",
+                  correlation_key: "req-1",
+                  vars: { driver_id: "drv-late", driver_name: "Late Driver" })
+
+  activate_job("update_shipment_status") # the message woke it
+end
+```
 
 ---
 
