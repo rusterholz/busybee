@@ -1,6 +1,6 @@
 # Busybee Demo: Dropship Co.
 
-A multi-domain e-commerce fulfillment system orchestrated by BPMN workflows, built on [busybee](https://github.com/busybee-org/busybee). Orders flow through warehouse planning, pick-and-pack simulation, driver assignment, and delivery, all coordinated by Zeebe with busybee workers doing the actual work.
+A multi-domain e-commerce fulfillment system orchestrated by BPMN workflows, built on [busybee](https://github.com/rusterholz/busybee). Orders flow through warehouse planning, pick-and-pack simulation, driver assignment, and delivery, all coordinated by Zeebe with busybee workers doing the actual work.
 
 For reference documentation on the busybee features used here, see [Workers](../../docs/workers.md) (defining, running, and testing workers) and [Gem Configuration](../../docs/configuration.md) (connection, credentials, and defaults).
 
