@@ -952,6 +952,27 @@ A publisher and a waiter race more often than you might expect. In the demo, a d
 
 The message's **time-to-live** covers that gap. The engine holds a published message for its TTL, and an instance that opens a matching subscription within that window receives it, even though it started waiting after the publish. Once the TTL runs out, an unclaimed message is discarded. When you leave `ttl:` out, busybee uses [`Busybee.default_message_ttl`](configuration.md#default_message_ttl), 10 seconds by default; `ttl: 0` isn't held at all, and reaches only a subscription that is already open. Size the TTL to the longest gap you expect between the publish and the wait: the demo's 30 seconds is generous for a gap of a few task hops.
 
+```mermaid
+sequenceDiagram
+    participant W as Publishing worker
+    participant E as Engine
+    participant I as Waiting instance
+
+    alt the instance is already waiting
+        I->>E: enters the catch event: subscription opens for name and key
+        W->>E: publish_message(name, correlation_key:)
+        E->>I: delivers the message, and the instance moves on
+    else the message arrives first
+        rect rgba(127, 127, 127, 0.12)
+            W->>E: publish_message(name, correlation_key:, ttl:)
+            Note over E: holds the message for its TTL
+            I->>E: enters the catch event within the TTL
+            E->>I: delivers the held message, and the instance moves on
+        end
+    end
+    Note over W,I: past its TTL, an unclaimed message is discarded, and ttl: 0 is never held
+```
+
 ### Retries and Duplicates
 
 Within its TTL, one message wakes at most one instance of a given process: once it has been received, the next instance of that process to wait on the same key doesn't get it. A second publish, though, is a second message. If a job publishes and then fails before it completes, its retry publishes again; the first message wakes the waiting instance, and the duplicate stays held for its TTL, ready to wake the next instance that waits on that key.
