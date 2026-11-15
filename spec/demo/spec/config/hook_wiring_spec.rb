@@ -93,13 +93,31 @@ RSpec.describe "Busybee hook wiring", :busybee do # rubocop:disable RSpec/Descri
       expect(Monitoring::JobRun.find_by(job_key: 6100)).to have_attributes(lifecycle_rank: 1, status: "complete")
     end
 
-    it "closes a handed-back job's run too, so the bracket always closes" do
+    # busybee's own handback: a fail_job that spends no retry and leaves the job
+    # unresolved, then on_job_not_executed.
+    it "closes a handed-back job's run as handed_back, so the bracket always closes" do
       job = job_for(Delivery::CalculateDistanceWorker, key: 6200)
 
       fire_busybee_hooks(:on_job_activated, job)
+      fire_busybee_hooks(:after_call, build_test_call(:fail_job, job: job))
       fire_busybee_hooks(:on_job_not_executed, job)
 
-      expect(Monitoring::JobRun.find_by(job_key: 6200)).to have_attributes(lifecycle_rank: 1, status: "ready")
+      expect(Monitoring::JobRun.find_by(job_key: 6200)).to have_attributes(lifecycle_rank: 1, status: "handed_back")
+    end
+
+    it "records a job the Sim workers hand back at a stop as handed_back, not failed" do
+      worker = start_test_worker(Sim::PickAndPackWorker)
+      job = job_for(Sim::PickAndPackWorker, key: 6250)
+      fire_busybee_hooks(:on_job_activated, job)
+      fire_busybee_hooks(:on_job_executed, job) # dispatched to its future, still unresolved
+      Sim::PickAndPackWorker.in_flight[job.key] = job
+
+      fire_busybee_hooks(:on_worker_stopping, worker)
+
+      expect(job).to be_failed # on the wire, a fail_job like any other
+      expect(Monitoring::JobRun.find_by(job_key: 6250)).to have_attributes(status: "handed_back")
+    ensure
+      Sim::PickAndPackWorker.in_flight.clear
     end
 
     it "advances the worker's row through all four moments" do

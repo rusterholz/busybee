@@ -55,6 +55,29 @@ RSpec.describe Monitoring::Recorder, :busybee do
 
       expect(recorded(4243)).to have_attributes(buffer_size: nil, buffered: false)
     end
+
+    it "records the job's place in its workflow and the process that ran it" do
+      job = activated_job(key: 4244)
+
+      described_class.record_activation(job)
+
+      expect(recorded(4244)).to have_attributes(
+        bpmn_process_id: "ship-order", element_id: job.element_id,
+        process_instance_key: job.process_instance_key, worker_name: Busybee.worker_name
+      )
+      expect(job.process_instance_key).to be_positive
+    end
+
+    it "records each activation of a job as its own run" do
+      first = activated_job(key: 4245)
+      described_class.record_activation(first)
+      sleep 0.002
+      described_class.record_activation(activated_job(key: 4245)) # re-offered after a timeout
+
+      expect(Monitoring::JobRun.where(job_key: 4245).pluck(:activated_at)).to contain_exactly(
+        be_within(0.001).of(first.activated_at), be > first.activated_at
+      )
+    end
   end
 
   describe ".record_worker" do
@@ -133,13 +156,12 @@ RSpec.describe Monitoring::Recorder, :busybee do
 
   describe "out-of-order guard (JobRun)" do
     it "fills a late activation's gaps without downgrading a resolved status" do
-      executed = completed_job(key: 7777)
-      activated = activated_job(key: 7777)
+      job = completed_job(key: 7777)
 
-      described_class.record_execution(executed)   # rank 1
-      described_class.record_activation(activated) # rank 0 — arrives late
+      described_class.record_execution(job)  # rank 1
+      described_class.record_activation(job) # rank 0 — arrives late
 
-      expect(recorded(7777)).to have_attributes(status: "complete", activated_at: be_present)
+      expect(recorded(7777)).to have_attributes(status: "complete", buffered: false)
     end
   end
 
@@ -148,16 +170,16 @@ RSpec.describe Monitoring::Recorder, :busybee do
     # landed leaves its row stuck at rank 0 forever — the leak the pairing exists
     # to prevent, and the reason the demo wires all three hooks rather than two.
     it "closes an activation the worker never got to run" do
-      activated = activated_job(key: 8888)
-      described_class.record_activation(activated)
-
       handed_back = activated_job(key: 8888)
+      described_class.record_activation(handed_back)
+
       sleep 0.005
       handed_back.timestamps.stamp!(:execution_started_at) # the moment it was handed back, not run
 
       described_class.record_handback(handed_back)
 
-      expect(recorded(8888)).to have_attributes(status: "ready", executed_at: be_present, lifecycle_rank: 1,
+      expect(Monitoring::JobRun.where(job_key: 8888).count).to eq(1)
+      expect(recorded(8888)).to have_attributes(status: "handed_back", executed_at: be_present, lifecycle_rank: 1,
                                                 buffer_latency_ms: handed_back.buffer_latency_ms)
       expect(handed_back.buffer_latency_ms).to be > 0
     end
@@ -170,28 +192,24 @@ RSpec.describe Monitoring::Recorder, :busybee do
 
       described_class.record_handback(handed_back)
 
-      expect(recorded(8889)).to have_attributes(error_message: "broker unreachable", status: "ready")
+      expect(recorded(8889)).to have_attributes(error_message: "broker unreachable", status: "handed_back")
     end
   end
 
   describe ".record_call" do
-    it "folds a resolved call's duration into the engine_call metric under its tags" do
-      # A fetch call: no job in scope, so it carries worker identity and no job keys.
+    it "records a fetch call, with its worker's tags and no job keys" do
       call = resolved_call(:activate_jobs, worker_status: worker_status)
 
       described_class.record_call(call)
 
-      metric = Monitoring::CallMetric.find_by(metric_name: "engine_call")
-      expect(metric).to have_attributes(count: 1, ewma: call.network_ms)
-      expect(call.network_ms).to be > 0
-      expect(metric.tags).to include("rpc" => "activate_jobs", "status" => "succeeded", "grpc_status" => "ok",
-                                     "worker_class" => "Oms::UpdateOrderStatusWorker",
-                                     "job_type" => "update_order_status", "worker_mode" => "hybrid")
-      expect(metric.tags.keys).not_to include("job_key", "bpmn_process_id")
-      expect(Monitoring::EngineCall.count).to eq(0) # a fetch call is aggregate-only
+      expect(Monitoring::EngineCall.sole).to have_attributes(
+        rpc: "activate_jobs", status: "succeeded", worker_class: "Oms::UpdateOrderStatusWorker",
+        job_type: "update_order_status", worker_mode: "hybrid", job_key: nil, bpmn_process_id: nil,
+        network_ms: call.network_ms
+      )
     end
 
-    it "also records a job-correlated call as an EngineCall row (the per-job log twin)" do
+    it "records a job-correlated call with the job's keys" do
       job = activated_job(key: 476, worker_status: worker_status)
       call = resolved_call(:complete_job, complete_request(476), job: job)
 
@@ -208,7 +226,6 @@ RSpec.describe Monitoring::Recorder, :busybee do
 
       described_class.record_call(call)
 
-      expect(Monitoring::CallMetric.count).to eq(0)
       expect(Monitoring::EngineCall.count).to eq(0)
     end
 
@@ -222,6 +239,23 @@ RSpec.describe Monitoring::Recorder, :busybee do
       described_class.record_call(resolved_call(:complete_job, complete_request(600), job: job))
 
       expect(recorded(600).status).to eq("complete")
+    end
+
+    # The future settles through the real Job#complete! with the demo's hooks live,
+    # so after_call fires where production fires it: before the job marks itself
+    # resolved, which is why the fold times the run off the call.
+    it "times an async run from activation to its resolution call" do
+      job = activated_job(key: 604)
+      job.timestamps.stamp!(:execution_started_at)
+      job.timestamps.stamp!(:executed_at)
+      described_class.record_execution(job) # perform only dispatched: unresolved, no total yet
+
+      sleep 0.01
+      job.complete!({})
+
+      run = recorded(604)
+      expect(run).to have_attributes(status: "complete", resolved_at: be_between(job.activated_at, job.resolved_at))
+      expect(run.total_duration_ms).to be_between(10, job.total_duration_ms) # the job resolves after its hooks
     end
 
     it "maps fail_job and throw_error to their run outcomes" do
@@ -250,14 +284,39 @@ RSpec.describe Monitoring::Recorder, :busybee do
     end
   end
 
+  describe "first writes from several threads at once" do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after { described_class.reset! }
+
+    it "share one executor and land every write" do
+      landed = Concurrent::AtomicFixnum.new
+      start = Concurrent::CountDownLatch.new(1)
+      executors = Concurrent::Array.new
+
+      threads = Array.new(16) do
+        Thread.new do
+          start.wait
+          described_class.send(:write, "racing") { landed.increment }
+          executors << described_class.executor
+        end
+      end
+      start.count_down
+      threads.each(&:join)
+      described_class.shutdown!
+
+      expect(executors.uniq.size).to eq(1)
+      expect(landed.value).to eq(16)
+    end
+  end
+
   # The drain semantics need the real background executor, not the file-wide
   # immediate stub — the unit under test is the wait across the writer thread.
   describe ".shutdown!" do
     before { allow(described_class).to receive(:executor).and_call_original }
 
     after do
-      described_class.instance_variable_get(:@executor)&.kill
-      described_class.instance_variable_set(:@executor, nil)
+      described_class.reset!
     end
 
     it "waits for queued writes before returning" do
@@ -286,30 +345,100 @@ RSpec.describe Monitoring::Recorder, :busybee do
     end
   end
 
-  describe ".flush" do
+  # The writer's own connection can't see into the example's transaction.
+  describe ".record_call on the writer thread", :no_transaction do
     before { allow(described_class).to receive(:executor).and_call_original }
 
     after do
-      described_class.instance_variable_get(:@executor)&.kill
-      described_class.instance_variable_set(:@executor, nil)
+      described_class.reset!
+      Monitoring::EngineCall.delete_all
     end
 
-    it "returns true after queued writes complete, leaving the executor accepting" do
+    it "queues the write rather than making it on the calling thread" do
+      gate = Concurrent::CountDownLatch.new(1)
+      described_class.executor.post { gate.wait(2) }
+
+      described_class.record_call(resolved_call(:activate_jobs, worker_status: worker_status))
+      expect(Monitoring::EngineCall.count).to eq(0)
+
+      gate.count_down
+      described_class.shutdown!
+      expect(Monitoring::EngineCall.count).to eq(1)
+    end
+  end
+
+  describe "the writer's batches", :no_transaction do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.reset!
+      Monitoring::JobRun.delete_all
+    end
+
+    it "drops a failing write alone, landing the writes queued around it" do
+      gate = Concurrent::CountDownLatch.new(1)
+      described_class.executor.post { gate.wait(2) } # hold the writer so all three queue together
+      [[1, "pick"], [2, nil], [3, "pick"]].each do |key, job_type| # job_type is NOT NULL
+        described_class.send(:upsert, Monitoring::JobRun, { job_key: key, activated_at: Time.current },
+                             rank: 0, job_type: job_type, status: "ready")
+      end
+      expect(described_class.send(:queue_depth)).to eq(3)
+
+      gate.count_down
+      described_class.shutdown!
+
+      expect(Monitoring::JobRun.order(:job_key).pluck(:job_key)).to eq([1, 3])
+    end
+  end
+
+  describe "lifecycle rows under a telemetry backlog", :no_transaction do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.reset!
+      Monitoring::WorkerProcess.delete_all
+    end
+
+    # Several seconds of queued telemetry ahead of the shutdown row, then the
+    # process's exit sequence: the shutdown hook's flush, then at_exit's drain.
+    it "lands the shutdown row although the process exits with telemetry still queued" do
+      gate = Concurrent::CountDownLatch.new(1)
+      described_class.executor.post { gate.wait(2) }
+      2_000.times { described_class.send(:write, "slow telemetry") { sleep 0.005 } }
+      described_class.record_worker(:shutdown, worker_status(reason: :rollover))
+      gate.count_down
+
+      expect(described_class.flush_lifecycle(timeout: 3)).to be(true)
+      described_class.shutdown!(timeout: 0.1)
+
+      expect(process).to have_attributes(status: "shutdown", reason: "rollover")
+      expect(described_class.send(:queue_depth)).to be > 0 # telemetry was dropped, not waited for
+    end
+  end
+
+  describe ".flush_lifecycle" do
+    before { allow(described_class).to receive(:executor).and_call_original }
+
+    after do
+      described_class.reset!
+    end
+
+    it "returns true once the queued lifecycle writes land, leaving the executor accepting" do
       flag = Concurrent::AtomicBoolean.new(false)
-      described_class.executor.post do
+      described_class.send(:write, "lifecycle", lane: :lifecycle) do
         sleep 0.05
         flag.make_true
       end
 
-      expect(described_class.flush).to be(true)
+      expect(described_class.flush_lifecycle).to be(true)
       expect(flag).to be_true
       expect(described_class.executor).not_to be_shutdown
     end
 
-    it "returns false when the queue cannot drain in time" do
+    it "returns false when the writer cannot reach them in time" do
       described_class.executor.post { sleep 0.3 }
 
-      expect(described_class.flush(timeout: 0.05)).to be(false)
+      expect(described_class.flush_lifecycle(timeout: 0.05)).to be(false)
     end
   end
 end

@@ -12,6 +12,7 @@ set -euo pipefail
 #   bin/demo test               Smoke test: clean, start stack, run 25 orders, tear down
 #   bin/demo test 20            Smoke test with 20 orders
 #   bin/demo status             Show running containers and order counts
+#   bin/demo db                 Start only the monitoring Postgres, for the demo's specs
 #
 # The data volumes are shared by every checkout on this machine, so clean and
 # test destroy the one demo state wherever they run.
@@ -28,6 +29,7 @@ Commands:
   clean                          Stop and destroy all data
   test [N]                       Smoke test: clean, start, run N orders (default: 25), tear down
   status                         Show container and order status
+  db                             Start only the monitoring Postgres (port 55432), for the specs
 
 Options for start:
   --speed N    Set simulation speed (default: 1)
@@ -150,6 +152,12 @@ cmd_status() {
   fi
 }
 
+cmd_db() {
+  cd "$DEMO_DIR"
+  docker compose up -d --wait postgres
+  echo "Monitoring Postgres: localhost:55432"
+}
+
 # ── Main ──
 
 command="${1:-}"
@@ -161,5 +169,6 @@ case "$command" in
   clean)  cmd_clean ;;
   test)   cmd_test "$@" ;;
   status) cmd_status ;;
+  db)     cmd_db ;;
   *)      usage ;;
 esac

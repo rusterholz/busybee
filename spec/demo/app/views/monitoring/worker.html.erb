@@ -1,42 +1,38 @@
-<%
-  fmt_int = ->(n) { n.nil? ? "—" : number_with_delimiter(n) }
-  fmt_at  = ->(t) { t.nil? ? "—" : t.utc.strftime("%H:%M:%S.%L") }
-  gap_ms  = ->(a, b) { a && b ? "#{((b - a) * 1000).round}ms" : "—" }
-%>
+<% gap_ms = ->(a, b) { a && b ? "#{((b - a) * 1000).round}ms" : "--" } %>
 
-<p><a href="<%= monitoring_path %>">← control center</a></p>
+<p><a href="<%= monitoring_infrastructure_path(filter_params) %>">← Infrastructure</a></p>
 
 <hgroup>
   <h1 class="mono"><%= @worker.worker_name %></h1>
   <p>
     <span class="wstatus-<%= @worker.status %>"><%= @worker.status %></span>
     <% if @worker.reason %><span class="badge <%= @worker.reason %>"><%= @worker.reason %></span><% end %>
-    — <%= @worker.worker_class %> · <code><%= @worker.job_type %></code> · <%= @worker.worker_mode %> mode
+    · <%= @worker.worker_class %> · <code><%= @worker.job_type %></code> · <%= @worker.worker_mode %> mode
   </p>
 </hgroup>
 
 <section>
   <div class="stat-grid">
-    <article class="stat-card"><h2><%= fmt_int.(@worker.total_job_count) %></h2><small>jobs</small></article>
-    <article class="stat-card"><h2 class="status-failed"><%= fmt_int.(@worker.failed_job_count) %></h2><small>failed</small></article>
-    <article class="stat-card"><h2><%= fmt_int.(@worker.backpressure_count) %></h2><small>backpressure</small></article>
-    <article class="stat-card"><h2><%= fmt_int.(@worker.current_buffer_size) %></h2><small>buffer</small></article>
-    <article class="stat-card"><h2><%= fmt_int.(@worker.peak_buffer_size) %></h2><small>buffer peak</small></article>
-    <article class="stat-card"><h2><%= fmt_int.(@worker.write_queue_depth) %></h2><small>write queue</small></article>
+    <article class="stat-card"><h2><%= fmt_int(@worker.total_job_count) %></h2><small>jobs</small></article>
+    <article class="stat-card"><h2 class="status-failed"><%= fmt_int(@worker.failed_job_count) %></h2><small>failed</small></article>
+    <article class="stat-card"><h2><%= fmt_int(@worker.backpressure_count) %></h2><small>backpressure</small></article>
+    <article class="stat-card"><h2><%= fmt_int(@worker.current_buffer_size) %></h2><small>buffer</small></article>
+    <article class="stat-card"><h2><%= fmt_int(@worker.peak_buffer_size) %></h2><small>buffer peak</small></article>
+    <article class="stat-card"><h2><%= fmt_int(@worker.write_queue_depth) %></h2><small>write queue</small></article>
   </div>
 </section>
 
 <section>
-  <h2>Lifecycle <small>— raw moments; every duration is just a diff between two of them</small></h2>
+  <h2>Lifecycle <small>raw moments; every duration is a diff between two of them</small></h2>
   <table>
-    <thead><tr><th>Moment</th><th>At (UTC)</th><th class="num">Gap from previous</th></tr></thead>
+    <thead><tr><th>Moment</th><th>At</th><th class="num">Gap from previous</th></tr></thead>
     <tbody>
-      <tr><td>started</td><td class="mono"><%= fmt_at.(@worker.started_at) %></td><td class="num">—</td></tr>
-      <tr><td>stop requested</td><td class="mono"><%= fmt_at.(@worker.stop_requested_at) %></td>
+      <tr><td>started</td><td class="mono"><%= local_time(@worker.started_at, millis: true) %></td><td class="num">--</td></tr>
+      <tr><td>stop requested</td><td class="mono"><%= local_time(@worker.stop_requested_at, millis: true) %></td>
           <td class="num"><%= gap_ms.(@worker.started_at, @worker.stop_requested_at) %></td></tr>
-      <tr><td>stopping</td><td class="mono"><%= fmt_at.(@worker.stopping_at) %></td>
+      <tr><td>stopping</td><td class="mono"><%= local_time(@worker.stopping_at, millis: true) %></td>
           <td class="num"><%= gap_ms.(@worker.stop_requested_at, @worker.stopping_at) %></td></tr>
-      <tr><td>shutdown</td><td class="mono"><%= fmt_at.(@worker.shutdown_at) %></td>
+      <tr><td>shutdown</td><td class="mono"><%= local_time(@worker.shutdown_at, millis: true) %></td>
           <td class="num"><%= gap_ms.(@worker.stopping_at, @worker.shutdown_at) %></td></tr>
     </tbody>
   </table>
@@ -54,7 +50,7 @@
 <% end %>
 
 <section>
-  <h2>Engine calls <small>— this incarnation's own call log, newest first</small></h2>
+  <h2>Engine Calls <small>this incarnation's own call log, newest first</small></h2>
   <% if @calls.any? %>
     <table>
       <thead><tr><th class="num">Seq</th><th>RPC</th><th>Status</th><th class="num">Network</th><th>Job</th></tr></thead>
@@ -64,13 +60,13 @@
             <td class="num"><%= call.seq&.round(1) %></td>
             <td><code><%= call.rpc %></code></td>
             <td class="<%= "status-failed" if call.status == "errored" %>"><%= call.status %></td>
-            <td class="num"><%= call.network_ms&.round(1) %> ms</td>
-            <td><a href="<%= monitoring_run_path(call.job_key) %>" class="mono"><%= call.job_key %></a></td>
+            <td class="num"><%= fmt_ms(call.network_ms) %></td>
+            <td><% if call.job_key %><a href="<%= monitoring_run_path(call.job_key) %>" class="mono"><%= call.job_key %></a><% end %></td>
           </tr>
         <% end %>
       </tbody>
     </table>
   <% else %>
-    <p class="empty">No job-correlated calls recorded for this incarnation.</p>
+    <p class="empty">No engine calls recorded for this incarnation.</p>
   <% end %>
 </section>

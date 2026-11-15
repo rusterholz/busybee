@@ -1,0 +1,29 @@
+<%# The tabs and the one filter row: every chart and table on the page follows it. %>
+<nav class="tabs" aria-label="Monitoring pages">
+  <% { "Workers" => :monitoring_workers_path, "Workflows" => :monitoring_workflows_path,
+       "Infrastructure" => :monitoring_infrastructure_path }.each do |label, route| %>
+    <% path = public_send(route) %>
+    <a href="<%= public_send(route, filter_params) %>" <%= 'aria-current="page"'.html_safe if request.path == path %>><%= label %></a>
+  <% end %>
+</nav>
+
+<form method="get" action="<%= this_page %>" class="filter-row">
+  <div class="ranges" role="group" aria-label="Range">
+    <% Monitoring::Window::KEYS.each do |key| %>
+      <a href="<%= here(range: key) %>"
+         <%= 'aria-current="true"'.html_safe if @window.key == key %>><%= key %></a>
+    <% end %>
+  </div>
+  <input type="hidden" name="range" value="<%= @window.key %>">
+  <% request.query_parameters.slice(*MonitoringController::LOCAL_KEYS).compact_blank.each do |name, value| %>
+    <input type="hidden" name="<%= name %>" value="<%= value %>">
+  <% end %>
+  <%= render "multi_select", key: :job_type, label: "Job types", noun: "job types",
+                             options: @job_types, selected: @selected_types %>
+  <%= render "multi_select", key: :workflow, label: "Workflows", noun: "workflows",
+                             options: @workflows, selected: @selected_workflows %>
+  <% if filter_params.except("range").any? %>
+    <a href="<%= page_path(filter_params.slice("range")) %>" class="clear">Clear filters</a>
+  <% end %>
+  <small class="zone">Times in <span data-time-zone>UTC</span></small>
+</form>

@@ -1,23 +1,25 @@
 # frozen_string_literal: true
 
 module Monitoring
-  # "How live is this page?" — the freshness of the monitoring data itself, for
-  # the control-center navbar. Two signals: the recorders' write-queue backlog
-  # across running workers (a deep queue means their numbers lag reality), and
-  # how long since any worker last wrote a row at all.
+  # Which workers are up (phase = last lifecycle event, however quiet since),
+  # their last engine calls, and how far the recorders' write queues lag.
   class Liveness
+    REPORTING_WINDOW = 1.minute
+
     def initialize(scope = WorkerProcess.all)
-      @scope = scope
       @running = scope.where(status: "running")
+      @reporting = @running.where(updated_at: REPORTING_WINDOW.ago..)
     end
 
-    def max_queue_depth = @running.maximum(:write_queue_depth)
-    def mean_queue_depth = @running.average(:write_queue_depth)&.to_f
+    def running_count = @running.count
 
-    # Seconds since the freshest worker write (nil when there are no workers).
-    def freshness_s
-      latest = @scope.maximum(:updated_at)
-      latest && (Time.current - latest)
+    # Write-queue depth across the running workers that reported in the last minute.
+    def max_queue_depth = @reporting.maximum(:write_queue_depth)
+    def mean_queue_depth = @reporting.average(:write_queue_depth)&.to_f
+
+    # { worker_name => time of its latest engine call } for those that have one.
+    def last_call_at(worker_names)
+      EngineCall.where(worker_name: worker_names).group(:worker_name).maximum(:at)
     end
   end
 end

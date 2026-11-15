@@ -1,25 +1,48 @@
 # frozen_string_literal: true
 
 # The operational view: what busybee is doing, as distinct from what the
-# business is doing. Rendered in dark mode via its own layout. Filters are
-# carried in the query string so they survive the page's auto-refresh — the
-# job filter scopes the job-centric sections, the worker filter scopes the
-# worker table (live incarnations by default), and each section's form
-# carries the other's params as hidden fields so they compose.
+# business is doing, in one page per operator audience (workers, workflows,
+# infrastructure) plus run and worker detail pages. Rendered in dark mode via
+# its own layout. The range and the job-type and workflow filters ride the query
+# string, so they survive the page's auto-refresh and carry across the tabs;
+# page-local toggles (failed runs only, worker phase) stay on their own page.
 class MonitoringController < ApplicationController
   layout "monitoring"
 
   RECENT_LIMIT = 10
+  FILTERS = %w[range job_type workflow].freeze
+  LOCAL_KEYS = %w[failed worker_status].freeze # page-local toggles
 
-  def index
-    read_job_filters
-    read_worker_filters
-    @job_types = filter_options(:job_type)
-    @processes = filter_options(:bpmn_process_id)
-    @domains = domain_map.keys.sort
-    @worker_types = Monitoring::WorkerProcess.where.not(job_type: nil).distinct.order(:job_type).pluck(:job_type)
-    load_jobs
-    load_platform
+  before_action :read_filters, :load_liveness, except: :index
+  before_action :drop_complete_selection, except: :index
+  helper_method :filter_params, :page_path, :here, :this_page
+
+  def index = redirect_to(page_path(path: monitoring_workers_path))
+
+  def workers
+    @stats = Monitoring::Stats.new(job_scope.within(@window))
+    @trends = Monitoring::JobTrends.new(job_scope, @window)
+    @job_type_rows = Monitoring::JobTypeSummary.new(job_scope, @window).rows
+    @failed_only = params[:failed].present?
+    @runs = recent_runs
+    @calls_by_job = engine_calls_for(@runs)
+  end
+
+  # The shares compare workflows, so they cover every workflow whatever the filter.
+  def workflows
+    @shares = Monitoring::WorkflowShare.new(job_scope(by_workflow: false), @window).rows
+    @elements = Monitoring::ElementLatency.new(job_scope, @window).rows
+    @slow_instances = Monitoring::SlowInstances.new(job_scope, @window).rows
+  end
+
+  # Calls and incarnations serve job types, not workflows, so the workflow filter doesn't apply here.
+  def infrastructure
+    calls = by_job_type(Monitoring::EngineCall.all)
+    @network = Monitoring::NetworkStats.new(calls, @window)
+    @errors = Monitoring::Errors.new(calls, by_job_type(Monitoring::WorkerProcess.all), @window)
+    @replicas = by_job_type_keys(Monitoring::Replicas.new(from: @window.from, to: @window.to,
+                                                          step: @window.bucket).series)
+    load_workers
   end
 
   # One incarnation's full detail: everything the index line compresses, plus
@@ -32,10 +55,12 @@ class MonitoringController < ApplicationController
     redirect_to monitoring_path
   end
 
-  # One run's full detail: timings, the full tag set, and its call sequence,
+  # One job key's activations (a handed-back or timed-out job is offered again
+  # under the same key), then the newest one's timings, tags and call sequence,
   # with each call linked back to the incarnation that made it.
   def run
-    @run = Monitoring::JobRun.find_by!(job_key: params[:job_key])
+    @activations = Monitoring::JobRun.where(job_key: params[:job_key]).recent.to_a
+    @run = @activations.first or raise ActiveRecord::RecordNotFound
     @calls = Monitoring::EngineCall.for_job(@run.job_key)
     @call_workers = Monitoring::WorkerProcess.where(worker_name: @calls.map(&:worker_name).uniq,
                                                     job_type: @run.job_type).index_by(&:worker_name)
@@ -45,66 +70,84 @@ class MonitoringController < ApplicationController
 
   private
 
-  # Job-centric sections, scoped by the active filter.
-  def load_jobs
-    scope = filtered(Monitoring::JobRun.all)
-    @stats = Monitoring::Stats.new(scope)
-    @runs = scope.recent.limit(RECENT_LIMIT).to_a
-    @calls_by_job = engine_calls_for(@runs)
+  # The cross-page selection, as the query a tab or range link carries.
+  def filter_params(overrides = {})
+    request.query_parameters.slice(*FILTERS).merge(overrides.stringify_keys).compact_blank
   end
 
-  # Whole-platform sections (engine calls, liveness); the worker table has its
-  # own filter, defaulting to the live incarnations.
-  def load_platform
-    @workers = filtered_workers(Monitoring::WorkerProcess.recent)
-    @workers_exist = Monitoring::WorkerProcess.exists?
-    @call_stats = Monitoring::CallStats.new
-    @calls_per_job = @call_stats.calls_per_job(Monitoring::JobRun.count)
-    @liveness = Monitoring::Liveness.new
+  # A path on this site carrying only the monitoring query keys; every link and
+  # redirect built from the query string goes through here. The path comes from
+  # route generation, never from the request.
+  def page_path(query = request.query_parameters, path: this_page)
+    query = query.to_h.stringify_keys.slice(*FILTERS, *LOCAL_KEYS).compact_blank
+    query.empty? ? path : "#{path}?#{query.to_query}"
   end
 
-  def read_job_filters
-    @selected_types = Array(params[:job_types]).reject(&:blank?)
-    @selected_status = params[:status].presence
-    @selected_process = params[:process].presence
-    @selected_domain = params[:domain].presence
+  def this_page = url_for(action: action_name, only_path: true)
+
+  # This page with some query keys changed (nil drops one).
+  def here(changes) = page_path(request.query_parameters.merge(changes.stringify_keys))
+
+  def read_filters
+    @window = Monitoring::Window.new(params[:range])
+    @job_types = filter_options(:job_type)
+    @selected_types = string_list(:job_type)
+    @selected_workflows = string_list(:workflow)
+    @workflows = filter_options(:bpmn_process_id)
   end
 
-  def read_worker_filters
-    @worker_status = params[:worker_status].presence || "running"
-    @worker_domain = params[:worker_domain].presence
-    @worker_type = params[:worker_type].presence
+  # A query value only counts as a string (or a list of them); a nested hash or a
+  # list of hashes is ignored.
+  def string_param(key)
+    value = params[key]
+    value.presence if value.is_a?(String)
+  end
+
+  def string_list(key)
+    Array(params[key]).grep(String).compact_blank
+  end
+
+  # Every option selected is the same as none: all of them, at the clean URL.
+  def drop_complete_selection
+    complete = { job_type: [@job_types, @selected_types],
+                 workflow: [@workflows, @selected_workflows] }.select do |_, (options, selected)|
+      selected.any? && options.any? && (options - selected).empty?
+    end
+    return if complete.empty?
+
+    redirect_to here(complete.transform_values { nil })
   end
 
   def filter_options(column)
     Monitoring::JobRun.where.not(column => nil).distinct.order(column).pluck(column)
   end
 
-  def filtered(scope)
+  def recent_runs
+    runs = job_scope.within(@window)
+    runs = runs.where(status: "failed") if @failed_only
+    runs.recent.limit(RECENT_LIMIT).to_a
+  end
+
+  def load_liveness = @liveness = Monitoring::Liveness.new
+
+  def load_workers
+    @worker_status = string_param(:worker_status) || "running"
+    workers = by_job_type(Monitoring::WorkerProcess.recent)
+    workers = workers.where(status: @worker_status) unless @worker_status == "all"
+    @workers = workers.to_a
+    @workers_exist = Monitoring::WorkerProcess.exists?
+    @last_calls = @liveness.last_call_at(@workers.map(&:worker_name))
+  end
+
+  def by_job_type(scope) = @selected_types.any? ? scope.where(job_type: @selected_types) : scope
+  def by_job_type_keys(series) = @selected_types.any? ? series.slice(*@selected_types) : series
+
+  def job_scope(by_workflow: true)
+    scope = Monitoring::JobRun.all
     scope = scope.where(job_type: @selected_types) if @selected_types.any?
-    scope = scope.where(status: @selected_status) if @selected_status
-    scope = scope.where(bpmn_process_id: @selected_process) if @selected_process
-    scope = scope.where(job_type: domain_types(@selected_domain)) if @selected_domain
+    scope = scope.where(bpmn_process_id: @selected_workflows) if @selected_workflows.any? && by_workflow
     scope
   end
-
-  def filtered_workers(scope)
-    scope = scope.where(status: @worker_status) unless @worker_status == "all"
-    scope = scope.where(worker_class: domain_classes(@worker_domain)) if @worker_domain
-    scope = scope.where(job_type: @worker_type) if @worker_type
-    scope
-  end
-
-  # domain (worker_class namespace, downcased) → observed [worker_class,
-  # job_type] pairs — how "domain" resolves without a schema column for it.
-  def domain_map
-    @domain_map ||= Monitoring::WorkerProcess.distinct.pluck(:worker_class, :job_type).
-                    reject { |worker_class, _| worker_class.nil? }.
-                    group_by { |worker_class, _| worker_class.split("::").first.downcase }
-  end
-
-  def domain_classes(domain) = domain_map.fetch(domain, []).map(&:first).uniq
-  def domain_types(domain) = domain_map.fetch(domain, []).map(&:last).uniq
 
   # The per-job call sequences for the runs on screen, keyed by job_key so each
   # row can unfold its calls without an N+1.

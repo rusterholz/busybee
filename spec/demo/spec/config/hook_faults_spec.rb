@@ -97,8 +97,8 @@ RSpec.describe "Busybee hook faults", :busybee do # rubocop:disable RSpec/Descri
 
   describe "when a job is in hand as the worker shuts down" do
     # A stop that arrives mid-batch puts the rest of it on the handback path: the
-    # job is returned unworked, so it must stay :ready — a :failed status would
-    # read as a job that ran and lost. Stopping from a hook stands in for the
+    # job is returned unworked, so it must stay :ready and its run reads
+    # handed_back — "failed" would read as a job that ran and lost. Stopping from a hook stands in for the
     # signal that would arrive on its own thread in production.
     def handback_run(key)
       worker = start_test_worker(Delivery::CalculateDistanceWorker, client: client)
@@ -111,7 +111,7 @@ RSpec.describe "Busybee hook faults", :busybee do # rubocop:disable RSpec/Descri
 
       handed_back = observed.select { |_, carrier| carrier.is_a?(Busybee::Job) && carrier.key == 9300 }.map(&:first)
       expect(handed_back).to eq(%i[on_job_activated on_job_not_executed])
-      expect(Monitoring::JobRun.find_by(job_key: 9300)).to have_attributes(status: "ready", lifecycle_rank: 1,
+      expect(Monitoring::JobRun.find_by(job_key: 9300)).to have_attributes(status: "handed_back", lifecycle_rank: 1,
                                                                            executed_at: be_present)
     end
 

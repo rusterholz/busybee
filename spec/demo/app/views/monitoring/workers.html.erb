@@ -1,0 +1,118 @@
+<hgroup>
+  <h1>Workers</h1>
+  <p>How well each job type is being processed: volume, outcome, time and failures over the last <%= @window.key %>, recorded by the lifecycle hooks this app registers, the way you'd wire a Datadog or OpenTelemetry sink in production.</p>
+</hgroup>
+
+<section>
+  <div class="stat-grid">
+    <% @stats.counts_by_status.each do |status, count| %>
+      <article class="stat-card"><h2 class="status-<%= status %>"><%= fmt_int(count) %></h2>
+        <small><%= status %></small></article>
+    <% end %>
+    <article class="stat-card"><h2><%= fmt_int(@stats.total_count) %></h2><small>jobs</small></article>
+  </div>
+</section>
+
+<section>
+  <div class="chart-card">
+    <h3>Jobs per Minute by Outcome</h3>
+    <p>Resolved jobs, bucketed by activation time.</p>
+    <%= chart :area_chart, @trends.throughput.map { |status, data| { name: status, data: data } },
+              **time_axis(@window), stacked: true, round: 1,
+              colors: @trends.throughput.keys.map { |status| MonitoringHelper::STATUS_COLORS[status] } %>
+  </div>
+  <div class="chart-grid">
+    <div class="chart-card">
+      <h3>Total Time, p50 and p95</h3>
+      <p>Activation to resolution, over completed, failed and errored jobs.</p>
+      <%= chart :line_chart, @trends.latency.map { |name, data| { name: name, data: data } },
+                **time_axis(@window), colors: MonitoringHelper::SERIES_COLORS.first(2), suffix: " ms", round: 1 %>
+    </div>
+    <div class="chart-card">
+      <h3>Failure Rate</h3>
+      <p>failed ÷ (complete + failed + error). BPMN errors count separately.</p>
+      <%= chart :line_chart, @trends.failure_rate, **time_axis(@window), colors: [MonitoringHelper::STATUS_COLORS["failed"]],
+                suffix: "%", min: 0, legend: false %>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Job Types</h2>
+  <% if @job_type_rows.any? %>
+    <table>
+      <thead>
+        <tr>
+          <th>Job type</th><th class="num">Jobs</th><th class="num">Per min</th>
+          <th class="num">p50</th><th class="num">p95</th>
+          <th class="num" title="failed ÷ (complete + failed + error)">Failed</th>
+          <th class="num" title="error ÷ (complete + failed + error)">BPMN error</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @job_type_rows.each do |row| %>
+          <tr>
+            <td><a href="<%= monitoring_workers_path(filter_params(job_type: [row[:job_type]])) %>"><code><%= row[:job_type] %></code></a></td>
+            <td class="num"><%= fmt_int(row[:jobs]) %></td>
+            <td class="num"><%= row[:per_minute] %></td>
+            <td class="num"><%= fmt_ms(row[:p50_ms]) %></td>
+            <td class="num"><%= fmt_ms(row[:p95_ms]) %></td>
+            <td class="num <%= "status-failed" if row[:failure_pct].to_f.positive? %>"><%= fmt_pct(row[:failure_pct]) %></td>
+            <td class="num <%= "status-error" if row[:error_pct].to_f.positive? %>"><%= fmt_pct(row[:error_pct]) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+    <p class="caption">Failed is failed ÷ (complete + failed + error); BPMN error is error ÷ the same. Times are activation to resolution.</p>
+  <% end %>
+</section>
+
+<section>
+  <h2>Recent Runs
+    <% if @failed_only %>
+      <a class="local-toggle" href="<%= here(failed: nil) %>">show all runs</a>
+    <% else %>
+      <a class="local-toggle" href="<%= here(failed: "1") %>">failed only</a>
+    <% end %>
+  </h2>
+  <% if @runs.any? %>
+    <%# Slim rows: element, source, buffer depth, retries and full errors live
+        on the run's page behind the type link. %>
+    <table>
+      <thead>
+        <tr>
+          <th>Job type</th><th>Status</th><th>Workflow</th>
+          <th class="num">Perform</th><th class="num">Total</th>
+          <th>Activated</th><th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @runs.each do |run| %>
+          <tr>
+            <td><a href="<%= monitoring_run_path(run.job_key) %>"><code><%= run.job_type %></code></a><%= " ⋯" if run.buffered %></td>
+            <td class="status-<%= run.status %>"><%= run.status %></td>
+            <td><%= run.bpmn_process_id %></td>
+            <td class="num"><%= fmt_ms(run.perform_duration_ms) %></td>
+            <td class="num"><%= fmt_ms(run.total_duration_ms) %></td>
+            <td><%= local_time(run.activated_at) %></td>
+            <td><%= run.error_code || run.error_message&.truncate(40) %></td>
+          </tr>
+          <% calls = @calls_by_job[run.job_key] %>
+          <% if calls&.any? %>
+            <tr>
+              <td colspan="7">
+                <div class="call-seq">
+                  <% calls.each do |call| %>
+                    <span class="call-pill <%= "errored" if call.status == "errored" %>"><%= call.rpc %><span class="ms"><%= call.network_ms&.round %>ms</span></span>
+                  <% end %>
+                </div>
+              </td>
+            </tr>
+          <% end %>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p class="empty">No job runs in this range<%= " match the filters" if filter_params.except("range").any? || @failed_only %>.</p>
+  <% end %>
+</section>

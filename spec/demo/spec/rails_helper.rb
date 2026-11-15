@@ -11,7 +11,14 @@ require "busybee"
 require "busybee/testing"
 
 ActionController::Base.allow_forgery_protection = false # Rack::Test requests carry no token
-ActiveRecord::Tasks::DatabaseTasks.prepare_all
+
+# The monitoring database is Postgres, so every spec that boots Rails needs it up.
+begin
+  ActiveRecord::Tasks::DatabaseTasks.prepare_all
+rescue ActiveRecord::ConnectionNotEstablished => e
+  abort "Can't reach the monitoring database's Postgres: #{e.message.lines.first.strip}\n" \
+        "Start it with `bin/demo db` (from spec/demo), then rerun."
+end
 
 RSpec.configure do |config|
   config.disable_monkey_patching!
@@ -26,6 +33,8 @@ RSpec.configure do |config|
   config.before do
     allow(Monitoring::Recorder).to receive(:executor).and_return(Concurrent::ImmediateExecutor.new)
   end
+
+  config.after { Monitoring::Recorder.reset! }
 
   # Worker specs opt in to busybee's helpers as a directory. They keep only the
   # perform hooks, which hold the domain transactions; the monitoring hooks would
