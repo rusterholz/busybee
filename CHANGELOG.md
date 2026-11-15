@@ -13,7 +13,8 @@ Instrumentation hooks for every job, worker and gRPC call, with testing helpers 
   - Each callback receives a lifecycle object carrying what that moment knows: status, gauges, counters, timestamps, durations and configuration
   - Two ready-made projections: `context_tags`, low-cardinality, for metric labels, and `logging_context`, for structured logs. The logging projection names an error by its class and message, and a job's never carries what `perform` returned, so logging it whole keeps workflow-instance data out of your logs
   - Middleware sees what the work produced: `perform.call` returns the job's result in every around hook, so a span or a log line can carry it without reaching back into the job
-  - `raise Busybee::Worker::Shutdown, "read replica has fallen too far behind"` declares the worker unhealthy from any hook, with no underlying error needed, and an error matching `shutdown_on` escalates from a hook as it does from `perform`, stopping the worker gracefully as `reason: :unhealthy`
+  - `raise Busybee::Worker::Shutdown, "read replica has fallen too far behind"` declares the worker unhealthy from any hook, with no underlying error needed, stopping the worker gracefully as `reason: :unhealthy`
+  - An error matching `shutdown_on` does the same from a job hook as from `perform`. A call hook escalates only on the gem-wide `Busybee.shutdown_on_errors`, and the teardown hooks (`on_worker_stop_requested`, `on_worker_stopping`, `on_worker_shutdown`) record the error for `on_worker_shutdown`'s `status.error` instead
   - The hook-error policy covers errors a hook raises, and nothing more. An error from the work a hook wrapped is the job's business or the caller's, and an error inside busybee itself surfaces where it happened rather than being logged as a fault in your hooks. See "What the Swallow Doesn't Cover" in the hooks guide for reading an outcome off the lifecycle object instead of rescuing around the call
 
 - **Hook Filters, Checked at Boot** – Register a hook only for the cases you care about, such as an `after_perform` for failed jobs only, by matching attributes of the lifecycle object:
@@ -25,7 +26,7 @@ Instrumentation hooks for every job, worker and gRPC call, with testing helpers 
   - A retry begins from a fresh writable copy of what the previous attempt sent, so a rewrite in `around_call` applies to the retry as well as the first try
   - A client call made from inside a call hook is refused with `Busybee::ReentrantCall`, so an `after_call` that publishes an alert can't set itself off. Job and worker hooks may use the client freely
 
-- **Perform Hooks That Fire When Your Code Runs** – `before_perform`, `around_perform` and `after_perform` fire exactly when `perform` is attempted, so a job short-circuited by a hook or turned away by input validation never reaches them. `on_job_executed` fires for every job that reached your process, and is the place for observation that must not miss one
+- **Perform Hooks That Fire When Your Code Runs** – `before_perform`, `around_perform` and `after_perform` fire exactly when `perform` is attempted, so a job short-circuited by a hook or turned away by input validation never reaches them. `on_job_executed` fires for every job the worker ran, short-circuited or not, and is the place for observation that must not miss one
   - `after_perform` is an `ensure` on your code: it runs however the attempt turned out, after automatic completion and failure, so `status` and `error` are already on the job when you read them
   - That includes the attempts that didn't settle the job: a resolution call that never reached the engine, or a `perform` that handed the work to a background thread. A job arriving with `status == :ready` is still yours to settle, and you can resolve it from the hook
   - So `after_perform(error: SomeError)` also sees the error that stopped a resolution, typically a `Busybee::GRPC::Error` from a failed `complete_job` or `fail_job`; give such a hook a `job.resolved?` check if it assumes the job settled. Filters on a settled outcome (`status: :complete`, `:failed`, `:error`) see settled jobs only
@@ -34,8 +35,8 @@ Instrumentation hooks for every job, worker and gRPC call, with testing helpers 
 
 - **Short-Circuit a Job From a Hook** – Sometimes the right answer is "don't do this work": the job was already fulfilled by an earlier attempt, the downstream service is in a known outage, the tenant is paused for maintenance. Resolve the job from any job hook with `complete!`, `fail!` or `throw_bpmn_error!`, and busybee stands down: `perform` doesn't run, input validation doesn't run, and neither automatic completion nor automatic failure fires against a job the engine already considers finished
   - Keep calling `perform.call` from your middleware exactly as you always have: the chain always descends, and busybee skips the work for you
-  - `on_job_activated`, `around_job_execution` and `on_job_executed` bracket every job that reached your process, short-circuited or not, so your instrumentation still sees it happen
-  - Resolving a job that is already resolved raises `Busybee::JobAlreadyHandled`
+  - `on_job_activated`, `around_job_execution` and `on_job_executed` bracket every job the worker ran, short-circuited or not, so your instrumentation still sees it happen. A job handed back at shutdown gets `on_job_not_executed` instead
+  - Resolving a job that is already resolved still raises `Busybee::JobAlreadyHandled`
   - A skipped `perform` is logged at `info`, and `complete!` tells you when variables you passed were discarded in favor of a result `perform` had already returned
 
 - **Shutdowns Your Instrumentation Can Count On** – The worker and job brackets close on every graceful shutdown, so gauges and counters stay true across a deploy:
@@ -173,6 +174,7 @@ Instrumentation hooks for every job, worker and gRPC call, with testing helpers 
 ### Breaking Changes:
 
 - **Strict Output Validation Is On by Default** – A worker whose `perform` returns, or whose `complete!` passes, keys not declared as `output` raises `Busybee::UndeclaredOutput`, through the worker's `complete!` and `job.complete!` alike. Declare the keys, or add `strict_outputs false` to workers that intentionally return ad-hoc keys
+- **`job.complete!` Checks Required Outputs From Inside a Worker** – Called from inside a worker, `job.complete!` now checks required outputs as the worker's own `complete!` does, raising `Busybee::MissingOutput` when one is missing. Pass every required output, or declare it `required: false`
 - **`fail_job_on_error` Is Gone: Every Failure Is Reported** – Every exception that escapes `perform` is reported to the workflow engine. Switching that off left the job silently unresolved, and since a lease expiring doesn't spend a retry, a job that failed the same way every time looped indefinitely and never raised an incident for anyone to see
   - A worker still carrying the declaration raises `NoMethodError` when it loads, so you hear about it at boot rather than in production
   - To report a failure *your* way, rescue inside `perform` and resolve the job yourself: `fail!(e, retries: job.retries)` to come back without spending the budget, `throw_bpmn_error!` for an outcome your process model has a path for. Whatever your rescue doesn't catch is still reported for you
