@@ -240,7 +240,7 @@ end
 
 Variables and headers are frozen to prevent accidental mutation.
 
-When you **write** variables (via `complete!`, `start_instance`, `publish_message`, etc.), Busybee calls `as_json` on your data before JSON-encoding it. This means objects with custom serialization—like ActiveRecord models—work sensibly:
+When you **write** variables (via `complete!`, `start_instance`, `publish_message`, etc.), Busybee calls `as_json` on your data before JSON-encoding it. This means objects with custom serialization, like ActiveRecord models, work sensibly:
 
 ```ruby
 user = User.find(user_id)
@@ -260,20 +260,20 @@ If you need custom serialization for your own classes, implement `as_json`.
 
 The Job object provides convenience methods that are the preferred way to complete, fail, or error jobs:
 
-**`complete!(vars = {})`** — Complete the job with optional output variables.
+**`complete!(vars = {})`**: Complete the job with optional output variables.
 
 ```ruby
 job.complete!
 job.complete!(result: "success", processedAt: Time.now.iso8601)
 ```
 
-**`fail!(message_or_exception, retries: nil, backoff: nil)`** — Fail the job. You can pass a string or an exception:
+**`fail!(message_or_exception, retries: nil, backoff: nil)`**: Fail the job. You can pass a string or an exception:
 
 ```ruby
 job.fail!("Payment gateway timeout")
 job.fail!("Rate limited", retries: 3, backoff: 30.seconds)
 
-# Pass an exception directly—Busybee formats it nicely
+# Pass an exception directly: Busybee formats it nicely
 begin
   risky_operation
 rescue => e
@@ -281,13 +281,13 @@ rescue => e
 end
 ```
 
-**`throw_bpmn_error!(code_or_exception, message = "")`** — Throw a BPMN error. You can pass a string, symbol, or exception:
+**`throw_bpmn_error!(code_or_exception, message = "")`**: Throw a BPMN error. You can pass a string, symbol, or exception:
 
 ```ruby
 job.throw_bpmn_error!("ORDER_NOT_FOUND", "Order #{order_id} not found")
 job.throw_bpmn_error!(:order_not_found)  # Symbol converted to "ORDER_NOT_FOUND"
 
-# Pass an exception—class name becomes the error code
+# Pass an exception: its class name becomes the error code
 begin
   order = Order.find!(order_id)
 rescue OrderNotFoundError => e
@@ -322,7 +322,7 @@ job.fail!("oops")  # => raises Busybee::JobAlreadyHandled
 
 **Gotchas:**
 
-1. **Blocking behavior:** Calling `stream.each` blocks the calling thread indefinitely. The iteration only ends when another thread calls `stream.close`, or when the server closes the connection. Plan for this—use signal handlers or a separate management thread.
+1. **Blocking behavior:** Calling `stream.each` blocks the calling thread indefinitely. The iteration only ends when another thread calls `stream.close`, or when the server closes the connection. Plan for this: use signal handlers or a separate management thread.
 
 2. **Single-pass:** Streams are single-pass. Once consumed via `each` or other Enumerable methods, the stream is exhausted. If you need to process the same jobs multiple times, collect them into an array first.
 
@@ -331,7 +331,7 @@ job.fail!("oops")  # => raises Busybee::JobAlreadyHandled
 ```ruby
 stream = client.open_job_stream("send-email")
 
-# Stream blocks on each—close from another thread or signal handler
+# Stream blocks on each; close from another thread or signal handler
 trap("INT") { stream.close }
 
 stream.each do |job|
@@ -765,7 +765,7 @@ client.publish_message("order-shipped", correlation_key: "ORD-123", ttl: 60_000)
 
 #### broadcast_signal
 
-Broadcast a signal to all process instances with matching signal catch events. Unlike messages, signals don't use correlation—they're delivered to all waiting instances.
+Broadcast a signal to all process instances with matching signal catch events. Unlike messages, signals don't use correlation: they're delivered to all waiting instances.
 
 ```ruby
 broadcast_signal(signal_name, vars: {}, tenant_id: nil) → Integer

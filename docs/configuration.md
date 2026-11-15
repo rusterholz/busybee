@@ -1,6 +1,6 @@
 # Gem Configuration
 
-Busybee provides a flexible configuration system that adapts to different environments — from local development with Docker to production deployments with Camunda Cloud. Configuration can be set through Ruby code, environment variables, or Rails configuration, with sensible defaults that work out of the box.
+Busybee provides a flexible configuration system that adapts to different environments, from local development with Docker to production deployments with Camunda Cloud. Configuration can be set through Ruby code, environment variables, or Rails configuration, with sensible defaults that work out of the box.
 
 This document covers gem-level settings: connection, credentials, logging, and operation defaults. For worker runtime configuration (CLI flags, YAML files, worker modes, and the config precedence chain), see [Workers: Running Workers](workers.md#running-workers).
 
@@ -57,7 +57,7 @@ Busybee.configure do |config|
 end
 ```
 
-The same block is where you register [lifecycle hooks](hooks.md) — `config.around_perform { ... }`, `config.after_call { ... }`, and friends live alongside the settings above.
+The same block is where you register [lifecycle hooks](hooks.md): `config.around_perform { ... }`, `config.after_call { ... }`, and friends live alongside the settings above.
 
 ### Direct Assignment
 
@@ -247,7 +247,7 @@ Both knobs take a [duration](#how-busybee-reads-durations); `nil` restores the d
 
 #### `grpc_keepalive_interval`
 
-The period between keepalive pings. Keep it above your gateway's minimum accepted ping interval (Zeebe's default is 30 seconds) — pinging more often than the gateway permits makes it close the connection.
+The period between keepalive pings. Keep it above your gateway's minimum accepted ping interval (Zeebe's default is 30 seconds); pinging more often than the gateway permits makes it close the connection.
 
 | | |
 |--|--|
@@ -277,13 +277,13 @@ Busybee.grpc_keepalive_timeout  = false
 
 #### How Busybee Reads Durations
 
-Every setting that takes a length of time — here, in the [worker DSL](workers.md#mode-configuration-in-the-dsl), in YAML, and as an argument to a client call — reads its value the same way:
+Every setting that takes a length of time (here, in the [worker DSL](workers.md#mode-configuration-in-the-dsl), in YAML, and as an argument to a client call) reads its value the same way:
 
 | You write | Busybee reads |
 |--|--|
 | `2_000` | 2,000 milliseconds |
 | `2.seconds` | an `ActiveSupport::Duration`, in whatever unit you spell it |
-| `"2000"` | 2,000 milliseconds — handy for values arriving from `ENV` |
+| `"2000"` | 2,000 milliseconds, handy for values arriving from `ENV` |
 | `0.5` | half a millisecond; fractions are kept, and truncated to whole milliseconds only when the value reaches the wire |
 
 Spellings like `2.seconds` and `5.minutes` come from ActiveSupport's numeric core extension. Rails loads it for you; outside Rails, add `require "active_support/core_ext/numeric/time"` after `require "busybee"`.
@@ -295,7 +295,7 @@ Spellings like `2.seconds` and `5.minutes` come from ActiveSupport's numeric cor
 milliseconds; if you meant 30 seconds, use 30000 or 30.seconds
 ```
 
-The value is still applied — the warning advises, it doesn't override you — and it only appears for settings where a sub-second value is almost certainly a slip. Deliberately tiny values are left alone: `0` means "no delay", `-1` is Zeebe's "answer immediately" for [`request_timeout`](workers.md#polling), and [`buffer_throttle`](workers.md#buffer-throttle), which takes sub-millisecond values, never warns.
+The value is still applied (the warning advises, it doesn't override you), and it only appears for settings where a sub-second value is almost certainly a slip. Deliberately tiny values are left alone: `0` means "no delay", `-1` is Zeebe's "answer immediately" for [`request_timeout`](workers.md#polling), and [`buffer_throttle`](workers.md#buffer-throttle), which takes sub-millisecond values, never warns.
 
 Per-call arguments never warn: `publish_message(name, correlation_key: key, ttl: 50)` sets a 50ms TTL without comment.
 

@@ -153,7 +153,7 @@ class ProcessPaymentWorker < Busybee::Worker
 
     { charged: true }
   rescue PaymentGateway::Timeout => e
-    # An outage isn't this order's fault — come back without spending a retry
+    # An outage isn't this order's fault: come back without spending a retry
     fail!(e, retries: job.retries, backoff: 60_000)
   rescue PaymentGateway::CardDeclined => e
     # A business outcome the process model has a path for
@@ -164,7 +164,7 @@ end
 
 Anything your rescue doesn't catch is still reported for you.
 
-Two neighboring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker — redacting sensitive text out of error messages, say — reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
+Two neighboring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker (redacting sensitive text out of error messages, say), reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
 
 #### Manual Lifecycle Control
 
@@ -247,13 +247,13 @@ end
 
 You can also configure shutdown errors globally for all workers in your application via [`Busybee.shutdown_on_errors`](configuration.md).
 
-`shutdown_on` accepts only `StandardError` subclasses. Classes outside that hierarchy (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise an error at class-definition time, because the per-job rescue that consults `shutdown_on` is `StandardError`-scoped — a non-`StandardError` would never reach the check at runtime. Signal-class errors are handled separately via the CLI's signal traps; there's nothing to configure here.
+`shutdown_on` accepts only `StandardError` subclasses. Classes outside that hierarchy (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise an error at class-definition time, because the per-job rescue that consults `shutdown_on` is `StandardError`-scoped: a non-`StandardError` would never reach the check at runtime. Signal-class errors are handled separately via the CLI's signal traps; there's nothing to configure here.
 
 When a shutdown is triggered, the job whose `perform` raised the error is reported as failed, spending a retry like any other failure. The worker process then stops requesting new jobs, hands back the jobs it received but hadn't started, with their retry counts untouched, so another worker picks them up, and exits. [Worker lifecycle hooks](hooks.md#worker-hooks) observe the whole sequence, with the closing snapshot reporting [`reason: :unhealthy`](hooks.md#stop-reasons).
 
 #### Direct Job Access
 
-Several of the methods you've already seen — `complete!`, `fail!`, `throw_bpmn_error!`, `update_retries`, `update_timeout`, `variables`, and `headers` — are actually delegated from the worker to an underlying `Busybee::Job` object. You can access this object directly via `self.job` in `perform`. The job carries metadata, raw data, and status information that isn't available at the worker level:
+Several of the methods you've already seen (`complete!`, `fail!`, `throw_bpmn_error!`, `update_retries`, `update_timeout`, `variables`, and `headers`) are actually delegated from the worker to an underlying `Busybee::Job` object. You can access this object directly via `self.job` in `perform`. The job carries metadata, raw data, and status information that isn't available at the worker level:
 
 ```ruby
 def perform
@@ -265,11 +265,11 @@ def perform
   job.retries                 # remaining retry attempts (Integer)
   job.deadline                # lock expiration time (frozen Time, UTC)
 
-  # Data (delegated, but declared inputs are preferred — see Declaring Inputs)
+  # Data (delegated, but declared inputs are preferred; see Declaring Inputs)
   job.variables               # all process variables, as a frozen hash with indifferent access
   job.headers                 # custom headers from BPMN definition, same format
 
-  # Lifecycle (delegated — see Manual Lifecycle Control)
+  # Lifecycle (delegated; see Manual Lifecycle Control)
   job.complete!(vars = {})    # mark job complete, checking declared outputs as the worker's does
   job.fail!(error, retries: nil, backoff: nil)  # mark job failed
   job.throw_bpmn_error!(code, message = "")     # throw a BPMN error
@@ -284,7 +284,7 @@ def perform
 end
 ```
 
-Worth knowing about how `status` relates to `result` and `error`: `result` and `error` are worker-side records of what came out of executing the job — captured the moment your `perform` decides them. `status` is the engine's ledger as reflected on this worker, and advances only after the relevant GRPC call (`complete_job`, `fail_job`, or `throw_bpmn_error`) succeeds. In normal operation the two views agree, but transient GRPC failures can produce divergence (e.g., a `:failed` worker-side status while the engine has the job in an incident); the worker doesn't observe engine state directly. A naming bridge that helps when cross-referencing Zeebe docs or Operate: Busybee's `:ready` is the worker-side name for what Zeebe calls the **ACTIVATED** state.
+Worth knowing about how `status` relates to `result` and `error`: `result` and `error` are worker-side records of what came out of executing the job, captured the moment your `perform` decides them. `status` is the engine's ledger as reflected on this worker, and advances only after the relevant GRPC call (`complete_job`, `fail_job`, or `throw_bpmn_error`) succeeds. In normal operation the two views agree, but transient GRPC failures can produce divergence (e.g., a `:failed` worker-side status while the engine has the job in an incident); the worker doesn't observe engine state directly. A naming bridge that helps when cross-referencing Zeebe docs or Operate: Busybee's `:ready` is the worker-side name for what Zeebe calls the **ACTIVATED** state.
 
 Variables and headers support both hash-style and method-style access, including nested values:
 
@@ -297,7 +297,7 @@ job.variables.address.zip_code    # nested method access
 
 Reaching past the worker doesn't change what `complete!` checks. The worker's `complete!` and `job.complete!` both check your declared outputs (required ones present, undeclared ones absent) whenever a worker is attached to the job: in `perform` and in the perform hooks around it. A job resolved before then, by an `on_job_activated` hook say, or a `Busybee::Job` used on its own, has no worker attached and so no outputs to check against. See [Strict Output Validation](#strict-output-validation).
 
-Most of the time, you won't need to reach for `job` directly — input accessors give you named, validated methods for reading data, and the lifecycle delegations (`complete!`, `fail!`, etc.) read more naturally without the `job.` prefix. But the job object is there when you need metadata, status checks, or raw data access.
+Most of the time, you won't need to reach for `job` directly: input accessors give you named, validated methods for reading data, and the lifecycle delegations (`complete!`, `fail!`, etc.) read more naturally without the `job.` prefix. But the job object is there when you need metadata, status checks, or raw data access.
 
 ### Declaring Inputs
 
@@ -429,7 +429,7 @@ end
 # :debug_info. Declare with `output :name` or set `strict_outputs false`
 ```
 
-The error message names your two options. Either the key belongs in the contract — declare it with `output` and the process can rely on it — or it doesn't, and it shouldn't be crossing the wire. The failure mode this prevents is a scratch value written into a process instance where a downstream FEEL expression or gateway condition can silently pick it up.
+The error message names your two options. Either the key belongs in the contract (declare it with `output` and the process can rely on it), or it doesn't, and it shouldn't be crossing the wire. The failure mode this prevents is a scratch value written into a process instance where a downstream FEEL expression or gateway condition can silently pick it up.
 
 Workers that deliberately return open-ended data can opt out:
 
@@ -1022,7 +1022,7 @@ expect(MyMonitor.status_of(ProcessOrderWorker)).to eq(:shutdown)
 
 Jobs you build for a held worker must use its client: `build_test_job(client: worker.client)`. The test worker has no transport behind it, so it reports no `worker_mode`, its jobs no `source`, and a hook filtered on either doesn't fire.
 
-`build_test_job` returns a real `Busybee::Job` — a genuine `ActivatedJob` protobuf, so it validates its own field types — backed by a real client whose transport is in-process. Lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) run the full client path and touch no network.
+`build_test_job` returns a real `Busybee::Job` (a genuine `ActivatedJob` protobuf, so it validates its own field types), backed by a real client whose transport is in-process. Lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) run the full client path and touch no network.
 
 Because the client is real rather than a double, your **call hooks fire** whenever the job makes a call, even outside `execute_worker`:
 
@@ -1039,7 +1039,7 @@ end
 
 #### Building the other carriers
 
-Hooks receive a `Worker::Status` or a `Client::Call` rather than a `Job`, and those have builders too. Each builds what production builds, so the projections a hook reads (`context_tags`, `logging_context`) are *computed* — a hand-written double would freeze your belief about them into the assertion and stay green when the contract moved.
+Hooks receive a `Worker::Status` or a `Client::Call` rather than a `Job`, and those have builders too. Each builds what production builds, so the projections a hook reads (`context_tags`, `logging_context`) are *computed*; a hand-written double would freeze your belief about them into the assertion and stay green when the contract moved.
 
 ```ruby
 status = build_test_worker_status(worker_class: ShipOrderWorker, total_job_count: 7)

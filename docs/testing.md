@@ -2,7 +2,7 @@
 
 Busybee provides RSpec helpers and matchers for testing BPMN workflows against a running Zeebe instance. This testing module lets you deploy processes, create instances, activate jobs, and verify that your workflow definitions route work correctly.
 
-This document covers **workflow-level testing** — verifying that your BPMN process definitions behave as expected. If you're looking to **unit test your worker classes** (the Ruby code that handles individual jobs), see [Workers: Testing Workers](workers.md#testing-workers). The two complement each other: workflow tests verify the orchestration, worker tests verify the business logic.
+This document covers **workflow-level testing**: verifying that your BPMN process definitions behave as expected. If you're looking to **unit test your worker classes** (the Ruby code that handles individual jobs), see [Workers: Testing Workers](workers.md#testing-workers). The two complement each other: workflow tests verify the orchestration, worker tests verify the business logic.
 
 ## Installation
 
@@ -73,7 +73,7 @@ Busybee.configure do |config|
 end
 ```
 
-Job activation waits default to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5 seconds) — the harness's own value, not your application's. Override it per call when an example wants something different:
+Job activation waits default to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5 seconds), the harness's own value, not your application's. Override it per call when an example wants something different:
 
 ```ruby
 job = activate_job("my-task", timeout: 2000)
@@ -88,7 +88,7 @@ For authenticated cluster connections (TLS, OAuth, Camunda Cloud), configure cre
 
 One parameter name in Busybee means seconds: **`wait:`**. It appears only on the helpers that pause your test process: [`assert_process_completed!`](#assert_process_completedwait-025) and [`zeebe_available?`](#zeebe_availablewait-5).
 
-Everything else, here and throughout the gem, is a [duration](configuration.md#how-busybee-reads-durations): a bare number means milliseconds, and an `ActiveSupport::Duration` works anywhere. That includes the helpers sitting right next to those two — `activate_job(timeout:)` and `publish_message(ttl:)` both set real Zeebe duration fields, so they read like every other duration in the gem.
+Everything else, here and throughout the gem, is a [duration](configuration.md#how-busybee-reads-durations): a bare number means milliseconds, and an `ActiveSupport::Duration` works anywhere. That includes the helpers sitting right next to those two: `activate_job(timeout:)` and `publish_message(ttl:)` both set real Zeebe duration fields, so they read like every other duration in the gem.
 
 ### The harness picks its own timings
 
@@ -96,9 +96,9 @@ Those durations have defaults, and the defaults belong to the harness rather tha
 
 | Helper | Default | Constant |
 |--------|---------|----------|
-| `activate_job` / `activate_jobs` — `timeout:` | 5 s | `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` |
+| `activate_job` / `activate_jobs`, `timeout:` | 5 s | `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` |
 | the lock an activated job holds | 30 s | `Busybee::Testing::ACTIVATE_JOB_LOCK_MS` |
-| `publish_message` — `ttl:` | 5 s | `Busybee::Testing::PUBLISH_MESSAGE_TTL_MS` |
+| `publish_message`, `ttl:` | 5 s | `Busybee::Testing::PUBLISH_MESSAGE_TTL_MS` |
 | how long a [foreign job](#jobs-from-other-process-instances) sits out after being handed back | 250 ms per job refused so far in that activation | `Busybee::Testing::FOREIGN_JOB_BACKOFF_MS` |
 | ... at most | 2 s | `Busybee::Testing::FOREIGN_JOB_MAX_BACKOFF_MS` |
 
@@ -236,7 +236,7 @@ Activates a single job of the specified type. Raises `Busybee::Testing::NoJobsAv
 
 **Parameters:**
 - `type` (String) - Job type to activate
-- `timeout` (Integer, ActiveSupport::Duration, optional) - How long to wait for a job. Defaults to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5,000ms) — see [The harness picks its own timings](#the-harness-picks-its-own-timings)
+- `timeout` (Integer, ActiveSupport::Duration, optional) - How long to wait for a job. Defaults to `Busybee::Testing::ACTIVATE_JOB_TIMEOUT_MS` (5,000ms); see [The harness picks its own timings](#the-harness-picks-its-own-timings)
 
 **Returns:** `ActivatedJob` instance
 
@@ -320,7 +320,7 @@ Publishes a message to Zeebe to trigger message intermediate catch events or mes
 - `name` (String) - Message name matching BPMN definition
 - `correlation_key` (String) - Key to correlate message with process instance
 - `vars` (Hash) - Message payload variables (optional, default: `{}`)
-- `ttl` (Integer, ActiveSupport::Duration) - Message time-to-live. Defaults to `Busybee::Testing::PUBLISH_MESSAGE_TTL_MS` (5,000ms) — see [The harness picks its own timings](#the-harness-picks-its-own-timings)
+- `ttl` (Integer, ActiveSupport::Duration) - Message time-to-live. Defaults to `Busybee::Testing::PUBLISH_MESSAGE_TTL_MS` (5,000ms); see [The harness picks its own timings](#the-harness-picks-its-own-timings)
 
 **Example:**
 
@@ -861,12 +861,12 @@ client.cancel_instance(key) # Easy to forget in error paths
 Assert expected inputs before completing jobs:
 
 ```ruby
-# Good: fluent style — verify and complete in one chain
+# Good: fluent style, verify and complete in one chain
 activate_job("send-email")
   .expect_variables(recipient: "user@example.com")
   .and_complete(sent_at: Time.now.iso8601)
 
-# Also Good: separate verification and completion — useful when you need to
+# Also Good: separate verification and completion, useful when you need to
 # activate multiple jobs of the same type and distinguish between them
 jobs = activate_jobs("send-comms", expected: 2)
   .group_by { |j| j.headers["medium"] }
