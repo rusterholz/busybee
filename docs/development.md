@@ -533,30 +533,26 @@ excluded.each { |f| puts \"  - #{f}\" }
 "
 ```
 
-**Review each included file** to ensure it should be user-facing. Test infrastructure, development tooling, and internal docs should be excluded.
+**Review each included file** to ensure it should be user-facing. Test infrastructure, development tooling, and docs should be excluded.
 
 ### Full Gem Audit (Before Release)
 
 Before each release, audit the complete file list:
 
 ```bash
-ruby -e "puts Dir.glob(%w[exe/**/* lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]).reject { |f| f.include?('docs/internal.md') || f.include?('docs/development.md') }"
+bundle exec ruby -e 'puts Gem::Specification.load("busybee.gemspec").files'
 ```
 
 **Files that SHOULD be in the gem:**
-- `exe/**/*` — The `busybee` executable
-- `lib/**/*` — All library code
-- `docs/testing.md`, `docs/grpc.md`, etc. — User-facing documentation
-- `LICENSE.txt`, `README.md`, `CHANGELOG.md` — Standard files
+- `exe/**/*`: the `busybee` executable
+- `lib/**/*`: all library code
+- `LICENSE.txt`, `README.md`, `CHANGELOG.md`: standard files
 
 **Files that should NOT be in the gem:**
-- `docs/internal.md` — Maintainer-only architecture documentation
-- `docs/development.md` — This development guide
-- `.github/`, `.env`, `docker-compose.yml` — CI/dev infrastructure
-- `spec/`, `Gemfile`, `Rakefile`, `Appraisals` — Development files
-- `proto/`, `gen-grpc.sh` — GRPC generation tooling
-
-If you add new docs, ensure user-facing docs go in `docs/` (included) and maintainer/dev docs are excluded in the gemspec.
+- `docs/`: all documentation, user-facing and maintainer alike. Readers find it on GitHub, at the release's tag, through the gemspec's `documentation_uri`
+- `.github/`, `.env`, `docker-compose.yml`: CI/dev infrastructure
+- `spec/`, `Gemfile`, `Rakefile`, `Appraisals`: development files
+- `proto/`, `gen-grpc.sh`: GRPC generation tooling
 
 ## Releasing a New Version
 

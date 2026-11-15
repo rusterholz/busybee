@@ -13,7 +13,7 @@ Gem::Specification.new do |spec|
     The missing Ruby gem for Camunda 8. Production-ready worker framework
     that runs out of the box - define your job handlers and go. Idiomatic
     Zeebe client with sensible defaults and configuration where you want it.
-    RSpec testing helpers and CI/CD deployment tooling for BPMNs.
+    RSpec testing helpers for BPMNs.
   DESC
   spec.homepage      = "https://github.com/rusterholz/busybee"
   spec.license       = "MIT"
@@ -23,12 +23,11 @@ Gem::Specification.new do |spec|
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/rusterholz/busybee"
   spec.metadata["changelog_uri"] = "https://github.com/rusterholz/busybee/blob/main/CHANGELOG.md"
+  spec.metadata["documentation_uri"] = "https://github.com/rusterholz/busybee/tree/v#{Busybee::VERSION}/docs"
   spec.metadata["rubygems_mfa_required"] = "true"
 
   # Explicit file list - audit before each release (see docs/development.md)
-  spec.files = Dir.glob(
-    %w[exe/**/* lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]
-  ).reject { |f| f.include?("docs/internal.md") || f.include?("docs/development.md") }
+  spec.files = Dir.glob(%w[exe/**/* lib/**/* LICENSE.txt README.md CHANGELOG.md])
   spec.bindir        = "exe"
   spec.executables   = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
