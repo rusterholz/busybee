@@ -41,10 +41,10 @@ module Busybee
     end
 
     # Blocks until stopped or until #run_loop raises; the teardown then runs on every
-    # exit path, on the runner thread. Fires T0 here and T2/T3 in the teardown, each
-    # with a fresh Worker::Status; T1 fires from announce_stop. Single-entry: start!'s
-    # compare-and-set reports whether this call won, so a second run! is a no-op,
-    # and sitting before the begin/ensure makes T0/T2/T3 all-or-none.
+    # exit path, on the runner thread, T0's escalation included. Fires T0 here and
+    # T2/T3 in the teardown, each with a fresh Worker::Status; T1 fires from
+    # announce_stop. Single-entry: start!'s compare-and-set reports whether this
+    # call won, so a second run! is a no-op and fires nothing.
     def run!
       return if stopping?
       return unless start!
@@ -117,7 +117,7 @@ module Busybee
       return false unless @running.make_true
 
       @worker_timestamps.stamp!(:started_at)
-      Hooks.run(:on_worker_started, worker_status, safe: true)
+      fire_worker_started
       Logging.info("Started #{logged_worker_name} (#{[worker_mode, "job type #{logged_job_type}"].compact.join(', ')})",
                    lifecycle_carrier)
       true

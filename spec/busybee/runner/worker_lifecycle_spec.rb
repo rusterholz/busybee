@@ -457,10 +457,17 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect(runner.stopping?).to be(true)
     end
 
-    it "still escalates from on_worker_started, where a start can be aborted" do
+    it "still escalates from on_worker_started, where a start can be aborted, after the closing moments" do
+      record_all_lifecycle_hooks
       Busybee.on_worker_started { raise Busybee::Worker::Shutdown, "T0 declares unhealth" }
 
       expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+
+      aggregate_failures do
+        expect(moments).to eq(%i[started stop_requested stopping shutdown])
+        expect(runner.drained).to be(true)
+        expect(runner.running?).to be(false)
+      end
     end
 
     context "with an error listed in shutdown_on" do
@@ -471,10 +478,13 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
       after { Busybee.shutdown_on_errors = nil }
 
-      it "escalates it from on_worker_started" do
+      it "escalates it from on_worker_started, after the closing moments" do
+        record_all_lifecycle_hooks
         Busybee.on_worker_started { raise LifecycleFatal, "listed" }
 
         expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown) { |e| expect(e.cause).to be_a(LifecycleFatal) }
+        expect(moments).to eq(%i[started stop_requested stopping shutdown])
+        expect(events.last.last).to have_attributes(reason: :unhealthy, error: be_a(LifecycleFatal))
       end
 
       it "contains it at on_worker_stopping" do

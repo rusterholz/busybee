@@ -41,6 +41,18 @@ RSpec.describe "the CLI's exit status" do # rubocop:disable RSpec/DescribeClass
                             ])
   end
 
+  it "is 1 when on_worker_started declares the worker down, logging its stop and the error" do
+    output, status = run_fixture("unhealthy_start")
+    logged = output.lines.grep(/\[busybee\]/).map { |line| line[/\[busybee\] .*/] }
+
+    aggregate_failures do
+      expect(status&.exitstatus).to eq(1), "the process #{status ? "exited #{status.exitstatus}" : 'hung'}:\n#{output}"
+      expect(logged).to eq(["[busybee] Stopping ClosingStreamWorker (unhealthy)",
+                            "[busybee] Stopped ClosingStreamWorker (unhealthy)"])
+      expect(output).to include("replica lagging (Busybee::Worker::Shutdown)")
+    end
+  end
+
   it "logs only the worker's start and stop after a clean stop" do
     output, = run_fixture
 
