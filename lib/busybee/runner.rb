@@ -29,15 +29,13 @@ module Busybee
       @worker_class = worker_class
       @runtime_config = runtime_config
       @client = client || Busybee::Client.new
-      @stop_reason = Concurrent::AtomicReference.new(nil)
       @running = Concurrent::AtomicBoolean.new(false)
       @worker_timestamps = Worker::Timestamps.new
       @total_job_count = Concurrent::AtomicFixnum.new(0)
       @failed_job_count = Concurrent::AtomicFixnum.new(0)
       @backpressure_count = Concurrent::AtomicFixnum.new(0)
       @teardown_error = Concurrent::AtomicReference.new(nil)
-      @announcing = Concurrent::AtomicBoolean.new(false)
-      @stop_announced = Concurrent::Event.new
+      initialize_stop_state
     end
 
     # Blocks until stopped or until #run_loop raises; the teardown then runs on every
@@ -58,11 +56,12 @@ module Busybee
 
     # Signals graceful shutdown, recording why. Thread-safe: the CLI runs signal
     # handlers on their own thread. The set-once reason is the gate: only the call
-    # setting it announces.
+    # setting it announces, unless no run was accepted first, when none ever will be.
     def stop!(reason: :signal)
       raise ArgumentError, "stop reason must be a Symbol, got #{reason.class}" unless reason.is_a?(Symbol)
+      return unless @stop_reason.compare_and_set(nil, reason)
 
-      announce_stop if @stop_reason.compare_and_set(nil, reason)
+      @run_decided.make_true ? log_stop_before_start : announce_stop
     end
 
     # True once a stop has begun, or once the process must exit immediately,
@@ -111,10 +110,13 @@ module Busybee
 
     private
 
-    # T0: try to begin the run. The @running flip doubles as the single-entry
-    # gate: lose it and start! returns false BEFORE stamping or firing.
+    # T0: try to begin the run. The decision is the single-entry gate, shared with
+    # stop!: lose it, to another start! or to a stop claimed first, and start!
+    # returns false BEFORE stamping or firing.
     def start! # rubocop:disable Naming/PredicateMethod
-      return false unless @running.make_true
+      return false unless @run_decided.make_true
+
+      @running.make_true
 
       @worker_timestamps.stamp!(:started_at)
       return false unless fire_worker_started

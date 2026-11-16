@@ -48,6 +48,9 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
   def moments = events.map(&:first)
 
+  # start!, run!'s first step: a stop announces only on a run already accepted.
+  def accept_run = runner.send(:start!)
+
   def wait_until(timeout: 2, poll: 0.005)
     deadline = Time.now + timeout
     sleep poll until yield || Time.now > deadline
@@ -82,16 +85,17 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
   describe "#stop! and on_worker_stop_requested" do
     it "fires on_worker_stop_requested exactly once across repeated stop!" do
       record_all_lifecycle_hooks
+      accept_run
       runner.stop!
       runner.stop!
-      expect(moments).to eq(%i[stop_requested])
+      expect(moments).to eq(%i[started stop_requested])
     end
 
-    it "fires nothing else when stop! precedes run! (early return, sequence guard)" do
+    it "fires nothing at all when stop! precedes run!, since the run never began" do
       record_all_lifecycle_hooks
-      runner.stop!   # fires stop_requested
-      runner.run!    # stopping? -> early return; started/stopping/shutdown must not fire
-      expect(moments).to eq(%i[stop_requested])
+      runner.stop!
+      runner.run!
+      expect(moments).to be_empty
     end
   end
 
@@ -99,6 +103,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "carries a caller-supplied reason onto on_worker_stop_requested" do
       captured = nil
       Busybee.on_worker_stop_requested { |worker| captured = worker }
+      accept_run
       runner.stop!(reason: :rollover)
       expect(captured.reason).to eq(:rollover)
     end
@@ -106,6 +111,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "defaults the reason to :signal" do
       captured = nil
       Busybee.on_worker_stop_requested { |worker| captured = worker }
+      accept_run
       runner.stop!
       expect(captured.reason).to eq(:signal)
     end
@@ -117,6 +123,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "records the reason once: the first stop! wins (set-once)" do
       reasons = Concurrent::Array.new
       Busybee.on_worker_stop_requested { |worker| reasons << worker.reason }
+      accept_run
       runner.stop!(reason: :rollover)
       runner.stop!(reason: :sigterm)
       expect(reasons).to eq(%i[rollover])
@@ -127,6 +134,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "stops with reason :kill" do
       captured = nil
       Busybee.on_worker_stop_requested { |worker| captured = worker }
+      accept_run
       runner.kill!
       expect(captured.reason).to eq(:kill)
     end

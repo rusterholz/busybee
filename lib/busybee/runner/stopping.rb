@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
+require "concurrent"
 
 require "busybee/durations"
 require "busybee/grpc/error"
@@ -33,6 +34,18 @@ module Busybee
         ensure
           @stop_announced.set
         end
+      end
+
+      def initialize_stop_state
+        @stop_reason = Concurrent::AtomicReference.new(nil)
+        @run_decided = Concurrent::AtomicBoolean.new(false) # by start! accepting the run, or a stop! before it
+        @announcing = Concurrent::AtomicBoolean.new(false)
+        @stop_announced = Concurrent::Event.new
+      end
+
+      # A worker stopped before its run was accepted fires no moments: its one record.
+      def log_stop_before_start
+        Logging.info("Stopped #{logged_worker_name} before it started (#{@stop_reason.get})", lifecycle_carrier)
       end
 
       def declare_unhealthy(error) = claim_stop(:unhealthy, error)

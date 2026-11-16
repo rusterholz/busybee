@@ -520,7 +520,7 @@ RSpec.describe Busybee::Runner::Hybrid do
 
   describe "#stop!" do
     it "closes the stream and pushes :stop sentinel" do
-      # Set up a stream on the runner to verify close
+      runner.send(:start!) # a run accepted, its stream open
       runner.instance_variable_set(:@stream, stream)
 
       runner.stop!
