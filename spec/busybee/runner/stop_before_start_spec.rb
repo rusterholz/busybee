@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "concurrent"
+require "delegate"
 
 # A stop and a run's start, in either order, with a real client. A stop claimed
 # before the run is accepted leaves a worker that never ran: no worker moments,
@@ -83,6 +84,52 @@ RSpec.describe "a stop meeting a worker's start", :gateway do # rubocop:disable 
       expect(run.value).to be_nil
       expect(fired).to eq(%i[started stop_requested started_hook_done stopping shutdown])
       expect(moments.assoc(:stop_requested).last).to be(stopper)
+    end
+  end
+
+  # Holds the stopping thread just short of contending for the run's decision,
+  # until the run it stopped has torn down on its own thread.
+  describe "a stop held after its claim while the accepted run tears down" do
+    let(:held) { Concurrent::Event.new }
+    let(:release) { Concurrent::Event.new }
+
+    before do
+      gate_held = held
+      gate_release = release
+      decision = runner.instance_variable_get(:@run_decided)
+      runner.instance_variable_set(:@run_decided, Class.new(SimpleDelegator) do
+        define_method(:make_true) do
+          if Thread.current[:hold_decision]
+            gate_held.set
+            gate_release.wait(5)
+          end
+          __getobj__.make_true
+        end
+      end.new(decision))
+    end
+
+    def held_stopper
+      Thread.new do
+        Thread.current[:hold_decision] = true
+        runner.stop!(reason: :sigterm)
+      end
+    end
+
+    it "still reads as the stop of a run that started, never as one before it" do
+      started = Concurrent::Event.new
+      Busybee.on_worker_started { |_status| started.set }
+      lines = capture_busybee_log(level: Logger::INFO) do
+        run = Thread.new { run_to_completion }
+        started.wait(5)
+        stopper = held_stopper
+        held.wait(5)
+        expect(run.value).to be_nil
+        release.set
+        stopper.join(5)
+      end
+
+      expect(fired).to eq(%i[started stop_requested stopping shutdown])
+      expect(lines.grep(/before it started/)).to be_empty
     end
   end
 
