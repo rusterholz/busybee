@@ -13,6 +13,7 @@ module Busybee
       # One link invocation's descent: whether the hook has yielded, and what the
       # first descent returned or raised.
       Descent = Struct.new(:called, :value, :error)
+      private_constant :Descent
 
       class << self
         # @param hooks [Array<Hash>] matching hooks, each with :callback
