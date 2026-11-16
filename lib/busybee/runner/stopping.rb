@@ -39,7 +39,7 @@ module Busybee
 
       def initialize_stop_state
         @stop_reason = Concurrent::AtomicReference.new(nil)
-        @run_decided = Concurrent::AtomicBoolean.new(false) # by start! accepting the run, or a stop! before it
+        @run_state = Concurrent::AtomicReference.new(nil) # :accepted then :finished, or :refused; never nil again
         @announcing = Concurrent::AtomicBoolean.new(false)
         @stop_announced = Concurrent::Event.new
       end

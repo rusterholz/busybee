@@ -87,7 +87,7 @@ RSpec.describe "a stop meeting a worker's start", :gateway do # rubocop:disable 
     end
   end
 
-  # Holds the stopping thread just short of contending for the run's decision,
+  # Holds the stopping thread just short of contending for the run's state,
   # until the run it stopped has torn down on its own thread.
   describe "a stop held after its claim while the accepted run tears down" do
     let(:held) { Concurrent::Event.new }
@@ -96,16 +96,16 @@ RSpec.describe "a stop meeting a worker's start", :gateway do # rubocop:disable 
     before do
       gate_held = held
       gate_release = release
-      decision = runner.instance_variable_get(:@run_decided)
-      runner.instance_variable_set(:@run_decided, Class.new(SimpleDelegator) do
-        define_method(:make_true) do
+      state = runner.instance_variable_get(:@run_state)
+      runner.instance_variable_set(:@run_state, Class.new(SimpleDelegator) do
+        define_method(:compare_and_set) do |expected, value|
           if Thread.current[:hold_decision]
             gate_held.set
             gate_release.wait(5)
           end
-          __getobj__.make_true
+          __getobj__.compare_and_set(expected, value)
         end
-      end.new(decision))
+      end.new(state))
     end
 
     def held_stopper
@@ -161,6 +161,19 @@ RSpec.describe "a stop meeting a worker's start", :gateway do # rubocop:disable 
 
       expect(run.value).to be_nil
       expect(fired).to eq(%i[stop_requested started stopping shutdown])
+    end
+
+    it "reads as running when the stop is announced, and not once the run is over" do
+      running_at_stop = nil
+      Busybee.on_worker_stop_requested { |_status| running_at_stop = runner.running? }
+      run = Thread.new { run_to_completion }
+      held.wait(5)
+      Thread.new { runner.stop!(reason: :sigterm) }.join(5)
+      release.set
+      run.join(5)
+
+      expect(running_at_stop).to be(true)
+      expect(runner.running?).to be(false)
     end
   end
 

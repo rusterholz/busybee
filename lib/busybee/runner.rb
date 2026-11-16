@@ -29,7 +29,6 @@ module Busybee
       @worker_class = worker_class
       @runtime_config = runtime_config
       @client = client || Busybee::Client.new
-      @running = Concurrent::AtomicBoolean.new(false)
       @worker_timestamps = Worker::Timestamps.new
       @total_job_count = Concurrent::AtomicFixnum.new(0)
       @failed_job_count = Concurrent::AtomicFixnum.new(0)
@@ -61,14 +60,14 @@ module Busybee
       raise ArgumentError, "stop reason must be a Symbol, got #{reason.class}" unless reason.is_a?(Symbol)
       return unless @stop_reason.compare_and_set(nil, reason)
 
-      @run_decided.make_true ? log_stop_before_start : announce_stop
+      @run_state.compare_and_set(nil, :refused) ? log_stop_before_start : announce_stop
     end
 
     # True once a stop has begun, or once the process must exit immediately,
     # which may come before this runner has a reason; stop_reason waits for one.
     def stopping? = !@stop_reason.get.nil? || exit_immediately?
     def stop_reason = @stop_reason.get
-    def running? = @running.true?
+    def running? = @run_state.get == :accepted
 
     # Force shutdown: the fire alarm, then a stop. Multi overrides to also kill the
     # pool. Parameterized: a hard teardown is not always operator-initiated.
@@ -110,13 +109,11 @@ module Busybee
 
     private
 
-    # T0: try to begin the run. The decision, set once and never cleared, is the
-    # single-entry gate, shared with stop!: lose it, to an earlier start! or to a
-    # stop claimed first, and start! returns false BEFORE stamping or firing.
+    # T0: try to begin the run. Accepting it is the single-entry gate, contended
+    # by stop!: lose it, to an earlier start! or to a stop claimed first, and
+    # start! returns false BEFORE stamping or firing.
     def start! # rubocop:disable Naming/PredicateMethod
-      return false unless @run_decided.make_true
-
-      @running.make_true
+      return false unless @run_state.compare_and_set(nil, :accepted)
 
       @worker_timestamps.stamp!(:started_at)
       return false unless fire_worker_started

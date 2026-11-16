@@ -9,8 +9,8 @@ module Busybee
   class Runner
     # What run!'s ensure does about things that go wrong inside it. The invariant:
     # short of an error the process can't recover from, the ensure completes, or
-    # jobs go unreturned and monitoring goes blind. @running clears whatever happens,
-    # so running? reads false once the run is over.
+    # jobs go unreturned and monitoring goes blind. The run finishes whatever happens,
+    # so running? reads false once it is over.
     module Teardown
       private
 
@@ -26,7 +26,7 @@ module Busybee
         fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
         Logging.info("Stopped #{logged_worker_name} (#{@stop_reason.get})", lifecycle_carrier)
       ensure
-        @running.make_false
+        @run_state.set(:finished)
       end
 
       # Claim for the exit exception, or for the fire a loop left on, before intake

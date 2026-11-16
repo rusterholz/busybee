@@ -32,9 +32,7 @@ module Busybee
 
       def run!
         return if stopping?
-        return unless @run_decided.make_true # one-shot, mirroring Runner#start!
-
-        @running.make_true
+        return unless @run_state.compare_and_set(nil, :accepted) # one-shot, mirroring Runner#start!
 
         begin
           post_runners_to_pool
@@ -43,7 +41,7 @@ module Busybee
           err = @thread_error.get
           raise err if err
         ensure
-          @running.make_false
+          @run_state.set(:finished)
         end
       end
 
