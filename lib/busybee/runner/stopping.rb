@@ -40,9 +40,24 @@ module Busybee
       def initialize_stop_state
         @stop_reason = Concurrent::AtomicReference.new(nil)
         @run_state = Concurrent::AtomicReference.new(nil) # :accepted then :finished, or :refused; never nil again
+        @run_lock = Mutex.new # deciding the run; never held across hooks
         @announcing = Concurrent::AtomicBoolean.new(false)
         @stop_announced = Concurrent::Event.new
       end
+
+      # Accepting the run stamps its start in the same step, so whoever sees it
+      # accepted sees started_at too.
+      def accept_run
+        @run_lock.synchronize do
+          next false unless @run_state.get.nil?
+
+          @worker_timestamps.stamp!(:started_at)
+          @run_state.set(:accepted)
+          true
+        end
+      end
+
+      def refuse_run = @run_lock.synchronize { @run_state.compare_and_set(nil, :refused) }
 
       # A worker stopped before its run was accepted fires no moments: its one record.
       def log_stop_before_start

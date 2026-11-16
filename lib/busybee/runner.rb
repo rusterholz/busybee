@@ -60,7 +60,7 @@ module Busybee
       raise ArgumentError, "stop reason must be a Symbol, got #{reason.class}" unless reason.is_a?(Symbol)
       return unless @stop_reason.compare_and_set(nil, reason)
 
-      @run_state.compare_and_set(nil, :refused) ? log_stop_before_start : announce_stop
+      refuse_run ? log_stop_before_start : announce_stop
     end
 
     # True once a stop has begun, or once the process must exit immediately,
@@ -113,9 +113,7 @@ module Busybee
     # by stop!: lose it, to an earlier start! or to a stop claimed first, and
     # start! returns false BEFORE stamping or firing.
     def start! # rubocop:disable Naming/PredicateMethod
-      return false unless @run_state.compare_and_set(nil, :accepted)
-
-      @worker_timestamps.stamp!(:started_at)
+      return false unless accept_run
       return false unless fire_worker_started
 
       Logging.info("Started #{logged_worker_name} (#{[worker_mode, "job type #{logged_job_type}"].compact.join(', ')})",

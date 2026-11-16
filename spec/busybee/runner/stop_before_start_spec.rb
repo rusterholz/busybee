@@ -133,7 +133,7 @@ RSpec.describe "a stop meeting a worker's start", :gateway do # rubocop:disable 
     end
   end
 
-  # Holds the run between its acceptance and its start stamp, while a stop lands.
+  # Holds the run at its start stamp, inside its acceptance, while a stop lands.
   describe "a stop landing as an accepted run starts" do
     let(:held) { Concurrent::Event.new }
     let(:release) { Concurrent::Event.new }
@@ -153,26 +153,33 @@ RSpec.describe "a stop meeting a worker's start", :gateway do # rubocop:disable 
       end.new(timestamps))
     end
 
-    it "announces the stop first, then still fires every moment once" do
+    # The stop either announces at once or waits for the acceptance to finish;
+    # either way its thread has gone as far as it can before the release.
+    def stop_as_it_starts
       run = Thread.new { run_to_completion }
       held.wait(5)
-      Thread.new { runner.stop!(reason: :sigterm) }.join(5)
+      stopper = Thread.new { runner.stop!(reason: :sigterm) }
+      Thread.pass until stopper.stop?
       release.set
-
-      expect(run.value).to be_nil
-      expect(fired).to eq(%i[stop_requested started stopping shutdown])
+      stopper.join(5)
+      run.value
     end
 
-    it "reads as running when the stop is announced, and not once the run is over" do
-      running_at_stop = nil
-      Busybee.on_worker_stop_requested { |_status| running_at_stop = runner.running? }
-      run = Thread.new { run_to_completion }
-      held.wait(5)
-      Thread.new { runner.stop!(reason: :sigterm) }.join(5)
-      release.set
-      run.join(5)
+    it "announces it as the stop of a running worker with its start time, every moment once" do
+      at_stop = nil
+      Busybee.on_worker_stop_requested { |status| at_stop = [runner.running?, status.started_at] }
 
-      expect(running_at_stop).to be(true)
+      lines = capture_busybee_log(level: Logger::INFO) { expect(stop_as_it_starts).to be_nil }
+
+      expect(lines.grep(/before it started/)).to be_empty
+      expect(at_stop).to match([true, an_instance_of(Time)])
+      expect(fired).to contain_exactly(:started, :stop_requested, :stopping, :shutdown)
+      expect(fired.last(2)).to eq(%i[stopping shutdown])
+    end
+
+    it "reads as stopped once the run is over" do
+      stop_as_it_starts
+
       expect(runner.running?).to be(false)
     end
   end
