@@ -431,7 +431,7 @@ Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` — works
 **Error handling:** A `Concurrent::AtomicReference` captures the first error from any child thread (first-error-wins via `update { |prev| prev || e }`). When a child thread raises, Multi logs the error and cascades to the siblings, and after the pool terminates, re-raises the captured error. A recoverable error cascades a graceful `stop!` (`cascade_after_failure`), unless the fire alarm is already raised, when it kills them under the fire's reason instead; anything else raises the fire alarm and kills them (`kill_children`, under the fire's reason: this crash's, or an earlier fire's). A child whose `run!` returns normally ends them too (`cascade_after_return`): it kills them, under the fire's reason, if the fire alarm is raised, since its own error never left it; otherwise it stops them gracefully under its own `stop_reason` (a clean stream close, say), so a job type is never left unworked while its siblings keep the process alive. Nothing is re-raised either way.
 
 **Shutdown sequence:**
-- `stop!` — stops all child runners, then `thread_pool.shutdown` (waits for in-progress jobs to finish)
+- `stop!` — stops all child runners, then `thread_pool.shutdown` (waits for in-progress jobs to finish). A `stop!` landing just as `run!` begins can shut the pool before `run!` has posted to it; the post's `RejectedExecutionError` is then taken as that stop, since every child is already stopped, and `run!` returns normally under its reason
 - `stopping?` — true only when *all* child runners are stopping (each counting the fire alarm, so all are once it is raised)
 - `kill!` — kills all child runners, then `thread_pool.kill` (immediate termination)
 

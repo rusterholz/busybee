@@ -88,6 +88,8 @@ module Busybee
             kill_children(reason: ending_reason) # the first fire's reason, maybe an earlier one
           end
         end
+      rescue Concurrent::RejectedExecutionError
+        raise unless stopping? # a stop shut the pool as the run began, its children already stopped
       end
 
       # A child that stopped takes the rest with it, under its reason, or kills

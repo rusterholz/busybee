@@ -199,6 +199,24 @@ RSpec.describe "a stop meeting a worker's start", :gateway do # rubocop:disable 
                                        "INFO [busybee] Stopped UnstartedSiblingWorker before it started (sigterm)")
     end
 
+    it "ends a run the process was stopped on as it began, under the stop's reason, without raising" do
+      stopping = -> { runner.stop!(reason: :sigterm) }
+      state = runner.instance_variable_get(:@run_state)
+      runner.instance_variable_set(:@run_state, Class.new(SimpleDelegator) do
+        define_method(:compare_and_set) do |expected, value|
+          __getobj__.compare_and_set(expected, value).tap { |won| stopping.call if won && value == :accepted }
+        end
+      end.new(state))
+      lines = capture_busybee_log(level: Logger::INFO) { expect(run_to_completion).to be_nil }
+
+      aggregate_failures do
+        expect(moments).to be_empty
+        expect(lines).to contain_exactly("INFO [busybee] Stopped UnstartedWorker before it started (sigterm)",
+                                         "INFO [busybee] Stopped UnstartedSiblingWorker before it started (sigterm)")
+        expect([runner.stop_reason, runner.running?]).to eq([:sigterm, false])
+      end
+    end
+
     # The failing worker's cascade usually reaches its sibling before the
     # sibling's thread has started it.
     it "gives a sibling the failure's cascade reaches either no moments or all four" do
