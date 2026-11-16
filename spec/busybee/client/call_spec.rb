@@ -299,6 +299,36 @@ RSpec.describe Busybee::Client::Call do
       expect(events).to eq(%i[before stub after])
     end
 
+    describe "what continue.call returns to around_call" do
+      let(:returned) { [] }
+
+      before { Busybee.around_call { |_call, continue| returned << continue.call } }
+
+      it "is the attempt's response, the same unfrozen object the caller gets" do
+        response = Struct.new(:key).new(5)
+        expect(described_class.new(:complete_job).attempt { response }).to be(response)
+        expect(returned).to contain_exactly(be(response))
+        expect(response).not_to be_frozen
+      end
+
+      it "is nil when the attempt errored, whose error still raises past the chain" do
+        call = described_class.new(:complete_job)
+        expect { call.attempt { raise GRPC::Unavailable, "down" } }.to raise_error(Busybee::GRPC::Error)
+        expect(returned).to eq([nil])
+      end
+
+      it "is the first call's response again when the hook calls it twice" do
+        Busybee.around_call do |_call, continue|
+          continue.call
+          returned << continue.call
+        end
+        response = Object.new
+
+        described_class.new(:complete_job).attempt { response }
+        expect(returned).to eq([response, response])
+      end
+    end
+
     it "records the result of a successful attempt and counts the attempt" do
       call = described_class.new(:complete_job)
       call.attempt { "result-value" }
