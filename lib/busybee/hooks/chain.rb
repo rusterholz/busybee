@@ -7,9 +7,13 @@ module Busybee
     # Builds the nested lambda chain used by Hooks.run_chain. Each hook receives
     # (target, perform); calling perform descends one step and returns the core's
     # value, whatever the hooks below it return. Chain owns only composition (the
-    # nesting, the called-flag, the forced continuation); what a raise means is
-    # Hooks' policy, shared with the flat hook runs.
+    # nesting, the once-only descent, the forced continuation); what a raise means
+    # is Hooks' policy, shared with the flat hook runs.
     module Chain
+      # One link invocation's descent: whether the hook has yielded, and what the
+      # first descent returned or raised.
+      Descent = Struct.new(:called, :value, :error)
+
       class << self
         # @param hooks [Array<Hash>] matching hooks, each with :callback
         # @param target [Object] the hook noun (Busybee::Job for job hooks)
@@ -33,15 +37,11 @@ module Busybee
         def build_propagating(hooks, target, core)
           hooks.reverse.inject(core) do |next_link, hook|
             lambda do
-              called = false
-              value = nil
-              wrapped = lambda {
-                called = true
-                value = next_link.call
-              }
-              hook[:callback].call(target, wrapped)
-              force_continuation(hook, wrapped, target) unless called
-              value
+              descent = Descent.new(false)
+              continuation = continuation(next_link, hook, target, descent)
+              hook[:callback].call(target, continuation)
+              force_continuation(hook, continuation, target) unless descent.called
+              descent.value
             end
           end
         end
@@ -58,28 +58,41 @@ module Busybee
         # One observing link; its state is per invocation, so it lives inside.
         def safe_link(next_link, hook, target)
           lambda do
-            called = false
-            value = error_from_below = nil
-            # Identity, not class: a hook raising its own error after a good descent owns it.
-            wrapped = lambda do
-              called = true
-              value = next_link.call
-            rescue StandardError => e
-              error_from_below = e
-              raise
-            end
-
+            descent = Descent.new(false)
+            continuation = continuation(next_link, hook, target, descent)
             begin
-              hook[:callback].call(target, wrapped)
-              force_continuation(hook, wrapped, target) unless called
+              hook[:callback].call(target, continuation)
+              force_continuation(hook, continuation, target) unless descent.called
             rescue StandardError => e
-              raise if e.equal?(error_from_below)
+              raise if e.equal?(descent.error) # identity, not class: a hook's own error after a good descent is its own
 
               Hooks.classify_hook_error(target, safe: true)
             end
-            wrapped.call unless called # a swallowed pre-yield error must not cancel downstream
-            value
+            continuation.call unless descent.called # a swallowed pre-yield error must not cancel downstream
+            descent.value
           end
+        end
+
+        # The hook's perform/continue: descends once; a repeat re-delivers the
+        # first descent's value, or re-raises its error, and says so.
+        def continuation(next_link, hook, target, descent)
+          lambda do
+            return repeated_continuation(hook, target, descent) if descent.called
+
+            descent.called = true
+            descent.value = next_link.call
+          rescue StandardError => e
+            descent.error ||= e
+            raise
+          end
+        end
+
+        def repeated_continuation(hook, target, descent)
+          Logging.warn("Ignoring repeated continuation call from an around-hook#{location_suffix(hook[:callback])}",
+                       target, error: descent.error)
+          raise descent.error if descent.error
+
+          descent.value
         end
 
         # The classification boundary, beneath every link so it exists with no
@@ -100,9 +113,13 @@ module Busybee
         end
 
         def log_forgotten_yield(callback, target)
+          Logging.warn("Forcing continuation past an around-hook that returned without yielding" \
+                       "#{location_suffix(callback)}", target)
+        end
+
+        def location_suffix(callback)
           location = callback.source_location&.join(":")
-          suffix = location ? " (at #{location})" : ""
-          Logging.warn("Forcing continuation past an around-hook that returned without yielding#{suffix}", target)
+          location ? " (at #{location})" : ""
         end
       end
     end
