@@ -442,7 +442,7 @@ A worker process run has four observable moments, in order:
 | Hook | Fires when |
 |------|-----------|
 | `on_worker_started` | the run began — the worker is about to start fetching jobs |
-| `on_worker_stop_requested` | the worker's stop began, whatever began it: a signal, a health trigger, your code, the gateway ending the stream, or a crash; fires once per run, on the thread that began the stop; `on_worker_stopping` waits for it, for up to [`shutdown_wait_timeout`](configuration.md#shutdown_wait_timeout) |
+| `on_worker_stop_requested` | the worker's stop began, whatever began it: a signal, a health trigger, your code, the gateway ending the stream, or a crash; fires once per run, on the thread that began the stop; `on_worker_stopping` waits for it, for up to [`shutdown_wait_timeout`](configuration.md#shutdown_wait_timeout). A stop that lands as the worker is starting may be announced before `on_worker_started` fires |
 | `on_worker_stopping` | the worker began its shutdown drain — intake is closed, in-flight work finishing |
 | `on_worker_shutdown` | the run is over; the closing snapshot carries the final counters, `reason`, and `error` |
 

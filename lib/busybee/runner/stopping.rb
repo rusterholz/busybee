@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
+require "concurrent"
 
 require "busybee/durations"
 require "busybee/grpc/error"
@@ -12,7 +13,8 @@ module Busybee
   class Runner
     # How a stop is claimed, announced and given its reason. The set-once reason
     # is the claim: its setter owns the stop, records its error in the exit slot
-    # (a loser's goes to the post-stop slot) and announces it. reason_for,
+    # (a loser's goes to the post-stop slot) and announces it, or, ahead of any
+    # accepted run, logs that the worker never started. reason_for,
     # recoverable? and the fire alarm decide the reason; last, the fetch loops'
     # gRPC policy: claim the stop, or wait out backpressure_delay unless announced.
     module Stopping
@@ -33,6 +35,33 @@ module Busybee
         ensure
           @stop_announced.set
         end
+      end
+
+      def initialize_stop_state
+        @stop_reason = Concurrent::AtomicReference.new(nil)
+        @run_state = Concurrent::AtomicReference.new(nil) # :accepted then :finished, or :refused; never nil again
+        @run_lock = Mutex.new # deciding the run; never held across hooks
+        @announcing = Concurrent::AtomicBoolean.new(false)
+        @stop_announced = Concurrent::Event.new
+      end
+
+      # Accepting the run stamps its start in the same step, so whoever sees it
+      # accepted sees started_at too.
+      def accept_run
+        @run_lock.synchronize do
+          next false unless @run_state.get.nil?
+
+          @worker_timestamps.stamp!(:started_at)
+          @run_state.set(:accepted)
+          true
+        end
+      end
+
+      def refuse_run = @run_lock.synchronize { @run_state.compare_and_set(nil, :refused) }
+
+      # A worker stopped before its run was accepted fires no moments: its one record.
+      def log_stop_before_start
+        Logging.info("Stopped #{logged_worker_name} before it started (#{@stop_reason.get})", lifecycle_carrier)
       end
 
       def declare_unhealthy(error) = claim_stop(:unhealthy, error)

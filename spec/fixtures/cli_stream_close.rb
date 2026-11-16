@@ -4,7 +4,7 @@
 # streaming worker whose job stream the in-process gateway closes at once, and
 # exits however the CLI does, logging to stdout. With "failing_stop_requested"
 # as its argument, on_worker_stop_requested raises a NoMemoryError on the
-# stream reader.
+# stream reader; with "unhealthy_start", on_worker_started raises a Shutdown.
 require "logger"
 
 require "busybee"
@@ -23,6 +23,9 @@ end)
 
 if ARGV.first == "failing_stop_requested"
   Busybee.on_worker_stop_requested { |_status| raise NoMemoryError, "out of memory" }
+end
+if ARGV.first == "unhealthy_start"
+  Busybee.on_worker_started { |_status| raise Busybee::Worker::Shutdown, "replica lagging" }
 end
 
 Busybee.credential_type = :insecure

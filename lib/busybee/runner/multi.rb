@@ -32,7 +32,7 @@ module Busybee
 
       def run!
         return if stopping?
-        return unless @running.make_true # single-entry CAS, mirroring Runner#run!
+        return unless @run_state.compare_and_set(nil, :accepted) # one-shot, mirroring Runner#start!
 
         begin
           post_runners_to_pool
@@ -41,7 +41,7 @@ module Busybee
           err = @thread_error.get
           raise err if err
         ensure
-          @running.make_false
+          @run_state.set(:finished)
         end
       end
 
@@ -88,6 +88,8 @@ module Busybee
             kill_children(reason: ending_reason) # the first fire's reason, maybe an earlier one
           end
         end
+      rescue Concurrent::RejectedExecutionError
+        raise unless stopping? # a stop shut the pool as the run began, its children already stopped
       end
 
       # A child that stopped takes the rest with it, under its reason, or kills

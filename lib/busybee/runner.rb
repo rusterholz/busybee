@@ -29,22 +29,19 @@ module Busybee
       @worker_class = worker_class
       @runtime_config = runtime_config
       @client = client || Busybee::Client.new
-      @stop_reason = Concurrent::AtomicReference.new(nil)
-      @running = Concurrent::AtomicBoolean.new(false)
       @worker_timestamps = Worker::Timestamps.new
       @total_job_count = Concurrent::AtomicFixnum.new(0)
       @failed_job_count = Concurrent::AtomicFixnum.new(0)
       @backpressure_count = Concurrent::AtomicFixnum.new(0)
       @teardown_error = Concurrent::AtomicReference.new(nil)
-      @announcing = Concurrent::AtomicBoolean.new(false)
-      @stop_announced = Concurrent::Event.new
+      initialize_stop_state
     end
 
     # Blocks until stopped or until #run_loop raises; the teardown then runs on every
-    # exit path, on the runner thread. Fires T0 here and T2/T3 in the teardown, each
-    # with a fresh Worker::Status; T1 fires from announce_stop. Single-entry: start!'s
-    # compare-and-set reports whether this call won, so a second run! is a no-op,
-    # and sitting before the begin/ensure makes T0/T2/T3 all-or-none.
+    # exit path, on the runner thread, T0's escalation included. Fires T0 here and
+    # T2/T3 in the teardown, each with a fresh Worker::Status; T1 fires from
+    # announce_stop. One-shot: start!'s compare-and-set reports whether this call
+    # won, so any later run!, during the run or after it, is a no-op and fires nothing.
     def run!
       return if stopping?
       return unless start!
@@ -58,18 +55,19 @@ module Busybee
 
     # Signals graceful shutdown, recording why. Thread-safe: the CLI runs signal
     # handlers on their own thread. The set-once reason is the gate: only the call
-    # setting it announces.
+    # setting it announces, unless no run was accepted first, when none ever will be.
     def stop!(reason: :signal)
       raise ArgumentError, "stop reason must be a Symbol, got #{reason.class}" unless reason.is_a?(Symbol)
+      return unless @stop_reason.compare_and_set(nil, reason)
 
-      announce_stop if @stop_reason.compare_and_set(nil, reason)
+      refuse_run ? log_stop_before_start : announce_stop
     end
 
     # True once a stop has begun, or once the process must exit immediately,
     # which may come before this runner has a reason; stop_reason waits for one.
     def stopping? = !@stop_reason.get.nil? || exit_immediately?
     def stop_reason = @stop_reason.get
-    def running? = @running.true?
+    def running? = @run_state.get == :accepted
 
     # Force shutdown: the fire alarm, then a stop. Multi overrides to also kill the
     # pool. Parameterized: a hard teardown is not always operator-initiated.
@@ -111,13 +109,13 @@ module Busybee
 
     private
 
-    # T0: try to begin the run. The @running flip doubles as the single-entry
-    # gate: lose it and start! returns false BEFORE stamping or firing.
+    # T0: try to begin the run. Accepting it is the single-entry gate, contended
+    # by stop!: lose it, to an earlier start! or to a stop claimed first, and
+    # start! returns false BEFORE stamping or firing.
     def start! # rubocop:disable Naming/PredicateMethod
-      return false unless @running.make_true
+      return false unless accept_run
+      return false unless fire_worker_started
 
-      @worker_timestamps.stamp!(:started_at)
-      Hooks.run(:on_worker_started, worker_status, safe: true)
       Logging.info("Started #{logged_worker_name} (#{[worker_mode, "job type #{logged_job_type}"].compact.join(', ')})",
                    lifecycle_carrier)
       true

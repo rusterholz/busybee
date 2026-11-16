@@ -549,9 +549,13 @@ RSpec.describe Busybee::Runner::Streaming do
     describe "#stop!" do
       around { |example| isolate_busybee_hooks { example.run } }
 
-      it "closes the stream and pushes :stop sentinel" do
+      # A run accepted (start!, run!'s first step) and its stream open.
+      before do
+        runner.send(:start!)
         runner.instance_variable_set(:@stream, stream)
+      end
 
+      it "closes the stream and pushes :stop sentinel" do
         runner.stop!
 
         expect(stream).to have_received(:close)
@@ -562,7 +566,6 @@ RSpec.describe Busybee::Runner::Streaming do
         order = []
         allow(stream).to receive(:close) { order << :close }
         Busybee.on_worker_stop_requested { order << :hook }
-        runner.instance_variable_set(:@stream, stream)
 
         runner.stop!
 

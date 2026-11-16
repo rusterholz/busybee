@@ -9,14 +9,14 @@ module Busybee
   class Runner
     # What run!'s ensure does about things that go wrong inside it. The invariant:
     # short of an error the process can't recover from, the ensure completes, or
-    # jobs go unreturned and monitoring goes blind. @running clears whatever happens,
-    # or the runner is silently unable to run again.
+    # jobs go unreturned and monitoring goes blind. The run finishes whatever happens,
+    # so running? reads false once it is over.
     module Teardown
       private
 
-      # run!'s ensure body; exception is what the run exits on, nil when clean. T3
-      # reports, where no exit exception explains the shutdown, a post-stop error and
-      # then a contained one.
+      # run!'s ensure body, and T0's escalation's; exception is what the run exits
+      # on, nil when clean. T3 reports, where no exit exception explains the
+      # shutdown, a post-stop error and then a contained one.
       def teardown(exception)
         begin_teardown(exception)
         error = Busybee::Worker::Shutdown.unwrap(exception)
@@ -26,7 +26,7 @@ module Busybee
         fire_worker_lifecycle(:shutdown_at, :on_worker_shutdown, error)
         Logging.info("Stopped #{logged_worker_name} (#{@stop_reason.get})", lifecycle_carrier)
       ensure
-        @running.make_false
+        @run_state.set(:finished)
       end
 
       # Claim for the exit exception, or for the fire a loop left on, before intake
@@ -38,6 +38,23 @@ module Busybee
         announce_stop
         cease_intake # idempotent backstop for an announcement still under way elsewhere
         @stop_announced.wait(shutdown_wait_seconds) unless exit_immediately?
+      end
+
+      # T0, outside run!'s ensure: an escalation from it aborts the start, so the
+      # closing moments run here before it propagates. A Shutdown meeting a stop
+      # under way is post-stop, the start aborted all the same: false.
+      def fire_worker_started
+        Hooks.run(:on_worker_started, worker_status, safe: true)
+        true
+      rescue Busybee::Worker::Shutdown => e
+        won = declare_unhealthy(e)
+        teardown(won ? e : nil)
+        raise if won
+
+        false
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        teardown(e)
+        raise
       end
 
       # Stamp a closing moment (T2/T3) and fire its observation-only hook with a
@@ -71,7 +88,7 @@ module Busybee
       # safe: true lets past, each recorded for T3: a worker already tearing down
       # cannot shut down harder. Past RECOVERABLE_ERRORS, an error is recorded for
       # T3 too, then raises the fire alarm and propagates, taking the rest of the
-      # teardown with it. T0 is excluded by not being wrapped.
+      # teardown with it. Not T0, whose escalation aborts the start: fire_worker_started.
       def contain_teardown_hooks(type)
         yield
       rescue Busybee::Worker::Shutdown => e

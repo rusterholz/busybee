@@ -1009,7 +1009,7 @@ To put a hook under test on its own, without running a worker, fire its moment w
 
 ### Holding the Worker Open
 
-To test the worker lifecycle itself, build the worker yourself. `build_test_worker` fires nothing; `start` fires `on_worker_started`; `stop!` fires the three closing moments. In between, `execute_worker` runs jobs through it without touching the worker's own hooks:
+To test the worker lifecycle itself, build the worker yourself. `build_test_worker` fires nothing; `start` fires `on_worker_started`; `stop!` fires the three closing moments. A test worker stopped before it starts fires none of them and logs `Stopped <Worker> before it started (<reason>)` instead. In between, `execute_worker` runs jobs through it without touching the worker's own hooks:
 
 ```ruby
 worker = start_test_worker(ProcessOrderWorker)   # build_test_worker(...).start

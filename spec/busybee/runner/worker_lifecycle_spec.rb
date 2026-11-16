@@ -48,6 +48,9 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
   def moments = events.map(&:first)
 
+  # start!, run!'s first step: a stop announces only on a run already accepted.
+  def accept_run = runner.send(:start!)
+
   def wait_until(timeout: 2, poll: 0.005)
     deadline = Time.now + timeout
     sleep poll until yield || Time.now > deadline
@@ -58,6 +61,18 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       record_all_lifecycle_hooks
       runner.run!
       expect(moments).to eq(%i[started stop_requested stopping shutdown])
+    end
+
+    it "does nothing on a second run!, even after one that ended with no stop" do
+      record_all_lifecycle_hooks
+      runner.run!
+      entered = false
+      runner.test_run_loop = -> { entered = true }
+      runner.run!
+
+      expect(moments).to eq(%i[started stop_requested stopping shutdown])
+      expect(entered).to be(false)
+      expect(runner.running?).to be(false)
     end
 
     it "fires all four moments, started first and shutdown last, when stopped mid-loop" do
@@ -82,16 +97,17 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
   describe "#stop! and on_worker_stop_requested" do
     it "fires on_worker_stop_requested exactly once across repeated stop!" do
       record_all_lifecycle_hooks
+      accept_run
       runner.stop!
       runner.stop!
-      expect(moments).to eq(%i[stop_requested])
+      expect(moments).to eq(%i[started stop_requested])
     end
 
-    it "fires nothing else when stop! precedes run! (early return, sequence guard)" do
+    it "fires nothing at all when stop! precedes run!, since the run never began" do
       record_all_lifecycle_hooks
-      runner.stop!   # fires stop_requested
-      runner.run!    # stopping? -> early return; started/stopping/shutdown must not fire
-      expect(moments).to eq(%i[stop_requested])
+      runner.stop!
+      runner.run!
+      expect(moments).to be_empty
     end
   end
 
@@ -99,6 +115,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "carries a caller-supplied reason onto on_worker_stop_requested" do
       captured = nil
       Busybee.on_worker_stop_requested { |worker| captured = worker }
+      accept_run
       runner.stop!(reason: :rollover)
       expect(captured.reason).to eq(:rollover)
     end
@@ -106,6 +123,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "defaults the reason to :signal" do
       captured = nil
       Busybee.on_worker_stop_requested { |worker| captured = worker }
+      accept_run
       runner.stop!
       expect(captured.reason).to eq(:signal)
     end
@@ -117,6 +135,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "records the reason once: the first stop! wins (set-once)" do
       reasons = Concurrent::Array.new
       Busybee.on_worker_stop_requested { |worker| reasons << worker.reason }
+      accept_run
       runner.stop!(reason: :rollover)
       runner.stop!(reason: :sigterm)
       expect(reasons).to eq(%i[rollover])
@@ -127,6 +146,7 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
     it "stops with reason :kill" do
       captured = nil
       Busybee.on_worker_stop_requested { |worker| captured = worker }
+      accept_run
       runner.kill!
       expect(captured.reason).to eq(:kill)
     end
@@ -368,19 +388,18 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       end
     end
 
-    # Were @running left set, the next run! would lose start!'s compare-and-set
-    # and return having done nothing.
-    it "leaves the runner able to run again" do
-      isolate_busybee_hooks do
-        Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
-        runner.run!
-      end
+    it "leaves running? false, and a later run! doing nothing" do
+      record_all_lifecycle_hooks
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+      runner.run!
+      expect(runner.running?).to be(false)
 
       entered = false
       runner.test_run_loop = -> { entered = true }
       runner.run!
 
-      expect(entered).to be(true)
+      expect(entered).to be(false)
+      expect(moments).to eq(%i[started stop_requested stopping shutdown])
     end
 
     it "does not replace the exception the worker was already exiting on" do
@@ -457,10 +476,17 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect(runner.stopping?).to be(true)
     end
 
-    it "still escalates from on_worker_started, where a start can be aborted" do
+    it "still escalates from on_worker_started, where a start can be aborted, after the closing moments" do
+      record_all_lifecycle_hooks
       Busybee.on_worker_started { raise Busybee::Worker::Shutdown, "T0 declares unhealth" }
 
       expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown)
+
+      aggregate_failures do
+        expect(moments).to eq(%i[started stop_requested stopping shutdown])
+        expect(runner.drained).to be(true)
+        expect(runner.running?).to be(false)
+      end
     end
 
     context "with an error listed in shutdown_on" do
@@ -471,10 +497,13 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
 
       after { Busybee.shutdown_on_errors = nil }
 
-      it "escalates it from on_worker_started" do
+      it "escalates it from on_worker_started, after the closing moments" do
+        record_all_lifecycle_hooks
         Busybee.on_worker_started { raise LifecycleFatal, "listed" }
 
         expect { runner.run! }.to raise_error(Busybee::Worker::Shutdown) { |e| expect(e.cause).to be_a(LifecycleFatal) }
+        expect(moments).to eq(%i[started stop_requested stopping shutdown])
+        expect(events.last.last).to have_attributes(reason: :unhealthy, error: be_a(LifecycleFatal))
       end
 
       it "contains it at on_worker_stopping" do
