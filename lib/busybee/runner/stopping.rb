@@ -13,7 +13,8 @@ module Busybee
   class Runner
     # How a stop is claimed, announced and given its reason. The set-once reason
     # is the claim: its setter owns the stop, records its error in the exit slot
-    # (a loser's goes to the post-stop slot) and announces it. reason_for,
+    # (a loser's goes to the post-stop slot) and announces it, or, ahead of any
+    # accepted run, logs that the worker never started. reason_for,
     # recoverable? and the fire alarm decide the reason; last, the fetch loops'
     # gRPC policy: claim the stop, or wait out backpressure_delay unless announced.
     module Stopping
