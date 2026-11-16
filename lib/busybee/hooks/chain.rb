@@ -82,7 +82,7 @@ module Busybee
 
             descent.called = true
             descent.value = next_link.call
-          rescue StandardError => e
+          rescue Exception => e # rubocop:disable Lint/RescueException
             descent.error ||= e
             raise
           end

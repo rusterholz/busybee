@@ -162,8 +162,39 @@ RSpec.describe "an around-hook calling its continuation more than once" do # rub
         perform.call
       end
 
-      expect { run_job(mode: "raise") }.to raise_error(Busybee::Worker::Shutdown) { |e| expect(e).to be(first) }
+      lines = capture_busybee_log do
+        expect { run_job(mode: "raise") }.to raise_error(Busybee::Worker::Shutdown) { |e| expect(e).to be(first) }
+      end
       expect(performs.size).to eq(1)
+      expect(lines.grep(/repeated continuation/)).to match(
+        [/#{repeat_warning.source} \(Busybee::Worker::Shutdown: .*\)\z/]
+      )
+    end
+  end
+
+  context "with around_perform rescuing an error outside StandardError and calling perform again" do
+    let(:unimplemented_worker) do
+      Class.new(Busybee::Worker) do
+        job_type "repeated"
+        strict_outputs false
+      end
+    end
+
+    it "re-raises that error rather than letting the job complete" do
+      first = nil
+      Busybee.around_perform do |_job, perform|
+        perform.call
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        first = e
+        perform.call
+      end
+      job = build_test_job(type: "repeated")
+
+      expect { execute_worker(unimplemented_worker, job: job) }.to raise_error(NotImplementedError) { |e|
+        expect(e).to be(first)
+      }
+      expect(job).not_to be_completed
+      expect(job.client.received(:complete_job)).to be_empty
     end
   end
 
