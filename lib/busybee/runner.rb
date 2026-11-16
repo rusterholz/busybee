@@ -41,8 +41,8 @@ module Busybee
     # Blocks until stopped or until #run_loop raises; the teardown then runs on every
     # exit path, on the runner thread, T0's escalation included. Fires T0 here and
     # T2/T3 in the teardown, each with a fresh Worker::Status; T1 fires from
-    # announce_stop. Single-entry: start!'s compare-and-set reports whether this
-    # call won, so a second run! is a no-op and fires nothing.
+    # announce_stop. One-shot: start!'s compare-and-set reports whether this call
+    # won, so any later run!, during the run or after it, is a no-op and fires nothing.
     def run!
       return if stopping?
       return unless start!
@@ -110,9 +110,9 @@ module Busybee
 
     private
 
-    # T0: try to begin the run. The decision is the single-entry gate, shared with
-    # stop!: lose it, to another start! or to a stop claimed first, and start!
-    # returns false BEFORE stamping or firing.
+    # T0: try to begin the run. The decision, set once and never cleared, is the
+    # single-entry gate, shared with stop!: lose it, to an earlier start! or to a
+    # stop claimed first, and start! returns false BEFORE stamping or firing.
     def start! # rubocop:disable Naming/PredicateMethod
       return false unless @run_decided.make_true
 

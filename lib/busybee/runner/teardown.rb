@@ -10,8 +10,7 @@ module Busybee
     # What run!'s ensure does about things that go wrong inside it. The invariant:
     # short of an error the process can't recover from, the ensure completes, or
     # jobs go unreturned and monitoring goes blind. @running clears whatever happens,
-    # and a run no stop ended reopens its decision, or the runner is silently
-    # unable to run again.
+    # so running? reads false once the run is over.
     module Teardown
       private
 
@@ -28,15 +27,6 @@ module Busybee
         Logging.info("Stopped #{logged_worker_name} (#{@stop_reason.get})", lifecycle_carrier)
       ensure
         @running.make_false
-        reopen_run if @stop_reason.get.nil? # a stopper's decision may still be on its way
-      end
-
-      # A run no stop ended may run again, announcing afresh; the decision last,
-      # so no start! accepts it before then.
-      def reopen_run
-        @announcing.make_false
-        @stop_announced.reset
-        @run_decided.make_false
       end
 
       # Claim for the exit exception, or for the fire a loop left on, before intake

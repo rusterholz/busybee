@@ -63,24 +63,16 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect(moments).to eq(%i[started stop_requested stopping shutdown])
     end
 
-    it "fires all four again on a second run after one that ended with no stop" do
+    it "does nothing on a second run!, even after one that ended with no stop" do
       record_all_lifecycle_hooks
       runner.run!
+      entered = false
+      runner.test_run_loop = -> { entered = true }
       runner.run!
-      expect(moments).to eq(%i[started stop_requested stopping shutdown] * 2)
-    end
 
-    # The back-off waits on the stop's announcement, which the first run made.
-    it "waits out a back-off on the second run, as on the first" do
-      runner.run!
-      waited = nil
-      runner.test_run_loop = lambda do
-        began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        runner.send(:back_off, 0.1)
-        waited = Process.clock_gettime(Process::CLOCK_MONOTONIC) - began
-      end
-      runner.run!
-      expect(waited).to be >= 0.09
+      expect(moments).to eq(%i[started stop_requested stopping shutdown])
+      expect(entered).to be(false)
+      expect(runner.running?).to be(false)
     end
 
     it "fires all four moments, started first and shutdown last, when stopped mid-loop" do
@@ -396,19 +388,18 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       end
     end
 
-    # Were @running left set, the next run! would lose start!'s compare-and-set
-    # and return having done nothing.
-    it "leaves the runner able to run again" do
-      isolate_busybee_hooks do
-        Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
-        runner.run!
-      end
+    it "leaves running? false, and a later run! doing nothing" do
+      record_all_lifecycle_hooks
+      Busybee.on_worker_stopping { raise Busybee::Worker::Shutdown, "T2 declares unhealth" }
+      runner.run!
+      expect(runner.running?).to be(false)
 
       entered = false
       runner.test_run_loop = -> { entered = true }
       runner.run!
 
-      expect(entered).to be(true)
+      expect(entered).to be(false)
+      expect(moments).to eq(%i[started stop_requested stopping shutdown])
     end
 
     it "does not replace the exception the worker was already exiting on" do

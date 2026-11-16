@@ -32,7 +32,9 @@ module Busybee
 
       def run!
         return if stopping?
-        return unless @running.make_true # single-entry CAS, mirroring Runner#run!
+        return unless @run_decided.make_true # one-shot, mirroring Runner#start!
+
+        @running.make_true
 
         begin
           post_runners_to_pool
