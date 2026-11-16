@@ -133,6 +133,37 @@ RSpec.describe "a stop meeting a worker's start", :gateway do # rubocop:disable 
     end
   end
 
+  # Holds the run between its acceptance and its start stamp, while a stop lands.
+  describe "a stop landing as an accepted run starts" do
+    let(:held) { Concurrent::Event.new }
+    let(:release) { Concurrent::Event.new }
+
+    before do
+      gate_held = held
+      gate_release = release
+      timestamps = runner.instance_variable_get(:@worker_timestamps)
+      runner.instance_variable_set(:@worker_timestamps, Class.new(SimpleDelegator) do
+        define_method(:stamp!) do |moment|
+          if moment == :started_at
+            gate_held.set
+            gate_release.wait(5)
+          end
+          __getobj__.stamp!(moment)
+        end
+      end.new(timestamps))
+    end
+
+    it "announces the stop first, then still fires every moment once" do
+      run = Thread.new { run_to_completion }
+      held.wait(5)
+      Thread.new { runner.stop!(reason: :sigterm) }.join(5)
+      release.set
+
+      expect(run.value).to be_nil
+      expect(fired).to eq(%i[stop_requested started stopping shutdown])
+    end
+  end
+
   describe "in a multi-worker process" do
     let(:sibling_class) do
       stub_const("UnstartedSiblingWorker", Class.new(Busybee::Worker) do
