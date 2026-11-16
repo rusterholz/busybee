@@ -28,7 +28,15 @@ module Busybee
         Logging.info("Stopped #{logged_worker_name} (#{@stop_reason.get})", lifecycle_carrier)
       ensure
         @running.make_false
-        @run_decided.make_false if @stop_reason.get.nil? # a stopper's decision may still be on its way
+        reopen_run if @stop_reason.get.nil? # a stopper's decision may still be on its way
+      end
+
+      # A run no stop ended may run again, announcing afresh; the decision last,
+      # so no start! accepts it before then.
+      def reopen_run
+        @announcing.make_false
+        @stop_announced.reset
+        @run_decided.make_false
       end
 
       # Claim for the exit exception, or for the fire a loop left on, before intake

@@ -63,6 +63,26 @@ RSpec.describe "Busybee::Runner worker lifecycle" do # rubocop:disable RSpec/Des
       expect(moments).to eq(%i[started stop_requested stopping shutdown])
     end
 
+    it "fires all four again on a second run after one that ended with no stop" do
+      record_all_lifecycle_hooks
+      runner.run!
+      runner.run!
+      expect(moments).to eq(%i[started stop_requested stopping shutdown] * 2)
+    end
+
+    # The back-off waits on the stop's announcement, which the first run made.
+    it "waits out a back-off on the second run, as on the first" do
+      runner.run!
+      waited = nil
+      runner.test_run_loop = lambda do
+        began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        runner.send(:back_off, 0.1)
+        waited = Process.clock_gettime(Process::CLOCK_MONOTONIC) - began
+      end
+      runner.run!
+      expect(waited).to be >= 0.09
+    end
+
     it "fires all four moments, started first and shutdown last, when stopped mid-loop" do
       record_all_lifecycle_hooks
       runner.test_run_loop = -> { sleep 0.005 until runner.stopping? }
