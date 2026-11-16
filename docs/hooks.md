@@ -483,9 +483,14 @@ sequenceDiagram
     S->>R: stop (a signal, a health trigger, your code, the gateway, a crash)
     Note over R: intake closes
     S->>H: on_worker_stop_requested, on the thread that began the stop
-    Note over R: the job in flight finishes<br/>other jobs in hand go back<br/>on_worker_stop_requested finishes<br/>(waited up to shutdown_wait_timeout)
+    Note over R: the job in flight finishes
+    loop each other job already in hand (such as the rest of a poll's batch)
+        R->>E: hand the job back
+        R->>H: on_job_not_executed
+    end
+    Note over R: on_worker_stop_requested finishes<br/>(waited up to shutdown_wait_timeout)
     R->>H: on_worker_stopping
-    loop each job left in the buffer (buffered workers)
+    loop each job still in the buffer (buffered streaming and hybrid workers)
         R->>E: hand the job back
         R->>H: on_job_not_executed
     end
