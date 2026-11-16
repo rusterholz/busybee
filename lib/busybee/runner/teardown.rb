@@ -41,9 +41,17 @@ module Busybee
       end
 
       # T0, outside run!'s ensure: an escalation from it aborts the start, so the
-      # closing moments run here before it propagates.
+      # closing moments run here before it propagates. A Shutdown meeting a stop
+      # under way is post-stop, the start aborted all the same: false.
       def fire_worker_started
         Hooks.run(:on_worker_started, worker_status, safe: true)
+        true
+      rescue Busybee::Worker::Shutdown => e
+        won = declare_unhealthy(e)
+        teardown(won ? e : nil)
+        raise if won
+
+        false
       rescue Exception => e # rubocop:disable Lint/RescueException
         teardown(e)
         raise

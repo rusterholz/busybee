@@ -117,7 +117,8 @@ module Busybee
       return false unless @running.make_true
 
       @worker_timestamps.stamp!(:started_at)
-      fire_worker_started
+      return false unless fire_worker_started
+
       Logging.info("Started #{logged_worker_name} (#{[worker_mode, "job type #{logged_job_type}"].compact.join(', ')})",
                    lifecycle_carrier)
       true

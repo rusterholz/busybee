@@ -150,6 +150,47 @@ RSpec.describe "an escalation from on_worker_started", :gateway do # rubocop:dis
     end
   end
 
+  # A signal, say, claims the stop while on_worker_started is still running.
+  shared_examples "a graceful stop that stands" do
+    before do
+      stopping = -> { runner }
+      Busybee.on_worker_started do
+        stopping.call.stop!(reason: :sigterm)
+        raise Busybee::Worker::Shutdown, "replica lagging"
+      end
+    end
+
+    it "finishes that stop, reporting the escalation at on_worker_shutdown rather than raising it" do
+      raised = :unset
+      lines = capture_busybee_log(level: Logger::WARN) { raised = run_to_completion }
+
+      aggregate_failures do
+        expect(raised).to be_nil
+        expect(fired).to eq(%i[started stop_requested stopping shutdown])
+        expect(status_at(:shutdown)).to have_attributes(reason: :sigterm, error: be_a(Busybee::Worker::Shutdown))
+        expect(lines).to eq(["WARN [busybee] Finishing #{worker_class.name}'s stop (sigterm) despite an error " \
+                             "(Busybee::Worker::Shutdown: replica lagging)"])
+        expect(runner.running?).to be(false)
+      end
+    end
+  end
+
+  describe "with a stop already under way, on a polling worker" do
+    let(:worker_class) { stub_const("StartLatePollingWorker", start_hook_worker(:polling)) }
+    let(:runner) { Busybee::Runner::Polling.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
+
+    it_behaves_like "a graceful stop that stands"
+  end
+
+  describe "with a stop already under way, on a buffered streaming worker" do
+    let(:worker_class) { stub_const("StartLateBufferedWorker", start_hook_worker(:streaming)) }
+    let(:runner) do
+      Busybee::Runner::Streaming.new(worker_class, runtime_config: runtime_config, client: gateway.client)
+    end
+
+    it_behaves_like "a graceful stop that stands"
+  end
+
   describe "with an error the process can't recover from" do
     let(:worker_class) { stub_const("StartOutOfMemoryWorker", start_hook_worker(:polling)) }
     let(:runner) { Busybee::Runner::Polling.new(worker_class, runtime_config: runtime_config, client: gateway.client) }
