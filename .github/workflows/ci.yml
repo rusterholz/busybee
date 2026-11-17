@@ -48,8 +48,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Latest patch of each maintained Camunda minor
+        camunda: ['8.8.46', '8.9.28', '8.10.9']
         tenancy: [single, multi]
-    name: "Zeebe Integration (${{ matrix.tenancy }}-tenant)"
+    name: "Zeebe Integration (${{ matrix.camunda }} / ${{ matrix.tenancy }}-tenant)"
     runs-on: ubuntu-latest
     needs: [lint, test]
     steps:
@@ -61,9 +63,10 @@ jobs:
         ruby-version: '.ruby-version'
         bundler: Gemfile.lock
         bundler-cache: true
-    - name: Start Camunda
+    - name: "Start Camunda ${{ matrix.camunda }}"
       env:
         MULTITENANCY_ENABLED: ${{ matrix.tenancy == 'multi' }}
+        ZEEBE_VERSION: ${{ matrix.camunda }}
       run: bundle exec rake zeebe:start
     - name: Wait for Camunda to be healthy
       run: bundle exec rake zeebe:health
