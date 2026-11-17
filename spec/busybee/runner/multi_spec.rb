@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "concurrent"
-require "ostruct"
 
 RSpec.describe Busybee::Runner::Multi do
   let(:client) { instance_double(Busybee::Client) }
@@ -101,8 +100,8 @@ RSpec.describe Busybee::Runner::Multi do
       end
 
       context "when ActiveRecord is defined" do
-        let(:mock_pool) { OpenStruct.new(size: pool_size) } # rubocop:disable Style/OpenStructUse
-        let(:mock_base) { OpenStruct.new(connection_pool: mock_pool) } # rubocop:disable Style/OpenStructUse
+        let(:mock_pool) { Data.define(:size).new(size: pool_size) }
+        let(:mock_base) { Data.define(:connection_pool).new(connection_pool: mock_pool) }
 
         before { stub_const("ActiveRecord::Base", mock_base) }
 
