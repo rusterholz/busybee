@@ -38,8 +38,13 @@ Busybee supports both local Zeebe (typical for development) and Camunda Cloud (r
 For local development, you can run Zeebe using Docker. The simplest setup is:
 
 ```bash
-docker run -d --name zeebe -p 26500:26500 camunda/zeebe:latest
+docker run -d --name zeebe -p 26500:26500 \
+  -e CAMUNDA_SECURITY_AUTHENTICATION_UNPROTECTEDAPI=true \
+  -e CAMUNDA_SECURITY_AUTHORIZATIONS_ENABLED=false \
+  camunda/camunda:8.10.9
 ```
+
+The two settings turn off authentication, which the image otherwise requires on every call. Give the container a minute to start before connecting.
 
 For a more complete setup with Operate (the web UI for monitoring workflows), see the [Camunda Docker Compose documentation](https://docs.camunda.io/docs/self-managed/setup/deploy/local/docker-compose/).
 
