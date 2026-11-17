@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/numeric/time"
+
 RSpec.describe Busybee::Worker::Configuration do
   # Helper to create a Configuration for a stub-const'd worker class
   def configuration_for(class_name)

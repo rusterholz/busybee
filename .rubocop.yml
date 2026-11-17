@@ -4,8 +4,7 @@ plugins:
   - rubocop-rake
   - rubocop-rspec
 
-# Shared house cops. Canonical copy lives in claude/defaults; this one is a
-# duplicate because a plugin has to resolve inside CI's own checkout.
+# Shared house cops, vendored: a plugin has to resolve inside CI's own checkout.
 require:
   - ./rubocop/comment_density_cops.rb
 
@@ -22,7 +21,7 @@ AllCops:
     - "spec/grpc_smoke_spec.rb"
 
 # Thresholds ship with the cops; only the excludes are ours. Generated protobuf
-# is out of scope for all three — its comments are the generator's, not ours.
+# is out of scope for all three: its comments are the generator's, not ours.
 # The merge mode keeps this permanent exclusion from overwriting the temporary
 # ones in .rubocop_todo.yml, which is a separate list with a separate lifetime.
 House/FileCommentDensity:
@@ -31,9 +30,7 @@ House/FileCommentDensity:
       - Exclude
   Exclude:
     - "lib/busybee/grpc/*_pb.rb"
-    # Catalogues, not prose: one line of documentation per error class is what
-    # these files are for, so a comment-to-code ratio above the bar is correct here
-    # rather than debt. Permanent by design — not a todo entry.
+    # Catalogs of error classes, one documenting line each.
     - "lib/busybee/error.rb"
     - "lib/busybee/testing/error.rb"
 

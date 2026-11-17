@@ -10,26 +10,25 @@ require "busybee/hooks"
 module Busybee
   class Client
     # Per-logical-call carrier for the call hooks (before_call / around_call /
-    # after_call); the block arg is |call|. A plain PORO, not an HWIA event: one
-    # per logical client operation, threaded through the seam, accumulating
-    # per-attempt outcome and timing behind a read surface computed live.
-    # Framework state is written only through the underscore seam methods below —
-    # there are no public setters, so the absence of a setter is the seal.
+    # after_call); the block arg is |call|. A plain PORO, one per logical client
+    # operation, threaded through the seam, accumulating per-attempt outcome and
+    # timing behind a read surface computed live. Framework state is written only
+    # through the underscore seam methods below; there are no public setters.
     class Call
       # Errors the seam catches and records. Widening to ScriptError is open.
       RECOVERABLE_ERRORS = [StandardError].freeze
 
       # Class-level correlation surface (with_job / with_worker_status /
-      # current_job / current_worker_status) — see Correlation.
+      # current_job / current_worker_status); see Correlation.
       extend Correlation
 
-      # Thread-local marking a client call in progress. Fiber-local in Ruby,
-      # which is what we want — a call is synchronous, so the only way to be
-      # inside one on this thread is to be inside one of its own hooks.
+      # Thread-local marking a client call in progress (fiber-local in Ruby). A
+      # call is synchronous, so the only way to be inside one on this thread is
+      # to be inside one of its own hooks.
       IN_CALL_KEY = :_busybee_in_call
 
       # Refuse a client call made from inside a call hook. Left unguarded it
-      # recurses — run_hooked → with_hooks → the same hook — until
+      # recurses (run_hooked → with_hooks → the same hook) until
       # SystemStackError, which is not a StandardError and so pierces every safe
       # layer on the way out. Job and worker hooks are unaffected: they do not
       # run inside a call, so they never reach the guard. The raise happens
@@ -104,7 +103,7 @@ module Busybee
         nil
       end
 
-      # ===== Timing — the span and per-attempt durations live on Timestamps =====
+      # ===== Timing: the span and per-attempt durations live on Timestamps =====
       delegate :created_at, :resolved_at, :network_started_at, :network_finished_at,
                :network_ms, :backoff_ms, :queue_ms, :total_ms, :cumulative_network_ms,
                to: :@timestamps
@@ -128,7 +127,7 @@ module Busybee
 
       # Execute one gRPC attempt inside the observing around_call chain, recording
       # the outcome (gRPC errors translated per attempt) and re-raising any error
-      # *past* the chain — the safe chain would otherwise swallow it.
+      # *past* the chain, which would otherwise swallow it.
       def attempt
         _begin_attempt
         reopen_request
@@ -146,7 +145,7 @@ module Busybee
           end
         end
         # `error` and `result` are the carrier's own attr_readers, set inside the
-        # chain core by _record_result / _record_error — not local variables.
+        # chain core by _record_result / _record_error, not local variables.
         raise error if error
 
         result
@@ -172,7 +171,7 @@ module Busybee
         @result = nil
       end
 
-      # Set the logical status (:succeeded / :errored) — advances once, at resolution.
+      # Set the logical status (:succeeded / :errored); it advances once, at resolution.
       def _resolve(status:)
         @status = status
         @timestamps.stamp_resolved!

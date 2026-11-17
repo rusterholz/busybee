@@ -10,7 +10,7 @@ Busybee provides everything you need to work with Camunda Platform or self-hoste
 - **Idiomatic Zeebe Client** - Ruby-native interface with keyword arguments, sensible defaults, and proper exception handling.
 - **Instrumentation Hooks** - Lifecycle hooks across jobs, workers, and gRPC calls, for middleware (transactions, tracing) and observation (metrics, logging, error reporting).
 - **RSpec Testing Integration** - Deploy BPMNs, activate jobs, and assert on workflow behavior in your test suite.
-- **Deployment Tools** - CI/CD tooling for deploying BPMN files to your clusters.
+- **Deployment Tools** (planned for v0.5) - CI/CD tooling for deploying BPMN files to your clusters.
 - **Low-Level GRPC Access** - Direct access to Zeebe's protocol buffer API when you need it.
 
 ## Roadmap & Availability
@@ -20,8 +20,11 @@ Busybee provides everything you need to work with Camunda Platform or self-hoste
 | v0.1 | BPMN Testing Tools, GRPC Layer | Available now! |
 | v0.2 | Client, Rails Integration | Available now! |
 | v0.3 | Worker Pattern & CLI | Available now! |
-| v0.4 | Instrumentation Hooks, Deployment Tools | Late 2026 |
-| v1.0 | Production Polish | 2027 |
+| v0.4 | Instrumentation Hooks | Late 2026 |
+| v0.5 | Deployment Tools, REST API Access | Planned |
+| v0.6 | Concurrency | Planned |
+| v0.7 | Health and Readiness Checks, Frozen Configuration at Boot | Planned |
+| v1.0 | Stable API | Planned |
 
 ## Installation
 
@@ -132,7 +135,7 @@ Capabilities:
 
 ### Instrumentation Hooks (new in v0.4!)
 
-Attach your own code to the lifecycle moments of a worker process — jobs, worker runs, and every gRPC call to the engine. Hooks serve as middleware (transactions, tracing spans) and observation (metrics, structured logs, error reporting):
+Attach your own code to the lifecycle moments of a worker process: jobs, worker runs, and every gRPC call to the engine. Hooks serve as middleware (transactions, tracing spans) and observation (metrics, structured logs, error reporting):
 
 ```ruby
 Busybee.configure do |config|
@@ -157,7 +160,7 @@ Capabilities:
 
 - Fourteen hooks across three subjects: the job lifecycle (both the system's view and around your `perform`), the worker lifecycle, and per-call gRPC instrumentation
 - Rich carrier objects with ready-made metric labels (`context_tags`) and structured log fields (`logging_context`)
-- Registration-time filters — by job type, worker class, outcome, stop reason, rpc, or error — validated loudly at boot
+- Registration-time filters (by job type, worker class, outcome, stop reason, rpc, or error), validated loudly at boot
 - Machine-readable stop reasons, so your alerts know *why* a worker went down
 
 **[Full hooks documentation →](docs/hooks.md)**
@@ -218,9 +221,9 @@ Each step activates the job waiting at a task, checks what the process handed it
 
 **For more info, see our [full testing documentation here](docs/testing.md).** For unit testing workers, see [Workers: Testing Workers](docs/workers.md#testing-workers).
 
-### Deployment Tools (coming soon)
+### Deployment Tools (planned for v0.5)
 
-CI/CD tooling for deploying BPMN processes to your Zeebe clusters. Version tracking, environment-specific deployments, and pre-deployment validation.
+Tooling for deploying your BPMN processes to Zeebe clusters from CI/CD.
 
 ### Low-Level GRPC Access (available now!)
 

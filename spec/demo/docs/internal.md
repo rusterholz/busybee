@@ -17,11 +17,11 @@ orders_per_tick = speed * tick / base_interval
 
 Each tick, `accumulator += orders_per_tick`, then `batch = accumulator.floor` orders are created and the fractional remainder carries over.
 
-**Catalog sampling**: Each order gets 3–10 random items from the 15-item catalog. The inventory is arranged so that every pair of warehouses misses exactly 2 items and every triple covers all 15 — this makes 3-shipment orders possible but 4-shipment orders impossible.
+**Catalog sampling**: Each order gets 3–10 random items from the 15-item catalog. The inventory is arranged so that every pair of warehouses misses exactly 2 items and every triple covers all 15, which makes 3-shipment orders possible but 4-shipment orders impossible.
 
 **Restocking**: `Sim::GuaranteedRestock` runs before each order enters the BPMN pipeline. It ensures enough inventory exists to fulfill the order, creating a sawtooth restocking pattern (generous restock when any warehouse runs low, partial restock otherwise).
 
-**Worker rollovers**: the business workers recycle themselves like a rolling deploy, so the Monitoring dashboard shows a realistic incarnation history and busybee's graceful-shutdown path is exercised continuously. A non-Sim `around_perform` hook (in the busybee initializer) samples a time-rate hazard at each job boundary; when it fires it raises `Sim::Rollover`, a declared shutdown error that busybee turns into a graceful `:unhealthy` shutdown — and `restart: unless-stopped` brings the container back as a fresh incarnation with a new `worker_name`. Rolling *before* `perform` also fails the triggering job, so one hook simulates two production events at once: a rollout and an ordinary transient failure that the engine's retry then recovers. The hazard rises with the worker's `uptime_s` and is computed entirely in sim-seconds, so jobs-per-rollover stays constant across `DEMO_SPEED` (mean time-to-roll is a few minutes per container at speed 1). Sim's own workers are exempt — recycling them mid-flight would stall the pipeline. Set `DEMO_ROLLOVERS=false` to disable rollovers for a stable watch session.
+**Worker rollovers**: the business workers recycle themselves like a rolling deploy, so the Monitoring dashboard shows a realistic incarnation history and busybee's graceful-shutdown path is exercised continuously. A non-Sim `around_perform` hook (in the busybee initializer) samples a time-rate hazard at each job boundary; when it fires it raises `Sim::Rollover`, a declared shutdown error that busybee turns into a graceful `:unhealthy` shutdown, and `restart: unless-stopped` brings the container back as a fresh incarnation with a new `worker_name`. Rolling *before* `perform` also fails the triggering job, so one hook simulates two production events at once: a rollout and an ordinary transient failure that the engine's retry then recovers. The hazard rises with the worker's `uptime_s` and is computed entirely in sim-seconds, so jobs-per-rollover stays constant across `DEMO_SPEED` (mean time-to-roll is a few minutes per container at speed 1). Sim's own workers are exempt: recycling them mid-flight would stall the pipeline. Set `DEMO_ROLLOVERS=false` to disable rollovers for a stable watch session.
 
 ## Speed Scaling
 
@@ -32,7 +32,7 @@ Each tick, `accumulator += orders_per_tick`, then `batch = accumulator.floor` or
 | Order creation rate | `base_interval / speed` (clamped to 1s ticks with batching) | Higher speed → more orders per second |
 | Pick-and-pack delay | `item_count * 1.4s * jitter / speed` | Faster warehouse processing |
 | Delivery delay | `distance * 1.5s * jitter / speed` | Faster deliveries |
-| Fleet size | `round((4 * speed + 83) / 29)` drivers | Linear scaling — more drivers at higher throughput |
+| Fleet size | `round((4 * speed + 83) / 29)` drivers | Linear scaling: more drivers at higher throughput |
 
 Jitter is uniform in `[0.8, 1.2)` for both Sim workers.
 
@@ -47,7 +47,7 @@ Jitter is uniform in `[0.8, 1.2)` for both Sim workers.
 
 ## Fleet Dynamics
 
-The driver fleet is a fixed size, seeded at startup via `db/seeds.rb`. Fleet size scales linearly with speed: `round((4 * speed + 83) / 29)` — giving 3 drivers at speed 1 and 7 at speed 30.
+The driver fleet is a fixed size, seeded at startup via `db/seeds.rb`. Fleet size scales linearly with speed: `round((4 * speed + 83) / 29)`, giving 3 drivers at speed 1 and 7 at speed 30.
 
 The seed runs only when `db:prepare` creates the databases, so the fleet is sized by the speed of the first start after a `clean`. A `stop` and a `start --speed N` keep the old fleet: the delays rescale, the driver count doesn't. `bin/demo clean` before the start resizes it.
 
@@ -89,7 +89,7 @@ All constants with their formulas and derivation:
 | `BASE_DELAY` (pick-and-pack) | `PickAndPackWorker` | 1.4s/item | ~7s for a 5-item order at speed 1 |
 | `BASE_DELAY` (delivery) | `DeliveryRunWorker` | 1.5s/distance unit | ~12s for avg 8-unit delivery |
 | Picker concurrency | `PickAndPackWorker::PICKERS` | 3 | Simulates 3 warehouse pickers |
-| Fleet size | `db/seeds.rb` | `round((4*speed + 83) / 29)` | Linear scaling — 3 at speed 1, 7 at speed 30 |
+| Fleet size | `db/seeds.rb` | `round((4*speed + 83) / 29)` | Linear scaling: 3 at speed 1, 7 at speed 30 |
 | Message TTL | `CompleteDriverDeliveryWorker` | 30 seconds | Time window for message correlation before expiry |
 | Order interval | `clock.rb` | `12/speed` seconds | Base order rate |
 | Item count range | `clock.rb` | 3–10 items | Wide range for shipment count variety |
@@ -102,7 +102,7 @@ Worker containers use per-domain YAML config files (`config/busybee/<domain>.yml
 
 `oms.yml`, `logistics.yml` and `delivery.yml` list their workers only. `sim.yml` adds a global `job_timeout` override for its long-running workers.
 
-Note that some worker settings remain in the DSL (e.g., Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning — settings that might vary by environment or deployment.
+Note that some worker settings remain in the DSL (e.g., Sim workers' `complete_job_on_success false`). These are intrinsic to the worker's behavior and shouldn't be overridden at deploy time. YAML config is for operational tuning: settings that might vary by environment or deployment.
 
 ## Monitoring & Lifecycle Hooks
 
@@ -181,7 +181,7 @@ bin/demo test           # 25 orders (default)
 bin/demo test 20        # 20 orders
 ```
 
-This is the primary verification command for gem maintainers — run it before every pull request.
+This is the primary verification command for gem maintainers; run it before every pull request.
 
 ### Integration Test: `demo:run_orders[count]`
 
@@ -206,7 +206,7 @@ bin/rails demo:run_orders[10]          # Quick smoke test
 system("cd spec/demo && bin/rails demo:run_orders[100]") or fail "Demo orders did not complete"
 ```
 
-This tests busybee end-to-end: process deployment, worker execution, variable passing, multi-instance fan-out, and conditional routing — all exercised through a realistic application rather than synthetic fixtures.
+This tests busybee end-to-end: process deployment, worker execution, variable passing, multi-instance fan-out, and conditional routing, all exercised through a realistic application rather than synthetic fixtures.
 
 ### Worker Unit Tests
 
@@ -259,7 +259,7 @@ rm -f "$COOKIE_JAR"
 
 Item types are from the 15-item catalog defined in `config/initializers/demo.rb`. Coordinates should be in the range `[-9.0, 9.0]` to land near the warehouses.
 
-For bulk order creation in a running Docker stack, prefer the `demo:run_orders` rake task (see Test Hardpoints above) — it bypasses the web layer and creates orders directly via ActiveRecord.
+For bulk order creation in a running Docker stack, prefer the `demo:run_orders` rake task (see Test Hardpoints above); it bypasses the web layer and creates orders directly via ActiveRecord.
 
 ## Known Limitations
 

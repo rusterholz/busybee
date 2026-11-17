@@ -28,6 +28,12 @@ Busybee is built around a workflow engine named [Zeebe](https://docs.camunda.io/
   - [Multiple Workers in One Process](#multiple-workers-in-one-process)
   - [YAML Configuration](#yaml-configuration)
   - [Configuration Precedence](#configuration-precedence)
+- [Message Correlation](#message-correlation)
+  - [The BPMN Side](#the-bpmn-side)
+  - [Publishing From a Worker](#publishing-from-a-worker)
+  - [When the Message Arrives First](#when-the-message-arrives-first)
+  - [Retries and Duplicates](#retries-and-duplicates)
+  - [Testing It](#testing-it)
 - [Testing Workers](#testing-workers)
   - [Setup](#setup)
   - [Basic Worker Testing](#basic-worker-testing)
@@ -153,7 +159,7 @@ class ProcessPaymentWorker < Busybee::Worker
 
     { charged: true }
   rescue PaymentGateway::Timeout => e
-    # An outage isn't this order's fault — come back without spending a retry
+    # An outage isn't this order's fault: come back without spending a retry
     fail!(e, retries: job.retries, backoff: 60_000)
   rescue PaymentGateway::CardDeclined => e
     # A business outcome the process model has a path for
@@ -164,7 +170,7 @@ end
 
 Anything your rescue doesn't catch is still reported for you.
 
-Two neighboring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker — redacting sensitive text out of error messages, say — reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
+Two neighboring tools for the cases a rescue doesn't cover. To take the whole worker process down on a class of errors rather than failing job after job, use [`shutdown_on`](#shutdown-handling). To adjust what reaches the engine across *every* worker (redacting sensitive text out of error messages, say), reach for a [call hook](hooks.md#call-hooks) rather than repeating the same rescue in each worker.
 
 #### Manual Lifecycle Control
 
@@ -247,13 +253,13 @@ end
 
 You can also configure shutdown errors globally for all workers in your application via [`Busybee.shutdown_on_errors`](configuration.md).
 
-`shutdown_on` accepts only `StandardError` subclasses. Classes outside that hierarchy (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise an error at class-definition time, because the per-job rescue that consults `shutdown_on` is `StandardError`-scoped — a non-`StandardError` would never reach the check at runtime. Signal-class errors are handled separately via the CLI's signal traps; there's nothing to configure here.
+`shutdown_on` accepts only `StandardError` subclasses. Classes outside that hierarchy (e.g., `Interrupt`, `NoMemoryError`, `LoadError`) raise an error at class-definition time, because the per-job rescue that consults `shutdown_on` is `StandardError`-scoped: a non-`StandardError` would never reach the check at runtime. Signal-class errors are handled separately via the CLI's signal traps; there's nothing to configure here.
 
 When a shutdown is triggered, the job whose `perform` raised the error is reported as failed, spending a retry like any other failure. The worker process then stops requesting new jobs, hands back the jobs it received but hadn't started, with their retry counts untouched, so another worker picks them up, and exits. [Worker lifecycle hooks](hooks.md#worker-hooks) observe the whole sequence, with the closing snapshot reporting [`reason: :unhealthy`](hooks.md#stop-reasons).
 
 #### Direct Job Access
 
-Several of the methods you've already seen — `complete!`, `fail!`, `throw_bpmn_error!`, `update_retries`, `update_timeout`, `variables`, and `headers` — are actually delegated from the worker to an underlying `Busybee::Job` object. You can access this object directly via `self.job` in `perform`. The job carries metadata, raw data, and status information that isn't available at the worker level:
+Several of the methods you've already seen (`complete!`, `fail!`, `throw_bpmn_error!`, `update_retries`, `update_timeout`, `variables`, and `headers`) are actually delegated from the worker to an underlying `Busybee::Job` object. You can access this object directly via `self.job` in `perform`. The job carries metadata, raw data, and status information that isn't available at the worker level:
 
 ```ruby
 def perform
@@ -265,11 +271,11 @@ def perform
   job.retries                 # remaining retry attempts (Integer)
   job.deadline                # lock expiration time (frozen Time, UTC)
 
-  # Data (delegated, but declared inputs are preferred — see Declaring Inputs)
+  # Data (delegated, but declared inputs are preferred; see Declaring Inputs)
   job.variables               # all process variables, as a frozen hash with indifferent access
   job.headers                 # custom headers from BPMN definition, same format
 
-  # Lifecycle (delegated — see Manual Lifecycle Control)
+  # Lifecycle (delegated; see Manual Lifecycle Control)
   job.complete!(vars = {})    # mark job complete, checking declared outputs as the worker's does
   job.fail!(error, retries: nil, backoff: nil)  # mark job failed
   job.throw_bpmn_error!(code, message = "")     # throw a BPMN error
@@ -284,7 +290,7 @@ def perform
 end
 ```
 
-Worth knowing about how `status` relates to `result` and `error`: `result` and `error` are worker-side records of what came out of executing the job — captured the moment your `perform` decides them. `status` is the engine's ledger as reflected on this worker, and advances only after the relevant GRPC call (`complete_job`, `fail_job`, or `throw_bpmn_error`) succeeds. In normal operation the two views agree, but transient GRPC failures can produce divergence (e.g., a `:failed` worker-side status while the engine has the job in an incident); the worker doesn't observe engine state directly. A naming bridge that helps when cross-referencing Zeebe docs or Operate: Busybee's `:ready` is the worker-side name for what Zeebe calls the **ACTIVATED** state.
+Worth knowing about how `status` relates to `result` and `error`: `result` and `error` are worker-side records of what came out of executing the job, captured the moment your `perform` decides them. `status` is the engine's ledger as reflected on this worker, and advances only after the relevant GRPC call (`complete_job`, `fail_job`, or `throw_bpmn_error`) succeeds. In normal operation the two views agree, but transient GRPC failures can produce divergence (e.g., a `:failed` worker-side status while the engine has the job in an incident); the worker doesn't observe engine state directly. A naming bridge that helps when cross-referencing Zeebe docs or Operate: Busybee's `:ready` is the worker-side name for what Zeebe calls the **ACTIVATED** state.
 
 Variables and headers support both hash-style and method-style access, including nested values:
 
@@ -297,7 +303,7 @@ job.variables.address.zip_code    # nested method access
 
 Reaching past the worker doesn't change what `complete!` checks. The worker's `complete!` and `job.complete!` both check your declared outputs (required ones present, undeclared ones absent) whenever a worker is attached to the job: in `perform` and in the perform hooks around it. A job resolved before then, by an `on_job_activated` hook say, or a `Busybee::Job` used on its own, has no worker attached and so no outputs to check against. See [Strict Output Validation](#strict-output-validation).
 
-Most of the time, you won't need to reach for `job` directly — input accessors give you named, validated methods for reading data, and the lifecycle delegations (`complete!`, `fail!`, etc.) read more naturally without the `job.` prefix. But the job object is there when you need metadata, status checks, or raw data access.
+Most of the time, you won't need to reach for `job` directly: input accessors give you named, validated methods for reading data, and the lifecycle delegations (`complete!`, `fail!`, etc.) read more naturally without the `job.` prefix. But the job object is there when you need metadata, status checks, or raw data access.
 
 ### Declaring Inputs
 
@@ -429,7 +435,7 @@ end
 # :debug_info. Declare with `output :name` or set `strict_outputs false`
 ```
 
-The error message names your two options. Either the key belongs in the contract — declare it with `output` and the process can rely on it — or it doesn't, and it shouldn't be crossing the wire. The failure mode this prevents is a scratch value written into a process instance where a downstream FEEL expression or gateway condition can silently pick it up.
+The error message names your two options. Either the key belongs in the contract (declare it with `output` and the process can rely on it), or it doesn't, and it shouldn't be crossing the wire. The failure mode this prevents is a scratch value written into a process instance where a downstream FEEL expression or gateway condition can silently pick it up.
 
 Workers that deliberately return open-ended data can opt out:
 
@@ -506,7 +512,7 @@ Not to be confused with the `description:` option on input and output declaratio
 
 #### `job_timeout`
 
-How long this worker is allowed to hold a job before the workflow engine assumes that the worker has crashed and will make the job available to another worker. Accepts an Integer (milliseconds) or `ActiveSupport::Duration`:
+How long this worker is allowed to hold a job before the workflow engine assumes that the worker has crashed and will make the job available to another worker. Accepts an Integer (milliseconds) or `ActiveSupport::Duration` (outside Rails, `2.minutes` needs [one require](configuration.md#how-busybee-reads-durations)):
 
 ```ruby
 job_timeout 120_000    # 2 minutes
@@ -778,7 +784,7 @@ Jobs of the *same* type are always processed sequentially. That is, only one ins
 
 #### When One Worker Fails
 
-**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. A worker that stops on its own, say because the engine closed its job stream, takes the rest with it too, gracefully and under its own reason, so the process exits and is replaced rather than leaving that job type unworked. Every worker's `on_worker_shutdown` fires with the crash's reason, so a container of five workers produces five shutdown events, one of which carries the error.
+**One worker's unhandled error stops all of them.** The failing worker is logged by name and class, its siblings are shut down, and the error is re-raised out of the process so your orchestrator sees a failed container and replaces it. A worker that stops on its own, say because the engine closed its job stream, takes the rest with it too, gracefully and under its own reason, so the process exits and is replaced rather than leaving that job type unworked. Every worker that had started fires its `on_worker_shutdown` with the crash's reason, so a container of five running workers produces five shutdown events, one of which carries the error. A worker stopped before it started fires none, and logs `Stopped <Worker> before it started (<reason>)` instead.
 
 How hard the shutdown is depends on what went wrong. An ordinary error leaves the process healthy enough to be polite, so each worker drains: jobs in hand go back to the engine promptly and are picked up by whoever replaces you. Any error outside `StandardError`, such as a `NoMemoryError` or a `NotImplementedError`, skips the drain in every worker, so busybee makes no more calls from a process in that state, and it may skip hooks too, `on_worker_shutdown` included. Those jobs come back to the engine the slower way, when their activation times out. Such an error stops the other workers even when the worker it struck absorbed it on its way down, as a streaming worker's thread reading the job stream does during a shutdown already under way; the process then exits with status 1 without re-raising it.
 
@@ -882,6 +888,148 @@ The [per-worker settings](#yaml-reference) this applies to are: `worker_mode`, `
 A `Busybee.credentials` object your app assigns keeps its own address over `--cluster-address`, and busybee logs that too, naming `Busybee.credentials.cluster_address`. `shutdown_wait_timeout` follows the same chain with top-level YAML in the flag's place. One exception: when `config.x.busybee` sets any credential key, Busybee builds its credentials while Rails boots, and an initializer that changes the cluster address afterward doesn't reach them; assign `Busybee.credentials` instead. Process-wide settings don't participate in per-worker overrides because they always apply to the entire process.
 
 For gem-level defaults (the bottom of the chain), see [Configuration](configuration.md).
+
+---
+
+## Message Correlation
+
+Some steps in a business process have to wait for something that happens somewhere else. In BPMN, a process instance waits at a **message intermediate catch event** (or a **receive task**), and a message published to the engine with a matching name and correlation key wakes it. Workers are a natural place to publish those messages, because the work that makes the awaited thing true is often a job in some *other* process instance.
+
+The [demo app](../spec/demo/README.md) does exactly this. When a shipment is packed but no driver is free, its `deliver_shipment` instance records a driver request and waits. When another delivery finishes, `Delivery::CompleteDriverDeliveryWorker`, working a job in *that* delivery's instance, frees the driver, claims the oldest open request, and publishes a `driver_available` message that wakes the instance that was waiting.
+
+### The BPMN Side
+
+The waiting process declares a message, with the name a publisher will use and a **correlation key** expression, and a catch event that references it. From the demo's `deliver_shipment.bpmn` (sequence flows omitted):
+
+```xml
+<bpmn:message id="Message_driver_available" name="driver_available">
+  <bpmn:extensionElements>
+    <zeebe:subscription correlationKey="= driver_request.id" />
+  </bpmn:extensionElements>
+</bpmn:message>
+
+<bpmn:intermediateCatchEvent id="wait_for_driver" name="Wait for Driver">
+  <bpmn:extensionElements>
+    <zeebe:ioMapping>
+      <zeebe:output source="= driver_id" target="driver.id" />
+      <zeebe:output source="= driver_name" target="driver.name" />
+    </zeebe:ioMapping>
+  </bpmn:extensionElements>
+  <bpmn:messageEventDefinition messageRef="Message_driver_available" />
+</bpmn:intermediateCatchEvent>
+```
+
+When an instance enters the catch event, Zeebe evaluates the correlation key expression against that instance's variables and opens a **subscription** for the message name and the resulting key. The key is fixed from then on: changing `driver_request.id` while the instance waits doesn't move the subscription, so the variable has to hold its final value by the time the instance arrives. In the demo, the `assign_driver` task sets it through an output mapping just before. The catch event's own output mappings then take what the message carried, here placing `driver_id` and `driver_name` under `driver`.
+
+### Publishing From a Worker
+
+Inside `perform`, `client` is the `Busybee::Client` that delivered the job (the same object as `job.client`), so a publish travels over the connection the job's own calls use. The demo worker's publish:
+
+```ruby
+def publish_driver_available!(request, driver)
+  client.publish_message(
+    "driver_available",
+    correlation_key: request.id,
+    vars: { driver_id: driver.id, driver_name: driver.name },
+    ttl: 30.seconds
+  )
+end
+```
+
+The full signature is `publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil)`:
+
+- `name` matches the message's `name` in the BPMN, not its `id`.
+- `correlation_key:` is the value the waiting instance's expression produced. Busybee sends it as a String, so `request.id` works whatever its type.
+- `vars:` is a Hash of variables delivered with the message.
+- `ttl:` is how long the engine holds the message for a subscription that hasn't opened yet (below). Like every duration in busybee it takes milliseconds or an `ActiveSupport::Duration`; `30.seconds` needs `require "active_support/core_ext/numeric/time"` outside Rails (see [How Busybee Reads Durations](configuration.md#how-busybee-reads-durations)).
+- `tenant_id:` names the tenant on a multi-tenant cluster.
+
+It returns the message's key, an Integer. A message that matches no subscription isn't an error: the engine accepts it and returns a key all the same. If the publish itself fails, it raises `Busybee::GRPC::Error`, which fails the job like any other error escaping `perform`, so the job comes back for a retry (see [Retries and Duplicates](#retries-and-duplicates)). Because it's a client call, your [call hooks](hooks.md) see it too, as `rpc: :publish_message`. The complete reference is in [Client: publish_message](client.md#publish_message).
+
+### When the Message Arrives First
+
+A publisher and a waiter race more often than you might expect. In the demo, a delivery can finish and claim a request in the moment between `assign_driver` recording that request and its instance reaching `wait_for_driver`, so the message can reach the engine before anyone is waiting for it.
+
+The message's **time-to-live** covers that gap. The engine holds a published message for its TTL, and an instance that opens a matching subscription within that window receives it, even though it started waiting after the publish. Once the TTL runs out, an unclaimed message is discarded. When you leave `ttl:` out, busybee uses [`Busybee.default_message_ttl`](configuration.md#default_message_ttl), 10 seconds by default; `ttl: 0` isn't held at all, and reaches only a subscription that is already open. Size the TTL to the longest gap you expect between the publish and the wait: the demo's 30 seconds is generous for a gap of a few task hops.
+
+```mermaid
+sequenceDiagram
+    participant W as Publishing worker
+    participant E as Engine
+    participant I as Waiting instance
+
+    alt the instance is already waiting
+        I->>E: enters the catch event: subscription opens for name and key
+        W->>E: publish_message(name, correlation_key:)
+        E->>I: delivers the message, and the instance moves on
+    else the message arrives first
+        rect rgba(127, 127, 127, 0.12)
+            W->>E: publish_message(name, correlation_key:, ttl:)
+            Note over E: holds the message for its TTL
+            I->>E: enters the catch event within the TTL
+            E->>I: delivers the held message, and the instance moves on
+        end
+    end
+    Note over W,I: past its TTL, an unclaimed message is discarded, and ttl: 0 is never held
+```
+
+### Retries and Duplicates
+
+Within its TTL, one message wakes at most one instance of a given process: once it has been received, the next instance of that process to wait on the same key doesn't get it. A second publish, though, is a second message. If a job publishes and then fails before it completes, its retry publishes again; the first message wakes the waiting instance, and the duplicate stays held for its TTL, ready to wake the next instance that waits on that key.
+
+Two habits keep that harmless:
+
+- **Use a correlation key that is unique to one wait.** The demo keys on the driver request's id, and each request is waited on once, so a duplicate has no second waiter to find.
+- **Make the publishing step safe to repeat.** On a retry, the demo's worker finds the request it already claimed and publishes for that one again, rather than claiming another request and waking a second shipment.
+
+Zeebe can also de-duplicate by a message ID, but `publish_message` doesn't set one.
+
+### Testing It
+
+In a unit spec, a [test client](#programming-failures) records every request that reaches it, so you can assert on the message your worker sent without a running engine. Trimmed from the demo's own spec for this worker:
+
+```ruby
+RSpec.describe Delivery::CompleteDriverDeliveryWorker, :busybee do
+  let(:client) { build_test_client }
+
+  it "publishes driver_available for the request it claims" do
+    driver = Delivery::Driver.create!(name: "Alice", total_mileage: 50.0, current_shipment_id: "ship-1")
+    request = Delivery::DriverRequest.create!(shipment_id: "ship-waiting-1", requested_at: 2.minutes.ago)
+
+    execute_worker(described_class,
+                   job: build_test_job(type: described_class.job_type, client: client,
+                                       variables: { driver_id: driver.id, shipment_id: "ship-1", distance: 5.0 }))
+
+    expect(client.received(:publish_message).sole).to have_attributes(
+      name: "driver_available",
+      correlationKey: request.id,
+      timeToLive: 30_000,
+      variables: JSON.generate("driver_id" => driver.id, "driver_name" => driver.name)
+    )
+  end
+end
+```
+
+The assertion reads the request as it reached the wire, so it checks the variables' serialization and the TTL's conversion to milliseconds along the way.
+
+To test the waiting side, publish from a workflow test with the [`publish_message`](testing.md#publish_messagename-correlation_key-vars--ttl-publish_message_ttl_ms) helper and check that the instance moves on. From the demo's spec for `deliver_shipment`, where `test_variables` holds the shipment the process starts with:
+
+```ruby
+with_process_instance("deliver_shipment", test_variables) do
+  activate_job("load_order_address").and_complete(lat: 5.3, lon: -2.1)
+  activate_job("assign_driver").and_complete(driver_id: nil, driver_name: nil, request_id: "req-1")
+  activate_job("calculate_distance").and_complete(distance: 12.45)
+
+  # No driver yet, so the instance waits at wait_for_driver
+  expect { activate_job("update_shipment_status") }.not_to have_available_jobs
+
+  publish_message("driver_available",
+                  correlation_key: "req-1",
+                  vars: { driver_id: "drv-late", driver_name: "Late Driver" })
+
+  activate_job("update_shipment_status") # the message woke it
+end
+```
 
 ---
 
@@ -1022,7 +1170,7 @@ expect(MyMonitor.status_of(ProcessOrderWorker)).to eq(:shutdown)
 
 Jobs you build for a held worker must use its client: `build_test_job(client: worker.client)`. The test worker has no transport behind it, so it reports no `worker_mode`, its jobs no `source`, and a hook filtered on either doesn't fire.
 
-`build_test_job` returns a real `Busybee::Job` — a genuine `ActivatedJob` protobuf, so it validates its own field types — backed by a real client whose transport is in-process. Lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) run the full client path and touch no network.
+`build_test_job` returns a real `Busybee::Job` (a genuine `ActivatedJob` protobuf, so it validates its own field types), backed by a real client whose transport is in-process. Lifecycle operations (`complete!`, `fail!`, `throw_bpmn_error!`) run the full client path and touch no network.
 
 Because the client is real rather than a double, your **call hooks fire** whenever the job makes a call, even outside `execute_worker`:
 
@@ -1039,7 +1187,7 @@ end
 
 #### Building the other carriers
 
-Hooks receive a `Worker::Status` or a `Client::Call` rather than a `Job`, and those have builders too. Each builds what production builds, so the projections a hook reads (`context_tags`, `logging_context`) are *computed* — a hand-written double would freeze your belief about them into the assertion and stay green when the contract moved.
+Hooks receive a `Worker::Status` or a `Client::Call` rather than a `Job`, and those have builders too. Each builds what production builds, so the projections a hook reads (`context_tags`, `logging_context`) are *computed*; a hand-written double would freeze your belief about them into the assertion and stay green when the contract moved.
 
 ```ruby
 status = build_test_worker_status(worker_class: ShipOrderWorker, total_job_count: 7)

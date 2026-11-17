@@ -210,6 +210,12 @@ I, [2026-10-23T09:11:18.444925 #92579]  INFO -- : [busybee] Stopping OkWorker (u
 I, [2026-10-23T09:11:18.445387 #92579]  INFO -- : [busybee] Stopped OkWorker (unhealthy)
 ```
 
+A worker the stop reaches before it has started, as when another worker fails right at boot, logs one line instead of the usual pair, and fires none of its worker hooks:
+
+```
+I, [2026-10-23T09:11:18.445412 #92579]  INFO -- : [busybee] Stopped OkWorker before it started (unhealthy)
+```
+
 [Workers: When One Worker Fails](workers.md#when-one-worker-fails) covers how hard each kind of failure stops the others.
 
 ## Retries, Incidents and Poison Pills

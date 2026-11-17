@@ -50,11 +50,11 @@ Two different mechanisms decide what runs, and conflating them is how a checkpoi
 
 **Environment variables gate eligibility.** `RUN_INTEGRATION_TESTS` and `RUN_CAMUNDA_CLOUD_TESTS` each un-gate a group that is otherwise excluded before RSpec ever considers it; each lives on its own line in `spec/spec_helper.rb`. `TEST_RAILS_INTEGRATION` works differently: it boots the demo app (in `spec/spec_helper.rb`), and the Rails integration specs skip themselves without it, so they report as pending rather than vanishing. The gates are per-group and don't imply one another: setting one does nothing for the others.
 
-`MULTITENANCY_ENABLED` is the odd one out. It doesn't un-gate anything — it *swaps* which of `:single_tenant_only` / `:multi_tenant_only` is excluded (`spec/support/integration_helper.rb`). Both modes always run; the variable chooses which half.
+`MULTITENANCY_ENABLED` is the odd one out. It doesn't un-gate anything: it *swaps* which of `:single_tenant_only` / `:multi_tenant_only` is excluded (`spec/support/integration_helper.rb`). Both modes always run; the variable chooses which half.
 
-**Tags select among what's already eligible.** `--tag integration` doesn't enable integration specs, it narrows the run to only them. `RUN_INTEGRATION_TESTS=1 bundle exec rspec` gives you unit *plus* integration; adding `--tag integration` gives you integration alone. Reach for a tag when you want a group's own count — not when you want a full checkpoint, where narrowing is the last thing you want.
+**Tags select among what's already eligible.** `--tag integration` doesn't enable integration specs, it narrows the run to only them. `RUN_INTEGRATION_TESTS=1 bundle exec rspec` gives you unit *plus* integration; adding `--tag integration` gives you integration alone. Reach for a tag when you want a group's own count, not when you want a full checkpoint, where narrowing is the last thing you want.
 
-**An explicit `--tag` overrides an exclusion filter.** That's RSpec's precedence, not ours, and it means a tag can walk a group straight past its own gate: `--tag camunda_cloud` selects those specs whether or not `RUN_CAMUNDA_CLOUD_TESTS` is set. Under `--dry-run` that's harmless and yields an accurate count. Run for real, it isn't — the Camunda Cloud specs enable live network access and would then have no credentials to use it. The `rails:` tag has a `before` hook that converts the override into an explicit skip; no other group has that backstop. **Set a group's gate when you mean "is this green?" Use `--tag` to narrow, never to enable.**
+**An explicit `--tag` overrides an exclusion filter.** That's RSpec's precedence, not ours, and it means a tag can walk a group straight past its own gate: `--tag camunda_cloud` selects those specs whether or not `RUN_CAMUNDA_CLOUD_TESTS` is set. Under `--dry-run` that's harmless and yields an accurate count. Run for real, it isn't: the Camunda Cloud specs enable live network access and would then have no credentials to use it. The `rails:` tag has a `before` hook that converts the override into an explicit skip; no other group has that backstop. **Set a group's gate when you mean "is this green?" Use `--tag` to narrow, never to enable.**
 
 ### The Testing Helpers in Our Own Specs
 
@@ -64,7 +64,7 @@ An adopter opts in to `Busybee::Testing::Helpers` per spec, with the `:busybee` 
 
 Some of busybee's most consequential behavior only appears when the broker misbehaves: a `RESOURCE_EXHAUSTED` during job activation, a stream that dies mid-delivery, a status that arrives while a response enumerator is being read. Those paths are easy to get wrong in a test by stubbing the client, because a stub encodes what you *believe* the gateway does. When the belief is wrong, the test passes and the system is broken.
 
-`spec/support/fault_injection_gateway.rb` removes the belief. It runs a real gRPC server implementing the Zeebe Gateway service, in-process on an ephemeral loopback port, and lets a spec program what each RPC does. Everything else — credentials, channel, stub, client, runner — is the real thing.
+`spec/support/fault_injection_gateway.rb` removes the belief. It runs a real gRPC server implementing the Zeebe Gateway service, in-process on an ephemeral loopback port, and lets a spec program what each RPC does. Everything else (credentials, channel, stub, client, runner) is the real thing.
 
 Tag an example group `:gateway` and it gets a fresh, started gateway, torn down afterwards:
 
@@ -79,7 +79,7 @@ RSpec.describe "a worker meeting backpressure", :gateway do
 end
 ```
 
-**The block is the gRPC handler**, so it keeps grpc-ruby's own contract: return a response message for `OK`, raise a `GRPC::BadStatus` subclass for that status, raise anything else for `UNKNOWN`. There is no separate vocabulary to learn, and no success-side helper — returning a message *is* success.
+**The block is the gRPC handler**, so it keeps grpc-ruby's own contract: return a response message for `OK`, raise a `GRPC::BadStatus` subclass for that status, raise anything else for `UNKNOWN`. There is no separate vocabulary to learn, and no success-side helper: returning a message *is* success.
 
 **Streaming responses stay lazy.** A server-streaming handler returns an Enumerable that is never materialized, so partial delivery followed by a failure is expressible directly, and errors surface during enumeration exactly as they do in production:
 
@@ -94,13 +94,13 @@ end
 
 The same property covers a stream that simply ends (let the enumerator finish) and one that hangs past a deadline (`sleep` in the block).
 
-**Every request is recorded**, for every RPC, whether or not a behavior was programmed — so "did what I built actually reach the wire?" is answerable without programming a response first:
+**Every request is recorded**, for every RPC, whether or not a behavior was programmed, so "did what I built actually reach the wire?" is answerable without programming a response first:
 
 ```ruby
 expect(gateway.received(:publish_message).map(&:name)).to eq(["order-shipped"])
 ```
 
-**Job payloads need real protos.** `FaultInjectionGateway.activated_job(type:, variables:, ...)` builds a genuine `Busybee::GRPC::ActivatedJob`; so does the Testing module's `build_test_raw_job`, if you would rather use the shipped builder. What a stub cannot take is a wrapped `Busybee::Job` — `build_test_job` returns one of those, for the worker side of a spec rather than the wire side.
+**Job payloads need real protos.** `FaultInjectionGateway.activated_job(type:, variables:, ...)` builds a genuine `Busybee::GRPC::ActivatedJob`; so does the Testing module's `build_test_raw_job`, if you would rather use the shipped builder. What a stub cannot take is a wrapped `Busybee::Job`; `build_test_job` returns one of those, for the worker side of a spec rather than the wire side.
 
 **Transport.** The gateway binds `127.0.0.1:0` and reports what it bound as `gateway.address`. Binding loopback rather than `0.0.0.0` avoids the macOS firewall prompt. Where loopback is unavailable, pass `bind:`; a bind failure raises an error that names that option.
 
@@ -113,9 +113,9 @@ Don't tag gateway specs `:integration`: that tag skips when local Zeebe is down,
 The CLI integration tests (`spec/integration/cli/cli_spec.rb`) verify the full CLI stack by spawning `busybee` as a subprocess against a live Zeebe instance. They test end-to-end job processing, YAML configuration loading, graceful shutdown via signals, and error scenarios.
 
 **Architecture:**
-- `spec/integration/cli/test_harness.rb` — Subprocess entry point that loads busybee, test workers, sets insecure credentials, and delegates to `CLI.main`
-- `spec/integration/cli/test_workers.rb` — Named worker classes (`CLITestWorker`, `CLITestWorkerA`, `CLITestWorkerB`) that write processed job keys to a signal file for test verification
-- `spec/integration/cli/cli_spec.rb` — Tests that spawn the harness via `Process.spawn`, create Zeebe jobs, wait for the signal file to confirm processing, and send signals for shutdown
+- `spec/integration/cli/test_harness.rb`: Subprocess entry point that loads busybee, test workers, sets insecure credentials, and delegates to `CLI.main`
+- `spec/integration/cli/test_workers.rb`: Named worker classes (`CLITestWorker`, `CLITestWorkerA`, `CLITestWorkerB`) that write processed job keys to a signal file for test verification
+- `spec/integration/cli/cli_spec.rb`: Tests that spawn the harness via `Process.spawn`, create Zeebe jobs, wait for the signal file to confirm processing, and send signals for shutdown
 
 The signal file pattern allows the test process to detect when the subprocess has processed jobs without shared memory. Each test gets a fresh temp file.
 
@@ -148,7 +148,7 @@ RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
 **Multi-Tenant Mode:**
 
 ```bash
-# Start Zeebe with multi-tenancy enabled
+# Start Zeebe with the multi-tenancy flag set (see the note below)
 MULTITENANCY_ENABLED=true rake zeebe:start
 MULTITENANCY_ENABLED=true rake zeebe:health
 
@@ -156,7 +156,7 @@ MULTITENANCY_ENABLED=true rake zeebe:health
 MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
 ```
 
-**Note:** Full multi-tenancy testing requires Camunda Identity service for tenant authorization. The local Docker Compose environment uses insecure mode without Identity, so `:multi_tenant_only` tests are currently marked as pending. The test infrastructure (filtering, CI matrix) is ready for when Identity is configured.
+**Note:** The multi-tenant mode switches which specs run; it does not give you a cluster with tenancy. On Camunda 8.8 the compose file's `CAMUNDA_MULTITENANCY_ENABLED` is inert: a cluster started with it still rejects a `tenant_id` with "multi-tenancy is disabled". Enforcing tenancy needs a protected API (Identity/OIDC or basic auth), which the local compose environment doesn't run, so the one `:multi_tenant_only` spec is pending ("Requires Camunda Identity service").
 
 **Test Tagging:**
 - `:single_tenant_only` - Only runs when multi-tenancy is disabled
@@ -165,7 +165,7 @@ MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integr
 
 **CI Behavior:**
 
-CI runs the integration tests in parallel for both modes using a matrix strategy. Until Identity is configured, the multi-tenant run's `:multi_tenant_only` specs report as pending (see the note above).
+CI runs the integration tests in parallel for both modes using a matrix strategy. The multi-tenant row runs against the same tenancy-free cluster, so it skips the `:single_tenant_only` specs and reports its one `:multi_tenant_only` spec as pending (see the note above).
 
 ### Camunda Cloud Integration Tests
 
@@ -226,7 +226,7 @@ CI runs `bundle exec rubocop` as its own job, alongside the unit test matrix. Th
 
 ### Custom cops
 
-`rubocop/comment_density_cops.rb` holds three cops that measure how much of a method — or a file — is given over to comment:
+`rubocop/comment_density_cops.rb` holds three cops that measure how much of a method, or a file, is given over to comment:
 
 | Cop | Measures | Max |
 |---|---|--:|
@@ -317,9 +317,9 @@ rake zeebe:clean
 
 ### Service Roles
 
-- **Zeebe** — gRPC API on port 26500. This is what busybee connects to.
-- **ElasticSearch** — Stores exported workflow data. Required by Operate.
-- **Operate** — Web UI at http://localhost:8088 (demo/demo). Useful for inspecting workflow instances and variables during development.
+- **Zeebe:** gRPC API on port 26500. This is what busybee connects to.
+- **ElasticSearch:** Stores exported workflow data. Required by Operate.
+- **Operate:** Web UI at http://localhost:8088 (demo/demo). Useful for inspecting workflow instances and variables during development.
 
 ### Troubleshooting
 
@@ -335,7 +335,7 @@ The health check task (`rake zeebe:health`) will wait up to 120 seconds for each
 
 ## Demo Application
 
-Busybee includes a full-featured demo app at `spec/demo/` — a simulated dropship fulfillment system ("Dropship Co.") that serves as both a showcase of busybee's orchestration capabilities and an integration testbed for gem development.
+Busybee includes a full-featured demo app at `spec/demo/`, a simulated dropship fulfillment system ("Dropship Co.") that serves as both a showcase of busybee's orchestration capabilities and an integration testbed for gem development.
 
 ### Purpose
 
@@ -381,7 +381,7 @@ spec/demo/bin/demo test 50
 
 This should be run:
 - **Before every pull request**: catches regressions early
-- **Before cutting a release** — final verification gate
+- **Before cutting a release**: final verification gate
 
 The test starts the Docker stack at speed 30 for fast feedback, creates orders, polls until all reach "fulfilled" status, verifies final state (all shipments delivered, all drivers released), and cleans up. Exits non-zero on failure.
 
@@ -389,7 +389,7 @@ The test starts the Docker stack at speed 30 for fast feedback, creates orders, 
 
 ### The Demo App's Own Spec Suite
 
-Separate from the smoke test, the demo has a spec suite of its own. It covers what matters from the *app's* perspective rather than the gem's — that the simulation's speed scaling behaves, that each BPMN process routes through its gateways and reaches its end event, that the workers map their inputs and outputs as the models expect:
+Separate from the smoke test, the demo has a spec suite of its own. It covers what matters from the *app's* perspective rather than the gem's: that the simulation's speed scaling behaves, that each BPMN process routes through its gateways and reaches its end event, that the workers map their inputs and outputs as the models expect:
 
 ```bash
 cd spec/demo
@@ -401,9 +401,9 @@ The suite needs that Postgres: the demo's monitoring domain lives there while th
 
 Run it whenever you refactor the demo or change how it exercises the gem. The smoke test and this suite check different things and neither substitutes for the other: the smoke test drives the real stack and asserts on **application** state (orders reach `fulfilled`, shipments delivered, drivers released), while the BPMN specs are the only thing that asserts a **process instance actually completes**. A process that deadlocks after its last service task will pass the smoke test and fail here.
 
-**Mind the skip.** The BPMN specs are tagged `:zeebe` and skip silently when Zeebe isn't reachable, so a green line can mean "everything passed" or "17 examples never ran." Start Zeebe first (`rake zeebe:start`) and check the example count — with Zeebe up the suite is substantially larger than without.
+**Mind the skip.** The BPMN specs are tagged `:zeebe` and skip silently when Zeebe isn't reachable, so a green line can mean "everything passed" or "17 examples never ran." Start Zeebe first (`rake zeebe:start`) and check the example count: with Zeebe up the suite is substantially larger than without.
 
-**Mind the demo's own workers, too.** Those same 17 specs activate jobs by type and assert on what comes back, so they need Zeebe **up** and the demo's worker containers **down**. Run them while the demo stack is running and its workers consume the jobs first, out of the same broker, and every one of the 17 fails with `Busybee::Testing::NoJobsAvailable` — a failure that looks like a regression in whatever you just changed and is nothing of the kind. `spec/demo/bin/demo stop` before the run, or stop the `busybee-demo-workers-*` and `busybee-demo-clockwork` containers and leave Zeebe up. The two hazards are mirror images: with the stack down *and* Zeebe down these specs vanish silently, and with the full stack up they fail loudly for no reason. Check the count, and check what else is holding the broker.
+**Mind the demo's own workers, too.** Those same 17 specs activate jobs by type and assert on what comes back, so they need Zeebe **up** and the demo's worker containers **down**. Run them while the demo stack is running and its workers consume the jobs first, out of the same broker, and every one of the 17 fails with `Busybee::Testing::NoJobsAvailable`, a failure that looks like a regression in whatever you just changed and is nothing of the kind. `spec/demo/bin/demo stop` before the run, or stop the `busybee-demo-workers-*` and `busybee-demo-clockwork` containers and leave Zeebe up. The two hazards are mirror images: with the stack down *and* Zeebe down these specs vanish silently, and with the full stack up they fail loudly for no reason. Check the count, and check what else is holding the broker.
 
 ### Neither Runs in CI
 
@@ -494,7 +494,7 @@ Combining `TEST_RAILS_INTEGRATION=1` with the full suite will cause spurious fai
 
 ## Updating Platform Lockfiles
 
-Two lockfiles are committed — the gem's own `Gemfile.lock` and the demo's — and both have to resolve on every platform CI runs on. Bundler operations tend to quietly drop platforms from a lockfile, so after touching `Gemfile`, `Appraisals`, the gemspec, or the demo's `Gemfile`:
+Two lockfiles are committed, the gem's own `Gemfile.lock` and the demo's, and both have to resolve on every platform CI runs on. Bundler operations tend to quietly drop platforms from a lockfile, so after touching `Gemfile`, `Appraisals`, the gemspec, or the demo's `Gemfile`:
 
 ```bash
 bundle exec rake gemfile:platforms
@@ -502,7 +502,7 @@ bundle exec rake gemfile:platforms
 
 That re-adds `ruby`, `x86_64-darwin`, `arm64-darwin`, and `x86_64-linux` to both, idempotently.
 
-**The Appraisal lockfiles are not committed.** `gemfiles/*.gemfile.lock` is gitignored: Appraisal resolves those per machine, and CI runs `bundle exec appraisal install` before every matrix run, so a checked-in resolution would be stale the moment anyone else's platform or Ruby differed. Run `bundle exec appraisal install` yourself after changing `Appraisals` or the gemspec — see [Running the Appraisal Matrix](#running-the-appraisal-matrix).
+**The Appraisal lockfiles are not committed.** `gemfiles/*.gemfile.lock` is gitignored: Appraisal resolves those per machine, and CI runs `bundle exec appraisal install` before every matrix run, so a checked-in resolution would be stale the moment anyone else's platform or Ruby differed. Run `bundle exec appraisal install` yourself after changing `Appraisals` or the gemspec; see [Running the Appraisal Matrix](#running-the-appraisal-matrix).
 
 ## Gem File Contents
 
@@ -533,30 +533,26 @@ excluded.each { |f| puts \"  - #{f}\" }
 "
 ```
 
-**Review each included file** to ensure it should be user-facing. Test infrastructure, development tooling, and internal docs should be excluded.
+**Review each included file** to ensure it should be user-facing. Test infrastructure, development tooling, and docs should be excluded.
 
 ### Full Gem Audit (Before Release)
 
 Before each release, audit the complete file list:
 
 ```bash
-ruby -e "puts Dir.glob(%w[exe/**/* lib/**/* docs/**/* LICENSE.txt README.md CHANGELOG.md]).reject { |f| f.include?('docs/internal.md') || f.include?('docs/development.md') }"
+bundle exec ruby -e 'puts Gem::Specification.load("busybee.gemspec").files.select { File.file?(_1) }'
 ```
 
 **Files that SHOULD be in the gem:**
-- `exe/**/*` — The `busybee` executable
-- `lib/**/*` — All library code
-- `docs/testing.md`, `docs/grpc.md`, etc. — User-facing documentation
-- `LICENSE.txt`, `README.md`, `CHANGELOG.md` — Standard files
+- `exe/**/*`: the `busybee` executable
+- `lib/**/*`: all library code
+- `LICENSE.txt`, `README.md`, `CHANGELOG.md`: standard files
 
 **Files that should NOT be in the gem:**
-- `docs/internal.md` — Maintainer-only architecture documentation
-- `docs/development.md` — This development guide
-- `.github/`, `.env`, `docker-compose.yml` — CI/dev infrastructure
-- `spec/`, `Gemfile`, `Rakefile`, `Appraisals` — Development files
-- `proto/`, `gen-grpc.sh` — GRPC generation tooling
-
-If you add new docs, ensure user-facing docs go in `docs/` (included) and maintainer/dev docs are excluded in the gemspec.
+- `docs/`: all documentation, user-facing and maintainer alike. Readers find it on GitHub, at the release's tag, through the gemspec's `documentation_uri`
+- `.github/`, `.env`, `docker-compose.yml`: CI/dev infrastructure
+- `spec/`, `Gemfile`, `Rakefile`, `Appraisals`: development files
+- `proto/`, `gen-grpc.sh`: GRPC generation tooling
 
 ## Releasing a New Version
 
@@ -571,7 +567,7 @@ Releases are published via GitHub Actions with manual trigger (`workflow_dispatc
 5. Run demo app smoke test: `spec/demo/bin/demo test`
 6. Commit, PR, and merge to `main`
 7. From clean `main`: trigger the release workflow, or manually:
-   - `bundle exec rake build` (outputs to `pkg/`, which is gitignored — do not use raw `gem build`)
+   - `bundle exec rake build` (outputs to `pkg/`, which is gitignored; do not use raw `gem build`)
    - Verify contents: `gem unpack pkg/busybee-X.Y.Z.gem` and inspect
    - Push to RubyGems: `gem push pkg/busybee-X.Y.Z.gem`
    - Tag: `git tag vX.Y.Z && git push --tags`

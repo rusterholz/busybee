@@ -135,7 +135,7 @@ lib/busybee/
 - **Testing** uses GRPC directly (doesn't need Client abstraction)
 - **Client** wraps GRPC with Ruby-idiomatic interface
 - **Worker** defines job handling logic; uses Client for job operations (complete, fail), plus GRPC directly for streaming
-- **Runner** orchestrates Workers — uses Client to fetch/stream jobs, dispatches to Worker's `perform_job`
+- **Runner** orchestrates Workers: uses Client to fetch/stream jobs, dispatches to Worker's `perform_job`
 - **Railtie** is optional; it reads Rails config and sets up gem-level configuration for Client, Worker, and Runner defaults. `busybee.rb` requires it at once when Rails is already loaded, and otherwise from an ActiveSupport `:before_configuration` load hook, which Rails runs as the app class is defined, before `initialize!` collects Railtie initializers
 
 ## Gem-Level Configuration
@@ -175,7 +175,7 @@ The logger is the exception to "`nil` resets": `Busybee.logger=` records that a 
 
 `Activated <type> job #<key>` logs at `debug` from `Runner#activate_job`, before `on_job_activated`, for every intake. `Multi` logs none of these itself; each child does.
 
-**A call returns nil and never raises**, so a log line may sit anywhere, a `rescue` clause included, without changing what that clause does. Whatever fails inside it, of any class, is rescued (`rescue Exception`, as at the gem's other containment sites). That covers failures of logging itself, not interrupts aimed at the thread: the whole call runs with asynchronous interrupts held (Ruby's interrupt masking, `Object => :never`, outermost), so a raise or kill sent from another thread mid-call waits until the line is written and the call returns, then lands in the caller, outside the containment. A real signal is not held that way: a SIGINT under Ruby's default handler raises `Interrupt` inside the call, where it is contained like any other error. The Ctrl-C is therefore lost, and since `Interrupt` is outside `RECOVERABLE_ERRORS`, the fire alarm goes up (`:crash`). An error outside `Runner::RECOVERABLE_ERRORS` then raises the fire alarm (`:crash`), first, since raising it allocates nothing. Then one line goes to stderr, `[busybee] Failed to log (<Class>: <message>): <original message>`, and if that fails too, nothing. Before rendering, the message and each top-level String value that is BINARY or not valid UTF-8 (gRPC hands back status details as BINARY) is copied as UTF-8 with bad bytes replaced; clean and ASCII-only strings pass through untouched, and nothing nested is inspected.
+**A call returns nil and never raises**, so a log line may sit anywhere, a `rescue` clause included, without changing what that clause does. Whatever fails inside it, of any class, is rescued (`rescue Exception`, as at the gem's other containment sites). That covers failures of logging itself, not interrupts aimed at the thread: the whole call runs with asynchronous interrupts held (Ruby's interrupt masking, `Object => :never`, outermost), so a raise or kill sent from another thread mid-call waits until the line is written and the call returns, then lands in the caller, outside the containment. A real signal is not held that way: a SIGINT under Ruby's default handler raises `Interrupt` inside the call, where it is contained like any other error, so the Ctrl-C is lost. A contained error outside `Runner::RECOVERABLE_ERRORS`, that `Interrupt` included, first raises the fire alarm (`:crash`), since raising it allocates nothing. Then one line goes to stderr, `[busybee] Failed to log (<Class>: <message>): <original message>`, and if that fails too, nothing. Before rendering, the message and each top-level String value that is BINARY or not valid UTF-8 (gRPC hands back status details as BINARY) is copied as UTF-8 with bad bytes replaced; clean and ASCII-only strings pass through untouched, and nothing nested is inspected.
 
 **Thread safety.** Each call reads `Busybee.logger` and `Busybee.log_format` once, so a logger swapped mid-call can't leave it writing to nil, and renders its line before taking the lock. `LOCK`, a `Mutex` created at load, covers only the logger's write, so concurrent lines can't interleave even on a logger with no lock of its own (stdlib `Logger` has one; not every logger does), and nothing that can yield runs under it. It is taken with `try_lock || lock`; where `lock` raises `ThreadError` (in a signal trap, from a logger whose write itself logs, or while a sibling fiber on the same thread holds it) the line is written unlocked rather than lost. Since interrupts are held for the whole call, none lands between taking the lock and the `ensure` that releases it, and a thread killed while waiting its turn dies once it has written its line. The cost: a logger write that blocks forever leaves its thread unkillable until the write returns. The mask is per thread, not per fiber, so a write that gives up its fiber mid-call (a `Fiber.yield`, or IO under a fiber scheduler) leaves the other fibers on that thread with raises and kills held until the logging fiber resumes, or forever if it never does. busybee runs no fibers itself, so only an adopter logging from fiber-scheduled code meets this.
 
@@ -183,7 +183,7 @@ The logger is the exception to "`nil` resets": `Busybee.logger=` records that a 
 
 `Busybee::Durations` is the one place that interprets duration-ish input, and the discipline it exists to enforce is **convert exactly once, at the point of consumption**.
 
-`validate!` runs at config boundaries (gem setters, the worker DSL). It is non-normalizing: an Integer, a Float, and an `ActiveSupport::Duration` are all stored as written. Rounding a value at the setter would force `buffer_throttle` — whose sub-millisecond values are a feature — to maintain a parallel validator with a subtly different contract, so truncation happens only where a value must become an integer, which is the wire.
+`validate!` runs at config boundaries (gem setters, the worker DSL). It is non-normalizing: an Integer, a Float, and an `ActiveSupport::Duration` are all stored as written. Rounding a value at the setter would force `buffer_throttle`, whose sub-millisecond values are a feature, to maintain a parallel validator with a subtly different contract, so truncation happens only where a value must become an integer, which is the wire.
 
 Consumers then convert for their own destination:
 
@@ -192,7 +192,7 @@ Consumers then convert for their own destination:
 
 A hand-rolled conversion at a sleep site goes wrong for some shape the config layer accepts: milliseconds taken as seconds, or an `ActiveSupport::Duration`, already in seconds, divided again. That bug lives at the *consumption* end, so a spec that exercises only the *input* end, or asserts the value it just passed in, cannot catch it.
 
-`IMPLAUSIBLE_BELOW_MS` maps knob names to the floor below which a configured value warns. Both spellings of a knob (`backpressure_delay`, `default_backpressure_delay`) are listed rather than derived — the table is documentation, and deriving it would hide `default_polling_request_timeout`/`request_timeout`, which do not share a stem. Zero and negatives are exempt as sentinels; `buffer_throttle` has no floor.
+`IMPLAUSIBLE_BELOW_MS` maps knob names to the floor below which a configured value warns. Both spellings of a knob (`backpressure_delay`, `default_backpressure_delay`) are listed rather than derived, since `default_polling_request_timeout`/`request_timeout` do not share a stem. Zero and negatives are exempt as sentinels; `buffer_throttle` has no floor.
 
 ## Worker Module
 
@@ -200,9 +200,9 @@ A hand-rolled conversion at a sleep site goes wrong for some shape the config la
 
 ### Job and Client Access
 
-Worker delegates `variables`, `headers`, `client`, `fail!`, `throw_bpmn_error!`, `update_retries`, and `update_timeout` to `job`. The `job` reader is also public. `complete!` is defined on Worker (not delegated) — it validates required and undeclared outputs before delegating to `job.complete!`.
+Worker delegates `variables`, `headers`, `client`, `fail!`, `throw_bpmn_error!`, `update_retries`, and `update_timeout` to `job`. The `job` reader is also public. `complete!` is defined on Worker (not delegated): it validates required and undeclared outputs before delegating to `job.complete!`.
 
-`Job#client` exposes the `Busybee::Client` instance that fetched the job. Workers can use `client` inside `perform` for direct API access — e.g., `client.publish_message(...)` for message correlation. The client reuses the existing gRPC connection, so there's no additional connection overhead.
+`Job#client` exposes the `Busybee::Client` instance that fetched the job. Workers can use `client` inside `perform` for direct API access, e.g. `client.publish_message(...)` for message correlation. The client reuses the existing gRPC connection, so there's no additional connection overhead.
 
 ### Structure
 
@@ -231,16 +231,16 @@ Steps:
 2. Validate required inputs (raises `MissingInput` listing all missing names)
 3. Call `instance.perform`
 4. **On success:** if `complete_job_on_success` and `job.ready?`, validate required outputs (`MissingOutput`), validate no undeclared outputs when `strict_outputs` is enabled (`UndeclaredOutput`), then call `job.complete!`. GRPC errors logged and swallowed.
-5. **On error:** if `job.ready?`, call `job.fail!`; otherwise log that the error arrived after the job was already resolved. Then check `shutdown_on` — if matched, wrap as `Shutdown` and re-raise.
-6. **Always, if `perform` was attempted:** run `after_perform`. It is propagating, so an error there leaves the envelope and meets an outer rescue that sends it back through step 5 — failing the job if it is still unresolved, logging it against the job if it settled. A `Shutdown` passes that rescue untouched rather than being reported twice.
+5. **On error:** if `job.ready?`, call `job.fail!`; otherwise log that the error arrived after the job was already resolved. Then check `shutdown_on`: if matched, wrap as `Shutdown` and re-raise.
+6. **Always, if `perform` was attempted:** run `after_perform`. It is propagating, so an error there leaves the envelope and meets an outer rescue that sends it back through step 5, failing the job if it is still unresolved, logging it against the job if it settled. A `Shutdown` passes that rescue untouched rather than being reported twice.
 
-The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform` — and is what makes step 6's second pass safe.
+The `job.ready?` guard on both auto-complete and auto-fail respects manual `complete!`/`fail!`/`throw_bpmn_error!` calls within `perform`, and is what makes step 6's second pass safe.
 
-**Output validation on manual `complete!`:** `Job#complete!` runs `validate_required_outputs!` and `validate_undeclared_outputs!` against the worker attached to the job, so validation applies exactly when there is a worker whose contract to apply — and a Job used outside a worker context has none. `Worker#complete!` keeps its own copy of the same two checks against `self.class` rather than delegating: an instance built outside `perform_job` is not attached to its job, so the Job-side check would find no contract and silently pass. The two overlap harmlessly on the normal path, and between them no route to completion skips validation while a worker is in play. Validation errors raised inside `perform` flow through `perform_job`'s normal rescue path and auto-fail the job; raised from an `after_perform` hook, they take the same path via the outer rescue.
+**Output validation on manual `complete!`:** `Job#complete!` runs `validate_required_outputs!` and `validate_undeclared_outputs!` against the worker attached to the job, so validation applies exactly when there is a worker whose contract to apply, and a Job used outside a worker context has none. `Worker#complete!` keeps its own copy of the same two checks against `self.class` rather than delegating: an instance built outside `perform_job` is not attached to its job, so the Job-side check would find no contract and silently pass. The two overlap harmlessly on the normal path, and between them no route to completion skips validation while a worker is in play. Validation errors raised inside `perform` flow through `perform_job`'s normal rescue path and auto-fail the job; raised from an `after_perform` hook, they take the same path via the outer rescue.
 
 ### Job Execution Flows
 
-Job execution flows — receive-to-runner-return walkthroughs for typical and edge-case lifecycle paths — are documented in [`internal/job_execution_flows.md`](internal/job_execution_flows.md).
+Job execution flows (receive-to-runner-return walkthroughs for typical and edge-case lifecycle paths) are documented in [`internal/job_execution_flows.md`](internal/job_execution_flows.md).
 
 ## Runtime Configuration
 
@@ -291,7 +291,7 @@ Resolution uses `first_non_nil` semantics: `0` and `false` are valid explicit va
 
 ### YAML Parsing
 
-`RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through — the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `worker_mode`).
+`RuntimeConfig.parse_yaml(path)` reads a YAML config file and returns a kwargs hash suitable for `RuntimeConfig.new(**result)`. Raw YAML types flow through; the constructor handles coercion (e.g., string `"polling"` → symbol `:polling` for `worker_mode`).
 
 **Valid YAML keys:** All worker-scoped fields (`worker_mode`, `backpressure_delay`, `max_jobs`, `request_timeout`, `buffer`, `buffer_throttle`, `job_timeout`, `fail_job_backoff`) plus `workers`, and one process-wide field, `shutdown_wait_timeout`, at the top level only. The other process-wide fields (`log_format`, `worker_name`, `cluster_address`) are CLI-only and rejected in YAML.
 
@@ -316,7 +316,7 @@ workers:
 - **`Runner.for`** accepts `runtime_config:`, calls `resolve_for` to determine runner class and build the resolved config passed to the runner.
 - **`Runner::Multi`** calls `resolve_for` per worker class, so each child runner gets its own resolved config.
 - **CLI** constructs a RuntimeConfig from parsed flags (or YAML config) and passes it to `Runner.for`. Process-wide fields (`log_format`, `worker_name`, `cluster_address`) are applied to gem config during initialization.
-- **YAML config** (`--config` / `-c`) — `RuntimeConfig.parse_yaml(path)` reads a YAML file and returns a kwargs hash. The CLI merges process-wide CLI flags into the YAML-sourced kwargs and constructs RuntimeConfig from the result.
+- **YAML config** (`--config` / `-c`): `RuntimeConfig.parse_yaml(path)` reads a YAML file and returns a kwargs hash. The CLI merges process-wide CLI flags into the YAML-sourced kwargs and constructs RuntimeConfig from the result.
 
 ## Runner Module
 
@@ -332,11 +332,11 @@ Runner                    # Base class: run!, stop!, stopping?, stop_reason, run
 └── Runner::Multi         # Thread pool managing multiple single-worker runners
 ```
 
-**Key design decision:** `Hybrid < Streaming`, not `Hybrid < Runner`. Hybrid's unique contribution is the drain phase — all pump thread and queue machinery is inherited from Streaming.
+**Key design decision:** `Hybrid < Streaming`, not `Hybrid < Runner`. Hybrid's unique contribution is the drain phase; all pump thread and queue machinery is inherited from Streaming.
 
 ### Threading Model
 
-**Sequential processing guarantee:** In v0.3, all `perform_job` calls happen on the main thread. Worker authors do not need to think about concurrency.
+**Sequential processing guarantee:** Each runner calls `perform_job` for one job at a time, on the thread that called `run!` (under `Multi`, one pool thread per listed worker), so a worker's `perform` never runs concurrently with itself.
 
 - **Polling:** single-threaded. `with_each_job` yields jobs sequentially.
 - **Streaming (inline mode, `buffer: false`):** single-threaded. `stream.each` calls `perform_job` directly.
@@ -352,7 +352,7 @@ Runner                    # Base class: run!, stop!, stopping?, stop_reason, run
 | `Concurrent::AtomicReference` | `@run_state` (`nil`, then `:accepted` and later `:finished`, or `:refused`; the single-entry gate, see Run Lifecycle), `@stop_reason` (set once; the stop gate), `@teardown_error` and `@thread_error` (Multi), first-error-wins |
 | Ruby `Monitor` | `@stop_lock` (Streaming/Hybrid): a stop claim and its record as one step, and the only access to the exit and post-stop error slots, which are plain ivars (other runners record on one thread, needing no lock); also orders assigning the opened stream against `cease_intake`'s close |
 | Ruby `Queue` | Job queue between pump thread and main thread (thread-safe) |
-| `Concurrent::FixedThreadPool` | Multi runner — one thread per child runner |
+| `Concurrent::FixedThreadPool` | Multi runner: one thread per child runner |
 
 ### Run Lifecycle & Worker Hooks
 
@@ -360,7 +360,7 @@ Runner                    # Base class: run!, stop!, stopping?, stop_reason, run
 
 - **T0 `on_worker_started`**: in `run!` via the private `start!` and `Teardown#fire_worker_started`, once the run is accepted. It sits outside `run!`'s `begin/ensure`, so an escalation from it (a `Worker::Shutdown`, a `shutdown_on` match, or an error outside `RECOVERABLE_ERRORS`) aborts the start: `fire_worker_started` runs the teardown itself, so T1, T2 and T3 still fire with every counter at zero, then re-raises. A `Shutdown` goes through `declare_unhealthy` first, as on any other path: where a stop was already claimed while T0 ran (a signal, or `Multi`'s cascade), it is a post-stop error, reported at T3 and not raised, and `start!` returns false. Either way `run_loop` never runs and the `Started` line is never logged.
 - **T1 `on_worker_stop_requested`**: in `announce_stop`, exactly once per run (an `@announcing` flag), on the thread whose claim won the stop reason, through `stop!` or `claim_stop`, at once, even while T0 is still running. A `stop!` claimed before the run was accepted fires nothing: that worker never runs (see Single-entry gate). One landing as the run is accepted, before T0 fires, may announce before T0; its status already carries `started_at`, and all four still fire, once each. Every run passes it: a teardown that finds nothing announced (a crash claimed only there, or a loop returning without a stop) announces on its own thread. `announce_stop` sets `@stop_announced` (a `Concurrent::Event`) when it finishes, and the teardown waits on it before T2, bounded by `shutdown_wait_timeout` and skipped once the process must exit immediately, so T1 precedes T2 even when another thread announced. `kill!` sets it too, releasing a teardown still waiting on a T1 running elsewhere.
-- **T2 `on_worker_stopping`** and **T3 `on_worker_shutdown`** — in `run!`'s `ensure`, around the drain.
+- **T2 `on_worker_stopping`** and **T3 `on_worker_shutdown`**: in `run!`'s `ensure`, around the drain.
 
 **The ensure completes, short of an error the process can't recover from.** T1, T2 and T3 all fire inside `contain_teardown_hooks`, which rescues and records in `@teardown_error` (first wins) what a `safe: true` run lets past short of that line: `Worker::Shutdown`, whether raised outright or wrapped around a `shutdown_on` match, which it logs, and any other `StandardError` (an adopter's filter Proc raising while the hook is matched, say). Once teardown has begun the worker cannot be made more stopped, so escalation buys nothing while costing the drain and the later moments, and it would *replace* the exception the worker was exiting on, leaving it only down the new error's `cause` chain. The recorded error is handed to T3 as `Worker::Status#error` only where the exit exception is not already there. An error outside `Runner::RECOVERABLE_ERRORS` is recorded the same way, then raises the fire alarm and propagates, out of `run!` on the runner's thread, or out of `stop!` on whichever thread announced, skipping the rest of the teardown. The record comes first: a teardown on another thread stops waiting once the alarm is up, so a T1 hook's error on the stream reader still reaches T3. The run state becomes `:finished` in the teardown's own `ensure` regardless, so a runner whose teardown crashed still reads as stopped. T0 is not contained: aborting a start is a real outcome, and its escalation still propagates once the teardown has run.
 
@@ -379,22 +379,22 @@ The pump never dies by exception, and it is the one thread that contains a T1 ho
 
 **Close-before-fire.** `stop!(reason:)` gates on `@stop_reason.compare_and_set(nil, reason)`: the set-once reason *is* the gate, and T1 fires once across repeated signals / per-job `Shutdown`s. `stopping?` is true once that reason is set **or** the fire alarm is raised, so every loop and handback branch that asks it also leaves, or declines, once the process must exit immediately, even before this runner has a reason of its own; `stop_reason` reads the reason alone, `nil` until one is claimed. Then `cease_intake` (closes the stream / pushes the `:stop` sentinel) runs *before* T1 fires, so a propagating observer can never skip the close and wedge shutdown. The teardown claims the reason for its exit exception *before* anything of its own closes intake, since closing the stream wakes the pump, whose clean-close claim (`:gateway_closed`) would otherwise race it; its own `cease_intake` call is an idempotent backstop for an announcement still under way on another thread. A stop landing while a streaming worker is still opening its stream finds nothing to close, so `Streaming#run_loop` assigns the opened stream under `@stop_lock`, which `cease_intake` also takes, then checks `stopping?`. A stop sets its reason before its `cease_intake` takes the lock, so either that close sees the stream, or the check sees the stop and the run goes straight to its teardown, whose `cease_intake` closes it. The fire alarm seen there does the same, and the teardown claims the fire's reason if nothing has claimed a stop. A stop just after the assignment closes a stream not yet read, whose first read then raises `StreamAlreadyClosed`; since only busybee's own close produces that, `each_streamed_job` takes it as a clean end, for the pump and inline alike.
 
-**Stop reason (`reason` ⊥ `error`).** The closing `Worker::Status` carries two independent axes: `reason` names *why* the run stopped (a low-cardinality Symbol); `error` carries the exception, if any. They don't collapse into one another — a `:rollover` that errors mid-drain reports `reason: :rollover, error: <exception>`. The reason is set once, through the `@stop_reason` gate; `stop!` defaults it to `:signal` and accepts only a Symbol (`ArgumentError` otherwise). Canonical values and who sets each:
+**Stop reason (`reason` ⊥ `error`).** The closing `Worker::Status` carries two independent axes: `reason` names *why* the run stopped (a low-cardinality Symbol); `error` carries the exception, if any. They don't collapse into one another: a `:rollover` that errors mid-drain reports `reason: :rollover, error: <exception>`. The reason is set once, through the `@stop_reason` gate; `stop!` defaults it to `:signal` and accepts only a Symbol (`ArgumentError` otherwise). Canonical values and who sets each:
 
 | reason | set by |
 |--------|--------|
-| `:signal` | a bare `stop!` — a graceful stop with no stated cause (the default) |
+| `:signal` | a bare `stop!`: a graceful stop with no stated cause (the default) |
 | `:sigint` / `:sigterm` / `:sigquit` | the CLI signal handler (`STOP_SIGNALS`, mapped `sig` + lowercased name) |
-| `:unhealthy` | the worker declared itself down — a `shutdown_on` error surfaced as `Worker::Shutdown`, caught by a fetch/pump rescue |
-| `:gateway_error` | an unrecovered gRPC failure — busybee couldn't reach the engine |
-| `:gateway_closed` | the streaming pump's backstop — the gateway closed the stream cleanly on its own |
+| `:unhealthy` | the worker declared itself down: a `shutdown_on` error surfaced as `Worker::Shutdown`, caught by a fetch/pump rescue |
+| `:gateway_error` | an unrecovered gRPC failure: busybee couldn't reach the engine |
+| `:gateway_closed` | the streaming pump's backstop: the gateway closed the stream cleanly on its own |
 | `:crash` | any other unhandled error |
 | `:kill` | `kill!` (forced shutdown) |
 | *(app-supplied)* | any Symbol a caller passes, e.g. a demo's `:rollover` |
 
-`:signal` is **never fabricated** — it only ever arrives via `stop!`'s default param. For a run that exits *without* any `stop!` (a raw fetch-loop error), `run!`'s `ensure` fills the reason from the in-flight exception via `reason_for` (`Worker::Shutdown → :unhealthy`, `Busybee::GRPC::Error → :gateway_error`, else `:crash`), using `compare_and_set` so a caller-set reason survives a coexisting exit error. The `error` axis is the *unwrapped* triggering cause — `Worker::Shutdown.unwrap($!)` (the wrapped `cause`, or the Shutdown itself) — while the reason classifies the raw exception. Two families share a prefix: `on_worker_shutdown(reason: /\Asig/)` matches every signal-driven stop, and `reason: /\Agateway/` matches both engine-driven endings (errored vs. clean close). Multi is transparent — a reasoned `stop!` cascades the reason to every child, and a child crash makes the container adopt `reason_for(error)`.
+`:signal` is **never fabricated**: it only ever arrives via `stop!`'s default param. For a run that exits *without* any `stop!` (a raw fetch-loop error), `run!`'s `ensure` fills the reason from the in-flight exception via `reason_for` (`Worker::Shutdown → :unhealthy`, `Busybee::GRPC::Error → :gateway_error`, else `:crash`), using `compare_and_set` so a caller-set reason survives a coexisting exit error. The `error` axis is the *unwrapped* triggering cause, `Worker::Shutdown.unwrap($!)` (the wrapped `cause`, or the Shutdown itself), while the reason classifies the raw exception. Two families share a prefix: `on_worker_shutdown(reason: /\Asig/)` matches every signal-driven stop, and `reason: /\Agateway/` matches both engine-driven endings (errored vs. clean close). Multi is transparent: a reasoned `stop!` cascades the reason to every child, and a child crash makes the container adopt `reason_for(error)`.
 
-**Counters.** `execute_job` increments `@total_job_count` per attempt and `@failed_job_count` when `job.failed?` (`:failed` only — BPMN `:error` is a business outcome, not a worker fault). `handle_grpc_error` increments `@backpressure_count`. All three read into every `Worker::Status`. Multi is transparent — no process-wide rollup; operators sum by `worker_name`.
+**Counters.** `execute_job` increments `@total_job_count` per attempt and `@failed_job_count` when `job.failed?` (`:failed` only; BPMN `:error` is a business outcome, not a worker fault). `handle_grpc_error` increments `@backpressure_count`. All three read into every `Worker::Status`. Multi is transparent: no process-wide rollup; operators sum by `worker_name`.
 
 ### Error Handling
 
@@ -406,7 +406,30 @@ From the Runner's perspective, `perform_job` has a simple two-outcome contract (
 
 ### Shutdown Sequence
 
-**Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` (the set-once reason *is* the gate), then stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), and fire T1. In-progress `perform_job` completes; `run!`'s `ensure` waits for T1 to finish, fires T2, drains (remaining queued/yielded jobs are handed back via `handle_shutdown_job`, preserving the retry count), and fires T3.
+Three ways a run stops, and what each does to jobs and hooks (T1 to T3 as in Run Lifecycle):
+
+```mermaid
+flowchart TD
+    G["<b>stop!</b> a signal, unhealthy, your code, the gateway"]
+    K["<b>kill!</b> the CLI's second signal"]
+    X["<b>an error outside RECOVERABLE_ERRORS</b> (NoMemoryError, say), on any runner thread"]
+
+    G --> G1["intake closes; T1 fires"]
+    G1 --> G2["the job in flight finishes, with its job hooks; other jobs in hand are handed back"]
+    G2 --> G3["T2; the drain hands back each buffered job, firing on_job_not_executed"]
+    G3 --> G4["T3"]
+
+    K --> A
+    K --> K1["Streaming: the pump thread is killed and the buffer discarded, its count logged"]
+    K1 --> K2["the CLI calls exit!(1) after a bounded wait: no T2 or T3, the job in flight abandoned"]
+
+    X --> A
+    A{{"the fire alarm, process-wide"}}
+    A --> A1["every runner skips handbacks, the drain, on_job_activated and on_job_executed; closing hooks may be skipped"]
+    A1 --> A2["unresolved jobs return to the engine when their activation times out"]
+```
+
+**Graceful (`stop!`):** fire-once via `@stop_reason.compare_and_set(nil, reason)` (the set-once reason *is* the gate), then stamp `stop_requested_at`, `cease_intake` (streaming/hybrid: close the stream, push the `:stop` sentinel), and fire T1. In-progress `perform_job` completes; jobs already in hand, including any a poll yielded after the stop, are handed back inside the loop via `handle_shutdown_job` (preserving the retry count). `run!`'s `ensure` then waits for T1 to finish, fires T2, drains (streaming and hybrid hand back what is left in the buffer; a polling worker has no buffer, so nothing), and fires T3.
 
 **Forced (`kill!`):** Base raises the fire alarm, so no runner in the process hands back or runs job hooks after it, then calls `stop!` with the reason it was given (`:kill` by default; `Multi`'s non-recoverable cascade passes the crash's reason instead). Streaming also kills the pump thread, logs how many activated jobs it is discarding, and flushes the queue (resetting the buffer gauge). Multi kills all child runners and the thread pool.
 
@@ -416,11 +439,11 @@ The log line is the only record a kill leaves: on the real path (`cli.rb`'s seco
 
 When `buffer_throttle` is configured on a worker, the pump thread sleeps between stream reads. This controls the trade-off between buffer growth (affecting memory) and job latency:
 
-- `false` (default) — no sleep, pump reads as fast as possible
-- `0` — `sleep(0)`, minimal throttle (yields thread via nanosleep, ~1-5µs)
-- Positive Numeric — explicit delay in milliseconds (e.g., `0.5` = 500µs)
+- `false` (default): no sleep, pump reads as fast as possible
+- `0`: `sleep(0)`, minimal throttle (yields thread via nanosleep, ~1-5µs)
+- Positive Numeric: explicit delay in milliseconds (e.g., `0.5` = 500µs)
 
-Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` — works because `false` is falsey, `0` is truthy in Ruby.
+Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` works because `false` is falsey, `0` is truthy in Ruby.
 
 ### Multi Runner
 
@@ -431,9 +454,9 @@ Point of use: `sleep(Busybee::Durations.seconds_from(delay)) if delay` — works
 **Error handling:** A `Concurrent::AtomicReference` captures the first error from any child thread (first-error-wins via `update { |prev| prev || e }`). When a child thread raises, Multi logs the error and cascades to the siblings, and after the pool terminates, re-raises the captured error. A recoverable error cascades a graceful `stop!` (`cascade_after_failure`), unless the fire alarm is already raised, when it kills them under the fire's reason instead; anything else raises the fire alarm and kills them (`kill_children`, under the fire's reason: this crash's, or an earlier fire's). A child whose `run!` returns normally ends them too (`cascade_after_return`): it kills them, under the fire's reason, if the fire alarm is raised, since its own error never left it; otherwise it stops them gracefully under its own `stop_reason` (a clean stream close, say), so a job type is never left unworked while its siblings keep the process alive. Nothing is re-raised either way.
 
 **Shutdown sequence:**
-- `stop!` — stops all child runners, then `thread_pool.shutdown` (waits for in-progress jobs to finish). A `stop!` landing just as `run!` begins can shut the pool before `run!` has posted to it; the post's `RejectedExecutionError` is then taken as that stop, since every child is already stopped, and `run!` returns normally under its reason
-- `stopping?` — true only when *all* child runners are stopping (each counting the fire alarm, so all are once it is raised)
-- `kill!` — kills all child runners, then `thread_pool.kill` (immediate termination)
+- `stop!`: stops all child runners, then `thread_pool.shutdown` (waits for in-progress jobs to finish). A `stop!` landing just as `run!` begins can shut the pool before `run!` has posted to it; the post's `RejectedExecutionError` is then taken as that stop, since every child is already stopped, and `run!` returns normally under its reason
+- `stopping?`: true only when *all* child runners are stopping (each counting the fire alarm, so all are once it is raised)
+- `kill!`: kills all child runners, then `thread_pool.kill` (immediate termination)
 
 **ActiveRecord connection pool check:** On initialization, if `ActiveRecord` is defined, Multi compares `connection_pool.size` against the number of worker classes. Logs an error if the pool is undersized (common misconfiguration), or an info message confirming adequate pool size.
 
@@ -454,9 +477,9 @@ lib/busybee/cli/log_formatter.rb    # CLI::LogFormatter, its default logger's fo
 
 ### Lifecycle
 
-1. **`CLI.main(args)`** — class method entry point; instantiates and calls `run`.
+1. **`CLI.main(args)`**: class method entry point; instantiates and calls `run`.
 2. **`initialize(args)`** -- all setup: parse options (`OptionParser`), install the default logger, extract workers from YAML if `--config`, build `RuntimeConfig`, apply process-wide config (`--log-format` first), load the app's environment (`CLI::LoadEnvironment.call`), load worker classes.
-3. **`run`** — creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks), joins the signal threads within `shutdown_wait_timeout`, then exits 1 if the fire alarm is up (see [Signal Handling](#signal-handling)).
+3. **`run`**: creates `Client`, calls `Runner.for` to get the appropriate runner, installs signal handlers, calls `runner.run!` (blocks), joins the signal threads within `shutdown_wait_timeout`, then exits 1 if the fire alarm is up (see [Signal Handling](#signal-handling)).
 
 ### CLI Flags
 
@@ -498,8 +521,8 @@ The CLI tells them apart by its own set-once `@signalled` flag, created in `init
 
 ### Error Classes
 
-- **`Busybee::NoWorkersSpecified`** — no positional arguments given
-- **`Busybee::WorkerNotFound`** — `Kernel.const_get` fails for a worker class name
+- **`Busybee::NoWorkersSpecified`**: no positional arguments given
+- **`Busybee::WorkerNotFound`**: `Kernel.const_get` fails for a worker class name
 
 ## Serialization Module
 
@@ -509,9 +532,9 @@ The CLI tells them apart by its own set-once `@signalled` flag, created in `init
 
 All Client methods and the Job class route JSON through this module to ensure:
 
-1. **Consistent `as_json` behavior** — Serialization calls `as_json` before `JSON.generate`, so ActiveRecord models, Time objects, and custom classes serialize their JSON-friendly representation
-2. **Consistent deserialization** — Parsing returns `HashWithIndifferentAccess` with the `HashAccess` module mixed in for method-style access
-3. **Immutability** — Deserialized hashes are deeply frozen to prevent accidental mutation
+1. **Consistent `as_json` behavior:** Serialization calls `as_json` before `JSON.generate`, so ActiveRecord models, Time objects, and custom classes serialize their JSON-friendly representation
+2. **Consistent deserialization:** Parsing returns `HashWithIndifferentAccess` with the `HashAccess` module mixed in for method-style access
+3. **Immutability:** Deserialized hashes are deeply frozen to prevent accidental mutation
 
 ### API
 
@@ -541,7 +564,7 @@ All Client operation modules, Job, and Testing helpers route through this module
 
 ## Hooks Module
 
-`Busybee::Hooks` is the instrumentation system — lifecycle hooks enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting). Hooks fire around three nouns, each with its own carrier: **jobs** (`Busybee::Job`), **workers** (`Busybee::Worker::Status`), and **calls** (`Busybee::Client::Call`). Job hooks are the richest (wrapping + observing); worker hooks are observation-only; call hooks observe as well, except `before_call`, which propagates and can therefore stop a call from reaching the wire. Each carrier exposes `context_tags` (low-cardinality metric labels) and `logging_context` (high-cardinality log fields) — the uniform projection a hook reads to emit metrics or structured logs.
+`Busybee::Hooks` is the instrumentation system: lifecycle hooks enabling middleware (transactions, retry logic) and observation (metrics, tracing, error reporting). Hooks fire around three nouns, each with its own carrier: **jobs** (`Busybee::Job`), **workers** (`Busybee::Worker::Status`), and **calls** (`Busybee::Client::Call`). Job hooks are the richest (wrapping + observing); worker hooks are observation-only; call hooks observe as well, except `before_call`, which propagates and can therefore stop a call from reaching the wire. Each carrier exposes `context_tags` (low-cardinality metric labels) and `logging_context` (high-cardinality log fields), the uniform projection a hook reads to emit metrics or structured logs.
 
 ### Job as the hook target
 
@@ -554,23 +577,23 @@ Busybee.configure do |c|
 end
 ```
 
-Job is the authoritative lifecycle object — there is no separate "event" mirror. The concerns a hook reads or annotates live on the Job through typed helper POROs, with readers delegated onto Job and writers kept internal to the POROs:
+Job is the authoritative lifecycle object; there is no separate "event" mirror. The concerns a hook reads or annotates live on the Job through typed helper POROs, with readers delegated onto Job and writers kept internal to the POROs:
 
-- **`Job::Payload`** — immutable facts from the activation protobuf: `key`, `type`, `variables`, `headers`, `retries`, `deadline`.
-- **`Job::Activation`** — receive-time context: `source`, `buffered`, `worker`, `worker_class`, `worker_status`. Populated by the Runner and Worker as the job is dispatched.
-- **`Job::Resolution`** — the outcome: `status` (starts `:ready`), `result`, and the error trio (`error`, `error_message`, `error_code`), plus predicates (`ready?`, `completed?`, `failed?`, `errored?`, `resolved?`). Advanced exactly once, by the Job lifecycle methods (`complete!` / `fail!` / `throw_bpmn_error!`).
-- **`Job::Timestamps`** — monotonic + UTC stamp pairs and the duration projections derived from them (see below).
-- **`Job::Context`** — an opaque key/value bag for cross-hook scratch (the tracing-span use case above).
+- **`Job::Payload`**: immutable facts from the activation protobuf: `key`, `type`, `variables`, `headers`, `retries`, `deadline`.
+- **`Job::Activation`**: receive-time context: `source`, `buffered`, `worker`, `worker_class`, `worker_status`. Populated by the Runner and Worker as the job is dispatched.
+- **`Job::Resolution`**, the outcome: `status` (starts `:ready`), `result`, and the error trio (`error`, `error_message`, `error_code`), plus predicates (`ready?`, `completed?`, `failed?`, `errored?`, `resolved?`). Advanced exactly once, by the Job lifecycle methods (`complete!` / `fail!` / `throw_bpmn_error!`).
+- **`Job::Timestamps`**: monotonic + UTC stamp pairs and the duration projections derived from them (see below).
+- **`Job::Context`**: an opaque key/value bag for cross-hook scratch (the tracing-span use case above).
 
-Hooks don't write framework state on the Job: there are no public setters for status or result, and the framework records outcomes through an underscore seam (`_record_result` / `_record_error`, the idiom `Client::Call` uses). Hooks **may resolve the job**, and that is the supported way to short-circuit it. The safety property isn't "the job must not be resolved"; it's "perform must not run against a resolved job, and automatic resolution must not fire on top of a manual one." Both are `ready?` questions, so both are answered by `ready?`: `run_hooked_perform` gates `validate_inputs!`, `before_perform`, the `around_perform` chain and `timed_perform` individually, each asking at the moment it arrives, and `handle_success`/`handle_failure` gate on `ready?` as well. `after_perform` uses the past-tense form, `resolved? && perform_started_at`.
+Hooks don't write framework state on the Job: there are no public setters for status or result, and the framework records outcomes through an underscore seam (`_record_result` / `_record_error`, the idiom `Client::Call` uses). Hooks **may resolve the job**, and that is the supported way to short-circuit it. The safety property isn't "the job must not be resolved"; it's "perform must not run against a resolved job, and automatic resolution must not fire on top of a manual one." Both are `ready?` questions, so both are answered by `ready?`: `run_hooked_perform` gates `validate_inputs!`, `before_perform`, the `around_perform` chain and `timed_perform` individually, each asking at the moment it arrives, and `handle_success`/`handle_failure` gate on `ready?` as well. `after_perform` is gated only on `perform_started_at`, so it fires however the attempt ended; `resolved? && perform_started_at` is `log_short_circuit`'s test.
 
-Gating per line item rather than once on entry is what makes the invariant temporal: a `before_perform` that resolves the job means the `around_perform` chain is never entered, because by then there is nothing to wrap. The invariant it buys is **perform-like hooks fire exactly when perform is attempted** — which is the naming law (`*_perform` = usercode lifecycle, `*_job_*` = system lifecycle) made mechanical. The system-lifecycle hooks are ungated and bracket every activated job.
+Gating per line item rather than once on entry is what makes the invariant temporal: a `before_perform` that resolves the job means the `around_perform` chain is never entered, because by then there is nothing to wrap. The invariant it buys is **perform-like hooks fire exactly when perform is attempted**, which is the naming law (`*_perform` = usercode lifecycle, `*_job_*` = system lifecycle) made mechanical. The system-lifecycle hooks are ungated and bracket every activated job.
 
-Two consequences follow. `Chain.build_propagating` force-runs its continuation exactly as `build_safe` does, so the chain always descends and skipping a yield is never a cancellation — there is one way to short-circuit, and it is to resolve. And `Job#complete!` warns when the result axis was already claimed by perform's return value, since set-once precedence otherwise drops caller-supplied variables silently.
+Two consequences follow. `Chain.build_propagating` force-runs its continuation exactly as `build_safe` does, so the chain always descends and skipping a yield is never a cancellation: there is one way to short-circuit, and it is to resolve. And `Job#complete!` warns when the result axis was already claimed by perform's return value, since set-once precedence otherwise drops caller-supplied variables silently.
 
 Two cardinality-aware projections aggregate state across the POROs for instrumentation:
 
-- `job.context_tags` — low-cardinality, safe for metric labels
+- `job.context_tags`: low-cardinality, safe for metric labels
 - `job.logging_context`: high-cardinality superset, for structured log fields; never the `result` (workflow-instance data), and an error as `error_class` + `error_message`, like `Client::Call`
 
 ### Job Lifecycle Timestamps
@@ -586,7 +609,7 @@ Two cardinality-aware projections aggregate state across the POROs for instrumen
 | `resolved_at` | top of `resolve!` (complete / fail / throw) |
 | `executed_at` | Runner finishes the job (`execute_job`) |
 
-Per-moment readers are forwarded on Job (`job.activated_at`, `job.executed_at`, …) — default `:utc`, pass `:monotonic` for the raw clock. Monotonic values back the seven duration projections (`perform_duration_ms`, `execution_duration_ms`, `total_duration_ms`, etc.); UTC values appear in structured log output. Accessors return `nil` before stamping.
+Per-moment readers are forwarded on Job (`job.activated_at`, `job.executed_at`, …), default `:utc`, pass `:monotonic` for the raw clock. Monotonic values back the seven duration projections (`perform_duration_ms`, `execution_duration_ms`, `total_duration_ms`, etc.); UTC values appear in structured log output. Accessors return `nil` before stamping.
 
 ### Hook Registration
 
@@ -602,7 +625,7 @@ Busybee.configure do |c|
 end
 ```
 
-Storage is plain arrays (one per hook type). Each entry is `{ callback:, filters: }`. FIFO ordering. No locking or concurrent data structures — hooks are registered at configure time and never modified after workers start. There is no supported use case for mutating hooks at runtime.
+Storage is plain arrays (one per hook type). Each entry is `{ callback:, filters: }`. FIFO ordering. No locking or concurrent data structures: hooks are registered at configure time and never modified after workers start.
 
 The arrays live in a hash behind the private `Hooks.registry` accessor, which `hooks_for` reads. `Hooks` has no test-isolation API of its own: `Busybee::Testing::HookRegistry` is the one place that reaches the accessor, to snapshot, swap and restore the registry for the testing helpers.
 
@@ -614,63 +637,63 @@ The whole filter concern (vocabulary, validation, and matching) lives in `Busybe
 - **Worker hooks:** `worker_class:`, `job_type:`, `worker_mode:`, `reason:`, `error:`
 - **Call hooks:** `rpc:`, `status:`, `grpc_status:`, `error:`
 
-A top-level `nil` filter value is dropped at registration — `nil` means "don't filter on this key," so programmatic composition (`reason: maybe_reason`) degrades to no-op rather than never-fire.
+A top-level `nil` filter value is dropped at registration: `nil` means "don't filter on this key," so programmatic composition (`reason: maybe_reason`) degrades to no-op rather than never-fire.
 
-**Registration refuses a filter that could never match**, under one rule: *a filter is invalid if it cannot match any value the key can hold at that hook's moment*. The check runs the real matcher against those values, so validation and matching cannot disagree. It has two inputs — the key's vocabulary from `FILTERS`, and `MOMENTS`, which narrows a vocabulary where the carrier has not filled it in yet (`before_call` sees `status: :pending` and nothing else). Arrays are validated element by element. **Procs are exempt**, since reading one means running it. Shape is checked separately against `SHAPES`, which is what rejects a value no matcher rule could consume.
+**Registration refuses a filter that could never match**, under one rule: *a filter is invalid if it cannot match any value the key can hold at that hook's moment*. The check runs the real matcher against those values, so validation and matching cannot disagree. It has two inputs: the key's vocabulary from `FILTERS`, and `MOMENTS`, which narrows a vocabulary where the carrier has not filled it in yet (`before_call` sees `status: :pending` and nothing else). Arrays are validated element by element. **Procs are exempt**, since reading one means running it. Shape is checked separately against `SHAPES`, which is what rejects a value no matcher rule could consume.
 
 `MOMENTS` is also the source of `hooks.md`'s [Filter Scope by Moment](hooks.md#filter-scope-by-moment) table. Around-hooks appear in it because `run_chain` selects matching hooks *before* building the chain, so their filters see the entry state.
 
-At fire time, `Filters.matches?(hook, target)` reads each filter key off the target (`target.public_send(key)`, nil-safe) and applies `match?` — case equality (`===`) supporting Regexp (pattern), Class (`is_a?`), Proc (custom); then equality (`==`) for Class identity; then **name equivalence**, under which String and Symbol are interchangeable (`status: "failed"` matches `:failed`, and `job_type: :charge_card` matches `"charge_card"`). A Class value is additionally offered its own `.name`, so `worker_class: "OrderWorker"` or `/Order/` work regardless of load order. Empty filters match everything (vacuous truth). A filter value may also be an **array**, which matches if any element matches — `job_type: %w[create_shipment assign_driver]` fires for either, and the elements may mix matcher types.
+At fire time, `Filters.matches?(hook, target)` reads each filter key off the target (`target.public_send(key)`, nil-safe) and applies `match?`: case equality (`===`) supporting Regexp (pattern), Class (`is_a?`), Proc (custom); then equality (`==`) for Class identity; then **name equivalence**, under which String and Symbol are interchangeable (`status: "failed"` matches `:failed`, and `job_type: :charge_card` matches `"charge_card"`). A Class value is additionally offered its own `.name`, so `worker_class: "OrderWorker"` or `/Order/` work regardless of load order. Empty filters match everything (vacuous truth). A filter value may also be an **array**, which matches if any element matches: `job_type: %w[create_shipment assign_driver]` fires for either, and the elements may mix matcher types.
 
-**`error:` is the one error filter, and it has its own semantic table** (`error_match?`, not the generic layers): the filter describes the error — or its absence. Uniform across all three nouns:
+**`error:` is the one error filter, and it has its own semantic table** (`error_match?`, not the generic layers): the filter describes the error, or its absence. Uniform across all three nouns:
 
 | `error:` filter | matches when |
 |-----------------|--------------|
 | `false` | no error present |
 | `true` | any error present |
-| Class / Module | `error.is_a?(filter)` — hierarchy and mixin, like `rescue` |
+| Class / Module | `error.is_a?(filter)`: hierarchy and mixin, like `rescue` |
 | String | the error's own class name, exactly |
 | Regexp | the error's own class name, by pattern |
 | Array | any element matches (mixed kinds fine; `nil` elements rejected at registration) |
 | Proc | `filter.call(error)` truthy |
 
-Name-domain matchers (String/Regexp) never see ancestry — hierarchy matching takes the live constant. With no error present, only `false` matches (Procs aren't even called). Values outside the table are rejected loudly at registration. The carriers' `error_class` *readers* serve the projections (`context_tags`' scalar label), not filtering.
+Name-domain matchers (String/Regexp) never see ancestry; hierarchy matching takes the live constant. With no error present, only `false` matches (Procs aren't even called). Values outside the table are rejected loudly at registration. The carriers' `error_class` *readers* serve the projections (`context_tags`' scalar label), not filtering.
 
-Because filters resolve by sending the key name to the target, every filter key must name a real reader on its noun's carrier (`Job`, `Worker::Status`, or `Client::Call`). Most line up directly; the exception is `job_type`, whose underlying protobuf field is `type` — `Job::Payload` aliases `job_type` to `type` (and `Job` delegates it) so `job_type:` filters resolve. A filter key that the target does not respond to reads as `nil` and silently never matches.
+Because filters resolve by sending the key name to the target, every filter key must name a real reader on its noun's carrier (`Job`, `Worker::Status`, or `Client::Call`). Most line up directly; the exception is `job_type`, whose underlying protobuf field is `type`: `Job::Payload` aliases `job_type` to `type` (and `Job` delegates it) so `job_type:` filters resolve. A filter key that the target does not respond to reads as `nil` and silently never matches.
 
 ### Hook Invocation
 
-- **`Busybee::Hooks.run(type, target, safe: false)`** — runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_perform`); `safe: true` logs and continues to the next hook (observing hooks like `after_perform` and the `on_*` family).
-- **`Busybee::Hooks.run_chain(type, target, safe:, &core)`** — builds a nested lambda chain from matching around hooks (via `Busybee::Hooks::Chain`) and wraps the core block. First-registered hook is outermost. It knows nothing about any carrier's outcome and returns `nil`: a core whose result matters records it on its carrier, as `Worker.run_hooked_perform`'s does with `job._record_result` and `Client::Call#attempt`'s with `_record_result` / `_record_error`. So middleware can't "forget" the result: it's read back from the carrier, never from the chain's return value. Every link returns the value of the continuation below it, so each hook's `perform.call` returns the core's value whatever the hooks between return; both job cores return `job.result`. With zero matching hooks a safe chain is its classifying core alone (below); a propagating chain is the bare core.
-- **`Busybee::Hooks.classify_hook_error(target, safe:)`** — the single error policy, so it can't drift between invocation sites: `Busybee::Worker::Shutdown` always propagates; an error matching the target's `shutdown_on` classes (worker config + gem-level) is wrapped in `Shutdown` and propagated; anything else propagates when `safe: false` and is logged-and-swallowed when `safe: true`. **It must be called from inside a `rescue`** — it reads the in-flight exception from `$!`, which is what lets its bare `raise`s re-raise the original and the `Shutdown` wrap pick that up as `cause`.
-- **`Busybee::Hooks.protect_allowing_shutdowns(target, safe:, &block)`** — the catch half: runs the block and routes whatever it raises through `classify_hook_error`. Used by `run` and by `Chain`'s classifying core. Propagating chains (`around_perform`) bypass it: their errors classify later, at `perform_job`'s rescue, so autofail runs before the Shutdown wrap (the E3 ordering in the flows doc).
-- **`Chain`'s classifying core** — `build_safe` seeds its fold with the core wrapped in the policy at `safe: false`, so the classification boundary exists even when no hook is registered. Without it, an error matching `shutdown_on` that escaped `perform_job` would escalate to a graceful shutdown only when some unrelated hook happened to be listening, and otherwise report the worker as crashed (`:crash` rather than `:unhealthy`).
+- **`Busybee::Hooks.run(type, target, safe: false)`**: runs all matching hooks for a type. `safe: false` (default) lets errors propagate (wrapping hooks like `before_perform`); `safe: true` logs and continues to the next hook (observing hooks like `after_perform` and the `on_*` family).
+- **`Busybee::Hooks.run_chain(type, target, safe:, &core)`**: builds a nested lambda chain from matching around hooks (via `Busybee::Hooks::Chain`) and wraps the core block. First-registered hook is outermost. It knows nothing about any carrier's outcome and returns `nil`: a core whose result matters records it on its carrier, as `Worker.run_hooked_perform`'s does with `job._record_result` and `Client::Call#attempt`'s with `_record_result` / `_record_error`. So middleware can't "forget" the result: it's read back from the carrier, never from the chain's return value. Every link returns the value of the continuation below it, so each hook's `perform.call` returns the core's value whatever the hooks between return; both job cores return `job.result`. With zero matching hooks a safe chain is its classifying core alone (below); a propagating chain is the bare core.
+- **`Busybee::Hooks.classify_hook_error(target, safe:)`**: the single error policy, so it can't drift between invocation sites: `Busybee::Worker::Shutdown` always propagates; an error matching the target's `shutdown_on` classes (worker config + gem-level) is wrapped in `Shutdown` and propagated; anything else propagates when `safe: false` and is logged-and-swallowed when `safe: true`. **It must be called from inside a `rescue`**: it reads the in-flight exception from `$!`, which is what lets its bare `raise`s re-raise the original and the `Shutdown` wrap pick that up as `cause`.
+- **`Busybee::Hooks.protect_allowing_shutdowns(target, safe:, &block)`**, the catch half: runs the block and routes whatever it raises through `classify_hook_error`. Used by `run` and by `Chain`'s classifying core. Propagating chains (`around_perform`) bypass it: their errors classify later, at `perform_job`'s rescue, so autofail runs before the Shutdown wrap (the E3 ordering in the flows doc).
+- **`Chain`'s classifying core**: `build_safe` seeds its fold with the core wrapped in the policy at `safe: false`, so the classification boundary exists even when no hook is registered. Without it, an error matching `shutdown_on` that escaped `perform_job` would escalate to a graceful shutdown only when some unrelated hook happened to be listening, and otherwise report the worker as crashed (`:crash` rather than `:unhealthy`).
 - **A safe link classifies only its own error.** Every descent through a link is marked on the way up, and an error carrying that mark is re-raised untouched rather than swallowed. `safe:` describes *hook*-error policy, not what becomes of an error raised by the work; swallowing one would report it as `Ignoring error raised by a hook` with a source location pointing into the worker.
 
 Worker and Runner call these directly at each job lifecycle moment (e.g. `Hooks.run(:on_job_executed, job, safe: true)`); see the flows doc below for which hook fires where, and which run safe.
 
 ### Job execution flows
 
-For receive-to-runner-return walkthroughs of the typical and edge-case lifecycle paths — including where each hook fires — see [`internal/job_execution_flows.md`](internal/job_execution_flows.md).
+For receive-to-runner-return walkthroughs of the typical and edge-case lifecycle paths, including where each hook fires, see [`internal/job_execution_flows.md`](internal/job_execution_flows.md).
 
 ### Worker and call hooks
 
-Worker- and call-level hooks are observing rather than wrapping, each with its own carrier — with one gate among them, noted below:
+Worker- and call-level hooks are observing rather than wrapping, each with its own carrier, with one gate among them, noted below:
 
 - **Worker hooks** (`on_worker_started`, `on_worker_stop_requested`, `on_worker_stopping`, `on_worker_shutdown`) fire from `Runner#run!` / `#stop!` at the four lifecycle moments, each with a fresh frozen `Worker::Status` snapshot. See [Runner Module](#runner-module) for the run lifecycle and where each fires.
-- **Call hooks** (`before_call`, `around_call`, `after_call`) fire through the `Client::Call` seam: `before_call`/`after_call` bracket the logical operation, `around_call` wraps each attempt. Each receives the `Client::Call` carrying the rpc, resolved status, gRPC status, attempt count, and durations. `before_call` runs propagating (`Hooks.run` without `safe:`) — that is the gate: an error raised there aborts the call before any attempt, and the caller sees it. `around_call` and `after_call` are safe chains, so an error in either is logged and swallowed while the call proceeds.
+- **Call hooks** (`before_call`, `around_call`, `after_call`) fire through the `Client::Call` seam: `before_call`/`after_call` bracket the logical operation, `around_call` wraps each attempt. Each receives the `Client::Call` carrying the rpc, resolved status, gRPC status, attempt count, and durations. `before_call` runs propagating (`Hooks.run` without `safe:`), and that is the gate: an error raised there aborts the call before any attempt, and the caller sees it. `around_call` and `after_call` are safe chains, so an error in either is logged and swallowed while the call proceeds.
 
-  **No reentry.** `Client#run_hooked` wraps the whole seam in `Call.without_reentry`, a fiber-local latch that raises `Busybee::ReentrantCall` for a client call made while one is already in progress on this thread. Since a client call is synchronous, that condition is reachable only from inside one of its own hooks — so the latch forbids exactly the call-hook case and leaves job and worker hooks free to use the client. Unguarded, a hook that calls recurses without a floor and terminates in `SystemStackError`, which is not a `StandardError` and pierces every safe layer. `Call` exposes no client, but a hook can still reach one through `call.job.client`. The guard raises *before* claiming the latch, so a refusal cannot clear the outer call's.
+  **No reentry.** `Client#run_hooked` wraps the whole seam in `Call.without_reentry`, a fiber-local latch that raises `Busybee::ReentrantCall` for a client call made while one is already in progress on this thread. Since a client call is synchronous, that condition is reachable only from inside one of its own hooks, so the latch forbids exactly the call-hook case and leaves job and worker hooks free to use the client. Unguarded, a hook that calls recurses without a floor and terminates in `SystemStackError`, which is not a `StandardError` and pierces every safe layer. `Call` exposes no client, but a hook can still reach one through `call.job.client`. The guard raises *before* claiming the latch, so a refusal cannot clear the outer call's.
 
 **Retries stay busybee-owned.** gRPC's service-config retry policy (`grpc.enable_retries` + a retry-policy JSON) is not used in place of `with_retry`: retries performed inside the gRPC core are invisible to the `Call` carrier, so `attempts` would undercount, `backoff_ms` would lie, and the call seam would lose its per-attempt view ("how many attempts, and why"). Every retry busybee performs runs through `Call#attempt`, wrapped by `around_call`, counted on the carrier. If retry needs grow, extend the visible layer (e.g. a retry-count knob on `with_retry`, today hardcoded to a single retry when `grpc_retry_enabled`) rather than delegating to the invisible one.
 
 ### The request's writable window
 
-`Call#request` is the protobuf message the stub is handed, and hooks may write to it. The invariant is that **the freeze belongs to the wire, not to the call**: each attempt begins with a writable request and seals it the instant the send returns, success or failure. Both halves live in `Call#attempt` — `reopen_request` ahead of the `around_call` chain, `@request.freeze` in an `ensure` on the chain's core, so a non-recoverable error still seals what was sent.
+`Call#request` is the protobuf message the stub is handed, and hooks may write to it. The invariant is that **the freeze belongs to the wire, not to the call**: each attempt begins with a writable request and seals it the instant the send returns, success or failure. Both halves live in `Call#attempt`: `reopen_request` ahead of the `around_call` chain, `@request.freeze` in an `ensure` on the chain's core, so a non-recoverable error still seals what was sent.
 
-That places the whole writable window ahead of each send and none of it after, which is what lets `after_call` be trusted as a record of what the engine received. Each simpler placement leaves a hole: freezing when `before_call` returns forbids `around_call` from writing at all; freezing at resolution leaves post-yield `around_call` past the wire and still writable; freezing only on success leaves a *failed* call's request writable forever, though it demonstrably went out. The structural reason none of them work is that the wire runs on every attempt — anything frozen at or before it is dead by the retry, and anything after it must wait for retrying to finish. A per-attempt copy is the only placement without a conditional.
+That places the whole writable window ahead of each send and none of it after, which is what lets `after_call` be trusted as a record of what the engine received. Each simpler placement leaves a hole: freezing when `before_call` returns forbids `around_call` from writing at all; freezing at resolution leaves post-yield `around_call` past the wire and still writable; freezing only on success leaves a *failed* call's request writable though it went out. The wire runs on every attempt, so freezing at or before it is undone by the retry, and freezing after it would have to wait out the retries; a per-attempt copy is the one placement that needs no conditional.
 
-**`reopen_request` must round-trip through the wire format.** `Google::Protobuf` returns a **frozen** copy from both `dup` and `clone` — a deliberate deviation from Ruby's own contract, where `dup` drops frozen state and only `clone` keeps it — and it propagates to repeated fields and nested messages. The writable copy comes from `Google::Protobuf`'s own codec instead — encode the message, parse it straight back — at roughly 2.6 µs; `Call#reopen_request` holds the expression. Substituting `dup` degrades **silently**: the retry's request comes back frozen, the `FrozenError` from a hook writing to it is swallowed by the observing chain, and the retry quietly sends the previous attempt's message. `spec/busybee/client/request_mutation_spec.rb` pins it by asserting distinct per-attempt values, which is the assertion `dup` cannot satisfy.
+**`reopen_request` must round-trip through the wire format.** `Google::Protobuf` returns a **frozen** copy from both `dup` and `clone` (a deliberate deviation from Ruby's own contract, where `dup` drops frozen state and only `clone` keeps it), and it propagates to repeated fields and nested messages. The writable copy comes from `Google::Protobuf`'s own codec instead (encode the message, parse it straight back), at roughly 2.6 µs; `Call#reopen_request` holds the expression. Substituting `dup` degrades **silently**: the retry's request comes back frozen, the `FrozenError` from a hook writing to it is swallowed by the observing chain, and the retry quietly sends the previous attempt's message. `spec/busybee/client/request_mutation_spec.rb` pins it by asserting distinct per-attempt values, which is the assertion `dup` cannot satisfy.
 
 **`Client#run_hooked` reads `call.request` at each send** rather than closing over its argument. Under a per-attempt copy the local would pin the first attempt's message and discard every hook that ran after it.
 
@@ -678,14 +701,14 @@ The freeze is enforcement, not protection: from `before_call` a `FrozenError` wo
 
 ### Call correlation context
 
-A `Client::Call` correlates itself to the executing Job and the runner's `Worker::Status` by capturing them from thread-locals at construction (exposed as `call.job` / `call.worker_status`). They are seeded per single-carrier window by class methods on `Call` — `Call.with_job(job)` / `Call.with_worker_status(ws)`, read via `Call.current_job` / `Call.current_worker_status` — each restored to its prior value on block exit. **Fall-through safety** lives in the reader: when a job is present, `current_worker_status` returns `job.worker_status` — a separately-seeded status can't override it — so a Call's two carriers can never disagree. This lives on `Call`, not `Hooks`: nothing hook-related reads it; it's call correlation.
+A `Client::Call` correlates itself to the executing Job and the runner's `Worker::Status` by capturing them from thread-locals at construction (exposed as `call.job` / `call.worker_status`). They are seeded per single-carrier window by class methods on `Call`, `Call.with_job(job)` / `Call.with_worker_status(ws)`, read via `Call.current_job` / `Call.current_worker_status`, each restored to its prior value on block exit. **Fall-through safety** lives in the reader: when a job is present, `current_worker_status` returns `job.worker_status` (a separately-seeded status can't override it), so a Call's two carriers can never disagree. The correlation lives on `Call`, not `Hooks`: only `Call#initialize` reads it.
 
 The carriers seed with different **window widths**:
 
-- **`job` — narrow (the perform-only crutch).** `Worker.perform_job` wraps its whole body in `Call.with_job(job)`, so `before/around/after_perform`, `perform`, and autofail/autocomplete — everything that "runs as part of perform" — correlate to the job. It is *not* seeded for the runner-level `around_job_execution` middleware, which sit *outside* `perform_job` and already hold the Job as their carrier.
-- **`worker_status` — wide (every job-in-scope window).** Nothing but `job.worker_status` reaches the runner's snapshot, so each per-job window seeds it through `Runner#with_fresh_worker_status(job)`: stamp a fresh point-in-time `Worker::Status` onto the job, then `Call.with_worker_status(job.worker_status)` — one object in both places. It runs at activation, at execution (wrapping the `around_job_execution` chain and `perform`), again around `on_job_executed` (a fresh re-stamp, so completion-time gauges are reported rather than the possibly long-ago start), and twice on the handback path — once around the wire call, once around `on_job_not_executed` carrying any handback error on the worker's own axis. A job-less **fetch scope** (`Call.with_worker_status(worker_status)` around polling `with_each_job`, stream open, hybrid drain) attributes the `ActivateJobs`/stream-open Call to the worker before any job exists.
+- **`job`: narrow (the perform-only crutch).** `Worker.perform_job` wraps its whole body in `Call.with_job(job)`, so `before/around/after_perform`, `perform`, and autofail/autocomplete (everything that "runs as part of perform") correlate to the job. It is *not* seeded for the runner-level `around_job_execution` middleware, which sit *outside* `perform_job` and already hold the Job as their carrier.
+- **`worker_status`: wide (every job-in-scope window).** Nothing but `job.worker_status` reaches the runner's snapshot, so each per-job window seeds it through `Runner#with_fresh_worker_status(job)`: stamp a fresh point-in-time `Worker::Status` onto the job, then `Call.with_worker_status(job.worker_status)`: one object in both places. It runs at activation, at execution (wrapping the `around_job_execution` chain and `perform`), again around `on_job_executed` (a fresh re-stamp, so completion-time gauges are reported rather than the possibly long-ago start), and twice on the handback path: once around the wire call, once around `on_job_not_executed` carrying any handback error on the worker's own axis. A job-less **fetch scope** (`Call.with_worker_status(worker_status)` around polling `with_each_job`, stream open, hybrid drain) attributes the `ActivateJobs`/stream-open Call to the worker before any job exists.
 
-A Call folds a **curated** correlation subset — not the carriers' full `context_tags`/`logging_context` (those stay right for logging the Job and Worker *directly*). It takes worker identity (`worker_class`, `job_type`, `worker_mode`; `worker_name` logging-only, since it can be per-run-unique) and job identity (`bpmn_process_id`, `source`; `job_key` / `process_instance_key` / `element_id` logging-only), and excludes lifecycle telemetry — job timestamps, worker gauges, and `retries` (which reads like the call's `attempts` but means the engine's retry budget). The composition lives in `Call#{worker,job}_correlation_{tags,logging}`.
+A Call folds a **curated** correlation subset, not the carriers' full `context_tags`/`logging_context` (those stay right for logging the Job and Worker *directly*). It takes worker identity (`worker_class`, `job_type`, `worker_mode`; `worker_name` logging-only, since it can be per-run-unique) and job identity (`bpmn_process_id`, `source`; `job_key` / `process_instance_key` / `element_id` logging-only), and excludes lifecycle telemetry: job timestamps, worker gauges, and `retries` (which reads like the call's `attempts` but means the engine's retry budget). The composition lives in `Call#{worker,job}_correlation_{tags,logging}`.
 
 ## Testing Module
 
@@ -693,20 +716,20 @@ A Call folds a **curated** correlation subset — not the carriers' full `contex
 
 ### Architecture
 
-- `testing.rb` — Entry point. When RSpec is defined, loads the helpers, includes `Helpers` into examples tagged `:busybee`, and installs the `around`s behind the `without_busybee_hooks:` and `busybee_foreign_jobs:` metadata, which apply to every example whether it opted in or not.
-- `testing/helpers.rb` — Integration test helpers (`deploy_process`, `with_process_instance`, `activate_job`, etc.) that talk to Zeebe via gRPC. `Helpers` also includes the other helper modules and `Matchers`, so it is the one module an example needs. `with_process_instance` keeps its key in a local for its own cancel, and pushes it on the example's enclosure stack (`busybee_process_instances`, outermost first), whose top is `process_instance_key`.
-- `testing/foreign_jobs.rb` — `Testing::ForeignJobs`, built per activation from the enclosure stack and the mode: refusing (the default), any job whose `processInstanceKey` isn't the top's; accepting, only the enclosing blocks' jobs. `Helpers.activate_own_jobs` (in `helpers/support.rb`) activates until enough of its own jobs are in hand (one for `activate_job` and `max_jobs:`, N for `expected:`) or the wait runs out, asking each poll only for what's still missing and keeping its own by key, since a lock lapsing mid-wait re-offers a job. It hands each foreign one back through `fail_job` with its own retries and a backoff of `FOREIGN_JOB_BACKOFF_MS` times the distinct jobs refused so far in that activation, capped at `FOREIGN_JOB_MAX_BACKOFF_MS`. With no backoff, a refused older job would win every activation and starve the example's own; with a flat one, the oldest few come back before the rest of a long queue has been seen. The mode is module state on `Busybee::Testing`, set and restored by `with_foreign_jobs`, behind both the metadata and `accepting_foreign_jobs`.
-- `testing/error.rb` — `Testing::Error`, a `StandardError` outside the `Busybee::Error` family, and its subclasses. `NoJobsAvailable`, with `NoJobAvailable` as an alias, is raised by `activate_job` and `activate_jobs(expected:)`, and rescued by `have_available_jobs`, which lets any other error through. `ProcessStillRunning` and `NoCurrentProcessInstance` are raised by `assert_process_completed!`.
-- `testing/helpers/builders.rb` — The carrier builders (`build_test_job`, `build_test_raw_job`, `build_test_worker_status`, `build_test_call`, `build_test_client`). Nothing here is doubled: a real `ActivatedJob` proto, a real `Status`, a real `Call` driven through its underscore seam. Hooks read their carrier's projections, so a double would freeze a spec's belief about those projections into its assertions and stay green when the contract moved. Job fixtures are built under `HookRegistry.with_only` (every hook suppressed), since resolving one runs a real call and would otherwise fire the hooks the spec is about to observe.
-- `testing/client.rb` — `Testing::Client`, a real `Busybee::Client` subclass that overrides the private `stub`. Everything above the wire is genuine: a doubled client sits *above* `run_hooked`, the seam call hooks hang off, so with one in place no call hook can fire. Programming keeps grpc-ruby's contract (`client.on(:rpc) { … }`), matching the internal `FaultInjectionGateway` so both sides teach one vocabulary.
-- `testing/runner.rb` — `Testing::Runner`, the test worker behind `build_test_worker` / `start_test_worker`. A `Runner` subclass run synchronously in the spec's thread: `start` fires T0 through the shared `start!`, `activate(jobs)` runs Polling's per-job intake minus the fetch (`activate_job`, then `execute_job` or the hand-back once stopping), and `stop!` fires T1 and then the shared `Runner#teardown`. Everything past intake is base-class code. It reports no `worker_mode` (overriding `Runner#worker_mode`) and activates with `source: nil`, since no transport stands behind it; `run!` raises.
-- `testing/helpers/execution.rb` — `execute_worker`, over a worker class (start, activate, stop, so all four hook levels fire) or a held test worker (activate only).
-- `testing/hook_registry.rb` — `Testing::HookRegistry`, the only code that reaches `Hooks`' private registry: `isolated` snapshots and restores it, `with_only` swaps in a registry holding only the named types and records what it suppressed. Not a helper itself; the helpers below are built on it.
-- `testing/helpers/hook_scoping.rb` — `without_busybee_hooks` and `isolate_busybee_hooks`; a registry swap through `Testing::HookRegistry` keyed by the word in the hook's name. `testing.rb` installs an `around` that applies it from `without_busybee_hooks:` metadata, through the module-level `HookScoping.without`, since that example may not include the helpers. `HookRegistry` also records what is currently suppressed, as `HookRegistry.suppressed?(type)`.
-- `testing/helpers/hook_firing.rb` — `fire_busybee_hooks`, one moment fired against a built carrier through `Hooks.run` / `Hooks.run_chain` with `safe: false`, inside the correlation scopes the runner would set for that moment (the job's worker status; for the perform triple, the job too). On a job, an around moment's continuation stands in for perform, so a Hash it returns is recorded as the job's result, and `perform.call` returns that result as production's does. A test worker converts to its `status`. It raises on a carrier of the wrong noun, and when `HookRegistry.suppressed?` says the moment was emptied rather than never registered.
-- `testing/helpers/support.rb` — Private module-level helpers shared by integration test methods.
-- `testing/timings.rb` — The durations the harness defaults to, and the only place they are written down. Not `Busybee::Defaults`: those are operational settings an adopter sizes for production load, in an initializer the test environment usually loads too, so inheriting them would make a suite wait production lengths for nothing. Named after the helpers that read them (`ACTIVATE_JOB_TIMEOUT_MS`, not `DEFAULT_POLLING_REQUEST_TIMEOUT_MS`) to keep the two sets from being mistaken for each other.
-- `testing/matchers/` — Custom RSpec matchers for both integration and unit testing, defined on `Busybee::Testing::Matchers` with `RSpec::Matchers::DSL` rather than on `RSpec::Matchers`, so they reach only the examples that include `Helpers`.
+- `testing.rb`: Entry point. When RSpec is defined, loads the helpers, includes `Helpers` into examples tagged `:busybee`, and installs the `around`s behind the `without_busybee_hooks:` and `busybee_foreign_jobs:` metadata, which apply to every example whether it opted in or not.
+- `testing/helpers.rb`: Integration test helpers (`deploy_process`, `with_process_instance`, `activate_job`, etc.) that talk to Zeebe via gRPC. `Helpers` also includes the other helper modules and `Matchers`, so it is the one module an example needs. `with_process_instance` keeps its key in a local for its own cancel, and pushes it on the example's enclosure stack (`busybee_process_instances`, outermost first), whose top is `process_instance_key`.
+- `testing/foreign_jobs.rb`: `Testing::ForeignJobs`, built per activation from the enclosure stack and the mode: refusing (the default), any job whose `processInstanceKey` isn't the top's; accepting, only the enclosing blocks' jobs. `Helpers.activate_own_jobs` (in `helpers/support.rb`) activates until enough of its own jobs are in hand (one for `activate_job` and `max_jobs:`, N for `expected:`) or the wait runs out, asking each poll only for what's still missing and keeping its own by key, since a lock lapsing mid-wait re-offers a job. It hands each foreign one back through `fail_job` with its own retries and a backoff of `FOREIGN_JOB_BACKOFF_MS` times the distinct jobs refused so far in that activation, capped at `FOREIGN_JOB_MAX_BACKOFF_MS`. With no backoff, a refused older job would win every activation and starve the example's own; with a flat one, the oldest few come back before the rest of a long queue has been seen. The mode is module state on `Busybee::Testing`, set and restored by `with_foreign_jobs`, behind both the metadata and `accepting_foreign_jobs`.
+- `testing/error.rb`: `Testing::Error`, a `StandardError` outside the `Busybee::Error` family, and its subclasses. `NoJobsAvailable`, with `NoJobAvailable` as an alias, is raised by `activate_job` and `activate_jobs(expected:)`, and rescued by `have_available_jobs`, which lets any other error through. `ProcessStillRunning` and `NoCurrentProcessInstance` are raised by `assert_process_completed!`.
+- `testing/helpers/builders.rb`: The carrier builders (`build_test_job`, `build_test_raw_job`, `build_test_worker_status`, `build_test_call`, `build_test_client`). Nothing here is doubled: a real `ActivatedJob` proto, a real `Status`, a real `Call` driven through its underscore seam, so a hook under test reads the real projections. Job fixtures are built under `HookRegistry.with_only` (every hook suppressed), since resolving one runs a real call and would otherwise fire the hooks the spec is about to observe.
+- `testing/client.rb`: `Testing::Client`, a real `Busybee::Client` subclass that overrides the private `stub`. Everything above the wire is genuine: a doubled client sits *above* `run_hooked`, the seam call hooks hang off, so with one in place no call hook can fire. Programming keeps grpc-ruby's contract (`client.on(:rpc) { … }`), matching the internal `FaultInjectionGateway` so both sides teach one vocabulary.
+- `testing/runner.rb`: `Testing::Runner`, the test worker behind `build_test_worker` / `start_test_worker`. A `Runner` subclass run synchronously in the spec's thread: `start` fires T0 through the shared `start!`, `activate(jobs)` runs Polling's per-job intake minus the fetch (`activate_job`, then `execute_job` or the hand-back once stopping), and `stop!` fires T1 and then the shared `Runner#teardown`. Everything past intake is base-class code. It reports no `worker_mode` (overriding `Runner#worker_mode`) and activates with `source: nil`, since no transport stands behind it; `run!` raises.
+- `testing/helpers/execution.rb`: `execute_worker`, over a worker class (start, activate, stop, so all four hook levels fire) or a held test worker (activate only).
+- `testing/hook_registry.rb`: `Testing::HookRegistry`, the only code that reaches `Hooks`' private registry: `isolated` snapshots and restores it, `with_only` swaps in a registry holding only the named types and records what it suppressed. Not a helper itself; the helpers below are built on it.
+- `testing/helpers/hook_scoping.rb`: `without_busybee_hooks` and `isolate_busybee_hooks`; a registry swap through `Testing::HookRegistry` keyed by the word in the hook's name. `testing.rb` installs an `around` that applies it from `without_busybee_hooks:` metadata, through the module-level `HookScoping.without`, since that example may not include the helpers. `HookRegistry` also records what is currently suppressed, as `HookRegistry.suppressed?(type)`.
+- `testing/helpers/hook_firing.rb`: `fire_busybee_hooks`, one moment fired against a built carrier through `Hooks.run` / `Hooks.run_chain` with `safe: false`, inside the correlation scopes the runner would set for that moment (the job's worker status; for the perform triple, the job too). On a job, an around moment's continuation stands in for perform, so a Hash it returns is recorded as the job's result, and `perform.call` returns that result as production's does. A test worker converts to its `status`. It raises on a carrier of the wrong noun, and when `HookRegistry.suppressed?` says the moment was emptied rather than never registered.
+- `testing/helpers/support.rb`: Private module-level helpers shared by integration test methods.
+- `testing/timings.rb`: The durations the harness defaults to, and the only place they are written down. Separate from `Busybee::Defaults`, which an adopter sizes for production in an initializer the test environment usually loads too. Named after the helpers that read them (`ACTIVATE_JOB_TIMEOUT_MS`, not `DEFAULT_POLLING_REQUEST_TIMEOUT_MS`).
+- `testing/matchers/`: Custom RSpec matchers for both integration and unit testing, defined on `Busybee::Testing::Matchers` with `RSpec::Matchers::DSL` rather than on `RSpec::Matchers`, so they reach only the examples that include `Helpers`.
 
 ### Worker Unit Testing
 
@@ -729,6 +752,6 @@ The matchers cover the common case: assert job status and optionally verify erro
 | `fail_job(job)` | Worker class | `.with_error(class, msg)` | Asserts job failed with optional error match |
 | `complete_job(job)` | Worker class | `.with_vars(hash)`, `.with_no_vars` | Asserts job completed with optional return value match |
 | `throw_bpmn_error_on(job)` | Worker class | `.with_code(code, message: msg)` | Asserts BPMN error thrown with optional code/message match |
-| `have_available_jobs` | Block | — | Integration: asserts jobs exist |
-| `have_received_variables(hash)` | ActivatedJob | — | Integration: asserts job variables |
-| `have_received_headers(hash)` | ActivatedJob | — | Integration: asserts job headers |
+| `have_available_jobs` | Block | none | Integration: asserts jobs exist |
+| `have_received_variables(hash)` | ActivatedJob | none | Integration: asserts job variables |
+| `have_received_headers(hash)` | ActivatedJob | none | Integration: asserts job headers |
