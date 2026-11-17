@@ -39,4 +39,5 @@ Gem::Specification.new do |spec|
   spec.add_dependency "base64"
   spec.add_dependency "concurrent-ruby", ">= 1.1.7", "< 2.0"
   spec.add_dependency "grpc", "~> 1.76"
+  spec.add_dependency "logger"
 end
