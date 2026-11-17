@@ -86,8 +86,7 @@ module Busybee
         rpc :CreateProcessInstance, CreateProcessInstanceRequest, CreateProcessInstanceResponse
         #
         # Behaves similarly to `rpc CreateProcessInstance`, except that a successful response is received when the process completes successfully.
-        rpc :CreateProcessInstanceWithResult, CreateProcessInstanceWithResultRequest,
-            CreateProcessInstanceWithResultResponse
+        rpc :CreateProcessInstanceWithResult, CreateProcessInstanceWithResultRequest, CreateProcessInstanceWithResultResponse
         #
         # Evaluates a decision. The decision to evaluate can be specified either by
         # using its unique key (as returned by DeployResource), or using the decision
