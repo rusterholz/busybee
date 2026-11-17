@@ -321,7 +321,7 @@ Errors from `after_perform` propagate, like the rest of the perform family: if t
 
 ### Wrapping perform: Middleware
 
-`around_perform` and `around_job_execution` receive `(job, perform)`; calling `perform.call` runs the rest of the chain. Call it exactly once, and always call it. **The chain always descends:** if your middleware returns without calling `perform.call`, busybee logs a warning and runs the rest of the chain anyway. Skipping the yield is not how you cancel a job; [resolving it](#short-circuiting-a-job) is.
+`around_perform` and `around_job_execution` receive `(job, perform)`; calling `perform.call` runs the rest of the chain. Call it exactly once, and always call it. **The chain always descends:** if your middleware returns without calling `perform.call`, busybee logs a warning and runs the rest of the chain anyway. Skipping the yield is not how you cancel a job; [resolving it](#short-circuiting-a-job) is. **And it descends only once:** a second `perform.call` logs a warning and hands back what the first one returned, or raises again what the first one raised, without running anything below your hook a second time.
 
 ```ruby
 # A transaction around the business logic only
@@ -340,10 +340,11 @@ Which of the two you want follows from the naming rule: a transaction belongs ar
 Rules of the middleware road:
 
 - **The return value is safe.** Your worker's result is harvested from the job itself, not from the chain's return value, so middleware can't lose it by returning something else.
-- **`perform.call` returns the job's result**, in every hook of the chain: perform's Hash, or the vars a `complete!` sent, as a frozen `HashWithIndifferentAccess` (nil when there is none). Middleware can log or measure what the work produced without reaching back into the job.
+- **`perform.call` returns the job's result**, in every hook of the chain, as `perform` left it: the vars a `complete!` sent (from `perform`, or from a hook that resolved the job before `perform` could run), otherwise the Hash `perform` returned, as a frozen `HashWithIndifferentAccess`, or nil if neither left one. In `around_job_execution` it is also nil once `perform` has raised, unless the error stops the worker (a `shutdown_on` match, or an error outside `StandardError`), which `perform.call` raises instead. Middleware can log or measure what the work produced without reaching back into the job.
 - **A hook can resolve the job**, and that's how you [short-circuit](#short-circuiting-a-job) one. `complete!`, `fail!`, and `throw_bpmn_error!` are legal from any job hook.
 - **Adjusting the job short of resolving it is also yours.** `update_timeout` and `update_retries` are legal from every hook, so middleware that knows the work ahead is slow can buy it more time before yielding.
 - **`around_job_execution` is observing.** Errors it raises are logged and swallowed. `around_perform` is the propagating one: errors it raises fail the job (see [When Hooks Raise](#when-hooks-raise)).
+- **Retry through the engine, not in middleware.** Rescuing an error from `perform.call` and calling it again gets you the same error back, and the job fails with it. The engine already retries a failed job while it has retries left, after the job's [backoff](workers.md#fail_job_backoff); set the retry count in your process model (see [Retries, Incidents and Poison Pills](operating.md#retries-incidents-and-poison-pills)).
 
 ### Short-Circuiting a Job
 
@@ -563,6 +564,8 @@ The client's gRPC operations (fetching jobs, completing them, publishing message
 
 `around_call` wraps each attempt rather than the whole operation, and busybee performs its own retries (they're never delegated to the gRPC layer), so every attempt is individually visible and `call.attempts` counts each one.
 
+In `around_call`, `continue.call` returns the attempt's gRPC response, the same object as `call.result`, or nil when the attempt errored (the error still reaches the caller). Like `perform.call`, it runs once: a second `continue.call` logs a warning and returns the first one's response, without sending the request again or changing the attempt's outcome.
+
 ```ruby
 # One metric per logical call, tagged with outcome
 config.after_call { |call| StatsD.distribution("zeebe.call_ms", call.network_ms, tags: call.context_tags) }
@@ -698,6 +701,8 @@ Two exceptions to the swallowing:
 - **Errors matching `shutdown_on` escalate to a graceful shutdown**, from any hook: a hook that detects a dead database connection gets the same treatment as a `perform` that does. The demo app uses exactly this to simulate rolling restarts from an `around_perform` hook.
 
   Escalation reads the *worker's* `shutdown_on` list plus the gem-wide [`Busybee.shutdown_on_errors`](configuration.md#shutdown_on_errors). Call hooks have no worker to read (a client call can be made from a web request or a background job, where "shut this worker down" means nothing), so only the gem-wide list escalates from `before_call`, `around_call`, and `after_call`. Put an error class in `Busybee.shutdown_on_errors` if you want it to escalate from anywhere.
+
+**Don't rescue `Busybee::Worker::Shutdown` in your hooks.** It is how the worker learns it should stop, and in `around_job_execution` an error matching `shutdown_on` arrives as one too, so a middleware that rescues it around `perform.call` and carries on keeps the worker running when it should be stopping.
 
 **Both exceptions stop applying once the worker is already shutting down.** `on_worker_stop_requested`, `on_worker_stopping` and `on_worker_shutdown` all fire during teardown, where a `Shutdown` and a `shutdown_on` match are logged and swallowed like any other hook error, and handed to `on_worker_shutdown` as `status.error` when the exception the worker is actually exiting on isn't already there. The rest of the shutdown still runs: the drain that hands jobs back, the moments after it, and the worker's own record of having stopped. An error outside `StandardError`, such as a `NoMemoryError`, is different. It tells every worker in the process to exit immediately, as that error does anywhere, then propagates from the thread the hook ran on, crashing the process and taking the rest of that worker's shutdown with it. The exception is `on_worker_stop_requested` on a streaming or hybrid worker's stream reader, which hands it to `on_worker_shutdown` instead (see [Stop Reasons](#stop-reasons)). `on_worker_started` is unaffected: an escalation there still aborts the start.
 

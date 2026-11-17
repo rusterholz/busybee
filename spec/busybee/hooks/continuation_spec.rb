@@ -57,6 +57,27 @@ RSpec.describe "perform.call in a job's around hooks" do # rubocop:disable RSpec
         execute_worker(completing_worker)
         expect(returned).to eq("total" => 7)
       end
+
+      it "returns the vars a hook's complete! sent, when the hook resolved the job before yielding" do
+        returned = nil
+        Busybee.public_send(type) do |job, perform|
+          job.complete!(early: true)
+          returned = perform.call
+        end
+
+        job = execute_worker(returning_worker)
+        expect(returned).to eq("early" => true)
+        expect(returned).to be(job.result)
+      end
     end
+  end
+
+  it "hands around_job_execution the vars an earlier hook's complete! sent" do
+    returned = nil
+    Busybee.before_perform { |job| job.complete!(early: true) }
+    Busybee.around_job_execution { |_job, perform| returned = perform.call }
+
+    execute_worker(returning_worker)
+    expect(returned).to eq("early" => true)
   end
 end

@@ -127,7 +127,8 @@ module Busybee
 
       # Execute one gRPC attempt inside the observing around_call chain, recording
       # the outcome (gRPC errors translated per attempt) and re-raising any error
-      # *past* the chain, which would otherwise swallow it.
+      # *past* the chain, which would otherwise swallow it. continue.call returns
+      # the response, or nil for an errored attempt.
       def attempt
         _begin_attempt
         reopen_request
@@ -137,9 +138,11 @@ module Busybee
             value = yield
             @timestamps.end_network # close the bracket the instant the op settles, before recording
             _record_result(value)
+            value
           rescue *RECOVERABLE_ERRORS => e
             @timestamps.end_network
             _record_error(translate_error(e))
+            nil
           ensure
             @request.freeze # the wire has seen it; from here it is a record, not an input
           end

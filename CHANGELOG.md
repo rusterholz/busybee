@@ -11,7 +11,7 @@ Instrumentation hooks for every job, worker and gRPC call, with testing helpers 
   - Worker hooks: `on_worker_started`, `on_worker_stop_requested`, `on_worker_stopping`, `on_worker_shutdown`
   - Call hooks: `before_call`, `around_call`, `after_call`, around every gRPC call
   - Each hook receives a lifecycle object (status, counters, timestamps, durations), with two ready-made projections: `context_tags` for metric labels, `logging_context` for structured logs
-  - `perform.call` returns the job's result to every around hook
+  - `perform.call` returns the job's result to every around hook, and `continue.call` the call's response; calling either again warns and returns the first outcome, without running the work twice
   - Declare the worker unhealthy from any hook with `raise Busybee::Worker::Shutdown`; `shutdown_on` escalates from job hooks, `Busybee.shutdown_on_errors` from call hooks
   - Any other `StandardError` from an observing hook is logged and swallowed, so one broken observer can't break job processing or shutdown
 

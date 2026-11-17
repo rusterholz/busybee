@@ -1631,11 +1631,12 @@ RSpec.describe Busybee::Worker do
         expect(client).to have_received(:complete_job).with(123456, vars: {})
       end
 
-      it "is nil when a before_perform hook completes the job, whose result is the hook's" do
+      it "is the hook's vars when a before_perform hook completes the job" do
         Busybee.before_perform { |j| j.complete!({ early: true }) }
 
-        expect(performing_worker.perform_job(job)).to be_nil
-        expect(job.result).to eq("early" => true)
+        returned = performing_worker.perform_job(job)
+        expect(returned).to eq("early" => true)
+        expect(returned).to be(job.result)
       end
     end
   end
