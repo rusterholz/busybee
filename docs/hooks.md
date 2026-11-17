@@ -340,7 +340,7 @@ Which of the two you want follows from the naming rule: a transaction belongs ar
 Rules of the middleware road:
 
 - **The return value is safe.** Your worker's result is harvested from the job itself, not from the chain's return value, so middleware can't lose it by returning something else.
-- **`perform.call` returns the job's result**, in every hook of the chain: perform's Hash, or the vars a `complete!` sent, as a frozen `HashWithIndifferentAccess`. That holds for a job a hook resolved before `perform` could run, too: `perform.call` hands back the vars the hook's `complete!` sent. It returns nil when `perform` returned something other than a Hash, and in `around_job_execution` whenever `perform` raised. Middleware can log or measure what the work produced without reaching back into the job.
+- **`perform.call` returns the job's result**, in every hook of the chain, as `perform` left it: the vars a `complete!` sent (from `perform`, or from a hook that resolved the job before `perform` could run), otherwise the Hash `perform` returned, as a frozen `HashWithIndifferentAccess`, or nil if neither left one. In `around_job_execution` it is also nil once `perform` has raised, unless the error stops the worker (a `shutdown_on` match, or an error outside `StandardError`), which `perform.call` raises instead. Middleware can log or measure what the work produced without reaching back into the job.
 - **A hook can resolve the job**, and that's how you [short-circuit](#short-circuiting-a-job) one. `complete!`, `fail!`, and `throw_bpmn_error!` are legal from any job hook.
 - **Adjusting the job short of resolving it is also yours.** `update_timeout` and `update_retries` are legal from every hook, so middleware that knows the work ahead is slow can buy it more time before yielding.
 - **`around_job_execution` is observing.** Errors it raises are logged and swallowed. `around_perform` is the propagating one: errors it raises fail the job (see [When Hooks Raise](#when-hooks-raise)).
@@ -564,7 +564,7 @@ The client's gRPC operations (fetching jobs, completing them, publishing message
 
 `around_call` wraps each attempt rather than the whole operation, and busybee performs its own retries (they're never delegated to the gRPC layer), so every attempt is individually visible and `call.attempts` counts each one.
 
-In `around_call`, `continue.call` returns the attempt's response, the same object your caller gets back, or nil when the attempt errored (the error still reaches the caller). Like `perform.call`, it runs once: a second `continue.call` logs a warning and returns the first one's response, without sending the request again or changing the attempt's outcome.
+In `around_call`, `continue.call` returns the attempt's gRPC response, the same object as `call.result`, or nil when the attempt errored (the error still reaches the caller). Like `perform.call`, it runs once: a second `continue.call` logs a warning and returns the first one's response, without sending the request again or changing the attempt's outcome.
 
 ```ruby
 # One metric per logical call, tagged with outcome
