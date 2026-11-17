@@ -22,7 +22,7 @@ x-app: &app
 services:
   elasticsearch:
     container_name: busybee-demo-elasticsearch
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.10
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.25
     ports:
       - "9200:9200"
     environment:
@@ -47,7 +47,7 @@ services:
 
   zeebe:
     container_name: busybee-demo-zeebe
-    image: camunda/camunda:8.8.8
+    image: camunda/camunda:8.10.9
     ports:
       - "26500:26500"
       - "9600:9600"

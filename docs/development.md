@@ -8,6 +8,8 @@ After checking out the repo, run `bin/setup` to install dependencies. Then, run 
 
 To install this gem onto your local machine, run `bundle exec rake install`.
 
+The development Ruby is pinned in `.ruby-version` (4.0.9). The `Gemfile` asks for Bundler 2.7, while Ruby 4.0 ships Bundler 4 as its default: Bundler switches to the version recorded in `Gemfile.lock` on its own, but a command run directly against a gemfile with no lockfile yet (such as a fresh `gemfiles/*.gemfile`) needs it named: `bundle _2.7.2_ install`.
+
 ## Running Tests
 
 Busybee has two types of tests:
@@ -156,7 +158,7 @@ MULTITENANCY_ENABLED=true rake zeebe:health
 MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
 ```
 
-**Note:** The multi-tenant mode switches which specs run; it does not give you a cluster with tenancy. On Camunda 8.8 the compose file's `CAMUNDA_MULTITENANCY_ENABLED` is inert: a cluster started with it still rejects a `tenant_id` with "multi-tenancy is disabled". Enforcing tenancy needs a protected API (Identity/OIDC or basic auth), which the local compose environment doesn't run, so the one `:multi_tenant_only` spec is pending ("Requires Camunda Identity service").
+**Note:** The multi-tenant mode switches which specs run; it does not give you a cluster with tenancy. On Camunda 8.8, 8.9 and 8.10 alike, the compose file's `CAMUNDA_MULTITENANCY_ENABLED` is inert: a cluster started with it still rejects a `tenant_id` with "multi-tenancy is disabled". Enforcing tenancy needs a protected API (Identity/OIDC or basic auth), which the local compose environment doesn't run, so the one `:multi_tenant_only` spec is pending ("Requires Camunda Identity service").
 
 **Test Tagging:**
 - `:single_tenant_only` - Only runs when multi-tenancy is disabled
@@ -165,7 +167,7 @@ MULTITENANCY_ENABLED=true RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integr
 
 **CI Behavior:**
 
-CI runs the integration tests in parallel for both modes using a matrix strategy. The multi-tenant row runs against the same tenancy-free cluster, so it skips the `:single_tenant_only` specs and reports its one `:multi_tenant_only` spec as pending (see the note above).
+CI runs the integration tests in parallel for both modes on each Camunda version, using a matrix strategy. Each multi-tenant row runs against the same tenancy-free cluster, so it skips the `:single_tenant_only` specs and reports its one `:multi_tenant_only` spec as pending (see the note above).
 
 ### Camunda Cloud Integration Tests
 
@@ -259,16 +261,22 @@ Busybee provides a Docker Compose setup for running [Zeebe](https://docs.camunda
 
 ### Version Management
 
-All version configuration is centralized in the `.env` file at the project root. This file is committed to git and serves as the source of truth for Zeebe and ElasticSearch versions.
+All version configuration is centralized in the `.env` file at the project root, which is committed to git. It holds three settings:
 
-**Upgrading Zeebe/Camunda:**
+- `ZEEBE_VERSION`: the `camunda/camunda` image the local stack runs.
+- `ELASTICSEARCH_VERSION`: the Elasticsearch image beside it.
+- `GRPC_PROTO_VERSION`: the Camunda release whose `gateway.proto` generates `lib/busybee/grpc/` (see [Regenerating GRPC Classes](#regenerating-grpc-classes)).
 
-1. Edit `.env` and update `ZEEBE_VERSION` to the desired version
-2. Regenerate GRPC protocol buffers: `rake grpc:generate`
-3. Restart containers: `rake zeebe:restart`
-4. Run tests to verify compatibility: `rake spec`
+The two image versions and the proto version move independently: the stack can run a newer Camunda than the generated classes describe.
 
-The `.env` file ensures all developers and CI environments use consistent versions.
+CI runs the integration tests against the latest patch of every maintained Camunda minor (8.8, 8.9 and 8.10), setting `ZEEBE_VERSION` per job; Docker Compose lets an environment variable override `.env`. To run the stack on another version locally, do the same, starting from empty data volumes, since a cluster's data can't move to an older Camunda or skip a minor:
+
+```bash
+rake zeebe:clean
+ZEEBE_VERSION=8.8.46 rake zeebe:start
+```
+
+**Upgrading the local stack:** edit `ZEEBE_VERSION` (and `ELASTICSEARCH_VERSION`, if that Camunda release needs a newer one) in `.env`, run `rake zeebe:clean` and `rake zeebe:start`, then run the integration tests.
 
 ### Starting the Environment
 
@@ -420,11 +428,11 @@ The demo app should be kept current as busybee evolves. When adding new features
 
 ## Regenerating GRPC Classes
 
-The protocol buffer classes in `lib/busybee/grpc/` are generated from the Zeebe proto file. To regenerate after upgrading Zeebe:
+The protocol buffer classes in `lib/busybee/grpc/` are generated from the Zeebe gateway proto file of the Camunda release named by `GRPC_PROTO_VERSION` in `.env`. To regenerate them from a newer release:
 
-1. Update the Zeebe version in `.env`:
+1. Update the proto version in `.env`:
    ```
-   ZEEBE_VERSION=8.9.0
+   GRPC_PROTO_VERSION=8.10.9
    ```
 
 2. Run the generator:
@@ -432,17 +440,12 @@ The protocol buffer classes in `lib/busybee/grpc/` are generated from the Zeebe 
    rake grpc:generate
    ```
 
-3. Restart containers to match the new version:
+3. Run the integration tests against every Camunda version CI covers (see [Version Management](#version-management)), oldest first, since the oldest server is the one most likely to lack something the new classes describe:
    ```bash
-   rake zeebe:restart
+   RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
    ```
 
-4. Run tests to verify compatibility:
-   ```bash
-   RUN_INTEGRATION_TESTS=1 bundle exec rspec
-   ```
-
-The `grpc:generate` task fetches the proto file from the Zeebe GitHub repository for the specified version and runs `grpc_tools_ruby_protoc` to generate the Ruby classes.
+The `grpc:generate` task fetches the proto file from the Camunda GitHub repository at that tag, runs `grpc_tools_ruby_protoc` to generate the Ruby classes, and formats them with RuboCop. With `GRPC_PROTO_VERSION` unchanged, it reproduces the committed files exactly.
 
 ## Running the Appraisal Matrix
 

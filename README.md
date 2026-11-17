@@ -250,7 +250,19 @@ puts response.brokers.map(&:host)
 
 The [Dropship Co. demo app](spec/demo/README.md) is a multi-domain Rails application that showcases busybee in action. It orchestrates order fulfillment across warehousing, logistics, and delivery services using BPMN workflows and busybee workers. It's a good place to see realistic usage patterns and to experiment with the framework.
 
-## Ruby Implementation Support
+## Compatibility
+
+Every change to busybee is tested against:
+
+| Dependency | Versions |
+|------------|----------|
+| Ruby (MRI) | 3.2, 3.3, 3.4 and 4.0 |
+| Rails / ActiveSupport | 7.0, 7.1, 7.2, 8.0 and 8.1, and without Rails |
+| Camunda 8 (Zeebe gateway) | 8.8, 8.9 and 8.10, self-managed |
+
+The generated gRPC classes (`Busybee::GRPC`) follow the Camunda 8.8 gateway protocol, so calls added in later releases aren't available through them.
+
+### Ruby Implementation Support
 
 Busybee currently only supports MRI (CRuby). This is due to the state of `grpc` support on other implementations. JRuby is not supported because it cannot run C extensions (it would require `grpc-java` with a Ruby wrapper). TruffleRuby's C extension support is experimental and the `grpc` gem does not currently build on it.
 
