@@ -76,6 +76,11 @@ Instrumentation hooks for every job, worker and gRPC call, with testing helpers 
 
 - **A Guide to Operating Busybee** – `docs/operating.md` covers logs, exit statuses, shutdown timing, health probes and troubleshooting for the `busybee` command
 
+- **Runs on Ruby 4.0 and Camunda 8.9 and 8.10** – Tested on every change against:
+  - Ruby 3.2, 3.3, 3.4 and 4.0
+  - Rails 7.0 through 8.1, and without Rails
+  - Self-managed Camunda 8.8, 8.9 and 8.10
+
 - **Docs for the Version You Run** – The RubyGems page links the docs for your installed version (`documentation_uri`); the gem no longer ships them
 
 ### Bug Fixes:
