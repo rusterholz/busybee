@@ -44,7 +44,7 @@ docker run -d --name zeebe -p 26500:26500 \
   camunda/camunda:8.10.9
 ```
 
-The two settings turn off authentication, which the image otherwise requires on every call. Give the container a minute to start before connecting.
+The two settings turn off authentication and authorization; without them, the image rejects every unauthenticated call. Give the container a minute to start before connecting.
 
 For a more complete setup with Operate (the web UI for monitoring workflows), see the [Camunda Docker Compose documentation](https://docs.camunda.io/docs/self-managed/setup/deploy/local/docker-compose/).
 

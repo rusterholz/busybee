@@ -260,7 +260,7 @@ Every change to busybee is tested against:
 | Rails / ActiveSupport | 7.0, 7.1, 7.2, 8.0 and 8.1, and without Rails |
 | Camunda 8 (Zeebe gateway) | 8.8, 8.9 and 8.10, self-managed |
 
-The generated gRPC classes (`Busybee::GRPC`) follow the Camunda 8.8 gateway protocol, so calls added in later releases aren't available through them yet.
+The generated gRPC classes (`Busybee::GRPC`) follow the Camunda 8.8 gateway protocol, so calls added in later releases aren't available through them.
 
 ### Ruby Implementation Support
 

@@ -269,7 +269,7 @@ All version configuration is centralized in the `.env` file at the project root,
 
 The two image versions and the proto version move independently: the stack can run a newer Camunda than the generated classes describe.
 
-CI runs the integration tests against the latest patch of every maintained Camunda minor (8.8, 8.9 and 8.10), setting `ZEEBE_VERSION` per job; Docker Compose lets an environment variable override `.env`. To run the stack on another version locally, do the same, and remove the old data volumes first, since a cluster's data doesn't move between versions:
+CI runs the integration tests against the latest patch of every maintained Camunda minor (8.8, 8.9 and 8.10), setting `ZEEBE_VERSION` per job; Docker Compose lets an environment variable override `.env`. To run the stack on another version locally, do the same, starting from empty data volumes, since a cluster's data can't move to an older Camunda or skip a minor:
 
 ```bash
 rake zeebe:clean
