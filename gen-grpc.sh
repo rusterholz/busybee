@@ -3,7 +3,7 @@
 # gen-grpc.sh - Generate Ruby GRPC code from Zeebe protocol buffers
 #
 # This script:
-# 1. Reads the ZEEBE_VERSION from .env
+# 1. Reads GRPC_PROTO_VERSION from .env
 # 2. Downloads gateway.proto from the Camunda GitHub repository
 # 3. Generates Ruby code using grpc_tools_ruby_protoc
 # 4. Fixes namespacing to use Busybee::GRPC module structure
@@ -21,24 +21,24 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}==> Starting GRPC code generation${NC}"
 
-# Load ZEEBE_VERSION from .env
+# Load GRPC_PROTO_VERSION from .env
 if [ ! -f .env ]; then
   echo -e "${RED}Error: .env file not found${NC}"
   exit 1
 fi
 
-# Extract ZEEBE_VERSION from .env (handles comments and whitespace)
-ZEEBE_VERSION=$(grep -E "^ZEEBE_VERSION=" .env | cut -d '=' -f2 | tr -d ' ' | tr -d '"' | tr -d "'")
+# Extract GRPC_PROTO_VERSION from .env (handles comments and whitespace)
+GRPC_PROTO_VERSION=$(grep -E "^GRPC_PROTO_VERSION=" .env | cut -d '=' -f2 | tr -d ' ' | tr -d '"' | tr -d "'")
 
-if [ -z "$ZEEBE_VERSION" ]; then
-  echo -e "${RED}Error: ZEEBE_VERSION not found in .env${NC}"
+if [ -z "$GRPC_PROTO_VERSION" ]; then
+  echo -e "${RED}Error: GRPC_PROTO_VERSION not found in .env${NC}"
   exit 1
 fi
 
-echo -e "${YELLOW}==> Using Zeebe version: ${ZEEBE_VERSION}${NC}"
+echo -e "${YELLOW}==> Using gateway.proto from Camunda ${GRPC_PROTO_VERSION}${NC}"
 
 # Download gateway.proto
-PROTO_URL="https://raw.githubusercontent.com/camunda/camunda/refs/tags/${ZEEBE_VERSION}/zeebe/gateway-protocol/src/main/proto/gateway.proto"
+PROTO_URL="https://raw.githubusercontent.com/camunda/camunda/refs/tags/${GRPC_PROTO_VERSION}/zeebe/gateway-protocol/src/main/proto/gateway.proto"
 PROTO_FILE="proto/gateway.proto"
 
 echo -e "${YELLOW}==> Downloading gateway.proto from ${PROTO_URL}${NC}"
@@ -47,7 +47,7 @@ if curl -f -L -o "$PROTO_FILE" "$PROTO_URL"; then
   echo -e "${GREEN}==> Downloaded gateway.proto successfully${NC}"
 else
   echo -e "${RED}Error: Failed to download gateway.proto${NC}"
-  echo -e "${RED}Please verify that version ${ZEEBE_VERSION} exists at:${NC}"
+  echo -e "${RED}Please verify that version ${GRPC_PROTO_VERSION} exists at:${NC}"
   echo -e "${RED}${PROTO_URL}${NC}"
   exit 1
 fi
@@ -134,9 +134,9 @@ sed -i '' 's/GatewayProtocol:://g' "$GATEWAY_SERVICES_PB"
 
 echo -e "${GREEN}==> Fixed namespacing in gateway_services_pb.rb${NC}"
 
-# Fix indentation using rubocop
+# Fix indentation and quoting using rubocop
 echo -e "${YELLOW}==> Running rubocop to fix formatting${NC}"
-bundle exec rubocop -A "$GATEWAY_PB" "$GATEWAY_SERVICES_PB" --only Layout || true
+bundle exec rubocop -a "$GATEWAY_PB" "$GATEWAY_SERVICES_PB" || true
 
 echo -e "${GREEN}==> GRPC code generation complete!${NC}"
 echo ""
