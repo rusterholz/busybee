@@ -19,6 +19,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# In-place edit for both BSD (macOS) and GNU sed: sed_in_place <script> <file>
+sed_in_place() {
+  sed -i.bak "$1" "$2" && rm -f "$2.bak"
+}
+
 echo -e "${GREEN}==> Starting GRPC code generation${NC}"
 
 # Load GRPC_PROTO_VERSION from .env
@@ -93,8 +98,8 @@ mv "${GATEWAY_PB}.tmp" "$GATEWAY_PB"
 
 # Remove 'module GatewayProtocol' line and one 'end' from the chain at the bottom
 # Rubocop will fix indentation afterward
-sed -i '' '/^[[:space:]]*module GatewayProtocol$/d' "$GATEWAY_PB"
-sed -i '' '$ d' "$GATEWAY_PB"
+sed_in_place '/^[[:space:]]*module GatewayProtocol$/d' "$GATEWAY_PB"
+sed_in_place '$ d' "$GATEWAY_PB"
 
 echo -e "${GREEN}==> Fixed namespacing in gateway_pb.rb${NC}"
 
@@ -124,13 +129,13 @@ mv "${GATEWAY_SERVICES_PB}.tmp" "$GATEWAY_SERVICES_PB"
 
 # Remove 'module GatewayProtocol' line and one 'end' from the chain at the bottom
 # Rubocop will fix indentation afterward
-sed -i '' '/^[[:space:]]*module GatewayProtocol$/d' "$GATEWAY_SERVICES_PB"
-sed -i '' '$ d' "$GATEWAY_SERVICES_PB"
+sed_in_place '/^[[:space:]]*module GatewayProtocol$/d' "$GATEWAY_SERVICES_PB"
+sed_in_place '$ d' "$GATEWAY_SERVICES_PB"
 
 # Remove GatewayProtocol:: prefix from class references (now they're in the same namespace)
 # Handle both ::GatewayProtocol:: and GatewayProtocol:: patterns
-sed -i '' 's/::GatewayProtocol:://g' "$GATEWAY_SERVICES_PB"
-sed -i '' 's/GatewayProtocol:://g' "$GATEWAY_SERVICES_PB"
+sed_in_place 's/::GatewayProtocol:://g' "$GATEWAY_SERVICES_PB"
+sed_in_place 's/GatewayProtocol:://g' "$GATEWAY_SERVICES_PB"
 
 echo -e "${GREEN}==> Fixed namespacing in gateway_services_pb.rb${NC}"
 
