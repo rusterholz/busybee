@@ -16,7 +16,7 @@ module Busybee
       GRPC_STATUSES = ::GRPC::Core::StatusCodes.constants.map { |name| name.to_s.downcase.to_sym }.freeze
 
       # The RPCs busybee itself issues, not the gateway's full descriptor list,
-      # whose seven other calls would accept filters that can never fire.
+      # whose other calls would accept filters that can never fire.
       RPCS = %i[
         activate_jobs broadcast_signal cancel_process_instance complete_job
         create_process_instance deploy_resource fail_job publish_message

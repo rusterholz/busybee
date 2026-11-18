@@ -23,7 +23,12 @@ RSpec.describe "GRPC Topology" do
       # Verify we have broker information
       expect(response.brokers).not_to be_empty
       broker = response.brokers.first
-      expect(broker.nodeId).to be >= 0
+      # brokerId replaces the deprecated nodeId from Camunda 8.10; earlier gateways send only nodeId
+      if broker.brokerId.empty?
+        expect(broker.nodeId).to be >= 0
+      else
+        expect(broker.brokerId).to match(/\S/)
+      end
       expect(broker.host).not_to be_empty
       expect(broker.port).to be > 0
       expect(broker.partitions).not_to be_empty

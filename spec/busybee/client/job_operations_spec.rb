@@ -553,6 +553,14 @@ RSpec.describe Busybee::Client::JobOperations do
       )
     end
 
+    it "never asks for a leased activation" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job") { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(having_attributes(withLease: false))
+    end
+
     it "requires a block" do
       expect do
         client.with_each_job("test-job")
@@ -698,6 +706,14 @@ RSpec.describe Busybee::Client::JobOperations do
         having_attributes(timeout: 30_000),
         return_op: true
       )
+    end
+
+    it "never asks for a leased activation" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream("test-job")
+
+      expect(stub).to have_received(:stream_activated_jobs).with(having_attributes(withLease: false), return_op: true)
     end
 
     it "wraps GRPC errors" do
