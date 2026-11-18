@@ -37,7 +37,7 @@ module Busybee
         # INVALID_ARGUMENT:
         # - type is blank (empty string, null)
         # - timeout less than 1
-        # - If multi-tenancy is enabled, and tenantIds is empty (empty list)
+        # - If multi-tenancy is enabled, tenantFilter is PROVIDED (default value) and tenantIds is empty (empty list)
         # - If multi-tenancy is enabled, and an invalid tenant ID is provided. A tenant ID is considered invalid if:
         # - The tenant ID is blank (empty string, null)
         # - The tenant ID is longer than 31 characters
@@ -83,9 +83,20 @@ module Busybee
         # INVALID_ARGUMENT:
         # - the given variables argument is not a valid JSON document; it is expected to be a valid
         # JSON document where the root node is an object.
+        #
+        # ALREADY_EXISTS:
+        # - Business ID Uniqueness Control is enabled, and an active root process instance
+        # with the provided businessId already exists
+        # for the same process definition and tenant.
         rpc :CreateProcessInstance, CreateProcessInstanceRequest, CreateProcessInstanceResponse
         #
         # Behaves similarly to `rpc CreateProcessInstance`, except that a successful response is received when the process completes successfully.
+        #
+        # Errors:
+        # ALREADY_EXISTS:
+        # - Business ID Uniqueness Control is enabled, and an active root process instance
+        # with the provided businessId already exists
+        # for the same process definition and tenant.
         rpc :CreateProcessInstanceWithResult, CreateProcessInstanceWithResultRequest, CreateProcessInstanceWithResultResponse
         #
         # Evaluates a decision. The decision to evaluate can be specified either by
@@ -178,6 +189,14 @@ module Busybee
         # INVALID_ARGUMENT:
         # - the given variables document is not a valid JSON document; valid documents are expected to
         # be JSON documents where the root node is an object.
+        # DEADLINE_EXCEEDED:
+        # - the request timed out between the gateway and the broker. This can happen for general
+        # timeout reasons (for example transient communication delays). On user-task-listener-
+        # related operations, this can additionally happen when the corresponding listener job is
+        # not completed within the request timeout.
+        #
+        # If this happens repeatedly, retry with backoff and check listener worker availability and
+        # health.
         rpc :SetVariables, SetVariablesRequest, SetVariablesResponse
         #
         # Obtains the current topology of the cluster the gateway is part of.
@@ -235,6 +254,21 @@ module Busybee
         # For example, the engine cannot determine how to migrate a process instance when the instructions are: [A->B, A->C].
         rpc :MigrateProcessInstance, MigrateProcessInstanceRequest, MigrateProcessInstanceResponse
         #
+        # Assigns a business id to an already running process instance.
+        #
+        # Errors:
+        # NOT_FOUND:
+        # - no process instance exists with the given key, or it is not active
+        #
+        # FAILED_PRECONDITION:
+        # - the process instance already has a different business id assigned
+        # - the process instance is a child instance created by a call activity
+        # - business id uniqueness is enabled for the process definition
+        #
+        # INVALID_ARGUMENT:
+        # - the business id is empty or exceeds the allowed length
+        rpc :AssignProcessInstanceBusinessId, AssignProcessInstanceBusinessIdRequest, AssignProcessInstanceBusinessIdResponse
+        #
         # Updates the deadline of a job using the timeout (in ms) provided. This can be used
         # for extending or shortening the job deadline.
         #
@@ -245,6 +279,19 @@ module Busybee
         # INVALID_STATE:
         # - no deadline exists for the given job key
         rpc :UpdateJobTimeout, UpdateJobTimeoutRequest, UpdateJobTimeoutResponse
+        #
+        # Updates the priority of a job.
+        #
+        # Errors:
+        # NOT_FOUND:
+        # - no job exists with the given key
+        #
+        # INVALID_ARGUMENT:
+        # - priority is not provided
+        #
+        # INVALID_STATE:
+        # - job is in a terminal state
+        rpc :UpdateJobPriority, UpdateJobPriorityRequest, UpdateJobPriorityResponse
         #
         # Deletes a resource from the state. Once a resource has been deleted it cannot
         # be recovered. If the resource needs to be available again, a new deployment
@@ -269,6 +316,21 @@ module Busybee
         #
         # Broadcasts a signal.
         rpc :BroadcastSignal, BroadcastSignalRequest, BroadcastSignalResponse
+        #
+        # Evaluates root-level conditional start events for process definitions.
+        # If the evaluation is successful, it will return the keys of all created process instances, along with their associated process definition key.
+        # Multiple root-level conditional start events of the same process definition can trigger if their conditions evaluate to true.
+        #
+        # Errors:
+        # INVALID_ARGUMENT:
+        # - The provided data is not valid
+        # NOT_FOUND:
+        # - The process definition was not found for the given processDefinitionKey
+        # PERMISSION_DENIED:
+        # - The client is not authorized to start process instances for the specified process definition
+        # - If a processDefinitionKey is not provided, this indicates that the client is not authorized
+        # to start process instances for at least one of the matched process definitions
+        rpc :EvaluateConditional, EvaluateConditionalRequest, EvaluateConditionalResponse
       end
 
       Stub = Service.rpc_stub_class
