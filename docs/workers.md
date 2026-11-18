@@ -213,6 +213,8 @@ def perform
 end
 ```
 
+**`update_priority(priority)`** changes the job's priority (Camunda 8.10+), and `job.priority` reads it back. Zeebe activates higher-priority jobs first, so a job that's failed and retried after an update competes with its new priority. On a gateway older than 8.10 it raises `Busybee::GRPC::Error`, and `job.priority` reads `0`.
+
 Note that you can safely mix-and-match manual and automatic control, because both automatic completion and automatic failure check whether the job is still `ready?` before they attempt to complete or fail it. Therefore, this is a perfectly valid alternate approach to the above:
 
 ```ruby
@@ -1100,7 +1102,7 @@ RSpec.describe ProcessOrderWorker, :busybee do
 end
 ```
 
-Keyword arguments go to `build_test_job`, which builds one job of your worker's type from them: `variables:`, `headers:`, `bpmn_process_id:`, `retries:`, and the rest. `job.result` is what your worker completed the job with, which is what the engine receives. A job that fails keeps its error on `job.error`; nothing is re-raised into your example.
+Keyword arguments go to `build_test_job`, which builds one job of your worker's type from them: `variables:`, `headers:`, `bpmn_process_id:`, `retries:`, `priority:`, and the rest. `job.result` is what your worker completed the job with, which is what the engine receives. A job that fails keeps its error on `job.error`; nothing is re-raised into your example.
 
 ### Passing Your Own Jobs
 

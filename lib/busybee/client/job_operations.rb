@@ -132,6 +132,27 @@ module Busybee
         run_hooked(:update_job_timeout, request)
       end
 
+      # Update the priority of a job (Camunda 8.10+). Zeebe activates
+      # higher-priority jobs first; priority is any integer, default 0.
+      #
+      # @param job_key [Integer] The unique job identifier
+      # @param priority [Integer] The new priority
+      # @return [Object] Response from the gateway (truthy)
+      # @raise [Busybee::GRPC::Error] if update operation fails, with grpc_status
+      #   :unimplemented on a gateway older than 8.10
+      #
+      # @example Move a job ahead of its peers
+      #   client.update_job_priority(123456, 100)
+      #
+      def update_job_priority(job_key, priority)
+        request = Busybee::GRPC::UpdateJobPriorityRequest.new(
+          jobKey: job_key.to_i,
+          priority: priority.to_i
+        )
+
+        run_hooked(:update_job_priority, request)
+      end
+
       # Activate and process jobs with a block (bounded, non-streaming).
       #
       # @param job_type [String] The job type to activate

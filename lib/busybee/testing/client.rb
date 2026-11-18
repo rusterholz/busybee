@@ -36,6 +36,7 @@ module Busybee
         publish_message: -> { Busybee::GRPC::PublishMessageResponse.new },
         set_variables: -> { Busybee::GRPC::SetVariablesResponse.new },
         throw_error: -> { Busybee::GRPC::ThrowErrorResponse.new },
+        update_job_priority: -> { Busybee::GRPC::UpdateJobPriorityResponse.new },
         update_job_retries: -> { Busybee::GRPC::UpdateJobRetriesResponse.new },
         update_job_timeout: -> { Busybee::GRPC::UpdateJobTimeoutResponse.new }
       }.freeze

@@ -50,6 +50,8 @@ module Busybee
         raw.retries
       end
 
+      def priority = raw.priority
+
       def deadline
         raw.deadline
       end
@@ -154,6 +156,19 @@ module Busybee
           timeout: Busybee::Durations.milliseconds_from(timeout)
         )
         client.update_job_timeout(request)
+        self
+      end
+
+      # Update the job's priority (Camunda 8.10+).
+      #
+      # @param priority [Integer] new priority; higher is activated first
+      # @return [self]
+      def update_priority(priority)
+        request = Busybee::GRPC::UpdateJobPriorityRequest.new(
+          jobKey: key,
+          priority: priority.to_i
+        )
+        client.update_job_priority(request)
         self
       end
 

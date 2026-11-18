@@ -559,6 +559,21 @@ Updates the job's retry count without completing or failing it.
 job.update_retries(5)
 ```
 
+#### `update_priority(priority)`
+
+Changes the job's priority without completing or failing it, and returns the job. `job.priority` reads the priority the job was activated with. Both need Camunda 8.10+; on an older gateway the update raises `GRPC::Unimplemented` and `priority` reads `0`.
+
+**Parameters:**
+- `priority` (Integer) - New priority; Zeebe activates higher-priority jobs first
+
+**Example:**
+
+```ruby
+job = activate_job("ship-order")
+expect(job.priority).to eq(50) # from the task's zeebe:jobPriorityDefinition
+job.update_priority(100)
+```
+
 ## RSpec Matchers
 
 ### `have_received_variables`

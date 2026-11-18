@@ -30,6 +30,7 @@ RSpec.describe Busybee::Job do
       customHeaders: '{"priority":"high"}',
       worker: "worker-1",
       retries: 3,
+      priority: 40,
       deadline: 1640000000000,
       variables: "{\"order\":{\"id\":\"550e8400-e29b-41d4-a716-446655440000\",\"amount\":99.99," \
                  "\"customerName\":\"Jane Doe\"},\"processTimeout\":\"PT1H\"}"
@@ -905,7 +906,7 @@ RSpec.describe Busybee::Job do
 
     it "seeds itself during fail!, throw_bpmn_error!, and the update calls" do
       seen = {}
-      %i[fail_job throw_bpmn_error update_job_retries update_job_timeout].each do |op|
+      %i[fail_job throw_bpmn_error update_job_retries update_job_timeout update_job_priority].each do |op|
         allow(client).to receive(op) { seen[op] = Busybee::Client::Call.current_job }
       end
       failer = described_class.new(raw_job, client: client)
@@ -915,9 +916,10 @@ RSpec.describe Busybee::Job do
       thrower.throw_bpmn_error!("CODE")
       job.update_retries(5)
       job.update_timeout(30_000)
+      job.update_priority(90)
 
       expect(seen).to eq(fail_job: failer, throw_bpmn_error: thrower,
-                         update_job_retries: job, update_job_timeout: job)
+                         update_job_retries: job, update_job_timeout: job, update_job_priority: job)
     end
   end
 
@@ -987,6 +989,41 @@ RSpec.describe Busybee::Job do
       allow(client).to receive(:update_job_timeout)
 
       expect { job.update_timeout(30_000) }.not_to change(job, :status)
+    end
+  end
+
+  describe "#priority" do
+    it "reads the priority the job was activated with" do
+      expect(job.priority).to eq(40)
+    end
+  end
+
+  describe "#update_priority" do
+    it "calls client.update_job_priority with job key and priority" do
+      allow(client).to receive(:update_job_priority)
+
+      job.update_priority(90)
+
+      expect(client).to have_received(:update_job_priority).with(123456, 90)
+    end
+
+    it "updates the local priority value" do
+      allow(client).to receive(:update_job_priority)
+
+      expect { job.update_priority(90) }.to change(job, :priority).from(40).to(90)
+    end
+
+    it "keeps the activation-time priority when the update fails" do
+      allow(client).to receive(:update_job_priority).and_raise(Busybee::GRPC::Error.wrap(GRPC::Unimplemented.new))
+
+      expect { job.update_priority(90) }.to raise_error(Busybee::GRPC::Error)
+      expect(job.priority).to eq(40)
+    end
+
+    it "does not change job status" do
+      allow(client).to receive(:update_job_priority)
+
+      expect { job.update_priority(90) }.not_to change(job, :status)
     end
   end
 

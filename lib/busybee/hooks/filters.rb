@@ -21,7 +21,7 @@ module Busybee
         activate_jobs broadcast_signal cancel_process_instance complete_job
         create_process_instance deploy_resource fail_job publish_message
         resolve_incident set_variables stream_activated_jobs throw_error
-        update_job_retries update_job_timeout
+        update_job_priority update_job_retries update_job_timeout
       ].freeze
 
       JOB_STATUSES = %i[ready complete failed error].freeze

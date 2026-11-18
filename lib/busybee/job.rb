@@ -123,6 +123,14 @@ module Busybee
       @deadline_override || payload.deadline
     end
 
+    # Job priority; higher is activated first. Layers an override from
+    # update_priority on top of the protobuf value. Camunda 8.10+; an older
+    # gateway never sends it, so it reads 0, as Zeebe's own default does.
+    # @return [Integer]
+    def priority
+      @priority_override || payload.priority
+    end
+
     # Complete the job with optional output variables.
     #
     # @param vars [Hash] Variables to return to the workflow engine
@@ -205,6 +213,17 @@ module Busybee
       duration_seconds = Busybee::Durations.seconds_from(duration)
       correlated { @client.update_job_timeout(key, duration) }.tap do
         @deadline_override = (Time.now.utc + duration_seconds).freeze
+      end
+    end
+
+    # Update the priority of this job (Camunda 8.10+).
+    #
+    # @param priority [Integer] The new priority; higher is activated first
+    # @return [Object] Response from update_job_priority operation
+    # @raise [Busybee::GRPC::Error] if the update fails
+    def update_priority(priority)
+      correlated { @client.update_job_priority(key, priority) }.tap do
+        @priority_override = priority.to_i
       end
     end
 

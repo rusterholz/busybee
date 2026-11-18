@@ -52,6 +52,23 @@ module IntegrationHelpers
     @local_busybee_client ||= Busybee::Client.new(insecure: true)
   end
 
+  # Whether the connected gateway is at least the given Camunda version, so a
+  # spec can pin both what a newer call does and how an older gateway answers it.
+  #
+  #   if gateway_at_least?("8.10") then ... else ... end
+  def gateway_at_least?(version)
+    Gem::Version.new(gateway_version) >= Gem::Version.new(version)
+  end
+
+  # The connected gateway's Camunda version, asked once per process and cluster.
+  def gateway_version
+    cloud = Busybee.credential_type == :camunda_cloud
+    IntegrationHelpers.gateway_versions[cloud] ||=
+      (cloud ? camunda_cloud_grpc_stub : local_grpc_stub).topology(Busybee::GRPC::TopologyRequest.new).gatewayVersion
+  end
+
+  def self.gateway_versions = (@gateway_versions ||= {})
+
   private
 
   # Returns Camunda Cloud credentials

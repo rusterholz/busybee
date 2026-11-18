@@ -45,6 +45,8 @@ module Busybee
         @raw_job.retries
       end
 
+      def priority = @raw_job.priority
+
       def deadline
         @deadline ||= Time.at(@raw_job.deadline / 1000.0).utc.freeze
       end

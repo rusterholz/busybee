@@ -160,6 +160,15 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
       expect(job.key).to eq(9876)
     end
 
+    it "uses the provided priority" do
+      job = build_test_job(priority: 75)
+      expect(job.priority).to eq(75)
+    end
+
+    it "defaults priority to zero, Zeebe's own default" do
+      expect(build_test_job.priority).to eq(0)
+    end
+
     it "defaults to a random key when none is given" do
       keys = Array.new(5) { build_test_job.key }
       expect(keys.uniq.size).to be > 1
@@ -192,6 +201,11 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
       it "accepts update_timeout" do
         job = build_test_job
         expect { job.update_timeout(30_000) }.not_to raise_error
+      end
+
+      it "accepts update_priority" do
+        job = build_test_job
+        expect { job.update_priority(90) }.to change(job, :priority).from(0).to(90)
       end
     end
 

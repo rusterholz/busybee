@@ -862,6 +862,14 @@ RSpec.describe Busybee::Worker do
         expect(client).to have_received(:update_job_timeout).with(123456, 30_000)
       end
     end
+
+    describe "#update_priority" do
+      it "delegates to job" do
+        allow(client).to receive(:update_job_priority)
+        instance.update_priority(90)
+        expect(client).to have_received(:update_job_priority).with(123456, 90)
+      end
+    end
   end
 
   context "with hook integration" do

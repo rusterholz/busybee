@@ -216,6 +216,7 @@ When you receive jobs through `with_each_job` or `open_job_stream`, each job is 
 | `process_instance_key` | `Integer` | The process instance this job belongs to |
 | `bpmn_process_id` | `String` | The BPMN process ID |
 | `retries` | `Integer` | Remaining retry attempts |
+| `priority` | `Integer` | Job priority, highest activated first (Camunda 8.10+; `0` on older gateways, which don't send it) |
 | `deadline` | `Time` | When the job lock expires (frozen Time object) |
 | `variables` | `Hash` | Job input variables (with indifferent access) |
 | `headers` | `Hash` | Custom headers from the BPMN task definition |
@@ -360,6 +361,7 @@ puts "Stream closed, shutting down"
 | | [`throw_bpmn_error`](#throw_bpmn_error) | Throw a BPMN error |
 | | [`update_job_retries`](#update_job_retries) | Update job retry count |
 | | [`update_job_timeout`](#update_job_timeout) | Extend job deadline |
+| | [`update_job_priority`](#update_job_priority) | Change job priority (Camunda 8.10+) |
 | | [`resolve_incident`](#resolve_incident) | Resolve a failed-job incident |
 | [Message](#message-operations) | [`publish_message`](#publish_message) | Publish a correlated message |
 | | [`broadcast_signal`](#broadcast_signal) | Broadcast a signal to all listeners |
@@ -681,6 +683,29 @@ update_job_timeout(job_key, timeout) → Object
 
 ```ruby
 client.update_job_timeout(job_key, 30.seconds)
+```
+
+#### update_job_priority
+
+Change a job's priority. Zeebe activates higher-priority jobs of a type first, and an updated job keeps its new priority when it's failed and activated again, ahead of any peers with a lower one. A job's starting priority comes from its BPMN task (`<zeebe:jobPriorityDefinition priority="=expression"/>`) and is `0` without one. Any integer is accepted, negative ones included.
+
+**Requires Camunda 8.10 or later.** An older gateway answers with `UNIMPLEMENTED`.
+
+```ruby
+update_job_priority(job_key, priority) → Object
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_key` | `Integer` | The job key |
+| `priority` | `Integer` | The new priority |
+
+**Returns:** A truthy response from the gateway.
+
+**Raises:** `Busybee::GRPC::Error` if the update fails: `grpc_status` `:not_found` for a job that no longer exists, `:unimplemented` on a gateway older than 8.10.
+
+```ruby
+client.update_job_priority(job_key, 100)
 ```
 
 #### resolve_incident

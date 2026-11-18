@@ -315,6 +315,61 @@ RSpec.describe Busybee::Client::JobOperations do
     end
   end
 
+  describe "#update_job_priority" do
+    let(:response) { Busybee::GRPC::UpdateJobPriorityResponse.new }
+
+    it "updates job priority and returns truthy value" do
+      allow(stub).to receive(:update_job_priority).and_return(response)
+
+      result = client.update_job_priority(123456, 90)
+
+      expect(result).to be_truthy
+    end
+
+    it "sends job key and priority in request" do
+      allow(stub).to receive(:update_job_priority).and_return(response)
+
+      client.update_job_priority(123456, 90)
+
+      expect(stub).to have_received(:update_job_priority).with(
+        having_attributes(jobKey: 123456, priority: 90)
+      )
+    end
+
+    it "sends a zero priority rather than leaving it unset" do
+      allow(stub).to receive(:update_job_priority).and_return(response)
+
+      client.update_job_priority(123456, 0)
+
+      expect(stub).to have_received(:update_job_priority).with(
+        having_attributes(has_priority?: true, priority: 0)
+      )
+    end
+
+    it "converts job key and priority from strings to integers" do
+      allow(stub).to receive(:update_job_priority).and_return(response)
+
+      client.update_job_priority("123456", "90")
+
+      expect(stub).to have_received(:update_job_priority).with(
+        having_attributes(jobKey: 123456, priority: 90)
+      )
+    end
+
+    it "requires priority parameter" do
+      expect { client.update_job_priority(123456) }.to raise_error(ArgumentError)
+    end
+
+    it "wraps GRPC errors" do
+      grpc_error = GRPC::Unimplemented.new("Method not found")
+      allow(stub).to receive(:update_job_priority).and_raise(grpc_error)
+
+      expect { client.update_job_priority(123456, 90) }.to raise_error(Busybee::GRPC::Error) do |error|
+        expect(error.grpc_status).to eq(:unimplemented)
+      end
+    end
+  end
+
   describe "#with_each_job" do
     # rubocop:disable RSpec/IndexedLet, Lint/EmptyBlock
     let(:raw_job1) do
