@@ -597,7 +597,7 @@ The chain also descends at most once per link invocation, in both builders. A li
 Two cardinality-aware projections aggregate state across the POROs for instrumentation:
 
 - `job.context_tags`: low-cardinality, safe for metric labels
-- `job.logging_context`: high-cardinality superset, for structured log fields, including `priority` and `process_instance_business_id`; never the `result` (workflow-instance data), and an error as `error_class` + `error_message`, like `Client::Call`
+- `job.logging_context`: high-cardinality superset, for structured log fields; never the `result` (workflow-instance data), and an error as `error_class` + `error_message`, like `Client::Call`
 
 ### Job Lifecycle Timestamps
 

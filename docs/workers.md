@@ -215,7 +215,7 @@ end
 
 **`update_priority(priority)`** changes the job's priority (Camunda 8.10+), and `job.priority` reads it back. Zeebe activates higher-priority jobs first, so a job that's failed and retried after an update competes with its new priority. On a gateway older than 8.10 it raises `Busybee::GRPC::Error`, and `job.priority` reads `0`.
 
-**`job.process_instance_business_id`** reads the process instance's [business ID](client.md#business-ids), and assigning to it stages one that rides along with the job's completion, manual or automatic (Camunda 8.10+). Stage it as `job.process_instance_business_id ||= …`: the `||=` stages only on a job that arrived without one. See [Completing with a Business ID](client.md#completing-with-a-business-id) for the rules and the cases Zeebe rejects:
+**`job.process_instance_business_id`** reads the process instance's [business ID](client.md#business-ids), and assigning to it stages one that rides along with the job's completion, manual or automatic (Camunda 8.10+). Stage it as `job.process_instance_business_id ||= …`: the `||=` stages only on a job that arrived without one. **Before you do, make sure you understand [the rules and the cases Camunda rejects](client.md#completing-with-a-business-id).** A completion Camunda rejects for its business ID leaves the job open, and it comes back to be rejected again:
 
 ```ruby
 def perform
@@ -1118,7 +1118,7 @@ RSpec.describe ProcessOrderWorker, :busybee do
 end
 ```
 
-Keyword arguments go to `build_test_job`, which builds one job of your worker's type from them: `variables:`, `headers:`, `bpmn_process_id:`, `retries:`, `priority:`, `process_instance_business_id:` (the business ID the job arrives with), and the rest. `job.result` is what your worker completed the job with, which is what the engine receives, and `job.process_instance_business_id` reads any business ID your worker staged. A job that fails keeps its error on `job.error`; nothing is re-raised into your example.
+Keyword arguments go to `build_test_job`, which builds one job of your worker's type from them: `variables:`, `headers:`, `bpmn_process_id:`, `retries:`, `priority:`, `process_instance_business_id:` (the business ID the job arrives with), and the rest. `job.result` is what your worker completed the job with, which is what the engine receives, and `job.process_instance_business_id` reads the process instance's business ID, whether the job arrived with it or your worker staged it. A job that fails keeps its error on `job.error`; nothing is re-raised into your example.
 
 ### Passing Your Own Jobs
 
