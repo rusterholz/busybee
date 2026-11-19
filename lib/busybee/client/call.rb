@@ -237,7 +237,8 @@ module Busybee
 
         job_correlation_tags.merge(job_key: job.key,
                                    process_instance_key: job.process_instance_key,
-                                   element_id: job.element_id)
+                                   element_id: job.element_id,
+                                   process_instance_business_id: job.process_instance_business_id).compact
       end
 
       # Wrap a raw gRPC error as Busybee::GRPC::Error (keeping it as the cause),
