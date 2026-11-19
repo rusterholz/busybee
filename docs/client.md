@@ -343,6 +343,20 @@ end
 puts "Stream closed, shutting down"
 ```
 
+## Business IDs
+
+A business ID ties a process instance to a record in your own domain, such as an order number. It's a string of up to 256 characters that belongs to the root process instance, and the child instances its call activities start inherit it.
+
+You give an instance its business ID when you start it:
+
+| Where | How | Requires |
+|-------|-----|----------|
+| Starting an instance | [`start_instance(…, business_id:)`](#start_instance) | Camunda 8.9+ |
+
+Several instances can share a business ID unless the cluster enables business ID uniqueness. With it enabled, starting an instance of a process while another active root instance of that process holds the same business ID raises `Busybee::GRPC::Error` with `grpc_status` `:already_exists`.
+
+**Older gateways ignore business IDs silently.** A gateway that predates the field drops it without an error, so an instance started with a business ID on Camunda 8.8 has none.
+
 ---
 
 ## API Reference
@@ -405,7 +419,7 @@ result = client.deploy_process("order.bpmn", "payment.bpmn", "shipping.bpmn")
 Start a new process instance from a deployed workflow.
 
 ```ruby
-start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil) → Integer
+start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil, business_id: nil) → Integer
 ```
 
 | Parameter | Type | Description |
@@ -414,6 +428,7 @@ start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil) → 
 | `vars:` | `Hash` | Variables to initialize the process with (default: `{}`) |
 | `version:` | `Integer`, `:latest`, `nil` | Process version to start (default: `:latest`) |
 | `tenant_id:` | `String`, `nil` | Tenant ID for multi-tenancy (optional) |
+| `business_id:` | `String`, `nil` | The instance's [business ID](#business-ids) (optional; Camunda 8.9+, ignored by older gateways; `""` starts it without one) |
 
 **Returns:** The process instance key (an integer uniquely identifying this instance).
 
@@ -429,6 +444,9 @@ instance_key = client.start_instance("order-fulfillment", vars: {
 
 # Start a specific version
 instance_key = client.start_instance("order-fulfillment", version: 3)
+
+# Start with a business ID
+instance_key = client.start_instance("order-fulfillment", business_id: "ORD-123")
 
 # Alias: start_process_instance
 instance_key = client.start_process_instance("order-fulfillment", vars: { orderId: "ORD-456" })

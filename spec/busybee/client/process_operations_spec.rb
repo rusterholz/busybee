@@ -147,6 +147,24 @@ RSpec.describe Busybee::Client::ProcessOperations do
       )
     end
 
+    it "supports business_id" do
+      allow(stub).to receive(:create_process_instance).and_return(double(processInstanceKey: 67890))
+
+      client.start_instance("order-fulfillment", business_id: :"order-123")
+
+      expect(stub).to have_received(:create_process_instance).with(
+        having_attributes(has_businessId?: true, businessId: "order-123")
+      )
+    end
+
+    it "leaves business_id unset when not given" do
+      allow(stub).to receive(:create_process_instance).and_return(double(processInstanceKey: 67890))
+
+      client.start_instance("order-fulfillment")
+
+      expect(stub).to have_received(:create_process_instance).with(having_attributes(has_businessId?: false))
+    end
+
     it "wraps GRPC errors in Busybee::GRPC::Error" do
       allow(stub).to receive(:create_process_instance).and_raise(GRPC::NotFound.new("process not found"))
 

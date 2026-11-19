@@ -48,6 +48,8 @@ module Busybee
       # @param vars [Hash] Variables to pass to the process instance
       # @param version [Integer, Symbol, nil] Process version (:latest, nil, or specific version number)
       # @param tenant_id [String, nil] Tenant ID for multi-tenancy
+      # @param business_id [String, nil] Business ID for the new instance (Camunda 8.9+;
+      #   an older gateway ignores it)
       # @return [Integer] The process_instance_key
       # @raise [ArgumentError] if vars is not a Hash
       # @raise [Busybee::GRPC::Error] if starting the process fails
@@ -56,7 +58,10 @@ module Busybee
       #   key = client.start_instance("order-fulfillment", vars: { orderId: 123 })
       #   # => 67890
       #
-      def start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil)
+      # @example Start a process instance with a business ID
+      #   client.start_instance("order-fulfillment", business_id: "order-123")
+      #
+      def start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil, business_id: nil)
         raise ArgumentError, "vars must be a Hash" unless vars.is_a?(Hash)
 
         request = Busybee::GRPC::CreateProcessInstanceRequest.new(
@@ -65,6 +70,7 @@ module Busybee
           version: version == :latest || version.nil? ? -1 : version.to_i,
           tenantId: tenant_id&.to_s
         )
+        request.businessId = business_id.to_s unless business_id.nil?
 
         run_hooked(:create_process_instance, request).processInstanceKey
       end
