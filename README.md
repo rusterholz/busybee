@@ -227,7 +227,7 @@ Tooling for deploying your BPMN processes to Zeebe clusters from CI/CD.
 
 ### Low-Level GRPC Access (available now!)
 
-For edge cases where the higher-level abstractions don't cover what you need, busybee exposes the raw GRPC interface to Zeebe. This is a complete drop-in replacement for the now-discontinued [zeebe-client](https://github.com/zeebe-io/zeebe-client-ruby) gem.
+For edge cases where the higher-level abstractions don't cover what you need, busybee exposes the raw GRPC interface to Zeebe. This is a complete drop-in replacement for the now-discontinued [zeebe-client](https://github.com/zeebe-io/zeebe-client-ruby) gem. It's also how to reach the gateway calls the Client doesn't wrap yet, such as process instance migration and modification, DMN decision evaluation, and resource deletion: [the full list](docs/grpc.md#what-the-client-doesnt-wrap).
 
 > Most users won't need this, as the Testing module, Client class, and Worker pattern cover most common use cases.
 
@@ -260,7 +260,7 @@ Every change to busybee is tested against:
 | Rails / ActiveSupport | 7.0, 7.1, 7.2, 8.0 and 8.1, and without Rails |
 | Camunda 8 (Zeebe gateway) | 8.8, 8.9 and 8.10, self-managed |
 
-The generated gRPC classes (`Busybee::GRPC`) follow the Camunda 8.8 gateway protocol, so calls added in later releases aren't available through them.
+The generated gRPC classes (`Busybee::GRPC`) follow the Camunda 8.10 gateway protocol. An older gateway answers a call it doesn't have with `UNIMPLEMENTED`, and silently ignores fields it doesn't know, so features like [business IDs](docs/client.md#business-ids) and job priority need the Camunda version their docs name.
 
 ### Ruby Implementation Support
 

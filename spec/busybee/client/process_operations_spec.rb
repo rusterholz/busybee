@@ -147,6 +147,34 @@ RSpec.describe Busybee::Client::ProcessOperations do
       )
     end
 
+    it "supports business_id" do
+      allow(stub).to receive(:create_process_instance).and_return(double(processInstanceKey: 67890))
+
+      client.start_instance("order-fulfillment", business_id: :"order-123")
+
+      expect(stub).to have_received(:create_process_instance).with(
+        having_attributes(has_businessId?: true, businessId: "order-123")
+      )
+    end
+
+    it "sends an empty business_id as given, for the engine to read as none" do
+      allow(stub).to receive(:create_process_instance).and_return(double(processInstanceKey: 67890))
+
+      client.start_instance("order-fulfillment", business_id: "")
+
+      expect(stub).to have_received(:create_process_instance).with(
+        having_attributes(has_businessId?: true, businessId: "")
+      )
+    end
+
+    it "leaves business_id unset when not given" do
+      allow(stub).to receive(:create_process_instance).and_return(double(processInstanceKey: 67890))
+
+      client.start_instance("order-fulfillment")
+
+      expect(stub).to have_received(:create_process_instance).with(having_attributes(has_businessId?: false))
+    end
+
     it "wraps GRPC errors in Busybee::GRPC::Error" do
       allow(stub).to receive(:create_process_instance).and_raise(GRPC::NotFound.new("process not found"))
 
@@ -219,6 +247,35 @@ RSpec.describe Busybee::Client::ProcessOperations do
   describe "#cancel_process_instance" do
     it "is aliased to #cancel_instance" do
       expect(client.method(:cancel_process_instance)).to eq(client.method(:cancel_instance))
+    end
+  end
+
+  describe "#assign_business_id" do
+    let(:response) { Busybee::GRPC::AssignProcessInstanceBusinessIdResponse.new }
+
+    it "sends the process instance key and business ID, converted, and returns truthy" do
+      allow(stub).to receive(:assign_process_instance_business_id).and_return(response)
+
+      expect(client.assign_business_id("67890", :"ORD-123")).to be_truthy
+      expect(stub).to have_received(:assign_process_instance_business_id).with(
+        an_instance_of(Busybee::GRPC::AssignProcessInstanceBusinessIdRequest).
+          and(having_attributes(processInstanceKey: 67890, businessId: "ORD-123"))
+      )
+    end
+
+    it "wraps GRPC errors" do
+      allow(stub).to receive(:assign_process_instance_business_id).
+        and_raise(GRPC::FailedPrecondition.new("already has a business id assigned"))
+
+      expect { client.assign_business_id(67890, "ORD-123") }.to raise_error(Busybee::GRPC::Error) do |error|
+        expect(error.grpc_status).to eq(:failed_precondition)
+      end
+    end
+  end
+
+  describe "#assign_process_instance_business_id" do
+    it "is aliased to #assign_business_id" do
+      expect(client.method(:assign_process_instance_business_id)).to eq(client.method(:assign_business_id))
     end
   end
 

@@ -15,8 +15,13 @@ module Busybee
       #
       # @param job_key [Integer] The unique job identifier
       # @param vars [Hash] Variables to return to the workflow engine
+      # @param business_id [String, nil] Business ID to assign to the job's own process
+      #   instance, which must be a root, as part of the completion (Camunda 8.10+; an
+      #   older gateway ignores it)
       # @return [Object] Response from the gateway (truthy)
-      # @raise [Busybee::GRPC::Error] if completion fails
+      # @raise [Busybee::GRPC::Error] if completion fails, with grpc_status
+      #   :failed_precondition when the instance can't take the business ID,
+      #   as for a call activity's child job
       #
       # @example Complete a job without variables
       #   client.complete_job(123456)
@@ -24,11 +29,15 @@ module Busybee
       # @example Complete a job with variables
       #   client.complete_job(123456, vars: { result: "success", orderId: 999 })
       #
-      def complete_job(job_key, vars: {})
+      # @example Complete a job and assign its process instance a business ID
+      #   client.complete_job(123456, business_id: "ORD-123")
+      #
+      def complete_job(job_key, vars: {}, business_id: nil)
         request = Busybee::GRPC::CompleteJobRequest.new(
           jobKey: job_key.to_i,
           variables: Busybee::Serialization.to_json(vars)
         )
+        request.businessId = business_id.to_s unless business_id.nil?
 
         run_hooked(:complete_job, request)
       end
@@ -132,6 +141,27 @@ module Busybee
         run_hooked(:update_job_timeout, request)
       end
 
+      # Update the priority of a job (Camunda 8.10+). Zeebe activates
+      # higher-priority jobs first; priority is any integer, default 0.
+      #
+      # @param job_key [Integer] The unique job identifier
+      # @param priority [Integer] The new priority
+      # @return [Object] Response from the gateway (truthy)
+      # @raise [Busybee::GRPC::Error] if update operation fails, with grpc_status
+      #   :unimplemented on a gateway older than 8.10
+      #
+      # @example Move a job ahead of its peers
+      #   client.update_job_priority(123456, 100)
+      #
+      def update_job_priority(job_key, priority)
+        request = Busybee::GRPC::UpdateJobPriorityRequest.new(
+          jobKey: job_key.to_i,
+          priority: priority.to_i
+        )
+
+        run_hooked(:update_job_priority, request)
+      end
+
       # Activate and process jobs with a block (bounded, non-streaming).
       #
       # @param job_type [String] The job type to activate
@@ -160,11 +190,8 @@ module Busybee
         count = 0
         responses = run_hooked(:activate_jobs, activate_jobs_request(job_type, max_jobs, job_timeout, request_timeout))
 
-        # grpc's server_streamer sends eagerly but hands back a *lazy* enumerator,
-        # so a status error — backpressure included — raises here, on read, not at
-        # the dispatch above. That is outside run_hooked, where nothing translates
-        # it, hence the rescue below: without it the raw error escapes every
-        # Busybee::GRPC::Error handler between here and the top of the worker.
+        # Lazy enumerator: a status error (backpressure too) raises on read,
+        # outside run_hooked, so the rescue below wraps it.
         responses.each do |response|
           response.jobs.each do |raw_job|
             job = Busybee::Job.new(raw_job, client: self)

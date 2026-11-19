@@ -414,6 +414,7 @@ job.process_instance_key   #=> 2251799813685255 (process instance key)
 job.variables              #=> {"order_id" => "123", "total" => 99.99}
 job.headers                #=> {"priority" => "high"}
 job.retries                #=> 3
+job.process_instance_business_id #=> "ORD-123", or nil without one (Camunda 8.10+)
 ```
 
 #### Variables and Headers
@@ -557,6 +558,21 @@ Updates the job's retry count without completing or failing it.
 
 ```ruby
 job.update_retries(5)
+```
+
+#### `update_priority(priority)`
+
+Changes the job's priority without completing or failing it, and returns the job. `job.priority` reads the priority the job was activated with. Both need Camunda 8.10+; on an older gateway the update raises `GRPC::Unimplemented` and `priority` reads `0`.
+
+**Parameters:**
+- `priority` (Integer) - New priority; Zeebe activates higher-priority jobs first
+
+**Example:**
+
+```ruby
+job = activate_job("ship-order")
+expect(job.priority).to eq(50) # from the task's zeebe:jobPriorityDefinition
+job.update_priority(100)
 ```
 
 ## RSpec Matchers

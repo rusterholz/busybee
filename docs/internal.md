@@ -200,7 +200,7 @@ A hand-rolled conversion at a sleep site goes wrong for some shape the config la
 
 ### Job and Client Access
 
-Worker delegates `variables`, `headers`, `client`, `fail!`, `throw_bpmn_error!`, `update_retries`, and `update_timeout` to `job`. The `job` reader is also public. `complete!` is defined on Worker (not delegated): it validates required and undeclared outputs before delegating to `job.complete!`.
+Worker delegates `variables`, `headers`, `client`, `fail!`, `throw_bpmn_error!`, `update_retries`, `update_timeout`, and `update_priority` to `job`. The `job` reader is also public. `complete!` is defined on Worker (not delegated): it validates required and undeclared outputs before delegating to `job.complete!`.
 
 `Job#client` exposes the `Busybee::Client` instance that fetched the job. Workers can use `client` inside `perform` for direct API access, e.g. `client.publish_message(...)` for message correlation. The client reuses the existing gRPC connection, so there's no additional connection overhead.
 
@@ -579,7 +579,8 @@ end
 
 Job is the authoritative lifecycle object; there is no separate "event" mirror. The concerns a hook reads or annotates live on the Job through typed helper POROs, with readers delegated onto Job and writers kept internal to the POROs:
 
-- **`Job::Payload`**: immutable facts from the activation protobuf: `key`, `type`, `variables`, `headers`, `retries`, `deadline`.
+- **`Job::Payload`**: immutable facts from the activation protobuf: `key`, `type`, `variables`, `headers`, `retries`, `priority`, `deadline`, `process_instance_business_id`.
+- **`Job::BusinessId`**: the business ID the job arrived with and one staged through `Job#process_instance_business_id=`, which `complete!` sends; it mirrors Zeebe's own rejections at staging time, since the completion that would hit them comes later. Job owns the reader and the setter.
 - **`Job::Activation`**: receive-time context: `source`, `buffered`, `worker`, `worker_class`, `worker_status`. Populated by the Runner and Worker as the job is dispatched.
 - **`Job::Resolution`**, the outcome: `status` (starts `:ready`), `result`, and the error trio (`error`, `error_message`, `error_code`), plus predicates (`ready?`, `completed?`, `failed?`, `errored?`, `resolved?`). Advanced exactly once, by the Job lifecycle methods (`complete!` / `fail!` / `throw_bpmn_error!`).
 - **`Job::Timestamps`**: monotonic + UTC stamp pairs and the duration projections derived from them (see below).
@@ -710,7 +711,7 @@ The carriers seed with different **window widths**:
 - **`job`: narrow (the perform-only crutch).** `Worker.perform_job` wraps its whole body in `Call.with_job(job)`, so `before/around/after_perform`, `perform`, and autofail/autocomplete (everything that "runs as part of perform") correlate to the job. It is *not* seeded for the runner-level `around_job_execution` middleware, which sit *outside* `perform_job` and already hold the Job as their carrier.
 - **`worker_status`: wide (every job-in-scope window).** Nothing but `job.worker_status` reaches the runner's snapshot, so each per-job window seeds it through `Runner#with_fresh_worker_status(job)`: stamp a fresh point-in-time `Worker::Status` onto the job, then `Call.with_worker_status(job.worker_status)`: one object in both places. It runs at activation, at execution (wrapping the `around_job_execution` chain and `perform`), again around `on_job_executed` (a fresh re-stamp, so completion-time gauges are reported rather than the possibly long-ago start), and twice on the handback path: once around the wire call, once around `on_job_not_executed` carrying any handback error on the worker's own axis. A job-less **fetch scope** (`Call.with_worker_status(worker_status)` around polling `with_each_job`, stream open, hybrid drain) attributes the `ActivateJobs`/stream-open Call to the worker before any job exists.
 
-A Call folds a **curated** correlation subset, not the carriers' full `context_tags`/`logging_context` (those stay right for logging the Job and Worker *directly*). It takes worker identity (`worker_class`, `job_type`, `worker_mode`; `worker_name` logging-only, since it can be per-run-unique) and job identity (`bpmn_process_id`, `source`; `job_key` / `process_instance_key` / `element_id` logging-only), and excludes lifecycle telemetry: job timestamps, worker gauges, and `retries` (which reads like the call's `attempts` but means the engine's retry budget). The composition lives in `Call#{worker,job}_correlation_{tags,logging}`.
+A Call folds a **curated** correlation subset, not the carriers' full `context_tags`/`logging_context` (those stay right for logging the Job and Worker *directly*). It takes worker identity (`worker_class`, `job_type`, `worker_mode`; `worker_name` logging-only, since it can be per-run-unique) and job identity (`bpmn_process_id`, `source`; `job_key` / `process_instance_key` / `element_id` / `process_instance_business_id` logging-only (the last only when the job has one)), and excludes lifecycle telemetry: job timestamps, worker gauges, and `retries` (which reads like the call's `attempts` but means the engine's retry budget). The composition lives in `Call#{worker,job}_correlation_{tags,logging}`.
 
 ## Testing Module
 

@@ -49,6 +49,32 @@ RSpec.describe Busybee::Client::JobOperations do
       )
     end
 
+    it "sends a business_id to assign to the job's process instance" do
+      allow(stub).to receive(:complete_job).and_return(response)
+
+      client.complete_job(123456, business_id: :"order-123")
+
+      expect(stub).to have_received(:complete_job).with(
+        having_attributes(has_businessId?: true, businessId: "order-123")
+      )
+    end
+
+    it "sends an empty business_id as given, for the engine to reject" do
+      allow(stub).to receive(:complete_job).and_return(response)
+
+      client.complete_job(123456, business_id: "")
+
+      expect(stub).to have_received(:complete_job).with(having_attributes(has_businessId?: true, businessId: ""))
+    end
+
+    it "leaves business_id unset when not given" do
+      allow(stub).to receive(:complete_job).and_return(response)
+
+      client.complete_job(123456)
+
+      expect(stub).to have_received(:complete_job).with(having_attributes(has_businessId?: false))
+    end
+
     it "wraps GRPC errors" do
       grpc_error = GRPC::NotFound.new("job not found")
       allow(stub).to receive(:complete_job).and_raise(grpc_error)
@@ -315,6 +341,61 @@ RSpec.describe Busybee::Client::JobOperations do
     end
   end
 
+  describe "#update_job_priority" do
+    let(:response) { Busybee::GRPC::UpdateJobPriorityResponse.new }
+
+    it "updates job priority and returns truthy value" do
+      allow(stub).to receive(:update_job_priority).and_return(response)
+
+      result = client.update_job_priority(123456, 90)
+
+      expect(result).to be_truthy
+    end
+
+    it "sends job key and priority in request" do
+      allow(stub).to receive(:update_job_priority).and_return(response)
+
+      client.update_job_priority(123456, 90)
+
+      expect(stub).to have_received(:update_job_priority).with(
+        having_attributes(jobKey: 123456, priority: 90)
+      )
+    end
+
+    it "sends a zero priority rather than leaving it unset" do
+      allow(stub).to receive(:update_job_priority).and_return(response)
+
+      client.update_job_priority(123456, 0)
+
+      expect(stub).to have_received(:update_job_priority).with(
+        having_attributes(has_priority?: true, priority: 0)
+      )
+    end
+
+    it "converts job key and priority from strings to integers" do
+      allow(stub).to receive(:update_job_priority).and_return(response)
+
+      client.update_job_priority("123456", "90")
+
+      expect(stub).to have_received(:update_job_priority).with(
+        having_attributes(jobKey: 123456, priority: 90)
+      )
+    end
+
+    it "requires priority parameter" do
+      expect { client.update_job_priority(123456) }.to raise_error(ArgumentError)
+    end
+
+    it "wraps GRPC errors" do
+      grpc_error = GRPC::Unimplemented.new("Method not found")
+      allow(stub).to receive(:update_job_priority).and_raise(grpc_error)
+
+      expect { client.update_job_priority(123456, 90) }.to raise_error(Busybee::GRPC::Error) do |error|
+        expect(error.grpc_status).to eq(:unimplemented)
+      end
+    end
+  end
+
   describe "#with_each_job" do
     # rubocop:disable RSpec/IndexedLet, Lint/EmptyBlock
     let(:raw_job1) do
@@ -553,6 +634,14 @@ RSpec.describe Busybee::Client::JobOperations do
       )
     end
 
+    it "never asks for a leased activation" do
+      allow(stub).to receive(:activate_jobs).and_return(responses)
+
+      client.with_each_job("test-job") { |_job| }
+
+      expect(stub).to have_received(:activate_jobs).with(having_attributes(withLease: false))
+    end
+
     it "requires a block" do
       expect do
         client.with_each_job("test-job")
@@ -698,6 +787,14 @@ RSpec.describe Busybee::Client::JobOperations do
         having_attributes(timeout: 30_000),
         return_op: true
       )
+    end
+
+    it "never asks for a leased activation" do
+      allow(stub).to receive(:stream_activated_jobs).and_return(operation)
+
+      client.open_job_stream("test-job")
+
+      expect(stub).to have_received(:stream_activated_jobs).with(having_attributes(withLease: false), return_op: true)
     end
 
     it "wraps GRPC errors" do

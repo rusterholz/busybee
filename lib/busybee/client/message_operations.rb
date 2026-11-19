@@ -16,6 +16,9 @@ module Busybee
       #   (defaults to Busybee.default_message_ttl)
       # @param vars [Hash] Variables to pass with the message
       # @param tenant_id [String, nil] Tenant ID for multi-tenancy
+      # @param business_id [String, nil] Correlate only to instances with this business ID,
+      #   and give it to an instance a message start event creates (Camunda 8.10+; an older
+      #   gateway ignores it, so the message correlates to any instance)
       # @return [Integer] The message key
       # @raise [ArgumentError] if vars is not a Hash
       # @raise [Busybee::GRPC::Error] if publishing fails
@@ -30,7 +33,10 @@ module Busybee
       #     ttl: 30.seconds,
       #     vars: { orderId: 123 })
       #
-      def publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil)
+      # @example Only for the instance with a business ID
+      #   client.publish_message("order-ready", correlation_key: "order-123", business_id: "ORD-123")
+      #
+      def publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil, business_id: nil) # rubocop:disable Metrics/ParameterLists
         raise ArgumentError, "vars must be a Hash" unless vars.is_a?(Hash)
 
         ttl_ms = Busybee::Durations.milliseconds_from(ttl || Busybee.default_message_ttl)
@@ -42,6 +48,7 @@ module Busybee
           timeToLive: ttl_ms,
           tenantId: tenant_id&.to_s
         )
+        request.businessId = business_id.to_s unless business_id.nil?
 
         run_hooked(:publish_message, request).key
       end

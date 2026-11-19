@@ -216,6 +216,8 @@ When you receive jobs through `with_each_job` or `open_job_stream`, each job is 
 | `process_instance_key` | `Integer` | The process instance this job belongs to |
 | `bpmn_process_id` | `String` | The BPMN process ID |
 | `retries` | `Integer` | Remaining retry attempts |
+| `priority` | `Integer` | Job priority, highest activated first (Camunda 8.10+; `0` on older gateways, which don't send it) |
+| `process_instance_business_id` | `String`, `nil` | The process instance's [business ID](#business-ids), or one [staged](#completing-with-a-business-id) for the completion (Camunda 8.10+; `nil` when there's none or the gateway doesn't send it) |
 | `deadline` | `Time` | When the job lock expires (frozen Time object) |
 | `variables` | `Hash` | Job input variables (with indifferent access) |
 | `headers` | `Hash` | Custom headers from the BPMN task definition |
@@ -342,6 +344,59 @@ end
 puts "Stream closed, shutting down"
 ```
 
+## Business IDs
+
+A business ID ties a process instance to a record in your own domain, such as an order number. It's a string of up to 256 characters (emoji and other characters outside the Basic Multilingual Plane count as two) that belongs to the root process instance, and the child instances its call activities start inherit it.
+
+You give an instance its business ID when you start it, or later:
+
+| Where | How | Requires |
+|-------|-----|----------|
+| Starting an instance | [`start_instance(…, business_id:)`](#start_instance) | Camunda 8.9+ |
+| A message start event | [`publish_message(…, business_id:)`](#publish_message) | Camunda 8.10+ |
+| Completing a job | [`job.process_instance_business_id =`](#completing-with-a-business-id), or [`complete_job(…, business_id:)`](#complete_job) | Camunda 8.10+ |
+| A running instance | [`assign_business_id`](#assign_business_id) | Camunda 8.10+ |
+
+An instance gets one business ID, once. After that, Zeebe rejects every attempt to assign one, the identical ID included, with `grpc_status` `:failed_precondition`.
+
+On Camunda 8.10 and later, a message published with a business ID also correlates only to instances with that business ID, so you can address one order's instance even when its correlation key is shared.
+
+Several instances can share a business ID unless the cluster enables business ID uniqueness. With it enabled, starting an instance of a process while another active root instance of that process holds the same business ID raises `Busybee::GRPC::Error` with `grpc_status` `:already_exists`, a message start event in the same situation creates no instance and raises nothing, and assigning a business ID through a job's completion isn't possible at all.
+
+**Older gateways ignore business IDs silently.** A gateway that predates the field drops it without an error: an instance started with a business ID on Camunda 8.8 has none, a job completed with one on 8.8 or 8.9 completes without assigning it, and a message published with one on 8.8 or 8.9 correlates to any instance waiting with its correlation key, whatever that instance's business ID. Jobs carry the business ID from Camunda 8.10, so on 8.9 an instance started with one hands its jobs none.
+
+### Completing with a Business ID
+
+When the business ID only becomes known partway through a process, a job can assign it as it completes. Stage it on the job, and it rides along with the job's completion, whether your worker calls `complete!` itself or leaves it to auto-complete:
+
+```ruby
+class ReserveInventoryWorker < Busybee::Worker
+  job_type "reserve-inventory"
+  output :order_id
+
+  def perform
+    order = Order.create!(sku: variables[:sku])
+    job.process_instance_business_id ||= order.number
+    { order_id: order.id }
+  end
+end
+```
+
+`job.process_instance_business_id` reads the staged business ID, or else the one the job arrived with, and `nil` when there's neither. Use `||=`, as above: it stages a business ID only when the job arrived without one, so it never raises.
+
+- **The first one wins.** Staging on a job that arrived with a business ID raises `Busybee::BusinessIdAlreadyAssigned`, whatever the value, `nil` included. Only jobs created after the assignment carry the business ID, so a job that was already waiting when another job assigned it still arrives without one (see the warning below).
+- **Only a completion carries it.** A job that fails or throws a BPMN error drops its staged business ID. A completion Zeebe rejects keeps it, so a retried `complete!` sends it again.
+- **Staging again replaces it.** A second, different business ID staged before the completion takes the first one's place, and busybee logs a warning. Staging `nil` clears it.
+- **Zeebe's limits apply up front.** An empty business ID, or one longer than 256 characters as Zeebe counts them, raises `ArgumentError` when you stage it.
+
+> **A completion Zeebe rejects for its business ID is rejected every time.** The job stays open, times out and comes back without spending a retry, and the same staging is rejected again each time it's offered. Three cases reach this:
+>
+> - **A cluster with business ID uniqueness enabled**, which rejects every completion that carries a business ID.
+> - **A job of a call activity's child instance.** The business ID belongs to the root instance, and Zeebe rejects a child job's completion that carries one. A child job of a root with no business ID arrives with none, so `||=` stages one.
+> - **Parallel jobs of one instance.** When two jobs that both arrived without a business ID each stage one, the first completion assigns it, and the other job, created before the assignment, keeps arriving without it.
+>
+> Stage business IDs from a single job of the root instance, never from a call activity's child, or give the instance its business ID when you start it.
+
 ---
 
 ## API Reference
@@ -353,6 +408,7 @@ puts "Stream closed, shutting down"
 | [Process](#process-operations) | [`deploy_process`](#deploy_process) | Deploy BPMN files |
 | | [`start_instance`](#start_instance) | Start a process instance |
 | | [`cancel_instance`](#cancel_instance) | Cancel a running instance |
+| | [`assign_business_id`](#assign_business_id) | Give a running instance its business ID (Camunda 8.10+) |
 | [Job](#job-operations) | [`with_each_job`](#with_each_job) | Poll for jobs (bounded) |
 | | [`open_job_stream`](#open_job_stream) | Stream jobs (push-based) |
 | | [`complete_job`](#complete_job) | Complete a job |
@@ -360,6 +416,7 @@ puts "Stream closed, shutting down"
 | | [`throw_bpmn_error`](#throw_bpmn_error) | Throw a BPMN error |
 | | [`update_job_retries`](#update_job_retries) | Update job retry count |
 | | [`update_job_timeout`](#update_job_timeout) | Extend job deadline |
+| | [`update_job_priority`](#update_job_priority) | Change job priority (Camunda 8.10+) |
 | | [`resolve_incident`](#resolve_incident) | Resolve a failed-job incident |
 | [Message](#message-operations) | [`publish_message`](#publish_message) | Publish a correlated message |
 | | [`broadcast_signal`](#broadcast_signal) | Broadcast a signal to all listeners |
@@ -403,7 +460,7 @@ result = client.deploy_process("order.bpmn", "payment.bpmn", "shipping.bpmn")
 Start a new process instance from a deployed workflow.
 
 ```ruby
-start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil) → Integer
+start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil, business_id: nil) → Integer
 ```
 
 | Parameter | Type | Description |
@@ -412,6 +469,7 @@ start_instance(bpmn_process_id, vars: {}, version: :latest, tenant_id: nil) → 
 | `vars:` | `Hash` | Variables to initialize the process with (default: `{}`) |
 | `version:` | `Integer`, `:latest`, `nil` | Process version to start (default: `:latest`) |
 | `tenant_id:` | `String`, `nil` | Tenant ID for multi-tenancy (optional) |
+| `business_id:` | `String`, `nil` | The instance's [business ID](#business-ids) (optional; Camunda 8.9+, ignored by older gateways; `""` starts it without one) |
 
 **Returns:** The process instance key (an integer uniquely identifying this instance).
 
@@ -427,6 +485,9 @@ instance_key = client.start_instance("order-fulfillment", vars: {
 
 # Start a specific version
 instance_key = client.start_instance("order-fulfillment", version: 3)
+
+# Start with a business ID
+instance_key = client.start_instance("order-fulfillment", business_id: "ORD-123")
 
 # Alias: start_process_instance
 instance_key = client.start_process_instance("order-fulfillment", vars: { orderId: "ORD-456" })
@@ -460,6 +521,36 @@ canceled = client.cancel_instance(2251799813685300, ignore_missing: true)
 
 # Alias: cancel_process_instance
 client.cancel_process_instance(instance_key, ignore_missing: true)
+```
+
+#### assign_business_id
+
+Give a running process instance its [business ID](#business-ids).
+
+**Requires Camunda 8.10 or later.** An older gateway answers with `UNIMPLEMENTED`.
+
+```ruby
+assign_business_id(process_instance_key, business_id) → Object
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `process_instance_key` | `Integer` | The root process instance's key |
+| `business_id` | `String` | The business ID, up to 256 characters (emoji count as two) |
+
+**Returns:** A truthy response from the gateway.
+
+**Raises:** `Busybee::GRPC::Error` if the assignment fails: `grpc_status` `:failed_precondition` when the instance already has a business ID (the same one included), was started by a call activity, or belongs to a cluster with business ID uniqueness enabled, `:not_found` when it isn't active, `:invalid_argument` for an empty or overlong business ID, and `:unimplemented` on a gateway older than 8.10.
+
+Only jobs created after the assignment carry the business ID; a job that was already waiting arrives without it.
+
+**From a worker, stage the business ID on the job instead** ([Completing with a Business ID](#completing-with-a-business-id)). It's assigned with the completion, so a job that fails after the call and runs again doesn't hit `:failed_precondition` from its own earlier assignment.
+
+```ruby
+client.assign_business_id(instance_key, "ORD-123")
+
+# Alias: assign_process_instance_business_id
+client.assign_process_instance_business_id(instance_key, "ORD-123")
 ```
 
 ---
@@ -554,23 +645,27 @@ puts "Stream closed, shutting down"
 Mark a job as successfully completed, optionally returning variables to the workflow.
 
 ```ruby
-complete_job(job_key, vars: {}) → Object
+complete_job(job_key, vars: {}, business_id: nil) → Object
 ```
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `job_key` | `Integer` | The job key |
 | `vars:` | `Hash` | Variables to return to the workflow (default: `{}`) |
+| `business_id:` | `String`, `nil` | A [business ID](#business-ids) to assign to the job's process instance as part of the completion (optional; Camunda 8.10+, ignored by older gateways) |
 
 **Returns:** A truthy response from the gateway.
 
-**Raises:** `Busybee::GRPC::Error` if completion fails.
+**Raises:** `Busybee::GRPC::Error` if completion fails: `grpc_status` `:failed_precondition` when the process instance can't take the business ID, which leaves the job open.
 
-**Prefer `Job#complete!`** when processing jobs through `with_each_job` or `open_job_stream`.
+**Prefer `Job#complete!`** when processing jobs through `with_each_job` or `open_job_stream`, and stage a business ID on the job with [`process_instance_business_id=`](#completing-with-a-business-id).
 
 ```ruby
 # Direct client call (when you only have the job key)
 client.complete_job(job_key, vars: { result: "success" })
+
+# Assign the job's process instance a business ID as it completes
+client.complete_job(job_key, business_id: "ORD-123")
 
 # Preferred: use the Job object
 job.complete!(result: "success")
@@ -683,6 +778,29 @@ update_job_timeout(job_key, timeout) → Object
 client.update_job_timeout(job_key, 30.seconds)
 ```
 
+#### update_job_priority
+
+Change a job's priority. Zeebe activates higher-priority jobs of a type first, and an updated job keeps its new priority when it's failed and activated again, ahead of any peers with a lower one. A job's starting priority comes from its BPMN task (`<zeebe:jobPriorityDefinition priority="=expression"/>`) and is `0` without one. Any integer is accepted, negative ones included.
+
+**Requires Camunda 8.10 or later.** An older gateway answers with `UNIMPLEMENTED`.
+
+```ruby
+update_job_priority(job_key, priority) → Object
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_key` | `Integer` | The job key |
+| `priority` | `Integer` | The new priority |
+
+**Returns:** A truthy response from the gateway.
+
+**Raises:** `Busybee::GRPC::Error` if the update fails: `grpc_status` `:not_found` for a job that no longer exists, `:unimplemented` on a gateway older than 8.10.
+
+```ruby
+client.update_job_priority(job_key, 100)
+```
+
 #### resolve_incident
 
 Resolve an incident so the workflow can continue. Incidents occur when a job fails with no retries remaining, or when an expression evaluation fails.
@@ -723,7 +841,7 @@ Messages enable communication with waiting process instances. A message correlat
 Publish a message that correlates to waiting process instances.
 
 ```ruby
-publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil) → Integer
+publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil, business_id: nil) → Integer
 ```
 
 | Parameter | Type | Description |
@@ -733,10 +851,15 @@ publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil) → 
 | `vars:` | `Hash` | Variables to pass with the message (default: `{}`) |
 | `ttl:` | `Integer`, `ActiveSupport::Duration`, `nil` | Time-to-live (see below) |
 | `tenant_id:` | `String`, `nil` | Tenant ID for multi-tenancy (optional) |
+| `business_id:` | `String`, `nil` | Deliver only to instances with this [business ID](#business-ids) (optional; Camunda 8.10+, see below; `""` publishes it without one) |
 
 **Returns:** The message key.
 
 **Raises:** `ArgumentError` if `vars` is not a Hash; `Busybee::GRPC::Error` if publishing fails.
+
+**Business ID:** On Camunda 8.10 and later, a message with a `business_id:` correlates only to instances whose business ID matches it exactly, on top of the correlation key, and an instance its message start event creates gets that business ID. A message without one correlates to any instance with the correlation key, as before.
+
+> **Camunda 8.8 and 8.9 silently drop `business_id:` on messages, which widens correlation instead of narrowing it.** The message correlates to any instance waiting with the correlation key, whatever its business ID, and nothing raises. If you rely on the narrowing, make sure every cluster you publish to runs 8.10 or later.
 
 **Default TTL:** When `ttl:` is omitted, Busybee uses `Busybee.default_message_ttl` (default: 10 seconds). You can change this globally:
 
@@ -761,6 +884,9 @@ client.publish_message("payment-received",
 
 # Publish with TTL in milliseconds
 client.publish_message("order-shipped", correlation_key: "ORD-123", ttl: 60_000)
+
+# Deliver only to the instance with this business ID (Camunda 8.10+)
+client.publish_message("order-shipped", correlation_key: "ORD-123", business_id: "ORD-123")
 ```
 
 #### broadcast_signal

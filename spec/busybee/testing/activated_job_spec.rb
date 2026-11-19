@@ -21,6 +21,8 @@ RSpec.describe Busybee::Testing::ActivatedJob do
       variables: '{"foo": "bar", "count": 42}',
       customHeaders: '{"task_type": "process_order"}',
       retries: 3,
+      priority: 40,
+      businessId: "ORD-1",
       deadline: 1640000000000
     )
     # rubocop:enable RSpec/VerifiedDoubles
@@ -54,6 +56,24 @@ RSpec.describe Busybee::Testing::ActivatedJob do
   describe "#retries" do
     it "returns the retry count" do
       expect(job.retries).to eq(3)
+    end
+  end
+
+  describe "#priority" do
+    it "returns the job's priority" do
+      expect(job.priority).to eq(40)
+    end
+  end
+
+  describe "#process_instance_business_id" do
+    it "returns the process instance's business ID" do
+      expect(job.process_instance_business_id).to eq("ORD-1")
+    end
+
+    it "returns nil when the job arrived without one" do
+      allow(raw_job).to receive(:businessId).and_return("")
+
+      expect(job.process_instance_business_id).to be_nil
     end
   end
 
@@ -225,6 +245,17 @@ RSpec.describe Busybee::Testing::ActivatedJob do
         an_instance_of(Busybee::GRPC::UpdateJobRetriesRequest)
       )
       job.update_retries(5)
+    end
+  end
+
+  describe "#update_priority" do
+    it "sends UpdateJobPriorityRequest to client and returns self" do
+      allow(client).to receive(:update_job_priority)
+
+      expect(job.update_priority(90)).to be(job)
+      expect(client).to have_received(:update_job_priority).with(
+        an_instance_of(Busybee::GRPC::UpdateJobPriorityRequest).and(having_attributes(jobKey: 12_345, priority: 90))
+      )
     end
   end
 

@@ -70,6 +70,9 @@ module Busybee
         # @param headers [Hash] custom headers
         # @param key [Integer] job key; defaults to a random one. Pass it when a
         #   spec correlates the same job across assertions.
+        # @param priority [Integer] job priority; 0, Zeebe's default, unless given
+        # @param process_instance_business_id [String, nil] the business ID the job
+        #   arrives with; none unless given
         # @param client [Busybee::Client] defaults to a fresh {build_test_client},
         #   so resolving the job runs the genuine call seam and fires call hooks
         # @param worker_class [Class<Busybee::Worker>] what a job-noun filter matches on
@@ -82,12 +85,14 @@ module Busybee
         # @return [Busybee::Job]
         def build_test_job(type: "test", key: nil, variables: {}, headers: {}, # rubocop:disable Metrics/ParameterLists
                            bpmn_process_id: "test-process", element_id: "test-element",
-                           retries: 3, worker: nil, tenant_id: nil, client: nil,
+                           retries: 3, priority: 0, process_instance_business_id: nil,
+                           worker: nil, tenant_id: nil, client: nil,
                            worker_class: nil, worker_status: nil, source: nil,
                            buffered: false, activated: true, status: nil)
           raw_job = build_test_raw_job(type: type, key: key, variables: variables, headers: headers,
                                        bpmn_process_id: bpmn_process_id, element_id: element_id,
-                                       retries: retries, worker: worker, tenant_id: tenant_id)
+                                       retries: retries, priority: priority, worker: worker, tenant_id: tenant_id,
+                                       process_instance_business_id: process_instance_business_id)
           job = Busybee::Job.new(raw_job, client: client || build_test_client)
           HookRegistry.with_only do # a fixture must not fire the hooks under test
             job.set_context(worker_class: worker_class, worker_status: worker_status,
@@ -104,7 +109,8 @@ module Busybee
         # @return [Busybee::GRPC::ActivatedJob]
         def build_test_raw_job(type: "test", key: nil, variables: {}, headers: {}, # rubocop:disable Metrics/ParameterLists
                                bpmn_process_id: "test-process", element_id: "test-element",
-                               retries: 3, worker: nil, tenant_id: nil)
+                               retries: 3, priority: 0, worker: nil, tenant_id: nil,
+                               process_instance_business_id: nil)
           Busybee::GRPC::ActivatedJob.new(
             key: key || rand(100_000..999_999),
             type: type.to_s,
@@ -112,6 +118,8 @@ module Busybee
             bpmnProcessId: bpmn_process_id.to_s,
             elementId: element_id.to_s,
             retries: retries,
+            priority: priority,
+            businessId: process_instance_business_id.to_s,
             worker: (worker || Busybee.worker_name).to_s,
             deadline: (Time.now.to_i + 300) * 1000,
             variables: Busybee::Serialization.to_json(variables),

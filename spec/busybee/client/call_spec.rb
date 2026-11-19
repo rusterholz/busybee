@@ -244,10 +244,12 @@ RSpec.describe Busybee::Client::Call do
                         worker_class: stub_const("CorrWorker", Class.new),
                         job_type: "process_order", worker_mode: :polling, worker_name: "host-7")
       end
+      let(:business_id) { nil }
       let(:job) do
         instance_double(Busybee::Job, worker_status: worker_status,
                                       bpmn_process_id: "order-flow", source: :poll,
-                                      key: 123, process_instance_key: 456, element_id: "task-1")
+                                      key: 123, process_instance_key: 456, element_id: "task-1",
+                                      process_instance_business_id: business_id)
       end
 
       def call_in_context
@@ -280,6 +282,22 @@ RSpec.describe Busybee::Client::Call do
         expect(call_in_context.logging_context).to include(
           worker_name: "host-7", job_key: 123, process_instance_key: 456, element_id: "task-1"
         )
+      end
+
+      it "omits the business ID from logging_context when the job has none" do
+        expect(call_in_context.logging_context).not_to have_key(:process_instance_business_id)
+      end
+
+      context "when the job has a business ID" do
+        let(:business_id) { "ORD-1" }
+
+        it "adds it to logging_context" do
+          expect(call_in_context.logging_context).to include(process_instance_business_id: "ORD-1")
+        end
+
+        it "keeps it out of context_tags" do
+          expect(call_in_context.context_tags).not_to have_key(:process_instance_business_id)
+        end
       end
     end
   end

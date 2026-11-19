@@ -1,25 +1,11 @@
 # frozen_string_literal: true
 
-# Integration test helper for testing busybee against a real Zeebe instance
-#
-# Usage:
-#   1. Start Zeebe: rake zeebe:start && rake zeebe:health
-#   2. Run tests: RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration
-#
-# Tests will skip gracefully if Zeebe is not running, unless ZEEBE_REQUIRED=1
-# is set, in which case tests will fail (useful for CI).
+# Specs against a real Zeebe: rake zeebe:start && rake zeebe:health, then
+# RUN_INTEGRATION_TESTS=1 bundle exec rspec --tag integration. They skip when
+# Zeebe is down, or fail with ZEEBE_REQUIRED=1 (CI).
 
 module IntegrationHelpers
-  # Skips or fails the current test if Zeebe is not available
-  #
-  # By default, tests skip gracefully when Zeebe is not running (for local dev).
-  # Set ZEEBE_REQUIRED=1 to fail instead of skip (for CI).
-  #
-  # Call this in a before block:
-  #
-  #   before do
-  #     skip_unless_zeebe_available
-  #   end
+  # Skips (or, with ZEEBE_REQUIRED=1, fails) when Zeebe is unreachable.
   def skip_unless_zeebe_available
     return if zeebe_available?
 
@@ -28,40 +14,41 @@ module IntegrationHelpers
     skip "Zeebe is not running (start with: rake zeebe:start)"
   end
 
-  # Returns a GRPC stub for Camunda Cloud
-  #
-  # Raises KeyError with clear message if required environment variables are not set.
+  # Raises naming the missing variables when cloud credentials aren't set.
   def camunda_cloud_grpc_stub
     @camunda_cloud_grpc_stub ||= camunda_cloud_credentials.grpc_stub
   end
 
-  # Returns a GRPC stub for local Zeebe (alias for consistency with camunda_cloud_grpc_stub)
   def local_grpc_stub
     Busybee::Testing::Helpers.grpc_client
   end
 
-  # Returns a Busybee::Client configured for Camunda Cloud
-  #
-  # Raises KeyError with clear message if required environment variables are not set.
   def camunda_cloud_busybee_client
     @camunda_cloud_busybee_client ||= Busybee::Client.new(camunda_cloud_credentials)
   end
 
-  # Returns a Busybee::Client configured for local Zeebe
   def local_busybee_client
     @local_busybee_client ||= Busybee::Client.new(insecure: true)
   end
 
+  # Whether the connected gateway is at least the given Camunda version, so a
+  # spec can pin both what a newer call does and how an older gateway answers it.
+  # Compares releases, so a prerelease gateway (8.10.0-alpha1) counts as 8.10.
+  def gateway_at_least?(version)
+    Gem::Version.new(gateway_version).release >= Gem::Version.new(version)
+  end
+
+  # Asked once per process and cluster.
+  def gateway_version
+    cloud = Busybee.credential_type == :camunda_cloud
+    IntegrationHelpers.gateway_versions[cloud] ||=
+      (cloud ? camunda_cloud_grpc_stub : local_grpc_stub).topology(Busybee::GRPC::TopologyRequest.new).gatewayVersion
+  end
+
+  def self.gateway_versions = (@gateway_versions ||= {})
+
   private
 
-  # Returns Camunda Cloud credentials
-  #
-  # Raises with clear message if required environment variables are not set.
-  # Required:
-  #   - CAMUNDA_CLIENT_ID
-  #   - CAMUNDA_CLIENT_SECRET
-  #   - CAMUNDA_CLUSTER_ID
-  #   - CAMUNDA_CLUSTER_REGION
   def camunda_cloud_credentials
     @camunda_cloud_credentials ||= begin
       require "busybee/credentials/camunda_cloud"
@@ -78,7 +65,6 @@ module IntegrationHelpers
   end
 
   def fail_if_cloud_credentials_absent!
-    # Fail fast if credentials aren't configured
     missing = %w[CAMUNDA_CLIENT_ID CAMUNDA_CLIENT_SECRET CAMUNDA_CLUSTER_ID CAMUNDA_CLUSTER_REGION].reject do |var|
       ENV.fetch(var, nil)
     end
@@ -99,19 +85,14 @@ module IntegrationHelpers
 end
 
 RSpec.configure do |config|
-  # Include integration helpers in all integration tests
   config.include IntegrationHelpers, integration: true
   config.include IntegrationHelpers, camunda_cloud: true
 
-  # Check Zeebe availability before running integration tests
   config.before(:each, :integration) do
     skip_unless_zeebe_available
   end
 
-  # Filter specs based on multi-tenancy mode
-  # - :single_tenant_only specs only run when MULTITENANCY_ENABLED is false/unset
-  # - :multi_tenant_only specs only run when MULTITENANCY_ENABLED is true
-  # - Untagged specs run in both modes
+  # :single_tenant_only and :multi_tenant_only run in their own mode; untagged, in both.
   multitenancy_enabled = ENV["MULTITENANCY_ENABLED"] == "true"
 
   if multitenancy_enabled

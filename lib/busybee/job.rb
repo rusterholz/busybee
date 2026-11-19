@@ -6,6 +6,7 @@ require "busybee/client/call"
 require "busybee/durations"
 require "busybee/error"
 require "busybee/job/activation"
+require "busybee/job/business_id"
 require "busybee/job/context"
 require "busybee/job/error_formatting"
 require "busybee/job/payload"
@@ -70,6 +71,7 @@ module Busybee
       @resolution = Resolution.new
       @context = Context.new
       @timestamps = Timestamps.new
+      @business_id = BusinessId.new(self)
     end
 
     # Route kwargs through the Job's typed POROs: Activation::KEYS land in
@@ -99,9 +101,9 @@ module Busybee
     # High-cardinality projection of the job's state. Strict superset of
     # context_tags: each component's logging_context contains everything its
     # context_tags does plus additional unbounded-dimension values. Job prepends
-    # the override-aware retries and deadline it owns.
+    # the override-aware values it owns (see owned_logging_context).
     def logging_context
-      { retries: retries, deadline: deadline }.compact.
+      owned_logging_context.
         merge(payload.logging_context).
         merge(activation.logging_context).
         merge(resolution.logging_context).
@@ -112,15 +114,30 @@ module Busybee
     # Number of retries remaining. Layers an override from update_retries on
     # top of the protobuf value.
     # @return [Integer]
-    def retries
-      @retries_override || payload.retries
-    end
+    def retries = @retries_override || payload.retries
 
     # Job deadline as a frozen Time. Layers an override from update_timeout on
     # top of the protobuf value.
     # @return [Time]
-    def deadline
-      @deadline_override || payload.deadline
+    def deadline = @deadline_override || payload.deadline
+
+    # Job priority; higher is activated first. Layers an override from
+    # update_priority on top of the protobuf value. Camunda 8.10+; reads 0 from an older gateway.
+    # @return [Integer]
+    def priority = @priority_override || payload.priority
+
+    # Staged business ID, else the one the job arrived with (Camunda 8.10+).
+    # @return [String, nil]
+    def process_instance_business_id = @business_id.current
+
+    # Stage a business ID to assign to the process instance with this job's
+    # completion, manual or automatic (Camunda 8.10+); nil clears it.
+    # @raise [Busybee::BusinessIdAlreadyAssigned] if the job arrived with one
+    # @raise [ArgumentError] if value is empty or past 256 characters (emoji count as two)
+    # @raise [Busybee::JobAlreadyHandled] if the job is already resolved
+    def process_instance_business_id=(value)
+      ensure_resolvable!("assign a business ID through")
+      @business_id.stage(value)
     end
 
     # Complete the job with optional output variables.
@@ -134,7 +151,7 @@ module Busybee
 
       warn_discarded_result(vars) if resolution.result_set?
       resolution.set_result(vars)
-      correlated { @client.complete_job(key, vars: resolution.result || {}) }.tap do
+      correlated { @client.complete_job(key, vars: resolution.result || {}, **@business_id.completion_kwargs) }.tap do
         resolve!(:complete)
         log_resolution("Completed")
       end
@@ -191,9 +208,7 @@ module Busybee
     # @return [Object] Response from update_job_retries operation
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_retries(count)
-      correlated { @client.update_job_retries(key, count) }.tap do
-        @retries_override = count
-      end
+      correlated { @client.update_job_retries(key, count) }.tap { @retries_override = count }
     end
 
     # Update the timeout for this job.
@@ -203,9 +218,17 @@ module Busybee
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_timeout(duration)
       duration_seconds = Busybee::Durations.seconds_from(duration)
-      correlated { @client.update_job_timeout(key, duration) }.tap do
-        @deadline_override = (Time.now.utc + duration_seconds).freeze
-      end
+      correlated { @client.update_job_timeout(key, duration) }.
+        tap { @deadline_override = (Time.now.utc + duration_seconds).freeze }
+    end
+
+    # Update the priority of this job (Camunda 8.10+).
+    #
+    # @param priority [Integer] The new priority; higher is activated first
+    # @return [Object] Response from update_job_priority operation
+    # @raise [Busybee::GRPC::Error] if the update fails
+    def update_priority(priority)
+      correlated { @client.update_job_priority(key, priority) }.tap { @priority_override = priority.to_i }
     end
 
     # ===== Framework-write seam (underscore idiom; no public setters) =====
@@ -220,6 +243,11 @@ module Busybee
     private
 
     attr_reader :activation, :resolution
+
+    def owned_logging_context
+      { retries: retries, deadline: deadline, priority: priority,
+        process_instance_business_id: process_instance_business_id }.compact
+    end
 
     # Output validation is the worker's contract, so it applies exactly when a
     # worker is attached. Checked here, not via Worker#complete!, which calls this.
