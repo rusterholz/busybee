@@ -12,7 +12,7 @@ Most users should use one of Busybee's higher-level abstractions:
 
 This GRPC layer is an escape hatch for any edge cases you may encounter which need direct access to Zeebe APIs that the higher-level abstractions don't expose. Examples might include:
 
-- Calling RPCs not yet wrapped by the Client (e.g., `MigrateProcessInstance`, `ModifyProcessInstance`)
+- Calling RPCs not yet wrapped by the Client (see [What the Client Doesn't Wrap](#what-the-client-doesnt-wrap))
 - Building custom tooling that needs low-level control
 - Debugging or experimenting with the Zeebe API directly
 - Using this layer as a drop-in, 100%-compatible replacement for the discontinued [zeebe-client](https://github.com/zeebe-io/zeebe-client-ruby) gem
@@ -132,3 +132,21 @@ The Gateway service includes, among others:
 | `MigrateProcessInstance` | Migrate a process instance to a new version |
 
 The full list, with every request and response field, is in the gateway's [protocol definition](../proto/gateway.proto), which follows Camunda 8.10. See the [Zeebe gRPC API documentation](https://docs.camunda.io/docs/apis-tools/zeebe-api/) for more on request/response structures.
+
+## What the Client Doesn't Wrap
+
+`Busybee::Client` doesn't yet have methods for these gateway calls, so reach them through the stub:
+
+| RPC | Description |
+|-----|-------------|
+| `CreateProcessInstanceWithResult` | Start a process instance and wait for it to complete |
+| `DeleteResource` | Delete a deployed resource |
+| `EvaluateConditional` | Evaluate root-level conditional start events (Camunda 8.9+) |
+| `EvaluateDecision` | Evaluate a DMN decision |
+| `MigrateProcessInstance` | Migrate a process instance to a new version |
+| `ModifyProcessInstance` | Modify a running process instance |
+| `Topology` | Get cluster topology (brokers, partitions) |
+
+`DeployProcess` is deprecated in favor of `DeployResource`, which `Client#deploy_process` uses.
+
+The calls the Client does wrap don't expose every request field either. Among those it never sets are job activation's `tenantFilter` and `withLease`, and process creation's `versionTag`.

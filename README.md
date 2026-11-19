@@ -227,7 +227,7 @@ Tooling for deploying your BPMN processes to Zeebe clusters from CI/CD.
 
 ### Low-Level GRPC Access (available now!)
 
-For edge cases where the higher-level abstractions don't cover what you need, busybee exposes the raw GRPC interface to Zeebe. This is a complete drop-in replacement for the now-discontinued [zeebe-client](https://github.com/zeebe-io/zeebe-client-ruby) gem.
+For edge cases where the higher-level abstractions don't cover what you need, busybee exposes the raw GRPC interface to Zeebe. This is a complete drop-in replacement for the now-discontinued [zeebe-client](https://github.com/zeebe-io/zeebe-client-ruby) gem. It's also how to reach the gateway calls the Client doesn't wrap yet, such as process instance migration and modification, DMN decision evaluation, and resource deletion: [the full list](docs/grpc.md#what-the-client-doesnt-wrap).
 
 > Most users won't need this, as the Testing module, Client class, and Worker pattern cover most common use cases.
 
