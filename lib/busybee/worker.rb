@@ -35,8 +35,7 @@ module Busybee
     attr_reader :job
 
     delegate :variables, :headers, :client, :fail!, :throw_bpmn_error!,
-             :update_retries, :update_timeout, :update_priority,
-             :process_instance_business_id, :process_instance_business_id=, to: :job
+             :update_retries, :update_timeout, :update_priority, to: :job
 
     # Container identity (Busybee.worker_name), not the per-job worker instance.
     # Explicit identity for metrics/registries.

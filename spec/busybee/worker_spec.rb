@@ -872,12 +872,9 @@ RSpec.describe Busybee::Worker do
       end
     end
 
-    describe "#process_instance_business_id" do
-      it "delegates reading and staging to job" do
-        instance.process_instance_business_id = "ORD-1"
-
-        expect(job.process_instance_business_id).to eq("ORD-1")
-        expect(instance.process_instance_business_id).to eq("ORD-1")
+    describe "business ID" do
+      it "is reached through job, not delegated to the worker" do
+        expect(instance).not_to respond_to(:process_instance_business_id, :process_instance_business_id=)
       end
     end
   end
@@ -892,7 +889,7 @@ RSpec.describe Busybee::Worker do
       stub_const("StagingWorker", Class.new(described_class) do
         strict_outputs false
         define_method(:perform) do
-          self.process_instance_business_id ||= "ORD-#{variables[:order_id]}"
+          job.process_instance_business_id ||= "ORD-#{variables[:order_id]}"
           instance_exec(&outcome)
         end
       end).perform_job(job)
