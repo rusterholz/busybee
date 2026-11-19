@@ -382,17 +382,16 @@ class ReserveInventoryWorker < Busybee::Worker
 end
 ```
 
-`job.process_instance_business_id` reads the staged business ID, or else the one the job arrived with, and `nil` when there's neither. Use `||=`, as above: it stages a business ID only when the instance has none yet.
+`job.process_instance_business_id` reads the staged business ID, or else the one the job arrived with, and `nil` when there's neither. Use `||=`, as above: it stages a business ID only when the job arrived without one, so it never raises.
 
 - **The first one wins.** Staging on a job that arrived with a business ID raises `Busybee::BusinessIdAlreadyAssigned`, whatever the value, `nil` included. Only jobs created after the assignment carry the business ID, so a job that was already waiting when another job assigned it still arrives without one (see the warning below).
-- **Only a successful completion sends it.** A job that fails or throws a BPMN error drops its staged business ID. A completion Zeebe rejects keeps it, so a retried `complete!` sends it again.
+- **Only a completion carries it.** A job that fails or throws a BPMN error drops its staged business ID. A completion Zeebe rejects keeps it, so a retried `complete!` sends it again.
 - **Staging again replaces it.** A second, different business ID staged before the completion takes the first one's place, and busybee logs a warning. Staging `nil` clears it.
 - **Zeebe's limits apply up front.** An empty business ID, or one longer than 256 characters, raises `ArgumentError` when you stage it.
 
 > **A completion Zeebe rejects for its business ID is rejected every time.** The job stays open, times out and comes back without spending a retry, and the same staging is rejected again each time it's offered. Three cases reach this:
 >
 > - **A cluster with business ID uniqueness enabled**, which rejects every completion that carries a business ID.
->
 > - **A job of a call activity's child instance.** The business ID belongs to the root instance, and Zeebe rejects a child job's completion that carries one. A child job of a root with no business ID arrives with none, so `||=` stages one.
 > - **Parallel jobs of one instance.** When two jobs that both arrived without a business ID each stage one, the first completion assigns it, and the other job, created before the assignment, keeps arriving without it.
 >
