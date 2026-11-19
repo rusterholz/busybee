@@ -101,9 +101,9 @@ module Busybee
     # High-cardinality projection of the job's state. Strict superset of
     # context_tags: each component's logging_context contains everything its
     # context_tags does plus additional unbounded-dimension values. Job prepends
-    # the override-aware retries and deadline it owns.
+    # the override-aware values it owns (see owned_logging_context).
     def logging_context
-      { retries: retries, deadline: deadline }.compact.
+      owned_logging_context.
         merge(payload.logging_context).
         merge(activation.logging_context).
         merge(resolution.logging_context).
@@ -114,24 +114,17 @@ module Busybee
     # Number of retries remaining. Layers an override from update_retries on
     # top of the protobuf value.
     # @return [Integer]
-    def retries
-      @retries_override || payload.retries
-    end
+    def retries = @retries_override || payload.retries
 
     # Job deadline as a frozen Time. Layers an override from update_timeout on
     # top of the protobuf value.
     # @return [Time]
-    def deadline
-      @deadline_override || payload.deadline
-    end
+    def deadline = @deadline_override || payload.deadline
 
     # Job priority; higher is activated first. Layers an override from
-    # update_priority on top of the protobuf value. Camunda 8.10+; an older
-    # gateway never sends it, so it reads 0, as Zeebe's own default does.
+    # update_priority on top of the protobuf value. Camunda 8.10+; reads 0 from an older gateway.
     # @return [Integer]
-    def priority
-      @priority_override || payload.priority
-    end
+    def priority = @priority_override || payload.priority
 
     # Staged business ID, else the one the job arrived with (Camunda 8.10+).
     # @return [String, nil]
@@ -250,6 +243,11 @@ module Busybee
     private
 
     attr_reader :activation, :resolution
+
+    def owned_logging_context
+      { retries: retries, deadline: deadline, priority: priority,
+        process_instance_business_id: process_instance_business_id }.compact
+    end
 
     # Output validation is the worker's contract, so it applies exactly when a
     # worker is attached. Checked here, not via Worker#complete!, which calls this.

@@ -1413,6 +1413,12 @@ RSpec.describe Busybee::Job do
       expect(job.context_tags).not_to have_key(:user_tier)
     end
 
+    it "leaves out the unbounded priority and business ID" do
+      allow(raw_job).to receive(:businessId).and_return("ORD-1")
+
+      expect(job.context_tags.keys).not_to include(:priority, :process_instance_business_id)
+    end
+
     it "reflects the update_retries override, not the activation-time value" do
       allow(client).to receive(:update_job_retries)
       job.update_retries(5)
@@ -1507,6 +1513,39 @@ RSpec.describe Busybee::Job do
 
       expect(job.logging_context[:deadline]).to eq(job.deadline)
       expect(job.logging_context[:deadline]).not_to eq(original)
+    end
+
+    it "carries the priority the job arrived with" do
+      expect(job.logging_context[:priority]).to eq(40)
+    end
+
+    it "keeps a priority of zero" do
+      allow(raw_job).to receive(:priority).and_return(0)
+
+      expect(job.logging_context).to include(priority: 0)
+    end
+
+    it "reflects the update_priority override in priority" do
+      allow(client).to receive(:update_job_priority)
+      job.update_priority(90)
+
+      expect(job.logging_context[:priority]).to eq(90)
+    end
+
+    it "carries the business ID the job arrived with" do
+      allow(raw_job).to receive(:businessId).and_return("ORD-1")
+
+      expect(job.logging_context[:process_instance_business_id]).to eq("ORD-1")
+    end
+
+    it "carries a staged business ID" do
+      job.process_instance_business_id = "ORD-2"
+
+      expect(job.logging_context[:process_instance_business_id]).to eq("ORD-2")
+    end
+
+    it "omits the business ID when there is none" do
+      expect(job.logging_context).not_to have_key(:process_instance_business_id)
     end
   end
 end
