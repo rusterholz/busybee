@@ -352,10 +352,13 @@ You give an instance its business ID when you start it:
 | Where | How | Requires |
 |-------|-----|----------|
 | Starting an instance | [`start_instance(…, business_id:)`](#start_instance) | Camunda 8.9+ |
+| A message start event | [`publish_message(…, business_id:)`](#publish_message) | Camunda 8.10+ |
 
-Several instances can share a business ID unless the cluster enables business ID uniqueness. With it enabled, starting an instance of a process while another active root instance of that process holds the same business ID raises `Busybee::GRPC::Error` with `grpc_status` `:already_exists`.
+On Camunda 8.10 and later, a message published with a business ID also correlates only to instances with that business ID, so you can address one order's instance even when its correlation key is shared.
 
-**Older gateways ignore business IDs silently.** A gateway that predates the field drops it without an error, so an instance started with a business ID on Camunda 8.8 has none.
+Several instances can share a business ID unless the cluster enables business ID uniqueness. With it enabled, starting an instance of a process while another active root instance of that process holds the same business ID raises `Busybee::GRPC::Error` with `grpc_status` `:already_exists`, while a message start event in the same situation creates no instance and raises nothing.
+
+**Older gateways ignore business IDs silently.** A gateway that predates the field drops it without an error: an instance started with a business ID on Camunda 8.8 has none, and a message published with one on 8.8 or 8.9 correlates to any instance waiting with its correlation key, whatever that instance's business ID.
 
 ---
 
@@ -766,7 +769,7 @@ Messages enable communication with waiting process instances. A message correlat
 Publish a message that correlates to waiting process instances.
 
 ```ruby
-publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil) → Integer
+publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil, business_id: nil) → Integer
 ```
 
 | Parameter | Type | Description |
@@ -776,10 +779,15 @@ publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil) → 
 | `vars:` | `Hash` | Variables to pass with the message (default: `{}`) |
 | `ttl:` | `Integer`, `ActiveSupport::Duration`, `nil` | Time-to-live (see below) |
 | `tenant_id:` | `String`, `nil` | Tenant ID for multi-tenancy (optional) |
+| `business_id:` | `String`, `nil` | Deliver only to instances with this [business ID](#business-ids) (optional; Camunda 8.10+, see below) |
 
 **Returns:** The message key.
 
 **Raises:** `ArgumentError` if `vars` is not a Hash; `Busybee::GRPC::Error` if publishing fails.
+
+**Business ID:** On Camunda 8.10 and later, a message with a `business_id:` correlates only to instances whose business ID matches it exactly, on top of the correlation key, and an instance its message start event creates gets that business ID. A message without one correlates to any instance with the correlation key, as before.
+
+> **Camunda 8.8 and 8.9 silently drop `business_id:` on messages, which widens correlation instead of narrowing it.** The message correlates to any instance waiting with the correlation key, whatever its business ID, and nothing raises. If you rely on the narrowing, make sure every cluster you publish to runs 8.10 or later.
 
 **Default TTL:** When `ttl:` is omitted, Busybee uses `Busybee.default_message_ttl` (default: 10 seconds). You can change this globally:
 
@@ -804,6 +812,9 @@ client.publish_message("payment-received",
 
 # Publish with TTL in milliseconds
 client.publish_message("order-shipped", correlation_key: "ORD-123", ttl: 60_000)
+
+# Deliver only to the instance with this business ID (Camunda 8.10+)
+client.publish_message("order-shipped", correlation_key: "ORD-123", business_id: "ORD-123")
 ```
 
 #### broadcast_signal

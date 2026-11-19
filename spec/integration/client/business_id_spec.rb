@@ -4,19 +4,19 @@
 # the field without an error. Each example pins what 8.10 does and how an older
 # gateway answers, so every row of the version matrix asserts.
 RSpec.describe "Business IDs" do
-  let(:bpmn_path) { File.expand_path("../../fixtures/business_id_process.bpmn", __dir__) }
+  let(:fixtures) { %w[business_id_process business_id_message_process business_id_message_start_process] }
   let(:business_id) { "order-#{SecureRandom.hex(6)}" }
   let(:started) { [] }
 
   shared_examples "business IDs" do
     around { |example| isolate_busybee_hooks { example.run } }
 
-    before { client.deploy_process(bpmn_path) }
+    before { client.deploy_process(*fixtures.map { |name| File.expand_path("../../fixtures/#{name}.bpmn", __dir__) }) }
 
     after { started.each { |key| client.cancel_instance(key, ignore_missing: true) } }
 
-    def start(**kwargs)
-      client.start_instance("business-id-process", **kwargs).tap { |key| started << key }
+    def start(process = "business-id-process", **kwargs)
+      client.start_instance(process, **kwargs).tap { |key| started << key }
     end
 
     # The raw business ID on the instance's next job of this type; "" when the
@@ -44,6 +44,48 @@ RSpec.describe "Business IDs" do
         key = start(business_id: "")
 
         expect(raw_business_id_of("business-id-task", key)).to eq("")
+      end
+    end
+
+    describe "#publish_message" do
+      let(:correlation_key) { "corr-#{SecureRandom.hex(6)}" }
+
+      def publish(**kwargs)
+        client.publish_message("business-id-message", correlation_key: correlation_key, ttl: 30_000, **kwargs)
+      end
+
+      def correlated?(key)
+        activate_job("business-id-message-task", timeout: 2_000).process_instance_key == key
+      rescue Busybee::Testing::NoJobsAvailable
+        false
+      end
+
+      it "correlates only to the instance with that business ID on 8.10, and to any instance before" do
+        key = start("business-id-message-process", vars: { correlationId: correlation_key },
+                                                   business_id: business_id)
+
+        publish(business_id: "#{business_id}-other")
+        expect(correlated?(key)).to eq(!gateway_at_least?("8.10"))
+        next unless gateway_at_least?("8.10")
+
+        publish(business_id: business_id)
+        expect(correlated?(key)).to be(true)
+      end
+
+      it "correlates a message without a business ID to an instance that has one" do
+        key = start("business-id-message-process", vars: { correlationId: correlation_key },
+                                                   business_id: business_id)
+
+        publish
+        expect(correlated?(key)).to be(true)
+      end
+
+      it "gives the business ID to the instance a message start event creates on 8.10, and drops it before" do
+        client.publish_message("business-id-start-message", correlation_key: "", ttl: 0, business_id: business_id)
+
+        job = activate_job("business-id-message-start-task")
+        started << job.process_instance_key
+        expect(job.raw.businessId).to eq(gateway_at_least?("8.10") ? business_id : "")
       end
     end
   end

@@ -71,6 +71,24 @@ RSpec.describe Busybee::Client::MessageOperations do
       )
     end
 
+    it "supports business_id" do
+      allow(stub).to receive(:publish_message).and_return(double(key: 12345))
+
+      client.publish_message("order-ready", correlation_key: "order-123", business_id: :"order-123")
+
+      expect(stub).to have_received(:publish_message).with(
+        having_attributes(has_businessId?: true, businessId: "order-123")
+      )
+    end
+
+    it "leaves business_id unset when not given" do
+      allow(stub).to receive(:publish_message).and_return(double(key: 12345))
+
+      client.publish_message("order-ready", correlation_key: "order-123")
+
+      expect(stub).to have_received(:publish_message).with(having_attributes(has_businessId?: false))
+    end
+
     it "uses configured default_message_ttl when ttl not provided" do
       Busybee.default_message_ttl = 60_000
       response = double(key: 12345)
