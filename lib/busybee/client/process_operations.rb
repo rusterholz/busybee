@@ -108,11 +108,12 @@ module Busybee
       # Assign a business ID to a running root process instance (Camunda 8.10+).
       #
       # @param process_instance_key [Integer, String] The process instance key
-      # @param business_id [String] The business ID, up to 256 characters
+      # @param business_id [String] The business ID, up to 256 characters (emoji count as two)
       # @return [Object] Response from the gateway (truthy)
       # @raise [Busybee::GRPC::Error] if the assignment fails: grpc_status
-      #   :failed_precondition when the instance already has one or is a call
-      #   activity's child, :not_found when it isn't active, :invalid_argument
+      #   :failed_precondition when the instance already has one, is a call
+      #   activity's child, or business ID uniqueness is enabled;
+      #   :not_found when it isn't active, :invalid_argument
       #   for an empty or overlong ID, :unimplemented on a gateway older than 8.10
       #
       # @example Assign a business ID

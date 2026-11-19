@@ -346,7 +346,7 @@ puts "Stream closed, shutting down"
 
 ## Business IDs
 
-A business ID ties a process instance to a record in your own domain, such as an order number. It's a string of up to 256 characters that belongs to the root process instance, and the child instances its call activities start inherit it.
+A business ID ties a process instance to a record in your own domain, such as an order number. It's a string of up to 256 characters (emoji and other characters outside the Basic Multilingual Plane count as two) that belongs to the root process instance, and the child instances its call activities start inherit it.
 
 You give an instance its business ID when you start it, or later:
 
@@ -387,7 +387,7 @@ end
 - **The first one wins.** Staging on a job that arrived with a business ID raises `Busybee::BusinessIdAlreadyAssigned`, whatever the value, `nil` included. Only jobs created after the assignment carry the business ID, so a job that was already waiting when another job assigned it still arrives without one (see the warning below).
 - **Only a completion carries it.** A job that fails or throws a BPMN error drops its staged business ID. A completion Zeebe rejects keeps it, so a retried `complete!` sends it again.
 - **Staging again replaces it.** A second, different business ID staged before the completion takes the first one's place, and busybee logs a warning. Staging `nil` clears it.
-- **Zeebe's limits apply up front.** An empty business ID, or one longer than 256 characters, raises `ArgumentError` when you stage it.
+- **Zeebe's limits apply up front.** An empty business ID, or one longer than 256 characters as Zeebe counts them, raises `ArgumentError` when you stage it.
 
 > **A completion Zeebe rejects for its business ID is rejected every time.** The job stays open, times out and comes back without spending a retry, and the same staging is rejected again each time it's offered. Three cases reach this:
 >
@@ -536,7 +536,7 @@ assign_business_id(process_instance_key, business_id) → Object
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `process_instance_key` | `Integer` | The root process instance's key |
-| `business_id` | `String` | The business ID, up to 256 characters |
+| `business_id` | `String` | The business ID, up to 256 characters (emoji count as two) |
 
 **Returns:** A truthy response from the gateway.
 
@@ -851,7 +851,7 @@ publish_message(name, correlation_key:, vars: {}, ttl: nil, tenant_id: nil, busi
 | `vars:` | `Hash` | Variables to pass with the message (default: `{}`) |
 | `ttl:` | `Integer`, `ActiveSupport::Duration`, `nil` | Time-to-live (see below) |
 | `tenant_id:` | `String`, `nil` | Tenant ID for multi-tenancy (optional) |
-| `business_id:` | `String`, `nil` | Deliver only to instances with this [business ID](#business-ids) (optional; Camunda 8.10+, see below) |
+| `business_id:` | `String`, `nil` | Deliver only to instances with this [business ID](#business-ids) (optional; Camunda 8.10+, see below; `""` publishes it without one) |
 
 **Returns:** The message key.
 

@@ -157,6 +157,16 @@ RSpec.describe Busybee::Client::ProcessOperations do
       )
     end
 
+    it "sends an empty business_id as given, for the engine to read as none" do
+      allow(stub).to receive(:create_process_instance).and_return(double(processInstanceKey: 67890))
+
+      client.start_instance("order-fulfillment", business_id: "")
+
+      expect(stub).to have_received(:create_process_instance).with(
+        having_attributes(has_businessId?: true, businessId: "")
+      )
+    end
+
     it "leaves business_id unset when not given" do
       allow(stub).to receive(:create_process_instance).and_return(double(processInstanceKey: 67890))
 

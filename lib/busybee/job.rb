@@ -140,7 +140,7 @@ module Busybee
     # Stage a business ID to assign to the process instance with this job's
     # completion, manual or automatic (Camunda 8.10+); nil clears it.
     # @raise [Busybee::BusinessIdAlreadyAssigned] if the job arrived with one
-    # @raise [ArgumentError] if value is empty or past 256 characters
+    # @raise [ArgumentError] if value is empty or past 256 characters (emoji count as two)
     # @raise [Busybee::JobAlreadyHandled] if the job is already resolved
     def process_instance_business_id=(value)
       ensure_resolvable!("assign a business ID through")

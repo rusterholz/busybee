@@ -50,7 +50,7 @@ module Busybee
         value = value.to_s
         raise ArgumentError, "business ID can't be empty" if value.empty?
         if value.encode(Encoding::UTF_16LE).bytesize > MAX_LENGTH * 2
-          raise ArgumentError, "business ID is longer than #{MAX_LENGTH} characters"
+          raise ArgumentError, "business ID is longer than #{MAX_LENGTH} UTF-16 code units"
         end
 
         value

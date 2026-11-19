@@ -81,6 +81,14 @@ RSpec.describe Busybee::Client::MessageOperations do
       )
     end
 
+    it "sends an empty business_id as given, for the engine to read as none" do
+      allow(stub).to receive(:publish_message).and_return(double(key: 12345))
+
+      client.publish_message("order-ready", correlation_key: "order-123", business_id: "")
+
+      expect(stub).to have_received(:publish_message).with(having_attributes(has_businessId?: true, businessId: ""))
+    end
+
     it "leaves business_id unset when not given" do
       allow(stub).to receive(:publish_message).and_return(double(key: 12345))
 

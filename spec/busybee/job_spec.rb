@@ -1122,9 +1122,9 @@ RSpec.describe Busybee::Job do
 
     it "raises ArgumentError past 256 characters, counted as Zeebe counts them" do
       expect { job.process_instance_business_id = "x" * 257 }.
-        to raise_error(ArgumentError, /business ID is longer than 256 characters/)
+        to raise_error(ArgumentError, "business ID is longer than 256 UTF-16 code units")
       expect { job.process_instance_business_id = "😀" * 129 }.
-        to raise_error(ArgumentError, /business ID is longer than 256 characters/)
+        to raise_error(ArgumentError, "business ID is longer than 256 UTF-16 code units")
     end
 
     context "when the job arrived with a business ID" do

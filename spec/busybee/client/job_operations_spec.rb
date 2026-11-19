@@ -59,6 +59,14 @@ RSpec.describe Busybee::Client::JobOperations do
       )
     end
 
+    it "sends an empty business_id as given, for the engine to reject" do
+      allow(stub).to receive(:complete_job).and_return(response)
+
+      client.complete_job(123456, business_id: "")
+
+      expect(stub).to have_received(:complete_job).with(having_attributes(has_businessId?: true, businessId: ""))
+    end
+
     it "leaves business_id unset when not given" do
       allow(stub).to receive(:complete_job).and_return(response)
 
