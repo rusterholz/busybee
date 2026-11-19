@@ -200,7 +200,7 @@ A hand-rolled conversion at a sleep site goes wrong for some shape the config la
 
 ### Job and Client Access
 
-Worker delegates `variables`, `headers`, `client`, `fail!`, `throw_bpmn_error!`, `update_retries`, and `update_timeout` to `job`. The `job` reader is also public. `complete!` is defined on Worker (not delegated): it validates required and undeclared outputs before delegating to `job.complete!`.
+Worker delegates `variables`, `headers`, `client`, `fail!`, `throw_bpmn_error!`, `update_retries`, `update_timeout`, `update_priority`, `process_instance_business_id` and `process_instance_business_id=` to `job`. The `job` reader is also public. `complete!` is defined on Worker (not delegated): it validates required and undeclared outputs before delegating to `job.complete!`.
 
 `Job#client` exposes the `Busybee::Client` instance that fetched the job. Workers can use `client` inside `perform` for direct API access, e.g. `client.publish_message(...)` for message correlation. The client reuses the existing gRPC connection, so there's no additional connection overhead.
 

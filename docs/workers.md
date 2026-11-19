@@ -215,7 +215,7 @@ end
 
 **`update_priority(priority)`** changes the job's priority (Camunda 8.10+), and `job.priority` reads it back. Zeebe activates higher-priority jobs first, so a job that's failed and retried after an update competes with its new priority. On a gateway older than 8.10 it raises `Busybee::GRPC::Error`, and `job.priority` reads `0`.
 
-**`process_instance_business_id`** reads the process instance's [business ID](client.md#business-ids), and **`process_instance_business_id=`** stages one that rides along with the job's completion, manual or automatic (Camunda 8.10+). Stage with `||=`, which leaves an instance that already has one alone; see [Completing with a Business ID](client.md#completing-with-a-business-id) for the rules and the cases Zeebe rejects:
+**`process_instance_business_id`** reads the process instance's [business ID](client.md#business-ids), and **`process_instance_business_id=`** stages one that rides along with the job's completion, manual or automatic (Camunda 8.10+). Stage it as `job.process_instance_business_id ||= …`: the `||=` stages only on a job that arrived without one, and the `job.` receiver matters, since a bare `process_instance_business_id ||= …` inside `perform` only sets a local variable. See [Completing with a Business ID](client.md#completing-with-a-business-id) for the rules and the cases Zeebe rejects:
 
 ```ruby
 def perform
@@ -271,7 +271,7 @@ When a shutdown is triggered, the job whose `perform` raised the error is report
 
 #### Direct Job Access
 
-Several of the methods you've already seen (`complete!`, `fail!`, `throw_bpmn_error!`, `update_retries`, `update_timeout`, `variables`, and `headers`) are actually delegated from the worker to an underlying `Busybee::Job` object. You can access this object directly via `self.job` in `perform`. The job carries metadata, raw data, and status information that isn't available at the worker level:
+Several of the methods you've already seen (`complete!`, `fail!`, `throw_bpmn_error!`, `update_retries`, `update_timeout`, `update_priority`, `process_instance_business_id`, `variables`, and `headers`) are actually delegated from the worker to an underlying `Busybee::Job` object. You can access this object directly via `self.job` in `perform`. The job carries metadata, raw data, and status information that isn't available at the worker level:
 
 ```ruby
 def perform
@@ -281,7 +281,12 @@ def perform
   job.process_instance_key    # workflow instance this job belongs to (Integer)
   job.bpmn_process_id         # BPMN process ID (String)
   job.retries                 # remaining retry attempts (Integer)
+  job.priority                # job priority, highest activated first (Integer; Camunda 8.10+)
   job.deadline                # lock expiration time (frozen Time, UTC)
+
+  # Business ID (delegated; Camunda 8.10+)
+  job.process_instance_business_id         # the instance's business ID, or one staged (String or nil)
+  job.process_instance_business_id ||= id  # stage one to send with the completion
 
   # Data (delegated, but declared inputs are preferred; see Declaring Inputs)
   job.variables               # all process variables, as a frozen hash with indifferent access
@@ -293,6 +298,7 @@ def perform
   job.throw_bpmn_error!(code, message = "")     # throw a BPMN error
   job.update_retries(count)   # change remaining retry count
   job.update_timeout(duration)  # extend or shorten the job lock deadline
+  job.update_priority(priority) # change the job's priority (Camunda 8.10+)
 
   # Status predicates (job-only)
   job.ready?                  # true if not yet completed/failed/errored

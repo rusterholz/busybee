@@ -20,7 +20,7 @@ RSpec.describe "Business IDs" do
     end
 
     # The raw business ID on the instance's next job of this type; "" when the
-    # gateway sent none.
+    # gateway sent none. 8.9 never sends it, so its "dropped" branches can't tell.
     def raw_business_id_of(type, key)
       job = activate_job(type)
       expect(job.process_instance_key).to eq(key)
