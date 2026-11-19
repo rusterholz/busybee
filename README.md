@@ -260,7 +260,7 @@ Every change to busybee is tested against:
 | Rails / ActiveSupport | 7.0, 7.1, 7.2, 8.0 and 8.1, and without Rails |
 | Camunda 8 (Zeebe gateway) | 8.8, 8.9 and 8.10, self-managed |
 
-The generated gRPC classes (`Busybee::GRPC`) follow the Camunda 8.8 gateway protocol, so calls added in later releases aren't available through them.
+The generated gRPC classes (`Busybee::GRPC`) follow the Camunda 8.10 gateway protocol. An older gateway answers a call it doesn't have with `UNIMPLEMENTED`, and silently ignores fields it doesn't know, so features like [business IDs](docs/client.md#business-ids) and job priority need the Camunda version their docs name.
 
 ### Ruby Implementation Support
 

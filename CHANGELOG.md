@@ -74,6 +74,18 @@ Instrumentation hooks for every job, worker and gRPC call, with testing helpers 
   - `max_jobs:` succeeds with fewer, none included
   - Shortfalls raise `Busybee::Testing::NoJobsAvailable` (formerly `NoJobAvailable`, which still works), under a new `Busybee::Testing::Error` base
 
+- **Business IDs** – Tie a process instance to a record in your own domain, such as an order number, and reach it by that value:
+  - Give it one as it starts: `start_instance(…, business_id:)` (Camunda 8.9+), or `publish_message(…, business_id:)` to a message start event (8.10+)
+  - Or let a worker assign it once the value exists: `job.process_instance_business_id ||= order.number` rides along with the job's completion, `complete!` or auto-complete, and is dropped if the job fails (8.10+)
+  - Assign it to a running instance with `client.assign_business_id`, or as a job completes with `client.complete_job(…, business_id:)` (8.10+)
+  - Address one order's instance even when correlation keys are shared: on Camunda 8.10, `publish_message(…, business_id:)` correlates only to instances with that business ID. 8.8 and 8.9 drop the field, so the message reaches any instance waiting with its correlation key
+  - Read it on any job with `job.process_instance_business_id`, and hand one to your worker specs with `build_test_job(process_instance_business_id:)`
+
+- **Job Priority** – Let urgent work go first (Camunda 8.10+):
+  - `job.priority` reads the priority a BPMN task gave its job, `0` from an older gateway
+  - `update_priority` in a worker, `job.update_priority` or `client.update_job_priority` changes it, and a job that's retried keeps its new priority
+  - `build_test_job(priority:)` hands one to your worker specs
+
 - **A Guide to Operating Busybee** – `docs/operating.md` covers logs, exit statuses, shutdown timing, health probes and troubleshooting for the `busybee` command
 
 - **Runs on Ruby 4.0 and Camunda 8.9 and 8.10** – Tested on every change against:

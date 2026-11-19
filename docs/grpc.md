@@ -106,7 +106,7 @@ The GRPC module exposes:
 
 ## Available RPCs
 
-The Gateway service includes these RPCs:
+The Gateway service includes, among others:
 
 | RPC | Description |
 |-----|-------------|
@@ -124,8 +124,11 @@ The Gateway service includes these RPCs:
 | `ResolveIncident` | Resolve an incident |
 | `UpdateJobRetries` | Update retry count for a job |
 | `UpdateJobTimeout` | Extend or shorten a job's deadline |
+| `UpdateJobPriority` | Change a job's priority (Camunda 8.10+) |
+| `AssignProcessInstanceBusinessId` | Give a running process instance its business ID (Camunda 8.10+) |
 | `BroadcastSignal` | Broadcast a BPMN signal |
+| `EvaluateConditional` | Evaluate root-level conditional start events (Camunda 8.9+) |
 | `ModifyProcessInstance` | Modify a running process instance |
 | `MigrateProcessInstance` | Migrate a process instance to a new version |
 
-See the [Zeebe gRPC API documentation](https://docs.camunda.io/docs/apis-tools/zeebe-api/) for full details on request/response structures.
+The full list, with every request and response field, is in the gateway's [protocol definition](../proto/gateway.proto), which follows Camunda 8.10. See the [Zeebe gRPC API documentation](https://docs.camunda.io/docs/apis-tools/zeebe-api/) for more on request/response structures.
