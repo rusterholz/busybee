@@ -13,6 +13,9 @@ module Busybee
   # Errors below this point are specific and semantic -- they are used in just one or two
   # places, and their name tells you exactly what went wrong:
 
+  # Raised when staging a business ID on a job whose process instance already has one
+  BusinessIdAlreadyAssigned = Class.new(Error)
+
   # Raised when Credentials.build cannot determine credential type from provided params.
   # This happens when params are provided but don't match any known credential type pattern,
   # and no explicit credential_type is configured.

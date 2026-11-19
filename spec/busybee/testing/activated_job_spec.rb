@@ -22,6 +22,7 @@ RSpec.describe Busybee::Testing::ActivatedJob do
       customHeaders: '{"task_type": "process_order"}',
       retries: 3,
       priority: 40,
+      businessId: "ORD-1",
       deadline: 1640000000000
     )
     # rubocop:enable RSpec/VerifiedDoubles
@@ -61,6 +62,18 @@ RSpec.describe Busybee::Testing::ActivatedJob do
   describe "#priority" do
     it "returns the job's priority" do
       expect(job.priority).to eq(40)
+    end
+  end
+
+  describe "#process_instance_business_id" do
+    it "returns the process instance's business ID" do
+      expect(job.process_instance_business_id).to eq("ORD-1")
+    end
+
+    it "returns nil when the job arrived without one" do
+      allow(raw_job).to receive(:businessId).and_return("")
+
+      expect(job.process_instance_business_id).to be_nil
     end
   end
 

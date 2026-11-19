@@ -88,6 +88,91 @@ RSpec.describe "Business IDs" do
         expect(job.raw.businessId).to eq(gateway_at_least?("8.10") ? business_id : "")
       end
     end
+
+    describe "completion" do
+      let(:fixtures) { %w[business_id_process call_activity_parent call_activity_child] }
+
+      # The instance's own business-id-task job, as a Busybee::Job.
+      def with_task_job(key, type = "business-id-task", &)
+        seen = false
+        client.with_each_job(type, max_jobs: 1) do |job|
+          expect(job.process_instance_key).to eq(key) if key
+          seen = true
+          yield job
+        end
+        expect(seen).to be(true)
+      end
+
+      def failed_precondition = a_kind_of(Busybee::GRPC::Error).and(have_attributes(grpc_status: :failed_precondition))
+
+      it "assigns the business ID through client.complete_job on 8.10, and drops it before" do
+        key = start
+        with_task_job(key) { |job| client.complete_job(job.key, business_id: business_id) }
+
+        expect(raw_business_id_of("business-id-next-task", key)).to eq(gateway_at_least?("8.10") ? business_id : "")
+      end
+
+      it "assigns a staged business ID with the job's own completion" do
+        key = start
+        with_task_job(key) do |job|
+          expect(job.process_instance_business_id).to be_nil
+          job.process_instance_business_id ||= business_id
+          job.complete!
+        end
+
+        expect(raw_business_id_of("business-id-next-task", key)).to eq(gateway_at_least?("8.10") ? business_id : "")
+      end
+
+      it "assigns a staged business ID with a worker's auto-complete" do
+        id = business_id
+        worker = stub_const("BusinessIdStagingWorker", Class.new(Busybee::Worker) do
+          job_type "business-id-task"
+          define_method(:perform) { job.process_instance_business_id ||= id }
+        end)
+        key = start
+        with_task_job(key) { |job| worker.perform_job(job) }
+
+        expect(raw_business_id_of("business-id-next-task", key)).to eq(gateway_at_least?("8.10") ? id : "")
+      end
+
+      it "hands a job of an instance with a business ID the ID on 8.10, which refuses another" do
+        key = start(business_id: business_id)
+        with_task_job(key) do |job|
+          next expect(job.process_instance_business_id).to be_nil unless gateway_at_least?("8.10")
+
+          expect(job.process_instance_business_id).to eq(business_id)
+          expect { job.process_instance_business_id = business_id }.to raise_error(Busybee::BusinessIdAlreadyAssigned)
+          job.complete!
+        end
+      end
+
+      it "rejects a completion carrying even the identical business ID once the instance has one, on 8.10" do
+        key = start(business_id: business_id)
+        with_task_job(key) do |job|
+          if gateway_at_least?("8.10")
+            expect { client.complete_job(job.key, business_id: business_id) }.
+              to raise_error(failed_precondition)
+            job.complete! # still open
+          else
+            client.complete_job(job.key, business_id: business_id)
+          end
+        end
+      end
+
+      it "rejects a completion staging a business ID from a call activity's child instance, on 8.10" do
+        start("call-activity-parent", vars: { marker: business_id })
+        with_task_job(nil, "call-activity-child-task") do |job|
+          expect(job.variables[:marker]).to eq(business_id)
+          job.process_instance_business_id = business_id
+          if gateway_at_least?("8.10")
+            expect { job.complete! }.to raise_error(failed_precondition)
+            expect(job).to be_ready
+          else
+            job.complete!
+          end
+        end
+      end
+    end
   end
 
   context "with local Zeebe", :integration do

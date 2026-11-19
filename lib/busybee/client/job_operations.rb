@@ -15,8 +15,11 @@ module Busybee
       #
       # @param job_key [Integer] The unique job identifier
       # @param vars [Hash] Variables to return to the workflow engine
+      # @param business_id [String, nil] Business ID to assign to the job's root process
+      #   instance as part of the completion (Camunda 8.10+; an older gateway ignores it)
       # @return [Object] Response from the gateway (truthy)
-      # @raise [Busybee::GRPC::Error] if completion fails
+      # @raise [Busybee::GRPC::Error] if completion fails, with grpc_status
+      #   :failed_precondition when the instance can't take the business ID
       #
       # @example Complete a job without variables
       #   client.complete_job(123456)
@@ -24,11 +27,15 @@ module Busybee
       # @example Complete a job with variables
       #   client.complete_job(123456, vars: { result: "success", orderId: 999 })
       #
-      def complete_job(job_key, vars: {})
+      # @example Complete a job and assign its process instance a business ID
+      #   client.complete_job(123456, business_id: "ORD-123")
+      #
+      def complete_job(job_key, vars: {}, business_id: nil)
         request = Busybee::GRPC::CompleteJobRequest.new(
           jobKey: job_key.to_i,
           variables: Busybee::Serialization.to_json(vars)
         )
+        request.businessId = business_id.to_s unless business_id.nil?
 
         run_hooked(:complete_job, request)
       end

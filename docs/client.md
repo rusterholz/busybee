@@ -217,6 +217,7 @@ When you receive jobs through `with_each_job` or `open_job_stream`, each job is 
 | `bpmn_process_id` | `String` | The BPMN process ID |
 | `retries` | `Integer` | Remaining retry attempts |
 | `priority` | `Integer` | Job priority, highest activated first (Camunda 8.10+; `0` on older gateways, which don't send it) |
+| `process_instance_business_id` | `String`, `nil` | The process instance's [business ID](#business-ids), or one [staged](#completing-with-a-business-id) for the completion (Camunda 8.10+; `nil` when there's none or the gateway doesn't send it) |
 | `deadline` | `Time` | When the job lock expires (frozen Time object) |
 | `variables` | `Hash` | Job input variables (with indifferent access) |
 | `headers` | `Hash` | Custom headers from the BPMN task definition |
@@ -347,18 +348,54 @@ puts "Stream closed, shutting down"
 
 A business ID ties a process instance to a record in your own domain, such as an order number. It's a string of up to 256 characters that belongs to the root process instance, and the child instances its call activities start inherit it.
 
-You give an instance its business ID when you start it:
+You give an instance its business ID when you start it, or later, from one of its jobs:
 
 | Where | How | Requires |
 |-------|-----|----------|
 | Starting an instance | [`start_instance(…, business_id:)`](#start_instance) | Camunda 8.9+ |
 | A message start event | [`publish_message(…, business_id:)`](#publish_message) | Camunda 8.10+ |
+| Completing a job | [`job.process_instance_business_id =`](#completing-with-a-business-id), or [`complete_job(…, business_id:)`](#complete_job) | Camunda 8.10+ |
+
+An instance gets one business ID, once. After that, Zeebe rejects every attempt to assign one, the identical ID included, with `grpc_status` `:failed_precondition`.
 
 On Camunda 8.10 and later, a message published with a business ID also correlates only to instances with that business ID, so you can address one order's instance even when its correlation key is shared.
 
-Several instances can share a business ID unless the cluster enables business ID uniqueness. With it enabled, starting an instance of a process while another active root instance of that process holds the same business ID raises `Busybee::GRPC::Error` with `grpc_status` `:already_exists`, while a message start event in the same situation creates no instance and raises nothing.
+Several instances can share a business ID unless the cluster enables business ID uniqueness. With it enabled, starting an instance of a process while another active root instance of that process holds the same business ID raises `Busybee::GRPC::Error` with `grpc_status` `:already_exists`, a message start event in the same situation creates no instance and raises nothing, and assigning a business ID through a job's completion isn't possible at all.
 
-**Older gateways ignore business IDs silently.** A gateway that predates the field drops it without an error: an instance started with a business ID on Camunda 8.8 has none, and a message published with one on 8.8 or 8.9 correlates to any instance waiting with its correlation key, whatever that instance's business ID.
+**Older gateways ignore business IDs silently.** A gateway that predates the field drops it without an error: an instance started with a business ID on Camunda 8.8 has none, a job completed with one on 8.8 or 8.9 completes without assigning it, and a message published with one on 8.8 or 8.9 correlates to any instance waiting with its correlation key, whatever that instance's business ID. Jobs carry the business ID from Camunda 8.10, so on 8.9 an instance started with one hands its jobs none.
+
+### Completing with a Business ID
+
+When the business ID only becomes known partway through a process, a job can assign it as it completes. Stage it on the job, and it rides along with the job's completion, whether your worker calls `complete!` itself or leaves it to auto-complete:
+
+```ruby
+class ReserveInventoryWorker < Busybee::Worker
+  job_type "reserve-inventory"
+  output :order_id
+
+  def perform
+    order = Order.create!(sku: variables[:sku])
+    job.process_instance_business_id ||= order.number
+    { order_id: order.id }
+  end
+end
+```
+
+`job.process_instance_business_id` reads the staged business ID, or else the one the job arrived with, and `nil` when there's neither. Use `||=`, as above: it stages a business ID only when the instance has none yet.
+
+- **The first one wins.** Staging on a job that arrived with a business ID raises `Busybee::BusinessIdAlreadyAssigned`, whatever the value, `nil` included. Only jobs created after the assignment carry the business ID, so a job that was already waiting when another job assigned it still arrives without one (see the warning below).
+- **Only a successful completion sends it.** A job that fails or throws a BPMN error drops its staged business ID. A completion Zeebe rejects keeps it, so a retried `complete!` sends it again.
+- **Staging again replaces it.** A second, different business ID staged before the completion takes the first one's place, and busybee logs a warning. Staging `nil` clears it.
+- **Zeebe's limits apply up front.** An empty business ID, or one longer than 256 characters, raises `ArgumentError` when you stage it.
+
+> **A completion Zeebe rejects for its business ID is rejected every time.** The job stays open, times out and comes back without spending a retry, and the same staging is rejected again each time it's offered. Three cases reach this:
+>
+> - **A cluster with business ID uniqueness enabled**, which rejects every completion that carries a business ID.
+>
+> - **A job of a call activity's child instance.** The business ID belongs to the root instance, and Zeebe rejects a child job's completion that carries one. A child job of a root with no business ID arrives with none, so `||=` stages one.
+> - **Parallel jobs of one instance.** When two jobs that both arrived without a business ID each stage one, the first completion assigns it, and the other job, created before the assignment, keeps arriving without it.
+>
+> Stage business IDs from a single job of the root instance, never from a call activity's child, or give the instance its business ID when you start it.
 
 ---
 
@@ -577,23 +614,27 @@ puts "Stream closed, shutting down"
 Mark a job as successfully completed, optionally returning variables to the workflow.
 
 ```ruby
-complete_job(job_key, vars: {}) → Object
+complete_job(job_key, vars: {}, business_id: nil) → Object
 ```
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `job_key` | `Integer` | The job key |
 | `vars:` | `Hash` | Variables to return to the workflow (default: `{}`) |
+| `business_id:` | `String`, `nil` | A [business ID](#business-ids) to assign to the job's process instance as part of the completion (optional; Camunda 8.10+, ignored by older gateways) |
 
 **Returns:** A truthy response from the gateway.
 
-**Raises:** `Busybee::GRPC::Error` if completion fails.
+**Raises:** `Busybee::GRPC::Error` if completion fails: `grpc_status` `:failed_precondition` when the process instance can't take the business ID, which leaves the job open.
 
-**Prefer `Job#complete!`** when processing jobs through `with_each_job` or `open_job_stream`.
+**Prefer `Job#complete!`** when processing jobs through `with_each_job` or `open_job_stream`, and stage a business ID on the job with [`process_instance_business_id=`](#completing-with-a-business-id).
 
 ```ruby
 # Direct client call (when you only have the job key)
 client.complete_job(job_key, vars: { result: "success" })
+
+# Assign the job's process instance a business ID as it completes
+client.complete_job(job_key, business_id: "ORD-123")
 
 # Preferred: use the Job object
 job.complete!(result: "success")

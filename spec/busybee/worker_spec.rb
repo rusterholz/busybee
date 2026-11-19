@@ -13,6 +13,7 @@ RSpec.describe Busybee::Worker do
       bpmnProcessId: "order-workflow",
       elementId: "service_task_1",
       retries: 3,
+      businessId: "",
       deadline: 1640000000000,
       variables: '{"order_id":"abc-123"}',
       customHeaders: '{"priority":"high"}'
@@ -869,6 +870,53 @@ RSpec.describe Busybee::Worker do
         instance.update_priority(90)
         expect(client).to have_received(:update_job_priority).with(123456, 90)
       end
+    end
+
+    describe "#process_instance_business_id" do
+      it "delegates reading and staging to job" do
+        instance.process_instance_business_id = "ORD-1"
+
+        expect(job.process_instance_business_id).to eq("ORD-1")
+        expect(instance.process_instance_business_id).to eq("ORD-1")
+      end
+    end
+  end
+
+  describe "staged business IDs" do
+    before do
+      allow(client).to receive(:complete_job)
+      allow(client).to receive(:fail_job)
+    end
+
+    def run_staging(&outcome)
+      stub_const("StagingWorker", Class.new(described_class) do
+        strict_outputs false
+        define_method(:perform) do
+          self.process_instance_business_id ||= "ORD-#{variables[:order_id]}"
+          instance_exec(&outcome)
+        end
+      end).perform_job(job)
+    end
+
+    it "rides back with auto-complete" do
+      run_staging { { done: true } }
+
+      expect(client).to have_received(:complete_job).with(123456, vars: { done: true }, business_id: "ORD-abc-123")
+    end
+
+    it "rides back with a manual complete!" do
+      run_staging { complete!(done: true) }
+
+      expect(client).to have_received(:complete_job).once.with(123456, vars: { done: true }, business_id: "ORD-abc-123")
+    end
+
+    it "is discarded when auto-fail fails the job" do
+      run_staging { raise "boom" }
+
+      expect(job.error.message).to eq("boom")
+      expect(client).to have_received(:fail_job)
+      expect(client).not_to have_received(:complete_job)
+      expect(job.process_instance_business_id).to be_nil
     end
   end
 

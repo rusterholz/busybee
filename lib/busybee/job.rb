@@ -6,6 +6,7 @@ require "busybee/client/call"
 require "busybee/durations"
 require "busybee/error"
 require "busybee/job/activation"
+require "busybee/job/business_id"
 require "busybee/job/context"
 require "busybee/job/error_formatting"
 require "busybee/job/payload"
@@ -70,6 +71,7 @@ module Busybee
       @resolution = Resolution.new
       @context = Context.new
       @timestamps = Timestamps.new
+      @business_id = BusinessId.new(self)
     end
 
     # Route kwargs through the Job's typed POROs: Activation::KEYS land in
@@ -131,6 +133,20 @@ module Busybee
       @priority_override || payload.priority
     end
 
+    # Staged business ID, else the one the job arrived with (Camunda 8.10+).
+    # @return [String, nil]
+    def process_instance_business_id = @business_id.current
+
+    # Stage a business ID to assign to the process instance with this job's
+    # completion, manual or automatic (Camunda 8.10+); nil clears it.
+    # @raise [Busybee::BusinessIdAlreadyAssigned] if the job arrived with one
+    # @raise [ArgumentError] if value is empty or past 256 characters
+    # @raise [Busybee::JobAlreadyHandled] if the job is already resolved
+    def process_instance_business_id=(value)
+      ensure_resolvable!("assign a business ID through")
+      @business_id.stage(value)
+    end
+
     # Complete the job with optional output variables.
     #
     # @param vars [Hash] Variables to return to the workflow engine
@@ -142,7 +158,7 @@ module Busybee
 
       warn_discarded_result(vars) if resolution.result_set?
       resolution.set_result(vars)
-      correlated { @client.complete_job(key, vars: resolution.result || {}) }.tap do
+      correlated { @client.complete_job(key, vars: resolution.result || {}, **@business_id.completion_kwargs) }.tap do
         resolve!(:complete)
         log_resolution("Completed")
       end
@@ -199,9 +215,7 @@ module Busybee
     # @return [Object] Response from update_job_retries operation
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_retries(count)
-      correlated { @client.update_job_retries(key, count) }.tap do
-        @retries_override = count
-      end
+      correlated { @client.update_job_retries(key, count) }.tap { @retries_override = count }
     end
 
     # Update the timeout for this job.
@@ -211,9 +225,8 @@ module Busybee
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_timeout(duration)
       duration_seconds = Busybee::Durations.seconds_from(duration)
-      correlated { @client.update_job_timeout(key, duration) }.tap do
-        @deadline_override = (Time.now.utc + duration_seconds).freeze
-      end
+      correlated { @client.update_job_timeout(key, duration) }.
+        tap { @deadline_override = (Time.now.utc + duration_seconds).freeze }
     end
 
     # Update the priority of this job (Camunda 8.10+).
@@ -222,9 +235,7 @@ module Busybee
     # @return [Object] Response from update_job_priority operation
     # @raise [Busybee::GRPC::Error] if the update fails
     def update_priority(priority)
-      correlated { @client.update_job_priority(key, priority) }.tap do
-        @priority_override = priority.to_i
-      end
+      correlated { @client.update_job_priority(key, priority) }.tap { @priority_override = priority.to_i }
     end
 
     # ===== Framework-write seam (underscore idiom; no public setters) =====

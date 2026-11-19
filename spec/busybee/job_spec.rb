@@ -31,6 +31,7 @@ RSpec.describe Busybee::Job do
       worker: "worker-1",
       retries: 3,
       priority: 40,
+      businessId: "",
       deadline: 1640000000000,
       variables: "{\"order\":{\"id\":\"550e8400-e29b-41d4-a716-446655440000\",\"amount\":99.99," \
                  "\"customerName\":\"Jane Doe\"},\"processTimeout\":\"PT1H\"}"
@@ -1024,6 +1025,151 @@ RSpec.describe Busybee::Job do
       allow(client).to receive(:update_job_priority)
 
       expect { job.update_priority(90) }.not_to change(job, :status)
+    end
+  end
+
+  describe "#process_instance_business_id" do
+    it "is nil when the job arrived without one" do
+      expect(job.process_instance_business_id).to be_nil
+    end
+
+    it "reads the business ID the job arrived with" do
+      allow(raw_job).to receive(:businessId).and_return("ORD-1")
+
+      expect(job.process_instance_business_id).to eq("ORD-1")
+    end
+
+    it "reads a staged business ID" do
+      job.process_instance_business_id = "ORD-2"
+
+      expect(job.process_instance_business_id).to eq("ORD-2")
+    end
+  end
+
+  describe "#process_instance_business_id=" do
+    before { allow(client).to receive(:complete_job) }
+
+    it "sends the staged business ID with complete!" do
+      job.process_instance_business_id = "ORD-2"
+      job.complete!(done: true)
+
+      expect(client).to have_received(:complete_job).with(123456, vars: { done: true }, business_id: "ORD-2")
+    end
+
+    it "stages a symbol as a string" do
+      job.process_instance_business_id = :"ORD-2"
+
+      expect(job.process_instance_business_id).to eq("ORD-2")
+    end
+
+    it "sends no business ID when none is staged" do
+      job.complete!
+
+      expect(client).to have_received(:complete_job).with(123456, vars: {})
+    end
+
+    it "clears a staged business ID with nil" do
+      job.process_instance_business_id = "ORD-2"
+      job.process_instance_business_id = nil
+      job.complete!
+
+      expect(job.process_instance_business_id).to be_nil
+      expect(client).to have_received(:complete_job).with(123456, vars: {})
+    end
+
+    it "supports the ||= idiom without raising on a job that arrived with one" do
+      allow(raw_job).to receive(:businessId).and_return("ORD-1")
+
+      job.process_instance_business_id ||= "ORD-2"
+      job.complete!
+
+      expect(job.process_instance_business_id).to eq("ORD-1")
+      expect(client).to have_received(:complete_job).with(123456, vars: {})
+    end
+
+    it "discards the staged business ID when the job fails" do
+      allow(client).to receive(:fail_job)
+      job.process_instance_business_id = "ORD-2"
+      job.fail!("boom")
+
+      expect(job.process_instance_business_id).to be_nil
+    end
+
+    it "discards the staged business ID when the job throws a BPMN error" do
+      allow(client).to receive(:throw_bpmn_error)
+      job.process_instance_business_id = "ORD-2"
+      job.throw_bpmn_error!("CODE")
+
+      expect(job.process_instance_business_id).to be_nil
+    end
+
+    it "keeps the staged business ID when the completion is rejected, for the next attempt" do
+      allow(client).to receive(:complete_job).and_raise(Busybee::GRPC::Error.wrap(GRPC::FailedPrecondition.new))
+      job.process_instance_business_id = "ORD-2"
+
+      expect { job.complete! }.to raise_error(Busybee::GRPC::Error)
+      expect(job.process_instance_business_id).to eq("ORD-2")
+    end
+
+    it "accepts 256 characters, counted as Zeebe counts them" do
+      expect { job.process_instance_business_id = "x" * 256 }.not_to raise_error
+      expect { job.process_instance_business_id = "😀" * 128 }.not_to raise_error
+    end
+
+    it "raises ArgumentError for an empty business ID" do
+      expect { job.process_instance_business_id = "" }.to raise_error(ArgumentError, /business ID can't be empty/)
+    end
+
+    it "raises ArgumentError past 256 characters, counted as Zeebe counts them" do
+      expect { job.process_instance_business_id = "x" * 257 }.
+        to raise_error(ArgumentError, /business ID is longer than 256 characters/)
+      expect { job.process_instance_business_id = "😀" * 129 }.
+        to raise_error(ArgumentError, /business ID is longer than 256 characters/)
+    end
+
+    context "when the job arrived with a business ID" do
+      before { allow(raw_job).to receive(:businessId).and_return("ORD-1") }
+
+      it "raises BusinessIdAlreadyAssigned for any value, nil and the same ID included" do
+        ["ORD-2", "ORD-1", nil].each do |value|
+          expect { job.process_instance_business_id = value }.to raise_error(
+            Busybee::BusinessIdAlreadyAssigned,
+            "Cannot assign a business ID to process instance 789012, it already has \"ORD-1\""
+          )
+        end
+        expect(job.process_instance_business_id).to eq("ORD-1")
+      end
+    end
+
+    context "when a business ID is already staged" do
+      before { job.process_instance_business_id = "ORD-2" }
+
+      it "takes the later value and logs a warning" do
+        lines = capture_busybee_log { job.process_instance_business_id = "ORD-3" }
+
+        expect(job.process_instance_business_id).to eq("ORD-3")
+        expect(lines).to eq(["WARN [busybee] Replacing staged business ID \"ORD-2\" with \"ORD-3\" " \
+                             "on find_available_driver job #123456"])
+      end
+
+      it "stays quiet when the same value is staged again, or the staged one is cleared" do
+        lines = capture_busybee_log do
+          job.process_instance_business_id = "ORD-2"
+          job.process_instance_business_id = nil
+        end
+
+        expect(lines).to be_empty
+      end
+    end
+
+    context "when the job is already resolved" do
+      it "raises JobAlreadyHandled" do
+        job.complete!
+
+        expect { job.process_instance_business_id = "ORD-2" }.to raise_error(
+          Busybee::JobAlreadyHandled, "Cannot assign a business ID through job 123456 because it is already complete"
+        )
+      end
     end
   end
 

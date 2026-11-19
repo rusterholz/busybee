@@ -579,7 +579,8 @@ end
 
 Job is the authoritative lifecycle object; there is no separate "event" mirror. The concerns a hook reads or annotates live on the Job through typed helper POROs, with readers delegated onto Job and writers kept internal to the POROs:
 
-- **`Job::Payload`**: immutable facts from the activation protobuf: `key`, `type`, `variables`, `headers`, `retries`, `deadline`.
+- **`Job::Payload`**: immutable facts from the activation protobuf: `key`, `type`, `variables`, `headers`, `retries`, `priority`, `deadline`, `process_instance_business_id`.
+- **`Job::BusinessId`**: the business ID the job arrived with and one staged through `Job#process_instance_business_id=`, which `complete!` sends; it mirrors Zeebe's own rejections at staging time, since the completion that would hit them comes later. Job owns the reader and the setter.
 - **`Job::Activation`**: receive-time context: `source`, `buffered`, `worker`, `worker_class`, `worker_status`. Populated by the Runner and Worker as the job is dispatched.
 - **`Job::Resolution`**, the outcome: `status` (starts `:ready`), `result`, and the error trio (`error`, `error_message`, `error_code`), plus predicates (`ready?`, `completed?`, `failed?`, `errored?`, `resolved?`). Advanced exactly once, by the Job lifecycle methods (`complete!` / `fail!` / `throw_bpmn_error!`).
 - **`Job::Timestamps`**: monotonic + UTC stamp pairs and the duration projections derived from them (see below).

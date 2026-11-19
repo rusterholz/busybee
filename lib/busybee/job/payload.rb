@@ -47,6 +47,12 @@ module Busybee
 
       def priority = @raw_job.priority
 
+      # nil for "", which is what a gateway sends for none, and all a pre-8.10 one sends.
+      def process_instance_business_id
+        id = @raw_job.businessId
+        id unless id.empty?
+      end
+
       def deadline
         @deadline ||= Time.at(@raw_job.deadline / 1000.0).utc.freeze
       end

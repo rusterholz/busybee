@@ -20,6 +20,7 @@ RSpec.describe Busybee::Job::Payload do
       elementId: "Activity_HandleOrder",
       retries: 3,
       priority: 40,
+      businessId: "ORD-1",
       deadline: 1_640_000_000_000,
       variables: '{"order_id":"abc-123"}',
       customHeaders: '{"priority":"high"}'
@@ -39,6 +40,16 @@ RSpec.describe Busybee::Job::Payload do
 
     it "exposes the job's priority" do
       expect(payload.priority).to eq(40)
+    end
+
+    it "exposes the process instance's business ID" do
+      expect(payload.process_instance_business_id).to eq("ORD-1")
+    end
+
+    it "reads an empty business ID, which is what a gateway sends for none, as nil" do
+      allow(raw_job).to receive(:businessId).and_return("")
+
+      expect(payload.process_instance_business_id).to be_nil
     end
 
     it "aliases #job_type to #type so hook filters can read it by its domain name" do

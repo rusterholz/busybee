@@ -215,6 +215,16 @@ end
 
 **`update_priority(priority)`** changes the job's priority (Camunda 8.10+), and `job.priority` reads it back. Zeebe activates higher-priority jobs first, so a job that's failed and retried after an update competes with its new priority. On a gateway older than 8.10 it raises `Busybee::GRPC::Error`, and `job.priority` reads `0`.
 
+**`process_instance_business_id`** reads the process instance's [business ID](client.md#business-ids), and **`process_instance_business_id=`** stages one that rides along with the job's completion, manual or automatic (Camunda 8.10+). Stage with `||=`, which leaves an instance that already has one alone; see [Completing with a Business ID](client.md#completing-with-a-business-id) for the rules and the cases Zeebe rejects:
+
+```ruby
+def perform
+  order = Order.create!(sku: variables[:sku])
+  job.process_instance_business_id ||= order.number
+  { order_id: order.id }
+end
+```
+
 Note that you can safely mix-and-match manual and automatic control, because both automatic completion and automatic failure check whether the job is still `ready?` before they attempt to complete or fail it. Therefore, this is a perfectly valid alternate approach to the above:
 
 ```ruby
@@ -1102,7 +1112,7 @@ RSpec.describe ProcessOrderWorker, :busybee do
 end
 ```
 
-Keyword arguments go to `build_test_job`, which builds one job of your worker's type from them: `variables:`, `headers:`, `bpmn_process_id:`, `retries:`, `priority:`, and the rest. `job.result` is what your worker completed the job with, which is what the engine receives. A job that fails keeps its error on `job.error`; nothing is re-raised into your example.
+Keyword arguments go to `build_test_job`, which builds one job of your worker's type from them: `variables:`, `headers:`, `bpmn_process_id:`, `retries:`, `priority:`, `process_instance_business_id:` (the business ID the job arrives with), and the rest. `job.result` is what your worker completed the job with, which is what the engine receives, and `job.process_instance_business_id` reads any business ID your worker staged. A job that fails keeps its error on `job.error`; nothing is re-raised into your example.
 
 ### Passing Your Own Jobs
 

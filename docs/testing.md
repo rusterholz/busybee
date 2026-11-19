@@ -414,6 +414,7 @@ job.process_instance_key   #=> 2251799813685255 (process instance key)
 job.variables              #=> {"order_id" => "123", "total" => 99.99}
 job.headers                #=> {"priority" => "high"}
 job.retries                #=> 3
+job.process_instance_business_id #=> "ORD-123", or nil without one (Camunda 8.10+)
 ```
 
 #### Variables and Headers

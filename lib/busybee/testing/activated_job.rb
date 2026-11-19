@@ -52,6 +52,9 @@ module Busybee
 
       def priority = raw.priority
 
+      # nil when the job arrived without one (Camunda 8.10+ sends it)
+      def process_instance_business_id = raw.businessId.then { |id| id unless id.empty? }
+
       def deadline
         raw.deadline
       end

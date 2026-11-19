@@ -49,6 +49,24 @@ RSpec.describe Busybee::Client::JobOperations do
       )
     end
 
+    it "sends a business_id to assign to the job's process instance" do
+      allow(stub).to receive(:complete_job).and_return(response)
+
+      client.complete_job(123456, business_id: :"order-123")
+
+      expect(stub).to have_received(:complete_job).with(
+        having_attributes(has_businessId?: true, businessId: "order-123")
+      )
+    end
+
+    it "leaves business_id unset when not given" do
+      allow(stub).to receive(:complete_job).and_return(response)
+
+      client.complete_job(123456)
+
+      expect(stub).to have_received(:complete_job).with(having_attributes(has_businessId?: false))
+    end
+
     it "wraps GRPC errors" do
       grpc_error = GRPC::NotFound.new("job not found")
       allow(stub).to receive(:complete_job).and_raise(grpc_error)

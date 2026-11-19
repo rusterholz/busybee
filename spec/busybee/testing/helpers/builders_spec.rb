@@ -169,6 +169,17 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
       expect(build_test_job.priority).to eq(0)
     end
 
+    it "uses the provided process instance business ID, as if the job arrived with it" do
+      job = build_test_job(process_instance_business_id: "ORD-1")
+
+      expect(job.process_instance_business_id).to eq("ORD-1")
+      expect { job.process_instance_business_id = "ORD-2" }.to raise_error(Busybee::BusinessIdAlreadyAssigned)
+    end
+
+    it "defaults to no process instance business ID" do
+      expect(build_test_job.process_instance_business_id).to be_nil
+    end
+
     it "defaults to a random key when none is given" do
       keys = Array.new(5) { build_test_job.key }
       expect(keys.uniq.size).to be > 1
@@ -206,6 +217,14 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
       it "accepts update_priority" do
         job = build_test_job
         expect { job.update_priority(90) }.to change(job, :priority).from(0).to(90)
+      end
+
+      it "accepts complete! carrying a staged business ID" do
+        job = build_test_job
+        job.process_instance_business_id = "ORD-2"
+
+        expect { job.complete! }.not_to raise_error
+        expect(job.process_instance_business_id).to eq("ORD-2")
       end
     end
 
