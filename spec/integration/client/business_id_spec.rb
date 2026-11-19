@@ -89,6 +89,46 @@ RSpec.describe "Business IDs" do
       end
     end
 
+    describe "#assign_business_id" do
+      it "assigns a running instance its business ID once on 8.10, and is unimplemented before" do
+        key = start
+        unless gateway_at_least?("8.10")
+          expect { client.assign_business_id(key, business_id) }.to raise_error(Busybee::GRPC::Error) do |error|
+            expect(error.grpc_status).to eq(:unimplemented)
+          end
+          next
+        end
+
+        expect(client.assign_process_instance_business_id(key, business_id)).to be_truthy
+        expect { client.assign_business_id(key, business_id) }.to raise_error(Busybee::GRPC::Error) do |error|
+          expect(error.grpc_status).to eq(:failed_precondition)
+        end
+      end
+
+      it "hands the business ID only to jobs created after the assignment, on 8.10" do
+        key = start
+        assigned = gateway_at_least?("8.10") && client.assign_business_id(key, business_id)
+
+        first = activate_job("business-id-task")
+        expect([first.process_instance_key, first.raw.businessId]).to eq([key, ""])
+        first.mark_completed
+        expect(raw_business_id_of("business-id-next-task", key)).to eq(assigned ? business_id : "")
+      end
+
+      it "fires call hooks filtered to the RPC" do
+        calls = []
+        Busybee.after_call(rpc: :assign_process_instance_business_id) { |call| calls << call.status }
+        key = start
+
+        begin
+          client.assign_business_id(key, business_id)
+        rescue Busybee::GRPC::Error
+          nil # unimplemented before 8.10
+        end
+        expect(calls).to eq([gateway_at_least?("8.10") ? :succeeded : :errored])
+      end
+    end
+
     describe "completion" do
       let(:fixtures) { %w[business_id_process call_activity_parent call_activity_child] }
 

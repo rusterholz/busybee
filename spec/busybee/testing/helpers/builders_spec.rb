@@ -64,6 +64,10 @@ RSpec.describe Busybee::Testing::Helpers::Builders do
       expect { build_test_client.complete_job(42, vars: { ok: true }) }.not_to raise_error
     end
 
+    it "answers assign_business_id without any programming" do
+      expect(build_test_client.assign_business_id(42, "ORD-1")).to be_truthy
+    end
+
     it "takes a programmed response, the block being the handler" do
       client = build_test_client
       client.on(:publish_message) { Busybee::GRPC::PublishMessageResponse.new(key: 99) }

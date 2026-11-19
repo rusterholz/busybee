@@ -313,6 +313,7 @@ RSpec.describe Busybee::Hooks::Filters do
     it "is the set busybee itself issues, not every RPC the gateway declares" do
       expect { Busybee.after_call(rpc: :complete_job, &noop) }.not_to raise_error
       expect { Busybee.after_call(rpc: :update_job_priority, &noop) }.not_to raise_error
+      expect { Busybee.after_call(rpc: :assign_process_instance_business_id, &noop) }.not_to raise_error
       expect { Busybee.after_call(rpc: :evaluate_decision, &noop) }.
         to raise_error(ArgumentError, /can never match/)
     end

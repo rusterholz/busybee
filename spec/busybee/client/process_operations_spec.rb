@@ -240,6 +240,35 @@ RSpec.describe Busybee::Client::ProcessOperations do
     end
   end
 
+  describe "#assign_business_id" do
+    let(:response) { Busybee::GRPC::AssignProcessInstanceBusinessIdResponse.new }
+
+    it "sends the process instance key and business ID, converted, and returns truthy" do
+      allow(stub).to receive(:assign_process_instance_business_id).and_return(response)
+
+      expect(client.assign_business_id("67890", :"ORD-123")).to be_truthy
+      expect(stub).to have_received(:assign_process_instance_business_id).with(
+        an_instance_of(Busybee::GRPC::AssignProcessInstanceBusinessIdRequest).
+          and(having_attributes(processInstanceKey: 67890, businessId: "ORD-123"))
+      )
+    end
+
+    it "wraps GRPC errors" do
+      allow(stub).to receive(:assign_process_instance_business_id).
+        and_raise(GRPC::FailedPrecondition.new("already has a business id assigned"))
+
+      expect { client.assign_business_id(67890, "ORD-123") }.to raise_error(Busybee::GRPC::Error) do |error|
+        expect(error.grpc_status).to eq(:failed_precondition)
+      end
+    end
+  end
+
+  describe "#assign_process_instance_business_id" do
+    it "is aliased to #assign_business_id" do
+      expect(client.method(:assign_process_instance_business_id)).to eq(client.method(:assign_business_id))
+    end
+  end
+
   describe "type coercion" do
     it "converts symbol bpmn_process_id to string" do
       response = double(processInstanceKey: 67890)

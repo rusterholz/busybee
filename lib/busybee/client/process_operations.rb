@@ -104,6 +104,29 @@ module Busybee
         false
       end
       alias cancel_process_instance cancel_instance
+
+      # Assign a business ID to a running root process instance (Camunda 8.10+).
+      #
+      # @param process_instance_key [Integer, String] The process instance key
+      # @param business_id [String] The business ID, up to 256 characters
+      # @return [Object] Response from the gateway (truthy)
+      # @raise [Busybee::GRPC::Error] if the assignment fails: grpc_status
+      #   :failed_precondition when the instance already has one or is a call
+      #   activity's child, :not_found when it isn't active, :invalid_argument
+      #   for an empty or overlong ID, :unimplemented on a gateway older than 8.10
+      #
+      # @example Assign a business ID
+      #   client.assign_business_id(67890, "ORD-123")
+      #
+      def assign_business_id(process_instance_key, business_id)
+        request = Busybee::GRPC::AssignProcessInstanceBusinessIdRequest.new(
+          processInstanceKey: process_instance_key.to_i,
+          businessId: business_id.to_s
+        )
+
+        run_hooked(:assign_process_instance_business_id, request)
+      end
+      alias assign_process_instance_business_id assign_business_id
     end
   end
 end

@@ -30,6 +30,7 @@ module Busybee
       # RPCs than busybee issues, and one of these is a stream, not a message.
       DEFAULT_RESPONSES = {
         activate_jobs: -> { [] }, # server-streaming: a stream of responses, empty meaning "no work"
+        assign_process_instance_business_id: -> { Busybee::GRPC::AssignProcessInstanceBusinessIdResponse.new },
         broadcast_signal: -> { Busybee::GRPC::BroadcastSignalResponse.new },
         complete_job: -> { Busybee::GRPC::CompleteJobResponse.new },
         fail_job: -> { Busybee::GRPC::FailJobResponse.new },

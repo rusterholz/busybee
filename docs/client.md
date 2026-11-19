@@ -348,13 +348,14 @@ puts "Stream closed, shutting down"
 
 A business ID ties a process instance to a record in your own domain, such as an order number. It's a string of up to 256 characters that belongs to the root process instance, and the child instances its call activities start inherit it.
 
-You give an instance its business ID when you start it, or later, from one of its jobs:
+You give an instance its business ID when you start it, or later:
 
 | Where | How | Requires |
 |-------|-----|----------|
 | Starting an instance | [`start_instance(…, business_id:)`](#start_instance) | Camunda 8.9+ |
 | A message start event | [`publish_message(…, business_id:)`](#publish_message) | Camunda 8.10+ |
 | Completing a job | [`job.process_instance_business_id =`](#completing-with-a-business-id), or [`complete_job(…, business_id:)`](#complete_job) | Camunda 8.10+ |
+| A running instance | [`assign_business_id`](#assign_business_id) | Camunda 8.10+ |
 
 An instance gets one business ID, once. After that, Zeebe rejects every attempt to assign one, the identical ID included, with `grpc_status` `:failed_precondition`.
 
@@ -408,6 +409,7 @@ end
 | [Process](#process-operations) | [`deploy_process`](#deploy_process) | Deploy BPMN files |
 | | [`start_instance`](#start_instance) | Start a process instance |
 | | [`cancel_instance`](#cancel_instance) | Cancel a running instance |
+| | [`assign_business_id`](#assign_business_id) | Give a running instance its business ID (Camunda 8.10+) |
 | [Job](#job-operations) | [`with_each_job`](#with_each_job) | Poll for jobs (bounded) |
 | | [`open_job_stream`](#open_job_stream) | Stream jobs (push-based) |
 | | [`complete_job`](#complete_job) | Complete a job |
@@ -520,6 +522,36 @@ canceled = client.cancel_instance(2251799813685300, ignore_missing: true)
 
 # Alias: cancel_process_instance
 client.cancel_process_instance(instance_key, ignore_missing: true)
+```
+
+#### assign_business_id
+
+Give a running process instance its [business ID](#business-ids).
+
+**Requires Camunda 8.10 or later.** An older gateway answers with `UNIMPLEMENTED`.
+
+```ruby
+assign_business_id(process_instance_key, business_id) → Object
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `process_instance_key` | `Integer` | The root process instance's key |
+| `business_id` | `String` | The business ID, up to 256 characters |
+
+**Returns:** A truthy response from the gateway.
+
+**Raises:** `Busybee::GRPC::Error` if the assignment fails: `grpc_status` `:failed_precondition` when the instance already has a business ID (the same one included), was started by a call activity, or belongs to a cluster with business ID uniqueness enabled, `:not_found` when it isn't active, `:invalid_argument` for an empty or overlong business ID, and `:unimplemented` on a gateway older than 8.10.
+
+Only jobs created after the assignment carry the business ID; a job that was already waiting arrives without it.
+
+**From a worker, stage the business ID on the job instead** ([Completing with a Business ID](#completing-with-a-business-id)). It's assigned with the completion, so a job that fails after the call and runs again doesn't hit `:failed_precondition` from its own earlier assignment.
+
+```ruby
+client.assign_business_id(instance_key, "ORD-123")
+
+# Alias: assign_process_instance_business_id
+client.assign_process_instance_business_id(instance_key, "ORD-123")
 ```
 
 ---

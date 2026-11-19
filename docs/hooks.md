@@ -592,9 +592,9 @@ The `rpc` values mirror the engine's gateway API:
 |----------|-------|
 | Job fetching | `:activate_jobs`, `:stream_activated_jobs` |
 | Job resolution | `:complete_job`, `:fail_job`, `:throw_error` |
-| Job maintenance | `:update_job_retries`, `:update_job_timeout` |
+| Job maintenance | `:update_job_retries`, `:update_job_timeout`, `:update_job_priority` |
 | Messaging | `:publish_message`, `:broadcast_signal` |
-| Process control | `:create_process_instance`, `:cancel_process_instance`, `:deploy_resource` |
+| Process control | `:create_process_instance`, `:cancel_process_instance`, `:assign_process_instance_business_id`, `:deploy_resource` |
 | Variables & incidents | `:set_variables`, `:resolve_incident` |
 
 Correlation is automatic: a call made during `perform` (including automatic completion/failure, and `job.complete!` from any thread) carries its `call.job`, and any call made inside a running worker carries `call.worker_status`. A fetch call that precedes any job carries only the worker. The call's own `context_tags`/`logging_context` fold in a curated slice of both identities, so tagging a metric with `call.context_tags` already says which worker and job type produced it.
