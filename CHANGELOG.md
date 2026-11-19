@@ -74,11 +74,11 @@ Instrumentation hooks for every job, worker and gRPC call, with testing helpers 
   - `max_jobs:` succeeds with fewer, none included
   - Shortfalls raise `Busybee::Testing::NoJobsAvailable` (formerly `NoJobAvailable`, which still works), under a new `Busybee::Testing::Error` base
 
-- **Camunda Business IDs** – Busybee now reaches Camunda's [business ID](https://docs.camunda.io/docs/components/concepts/process-instance-creation/#business-id), a process instance's identifier from your own domain (an order number, say) that you can search by:
+- **Camunda Business IDs** – Access to Camunda's [business ID](https://docs.camunda.io/docs/components/concepts/process-instance-creation/#business-id), a process instance's identifier from your own domain (an order number, say) that you can search by:
   - Set it as an instance starts: `start_instance(…, business_id:)` (Camunda 8.9+), or `publish_message(…, business_id:)` to a message start event (8.10+)
   - Assign it later: `job.process_instance_business_id ||= order.number` rides along with the job's completion and is dropped if the job fails, and `client.assign_business_id` or `client.complete_job(…, business_id:)` set it on a running instance (8.10+)
   - Read it with `job.process_instance_business_id`, and hand one to your worker specs with `build_test_job(process_instance_business_id:)`
-  - On 8.8 and 8.9, `publish_message(…, business_id:)` drops the field, so the message reaches any instance waiting with its correlation key
+  - On 8.10, a message published with a business ID correlates only to instances with that ID; 8.8 and 8.9 drop the field, so the message reaches any instance waiting with its correlation key
 
 - **Job Priority** – Let urgent work go first (Camunda 8.10+):
   - `job.priority` reads the priority a BPMN task gave its job, `0` from an older gateway
